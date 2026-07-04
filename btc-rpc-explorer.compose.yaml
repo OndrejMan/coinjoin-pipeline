@@ -1,0 +1,50 @@
+name: bitcoin-analysis-btc-rpc-explorer
+
+services:
+  bitcoind:
+    image: ${BTCEXP_BITCOIND_IMAGE:-ghcr.io/ondrejman/btc-node:latest}
+    container_name: bitcoin-analysis-btc-node
+    entrypoint: []
+    restart: unless-stopped
+    command:
+      - bitcoind
+      - -conf=/home/bitcoin/.bitcoin/bitcoin.conf
+      - -datadir=/home/bitcoin/data
+      - -printtoconsole
+      - -regtest
+      - -maxconnections=0
+      - -blocksxor=0
+    ports:
+      - "${BTCEXP_BITCOIND_HOST_PORT:-18443}:18443"
+    volumes:
+      - btc-data:/home/bitcoin/data:rw
+
+  btc-rpc-explorer:
+    image: ${BTC_RPC_EXPLORER_IMAGE:-ulamlabs/btc-rpc-explorer:latest}
+    container_name: bitcoin-analysis-btc-rpc-explorer
+    restart: unless-stopped
+    depends_on:
+      - bitcoind
+    ports:
+      - "${BTC_RPC_EXPLORER_HOST_PORT:-3002}:3002"
+    environment:
+      BTCEXP_HOST: 0.0.0.0
+      BTCEXP_PORT: 3002
+      BTCEXP_COIN: BTC
+      BTCEXP_BITCOIND_HOST: ${BTCEXP_BITCOIND_HOST:-bitcoind}
+      BTCEXP_BITCOIND_PORT: ${BTCEXP_BITCOIND_PORT:-18443}
+      BTCEXP_BITCOIND_USER: ${BTCEXP_BITCOIND_USER:-user}
+      BTCEXP_BITCOIND_PASS: ${BTCEXP_BITCOIND_PASS:-password}
+      BTCEXP_BITCOIND_COOKIE: ${BTCEXP_BITCOIND_COOKIE:-/bitcoin/regtest/.cookie}
+      BTCEXP_BITCOIND_RPC_TIMEOUT: ${BTCEXP_BITCOIND_RPC_TIMEOUT:-10000}
+      BTCEXP_PRIVACY_MODE: ${BTCEXP_PRIVACY_MODE:-true}
+      BTCEXP_NO_RATES: ${BTCEXP_NO_RATES:-true}
+      BTCEXP_UI_TIMEZONE: ${BTCEXP_UI_TIMEZONE:-Europe/Prague}
+      BTCEXP_UI_THEME: ${BTCEXP_UI_THEME:-dark}
+      BTCEXP_SLOW_DEVICE_MODE: ${BTCEXP_SLOW_DEVICE_MODE:-true}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  btc-data:
+    name: ${BTCEXP_BTC_DATA_VOLUME:-blocksci-emulator_btc_data}

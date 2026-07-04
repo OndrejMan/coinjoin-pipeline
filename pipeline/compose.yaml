@@ -1,0 +1,230 @@
+services:
+  # The Python Manager that controls the emulator
+  dind:
+      profiles: ["recreate"]
+      image: docker:29-dind
+      pull_policy: always
+      container_name: isolated_docker_daemon
+      privileged: true # REQUIRED for a container to run its own Docker daemon
+      environment:
+        - DOCKER_TLS_CERTDIR= # Disables TLS for easier local networking
+      volumes:
+        # Mount the data into the DinD container so it knows the paths
+        # - ./daemon.json:/etc/docker/daemon.json:ro # <--- Mount the config file
+        - btc_data:/home/bitcoin/data:rw # Named container volume
+        - dind_cache:/var/lib/docker
+      healthcheck:
+        test: ["CMD", "docker", "-H", "tcp://127.0.0.1:2375", "info"]
+        interval: 2s
+        timeout: 5s
+        retries: 10
+
+  data_wiper:
+      profiles: ["recreate"]
+      image: alpine
+      pull_policy: always
+      container_name: btc_data_wiper
+      volumes:
+        - btc_data:/home/bitcoin/data:rw
+      # Deletes everything inside the directory without deleting the directory itself
+      command: >
+              sh -c "rm -rf /home/bitcoin/data/* && 
+                    chmod 777 /home/bitcoin/data && 
+                    echo 'BTC data wiped and permissions set to 777!'"
+      depends_on:
+        dind:
+          condition: service_healthy
+
+  dind_image_prefetch:
+      profiles: ["recreate"]
+      image: docker:29-cli
+      pull_policy: always
+      container_name: dind_image_prefetch
+      environment:
+        - DOCKER_HOST=tcp://dind:2375
+        - DOCKER_DEFAULT_PLATFORM=${COINJOIN_EMULATOR_DOCKER_PLATFORM:-}
+      depends_on:
+        dind:
+          condition: service_healthy
+      command: >
+            sh -exc "
+                    sleep 3 &&
+                    PREFIX=${COINJOIN_EMULATOR_IMAGE_PREFIX:-ghcr.io/ondrejman/} &&
+                    pull_image() {
+                      if [ -n \"$${DOCKER_DEFAULT_PLATFORM:-}\" ]; then
+                        docker pull --platform \"$${DOCKER_DEFAULT_PLATFORM}\" \"$$1\";
+                      else
+                        docker pull \"$$1\";
+                      fi;
+                    } &&
+                    if [ -z \"${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-}\" ]; then
+                      pull_image \"$${PREFIX}btc-node\";
+                    else
+                      echo 'Skipping btc-node pull; local build requested';
+                    fi &&
+                    if [ \"${COINJOIN_ENGINE:-wasabi}\" = \"joinmarket\" ]; then
+                      if [ -z \"${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-}\" ]; then
+                        pull_image \"$${PREFIX}joinmarket-client-server\";
+                      else
+                        echo 'Skipping joinmarket-client-server pull; local build requested';
+                      fi &&
+                      if [ -z \"${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-}\" ]; then
+                        pull_image \"$${PREFIX}irc-server:latest\";
+                      else
+                        echo 'Skipping irc-server pull; local build requested';
+                      fi;
+                    else
+                      pull_image ghcr.io/ondrejman/wasabi-client:2.6.0 &&
+                      pull_image ghcr.io/ondrejman/wasabi-backend:2.6.0 &&
+                      pull_image ghcr.io/ondrejman/wasabi-coordinator:2.6.0;
+                    fi &&
+                    echo 'Image prefetching complete!'
+                    "
+
+  manager:
+    profiles: ["recreate"]
+    image: ${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}
+    pull_policy: ${COINJOIN_EMULATOR_PULL_POLICY:-always}
+    container_name: emulator_manager
+    volumes:
+     - btc_data:/home/bitcoin/data:rw # Named container volume
+     - ${EMULATION_LOGS_DIR:-./emulation_logs}:/app/logs:rw
+     - ${SCENARIOS_DIR:-./scenarios}:/app/scenarios:ro
+    environment:
+      - DOCKER_HOST=tcp://dind:2375
+      - PYTHONUNBUFFERED=1
+      - RUN_TIMEZONE=${RUN_TIMEZONE:-Europe/Prague}
+    depends_on:
+      dind:
+        condition: service_healthy
+      data_wiper:
+          condition: service_completed_successfully
+      dind_image_prefetch:
+          condition: service_completed_successfully
+    command: >
+          sh -c "python manager.py clean && 
+                python manager.py --engine ${COINJOIN_ENGINE:-wasabi} --run-timezone \"$${RUN_TIMEZONE}\" run --joinmarket-descriptor-regtest-fallback ${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:+--coinjoin-infrastructure-local-build} --control-ip dind --scenario ${SCENARIO_PATH:-/app/scenarios/overactive-local.json} --image-prefix ${COINJOIN_EMULATOR_IMAGE_PREFIX:-ghcr.io/ondrejman/} --btcFolder /home/bitcoin/data --btc-node-arg=-blocksxor=0 --download-btc-data /home/bitcoin/data"
+
+  blocksci:
+      profiles: ["analysis"]
+      image: ${BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-complete:latest}
+      pull_policy: ${BLOCKSCI_PULL_POLICY:-always}
+      container_name: blocksci_analyzer
+      volumes:
+        - btc_data:/mnt/data:ro # Mount the BTC data as Read-Only for analysis
+        - ${EMULATION_LOGS_DIR:-./emulation_logs}/${ACTIVE_RUN_ID:-}/blocksci_data:/mnt/anal:rw # Current run-local BlockSci output for notebooks
+        - ${NOTEBOOKS_DIR:-./notebooks}:/mnt/blocksci/Notebooks:rw # Mount notebooks for interactive analysis
+        - ${EMULATION_LOGS_DIR:-./emulation_logs}:/runs/emulation/logs:rw
+        - ${EXPORTERS_DIR:-./exporters}:/mnt/exporters:ro
+        - ${SCENARIOS_DIR:-./client/scenarios}:/mnt/scenarios:ro
+      environment:
+        - ACTIVE_RUN_ID=${ACTIVE_RUN_ID:-}
+        - BLOCKSCI_COINJOIN_TYPE=${BLOCKSCI_COINJOIN_TYPE:-wasabi2}
+        - BLOCKSCI_MIN_INPUT_COUNT=${BLOCKSCI_MIN_INPUT_COUNT:-1}
+        - BLOCKSCI_TEST_VALUES=${BLOCKSCI_TEST_VALUES:-false}
+        - BLOCKSCI_JOINMARKET_DETECTOR=${BLOCKSCI_JOINMARKET_DETECTOR:-definite}
+        - BLOCKSCI_JOINMARKET_MIN_BASE_FEE=${BLOCKSCI_JOINMARKET_MIN_BASE_FEE:-5000}
+        - BLOCKSCI_JOINMARKET_PERCENTAGE_FEE=${BLOCKSCI_JOINMARKET_PERCENTAGE_FEE:-0.00004}
+        - BLOCKSCI_JOINMARKET_MAX_DEPTH=${BLOCKSCI_JOINMARKET_MAX_DEPTH:-200000}
+        - BLOCKSCI_IMAGE=${BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-complete:latest}
+        - BLOCKSCI_IMAGE_ID=${BLOCKSCI_IMAGE_ID:-}
+        - BLOCKSCI_IMAGE_DIGEST=${BLOCKSCI_IMAGE_DIGEST:-}
+        - COINJOIN_ANALYSIS_IMAGE=${COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}
+        - COINJOIN_ANALYSIS_IMAGE_ID=${COINJOIN_ANALYSIS_IMAGE_ID:-}
+        - COINJOIN_ANALYSIS_IMAGE_DIGEST=${COINJOIN_ANALYSIS_IMAGE_DIGEST:-}
+        - COINJOIN_EMULATOR_IMAGE=${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}
+        - COINJOIN_EMULATOR_IMAGE_ID=${COINJOIN_EMULATOR_IMAGE_ID:-}
+        - COINJOIN_EMULATOR_IMAGE_DIGEST=${COINJOIN_EMULATOR_IMAGE_DIGEST:-}
+        - WRAPPER_IMAGE=${WRAPPER_IMAGE:-}
+        - WRAPPER_IMAGE_ID=${WRAPPER_IMAGE_ID:-}
+        - WRAPPER_IMAGE_DIGEST=${WRAPPER_IMAGE_DIGEST:-}
+        - COINJOIN_EMULATOR_GIT_COMMIT=${COINJOIN_EMULATOR_GIT_COMMIT:-}
+        - REPRODUCTION_COMMAND=${REPRODUCTION_COMMAND:-}
+        - SCENARIO_FALLBACK_PATH=${SCENARIO_FALLBACK_PATH:-/mnt/scenarios/overactive-local.json}
+        - BLOCKSCI_LAUNCH_JUPYTER=${BLOCKSCI_LAUNCH_JUPYTER:-true}
+        - BLOCKSCI_SCRIPT=${BLOCKSCI_SCRIPT:-}
+        - BLOCKSCI_EXPORT_REPORT=${BLOCKSCI_EXPORT_REPORT:-true}
+      depends_on:
+        manager:
+          condition: service_completed_successfully # Wait for simulation to finish
+          required: false
+        coinjoin_analysis:
+          condition: service_completed_successfully
+          required: true
+      ports:
+        - 8888:8888
+      entrypoint: ["/bin/bash"]
+      command:
+        - "-c"
+        - |
+          test -n "${ACTIVE_RUN_ID:-}" &&
+          mkdir -p "/runs/emulation/logs/${ACTIVE_RUN_ID}/blocksci_data" &&
+          EXPORTED_MAX_BLOCK="$$(find "/runs/emulation/logs/${ACTIVE_RUN_ID}/coinjoin_emulator_data/data/btc-node" -maxdepth 1 -type f -name 'block_*.json' -printf '%f\n' | sed -nE 's/^block_([0-9]+)\.json$/\1/p' | sort -n | tail -n 1)" &&
+          test -n "$$EXPORTED_MAX_BLOCK" &&
+          BLOCKSCI_MAX_BLOCK="$$((EXPORTED_MAX_BLOCK + 1))" &&
+          blocksci_parser "/runs/emulation/logs/${ACTIVE_RUN_ID}/blocksci_data/config.json" generate-config bitcoin_regtest "/runs/emulation/logs/${ACTIVE_RUN_ID}/blocksci_data/parsed" --disk /mnt/data/regtest --max-block "$$BLOCKSCI_MAX_BLOCK" &&
+          blocksci_parser "/runs/emulation/logs/${ACTIVE_RUN_ID}/blocksci_data/config.json" update &&
+
+          # Run an optional user-supplied Python analysis staged inside this run.
+          if [ -n "${BLOCKSCI_SCRIPT:-}" ]; then
+            cd "/runs/emulation/logs/${ACTIVE_RUN_ID}" &&
+            ACTIVE_RUN_ID="${ACTIVE_RUN_ID}" \
+            BLOCKSCI_CONFIG="/runs/emulation/logs/${ACTIVE_RUN_ID}/blocksci_data/config.json" \
+            BLOCKSCI_RUN_DIR="/runs/emulation/logs/${ACTIVE_RUN_ID}" \
+            python3 "${BLOCKSCI_SCRIPT}";
+          fi &&
+
+          # 5. Export deterministic JSON that compares BlockSci detection against coinjoin-analysis output
+          TEST_VALUES_ARGS="" &&
+          if [ "${BLOCKSCI_TEST_VALUES:-false}" = "true" ]; then
+            TEST_VALUES_ARGS="--test-values";
+          fi &&
+          if [ "${BLOCKSCI_EXPORT_REPORT:-true}" = "true" ] && [ -n "${ACTIVE_RUN_ID:-}" ]; then
+            python3 /mnt/exporters/unified_report.py \
+              --config "/runs/emulation/logs/${ACTIVE_RUN_ID}/blocksci_data/config.json" \
+              --runs-root /runs/emulation/logs \
+              --run-dir "/runs/emulation/logs/${ACTIVE_RUN_ID:-}" \
+              --scenario "${SCENARIO_FALLBACK_PATH:-/mnt/scenarios/overactive-local.json}" \
+              --coinjoin-type "${BLOCKSCI_COINJOIN_TYPE:-wasabi2}" \
+              --min-input-count "${BLOCKSCI_MIN_INPUT_COUNT:-1}" \
+              --joinmarket-detector "${BLOCKSCI_JOINMARKET_DETECTOR:-definite}" \
+              --joinmarket-min-base-fee "${BLOCKSCI_JOINMARKET_MIN_BASE_FEE:-5000}" \
+              --joinmarket-percentage-fee "${BLOCKSCI_JOINMARKET_PERCENTAGE_FEE:-0.00004}" \
+              --joinmarket-max-depth "${BLOCKSCI_JOINMARKET_MAX_DEPTH:-200000}" \
+              --markdown \
+              $${TEST_VALUES_ARGS};
+          fi &&
+          
+          # 6. Optionally launch the interactive BlockSci notebook environment.
+          # Noninteractive runIt.sh workflows stop here after deterministic exports.
+          if [ "${BLOCKSCI_LAUNCH_JUPYTER:-true}" = "0" ] || [ "${BLOCKSCI_LAUNCH_JUPYTER:-true}" = "false" ]; then
+            echo 'Parsing complete. Skipping interactive BlockSci environment.'
+          else
+            echo 'Parsing complete. Launching final environment...' &&
+            cd /mnt/blocksci &&
+            ./build.sh
+          fi
+
+  coinjoin_analysis:
+      profiles: ["analysis"]
+      image: ${COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}
+      pull_policy: ${COINJOIN_ANALYSIS_PULL_POLICY:-always}
+      container_name: coinjoin_analysis
+      volumes:
+        - ${COINJOIN_ANALYSIS_SOURCE_PATH:-${EMULATION_LOGS_DIR:-./emulation_logs}}:${COINJOIN_ANALYSIS_MOUNT_PATH:-/runs/emulation/logs}:rw
+        - ${COINJOIN_ANALYSIS_INPUT_DATA_PATH:-${EMULATION_LOGS_DIR:-./emulation_logs}}:${COINJOIN_ANALYSIS_MOUNT_PATH:-/runs/emulation/logs}/data:ro
+      depends_on:
+        manager:
+          condition: service_completed_successfully
+          required: false
+      command:
+        - analyze-emul
+        - --action
+        - ${COINJOIN_ANALYSIS_ACTION:-collect_docker}
+        - --target-path
+        - ${COINJOIN_ANALYSIS_TARGET_PATH:-/runs/emulation/logs}
+
+# Define the named volumes at the top level
+volumes:
+  btc_data:
+  dind_cache:

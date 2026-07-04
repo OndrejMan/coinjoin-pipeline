@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coinjoin-pipeline"
+version = "0.1.0"
+description = "Reproducible CoinJoin emulation and analysis pipeline"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = []
+
+[project.optional-dependencies]
+builder = ["questionary>=2.1,<3", "rich>=13.9,<15"]
+test = ["pytest>=8,<9"]
+
+[project.scripts]
+coinjoin-pipeline = "coinjoin_pipeline.cli:main"
+cjp = "coinjoin_pipeline.cli:main"
+coinjoin-command-builder = "coinjoin_pipeline.builder:main"
+coinjoin-pipeline-image = "coinjoin_pipeline.pipeline_image:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+coinjoin_pipeline = [
+  "metadata/*.json",
+  "resources/container/*.sh",
+  "resources/scenarios/*.json",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit", "tests/pipeline"]
+
+[tool.mypy]
+exclude = ["^emulation_logs/", "^notebooks/"]
+ignore_missing_imports = true
+
+[tool.ruff]
+exclude = ["emulation_logs", "notebooks"]

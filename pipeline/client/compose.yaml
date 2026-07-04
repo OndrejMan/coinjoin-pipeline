@@ -1,0 +1,17 @@
+services:
+  cli:
+    build:
+      context: ..
+      dockerfile: client/Dockerfile
+    image: blocksci-emulator-client:local
+    restart: unless-stopped
+    stdin_open: true 
+    tty: true
+    environment:
+      - HOST_CLIENT_DIR=${PWD}
+      - CONTAINER_RUNTIME=docker
+    volumes:
+      - ${CONTAINER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      - ./scenarios:/app/scenarios:ro
+      - ./notebooks:/app/notebooks:rw
+    entrypoint: ["/bin/bash", "-c", "python3 wrapper.py -h && /bin/bash"]

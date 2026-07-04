@@ -1,0 +1,9 @@
+emulation_logs
+coinjoin-runs/
+.btc-rpc-explorer.env
+
+gitlab-test-results/
+
+__pycache__/
+build/
+*.egg-info/

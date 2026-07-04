@@ -1,0 +1,300 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  command-builder-unit-tests:
+    runs-on: [self-hosted, x64]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Python
+        run: |
+          python3 --version
+          python3 - <<'PY'
+          import sys
+
+          if sys.version_info[:2] != (3, 14):
+              raise SystemExit(f"Expected Python 3.14, got {sys.version}")
+          PY
+
+      - name: Run command_builder unit tests
+        run: python3 -m unittest discover -s tests -v
+
+  podman-wrapper:
+    runs-on: [self-hosted, x64]
+    needs: command-builder-unit-tests
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Python
+        run: |
+          python3 --version
+          python3 - <<'PY'
+          import sys
+
+          if sys.version_info[:2] != (3, 14):
+              raise SystemExit(f"Expected Python 3.14, got {sys.version}")
+          PY
+
+      - name: Run runIt overactive-local dry test
+        run: ./tests/test-runIt-overactive-local.sh
+
+      - name: Run Podman wrapper dry test
+        run: ./tests/test-podman-no-host-docker.sh
+
+  docker-overactive-local:
+    runs-on: [self-hosted, x64]
+    needs: podman-wrapper
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run overactive-local through real Docker
+        env:
+          CONTAINER_RUNTIME: docker
+          WRAPPER_IMAGE: ghcr.io/ondrejman/blocksciemulatoranalysis:latest
+          EMULATION_LOGS_DIR: ${{ runner.temp }}/bitcoinAnalysis-docker-emulation-logs
+        run: ./tests/test-runIt-overactive-local-docker.sh
+
+  docker-joinmarket:
+    runs-on: [self-hosted, x64]
+    needs: podman-wrapper
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run JoinMarket through real Docker with upstream images
+        env:
+          CONTAINER_RUNTIME: docker
+          EMULATION_LOGS_DIR: ${{ runner.temp }}/bitcoinAnalysis-joinmarket-emulation-logs
+        run: ./tests/test-runIt-joinmarket-local-docker.sh
+
+  docker-parallel:
+    runs-on: [self-hosted, x64]
+    needs: podman-wrapper
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run overactive-local through real Docker with --parallel
+        env:
+          CONTAINER_RUNTIME: docker
+          WRAPPER_IMAGE: ghcr.io/ondrejman/blocksciemulatoranalysis:latest
+          EMULATION_LOGS_DIR: ${{ runner.temp }}/bitcoinAnalysis-parallel-emulation-logs
+        run: ./tests/test-runIt-parallel-local-docker.sh
+
+  kubernetes-k3d:
+    runs-on: [self-hosted, x64]
+    needs:
+      - docker-overactive-local
+      - docker-joinmarket
+      - docker-parallel
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install kubectl
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bin"
+          curl -fsSL -o "${RUNNER_TEMP}/bin/kubectl" "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod 0755 "${RUNNER_TEMP}/bin/kubectl"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      - name: Install k3d
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bin"
+          curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | USE_SUDO=false K3D_INSTALL_DIR="${RUNNER_TEMP}/bin" bash
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      - name: Run k3d Kubernetes integration test
+        env:
+          CONTAINER_RUNTIME: docker
+          WRAPPER_IMAGE: ghcr.io/ondrejman/blocksciemulatoranalysis:latest
+          EMULATION_LOGS_DIR: ${{ runner.temp }}/bitcoinAnalysis-emulation-logs
+          WAIT_TIMEOUT: 240s
+        run: ./tests/test-kubernetes-k3d.sh
+
+  pbs-apptainer-image:
+    runs-on: [self-hosted, x64]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify toolchain
+        run: |
+          docker version
+          k3d version
+          kubectl version --client
+          python3 --version
+          unzip -v | head -n 1
+          test -d /storage/github-runner
+          test -w /storage/github-runner
+
+      - name: Build and smoke-start the local PBS Apptainer image
+        env:
+          PBS_WORKDIR_HOST: /storage/github-runner
+          PBS_WORKDIR_CONTAINER: /storage/github-runner
+          PBS_CONTAINER_NAME: pbs-image-smoke-${{ github.run_id }}
+        run: |
+          ./tests/support/pbs/local-pbs.sh build
+          ./tests/support/pbs/local-pbs.sh start
+          ./tests/support/pbs/local-pbs.sh status
+      - name: Stop PBS container
+        if: always()
+        run: ./tests/support/pbs/local-pbs.sh stop || true
+
+  pbs-fixture-analysis:
+    runs-on: [self-hosted, x64]
+    needs: pbs-apptainer-image
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run local PBS fixture analysis
+        env:
+          TEST_RESULT_DIR: ${{ github.workspace }}/gitlab-test-results
+        run: ./tests/test-local-pbs-analysis.sh
+
+      - name: Upload PBS fixture artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pbs-fixture-results
+          path: gitlab-test-results/fixture/
+          retention-days: 14
+
+  kubernetes-pbs-wasabi:
+    runs-on: [self-hosted, x64]
+    needs: pbs-fixture-analysis
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Kubernetes+PBS analysis (wasabi)
+        env:
+          TEST_RESULT_DIR: ${{ github.workspace }}/gitlab-test-results
+        run: ./tests/test-kubernetes-pbs-analysis.sh wasabi
+
+      - name: Upload wasabi PBS artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubernetes-pbs-wasabi-results
+          path: gitlab-test-results/wasabi/
+          retention-days: 14
+
+  kubernetes-pbs-joinmarket:
+    runs-on: [self-hosted, x64]
+    needs: kubernetes-pbs-wasabi
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Kubernetes+PBS analysis (joinmarket)
+        env:
+          TEST_RESULT_DIR: ${{ github.workspace }}/gitlab-test-results
+        run: ./tests/test-kubernetes-pbs-analysis.sh joinmarket
+
+      - name: Upload joinmarket PBS artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubernetes-pbs-joinmarket-results
+          path: gitlab-test-results/joinmarket/
+          retention-days: 14
+
+  kubernetes-pbs-parallel:
+    runs-on: [self-hosted, x64]
+    needs: kubernetes-pbs-joinmarket
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install kubectl
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bin"
+          curl -fsSL -o "${RUNNER_TEMP}/bin/kubectl" "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod 0755 "${RUNNER_TEMP}/bin/kubectl"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      - name: Install k3d
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bin"
+          curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | USE_SUDO=false K3D_INSTALL_DIR="${RUNNER_TEMP}/bin" bash
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      - name: Run parallel PBS analysis integration test (wasabi + joinmarket)
+        env:
+          CONTAINER_RUNTIME: docker
+          WRAPPER_IMAGE: ghcr.io/ondrejman/blocksciemulatoranalysis:latest
+          COINJOIN_EMULATOR_IMAGE: ghcr.io/ondrejman/coinjoin-emulator:latest
+          IMAGE_PREFIX: ghcr.io/ondrejman/
+          EMULATION_LOGS_DIR: ${{ runner.temp }}/bitcoinAnalysis-parallel-pbs-logs
+          PBS_TEST_STORAGE_ROOT: /storage/github-runner
+          KUBERNETES_PBS_TIMEOUT: 85m
+        run: ./tests/test-parallel-pbs-analysis.sh all

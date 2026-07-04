@@ -1,0 +1,6 @@
+.git
+.github
+emulation_logs
+.btc-rpc-explorer.env
+__pycache__
+notebooks/.ipynb_checkpoints

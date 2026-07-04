@@ -1,0 +1,107 @@
+[project]
+name = "blocksci-emulator-analysis"
+version = "0.1.0"
+description = "BlockSci, coinjoin-analysis, and emulator comparison pipeline."
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+dependencies = []
+
+[project.scripts]
+lint = "lint:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["lint"]
+
+[dependency-groups]
+dev = [
+    "mypy",
+    "pylint",
+    "ruff>=0.15.17",
+]
+
+[tool.ruff]
+exclude = [
+    ".git",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".uv-cache",
+    ".venv",
+    "__pycache__",
+    "Notebooks",
+    "btc-data",
+    "emulation_logs",
+]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["ANN401", "E", "F", "I", "TID251"]
+ignore = []
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"typing.Any".msg = "Do not use typing.Any; model report data with explicit aliases or narrower types."
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["E402"]
+
+[tool.pylint.main]
+fail-under = 10
+ignore = [
+    ".venv",
+    ".uv-cache",
+    "Notebooks",
+    "btc-data",
+    "emulation_logs",
+]
+jobs = 1
+persistent = false
+py-version = "3.14"
+
+[tool.pylint.format]
+ignore-long-lines = "^\\s*(# )?<?https?://\\S+>?$"
+max-line-length = 120
+max-module-lines = 3000
+
+[tool.pylint."messages control"]
+confidence = ["HIGH", "CONTROL_FLOW", "INFERENCE", "INFERENCE_FAILURE", "UNDEFINED"]
+disable = [
+    "broad-exception-caught",
+    "duplicate-code",
+    "fixme",
+    "invalid-name",
+    "line-too-long",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "missing-module-docstring",
+    "subprocess-run-check",
+    "too-few-public-methods",
+    "too-many-arguments",
+    "too-many-branches",
+    "too-many-instance-attributes",
+    "too-many-lines",
+    "too-many-locals",
+    "too-many-positional-arguments",
+    "too-many-public-methods",
+    "too-many-return-statements",
+    "too-many-statements",
+    "import-outside-toplevel",
+    "wrong-import-position",
+]
+
+[tool.pylint.refactoring]
+max-nested-blocks = 7
+
+[tool.pylint.reports]
+score = true
+
+[tool.pylint.similarities]
+ignore-comments = true
+ignore-docstrings = true
+ignore-imports = true
+ignore-signatures = true
+min-similarity-lines = 4
