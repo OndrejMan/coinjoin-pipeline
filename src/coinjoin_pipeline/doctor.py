@@ -31,8 +31,6 @@ def validate_arguments(arguments: list[str], runs_root: Path) -> list[str]:
     if uses_pbs and os.environ.get("PBS_FRONTEND_DIRECT") == "1":
         if shutil.which("qsub") is None:
             errors.append("qsub command not found for direct PBS execution")
-        if shutil.which("apptainer") is None and shutil.which("singularity") is None:
-            errors.append("apptainer or singularity is required for direct PBS execution")
     run_dir = option_value(arguments, "--run-dir")
     if run_dir:
         selected = Path(run_dir).expanduser()
@@ -72,7 +70,7 @@ def check(
     if not probe.exists() or not os.access(probe, os.W_OK):
         errors.append(f"output directory is not writable: {runs_root}")
     if executable and check_images:
-        selected = image_components or set(images.as_dict())
+        selected = set(images.as_dict()) if image_components is None else image_components
         for component, image in images.as_dict().items():
             if component not in selected:
                 continue

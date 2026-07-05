@@ -1109,7 +1109,8 @@ def main() -> None:
         "coinjoin-analysis", "mappings", "initialize", "external analyze",
     }:
         command.version = questionary.text(
-            "Coordinated container image version (required)",
+            "Coordinated container image version",
+            default="latest",
             validate=lambda value: bool(value.strip()) or "Enter an image tag",
         ).ask()
     validation = validate_command(command)

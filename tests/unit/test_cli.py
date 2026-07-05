@@ -14,6 +14,7 @@ from coinjoin_pipeline.images import resolve_images
 from coinjoin_pipeline.manifest import atomic_write
 from coinjoin_pipeline.builder import Command, parse_command, render_command
 from coinjoin_pipeline.pipeline_image import Configuration, runtime_command
+from coinjoin_pipeline.host import required_image_components
 
 
 class CliTests(unittest.TestCase):
@@ -82,12 +83,47 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Generated runtime command:", output.getvalue())
 
-    def test_mutating_command_rejects_implicit_latest(self) -> None:
-        error = io.StringIO()
-        with redirect_stderr(error):
+    def test_mutating_command_uses_explicit_latest_by_default(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output), mock.patch("coinjoin_pipeline.cli.doctor_check", return_value=[]):
             code = main(["full-run", "--engine", "joinmarket", "--dry-run"])
-        self.assertEqual(code, 2)
-        self.assertIn("require --version", error.getvalue())
+        self.assertEqual(code, 0)
+        self.assertIn("coinjoin-pipeline:latest", output.getvalue())
+
+    def test_latest_defaults_match_published_runtime_images(self) -> None:
+        images = resolve_images(None, {})
+        self.assertEqual(images.blocksci, "ghcr.io/ondrejman/blocksci-complete:latest")
+        self.assertTrue(all(image.endswith(":latest") for image in images.as_dict().values()))
+
+    def test_recreate_checks_only_images_used_by_that_stage(self) -> None:
+        self.assertEqual(
+            required_image_components("recreate", ["recreate", "--driver", "kubernetes"]),
+            {"pipeline", "emulator"},
+        )
+
+    def test_direct_pbs_does_not_check_images_with_frontend_runtime(self) -> None:
+        with mock.patch.dict("os.environ", {"PBS_FRONTEND_DIRECT": "1"}):
+            self.assertEqual(
+                required_image_components(
+                    "coinjoin-analysis", ["coinjoin-analysis", "--analysisPbs"]
+                ),
+                set(),
+            )
+
+    def test_direct_pbs_skips_frontend_container_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                mock.patch.dict("os.environ", {"PBS_FRONTEND_DIRECT": "1"}),
+                mock.patch("coinjoin_pipeline.doctor.shutil.which", return_value="/usr/bin/qsub"),
+                mock.patch("coinjoin_pipeline.cli.doctor_check") as check,
+                mock.patch("coinjoin_pipeline.cli.run", return_value=0),
+                redirect_stdout(io.StringIO()),
+            ):
+                code = main([
+                    "coinjoin-analysis", "--run-dir", directory, "--analysisPbs"
+                ])
+        self.assertEqual(code, 0)
+        check.assert_not_called()
 
     def test_metadata_required_fields_and_choices_are_enforced(self) -> None:
         self.assertTrue(any("requires --engine" in error for error in validate_passthrough(

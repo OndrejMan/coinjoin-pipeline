@@ -9,7 +9,7 @@ import shlex
 import sys
 
 from . import MANIFEST_SCHEMA_VERSION, __version__
-from .commands import MUTATING_ACTIONS, action_from, launcher_command, validate_passthrough
+from .commands import action_from, launcher_command, validate_passthrough
 from .doctor import check as doctor_check, validate_arguments
 from .host import (
     add_effective_image_arguments,
@@ -18,7 +18,7 @@ from .host import (
     parse_host_options,
     required_image_components,
 )
-from .images import IMAGE_NAMES, Images, all_images_overridden, resolve_images
+from .images import DEFAULT_VERSION, IMAGE_NAMES, Images, resolve_images
 from .manifest import initial_manifest, mark_finished
 from .process import run
 from .runs import manifest_target, store_host_manifest
@@ -32,7 +32,7 @@ def fail(message: str, code: int = 2) -> int:
 def print_version() -> None:
     print(f"coinjoin-pipeline {__version__}")
     print(f"manifest schema: {MANIFEST_SCHEMA_VERSION}")
-    print("default image version: none (explicit --version required)")
+    print(f"default image version: {DEFAULT_VERSION}")
     for component, image in IMAGE_NAMES.items():
         print(f"{component}: {image}")
 
@@ -53,7 +53,7 @@ Pipeline actions: full-run, recreate, clean, analyze, export,
   coinjoin-analysis, mappings, initialize, runs ..., scenarios ..., external ...
 
 Host options:
-  --version TAG                 coordinated image tag (required for execution)
+  --version TAG                 coordinated image tag (default: latest)
   --runtime docker|podman       host container runtime
   --runs-root PATH              output root (default: ./coinjoin-runs)
   --local-build                 use local development image tags
@@ -93,8 +93,6 @@ def main(argv: list[str] | None = None) -> int:
         builder_main()
         return 0
     if top_action in {"doctor", "pull"}:
-        if not host.get("version") and not host["local_build"] and not all_images_overridden(overrides):
-            return fail(f"{top_action} requires --version, --local-build, or all per-image overrides")
         if top_action == "doctor":
             doctor_arguments = passthrough[1:]
             errors = validate_arguments(doctor_arguments, runs_root)
@@ -116,15 +114,17 @@ def main(argv: list[str] | None = None) -> int:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 2
-    if action in MUTATING_ACTIONS and not host.get("version") and not host["local_build"] and not all_images_overridden(overrides, required_images):
-        return fail("mutating image-based commands require --version, --local-build, or all per-image overrides")
-
     reproduction = shlex.join(["coinjoin-pipeline", *raw])
     launcher_resource = files("coinjoin_pipeline").joinpath("resources/container/launcher.sh")
     with as_file(launcher_resource) as launcher:
         command = launcher_command(launcher, runtime, passthrough, images, runs_root, reproduction)
+        source_root = Path(__file__).resolve().parents[2]
+        local_wrapper_root = source_root / "pipeline"
+        if os.environ.get("PBS_FRONTEND_DIRECT") == "1" and (local_wrapper_root / "client/wrapper.py").is_file():
+            command.environment["PBS_FRONTEND_WRAPPER_ROOT"] = str(local_wrapper_root)
         print(f"Generated runtime command:\n{command.rendered()}")
-        preflight = doctor_check(
+        direct_pbs = os.environ.get("PBS_FRONTEND_DIRECT") == "1" and not required_images
+        preflight = [] if direct_pbs else doctor_check(
             runtime, runs_root, images, image_components=required_images,
         )
         if preflight:
@@ -142,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
         target = manifest_target(action, passthrough, runs_root)
         manifest = initial_manifest(
             action=action,
-            requested_version=host.get("version"),
+            requested_version=("local" if host["local_build"] else host.get("version") or DEFAULT_VERSION),
             effective_images=images.as_dict(),
             runtime=runtime,
             user_arguments=raw,

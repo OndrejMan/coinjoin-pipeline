@@ -13,6 +13,7 @@ from .process import run
 
 
 DEFAULT_LOCAL_IMAGE = "coinjoin-pipeline:local"
+DEFAULT_IMAGE = "ghcr.io/ondrejman/coinjoin-pipeline:latest"
 FORWARDED_ENVIRONMENT = (
     "WRAPPER_IMAGE",
     "BLOCKSCI_IMAGE",
@@ -67,9 +68,7 @@ def configuration(argv: list[str] | None = None) -> Configuration:
         raise ValueError(f"container runtime {args.runtime!r} is not installed")
     default_logs = Path.cwd() / "coinjoin-runs"
     logs_dir = (args.logs_dir or Path(os.environ.get("EMULATION_LOGS_DIR", default_logs))).expanduser().resolve()
-    image = args.image or (DEFAULT_LOCAL_IMAGE if args.build else None)
-    if image is None:
-        raise ValueError("--image is required unless --build is used")
+    image = args.image or (DEFAULT_LOCAL_IMAGE if args.build else DEFAULT_IMAGE)
     socket = Path(os.environ.get(
         "CONTAINER_SOCKET",
         "/var/run/docker.sock" if args.runtime == "docker"

@@ -80,10 +80,24 @@ def local_images() -> Images:
 
 
 def required_image_components(action: str, arguments: list[str]) -> set[str]:
+    if os.environ.get("PBS_FRONTEND_DIRECT") == "1" and any(
+        flag in arguments for flag in ("--analysisPbs", "--blocksciPbs", "--mappingsPbs")
+    ):
+        # The frontend submits Singularity references to PBS. It does not run
+        # these images through its local Docker/Podman daemon.
+        return set()
     if action.startswith(("runs ", "scenarios ")):
         return {"pipeline"}
     if action == "external analyze":
         return {"pipeline", "blocksci"}
+    if action == "recreate":
+        return {"pipeline", "emulator"}
+    if action == "clean":
+        return {"pipeline"}
+    if action == "coinjoin-analysis":
+        return {"pipeline", "coinjoin_analysis"}
+    if action in {"analyze", "export"}:
+        return {"pipeline", "blocksci", "coinjoin_analysis"}
     required = {"pipeline", "emulator", "coinjoin_analysis", "blocksci"}
     if "--mappingsPbs" in arguments or action == "mappings":
         required.update(("mappings", "sake"))

@@ -14,15 +14,16 @@ pipx install /home/administrator/diplomka/coinjoin-pipeline
 python3 -m pip install -e '/home/administrator/diplomka/coinjoin-pipeline[builder,test]'
 
 coinjoin-pipeline version
-cjp doctor --version thesis-2026-07
-coinjoin-pipeline pull --version thesis-2026-07
-coinjoin-pipeline full-run --engine joinmarket --version thesis-2026-07 --dry-run
-coinjoin-pipeline full-run --engine joinmarket --version thesis-2026-07
+cjp doctor
+coinjoin-pipeline pull
+coinjoin-pipeline full-run --engine joinmarket --dry-run
+coinjoin-pipeline full-run --engine joinmarket
 ```
 
-Outputs default to `./coinjoin-runs`; override this with `--runs-root`. Mutating
-image-based commands require `--version`, all per-image overrides, or
-`--local-build`. Individual overrides (`--pipeline-image`, `--emulator-image`,
+Outputs default to `./coinjoin-runs`; override this with `--runs-root`. Images
+default to the explicit `latest` tag. Use `--version TAG` to apply one coordinated
+tag to every default image, or `--local-build` for local development tags.
+Individual overrides (`--pipeline-image`, `--emulator-image`,
 `--coinjoin-analysis-image`, `--blocksci-image`, `--mappings-image`, and
 `--sake-image`) take precedence over the coordinated tag.
 

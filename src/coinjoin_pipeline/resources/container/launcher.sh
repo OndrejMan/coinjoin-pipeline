@@ -181,14 +181,14 @@ if [[ "${PBS_FRONTEND_DIRECT:-0}" == 1 && ( "${HAS_ANALYSIS_PBS}" == true || "${
   if [[ ( "${ACTION}" == full-run || "${ACTION}" == analyze || "${ACTION}" == export ) && "${HAS_TEST_VALUES}" == false ]]; then
     DIRECT_WRAPPER_ARGS+=(--test-values)
   fi
-  DIRECT_WRAPPER_ROOT="${SCRIPT_DIR}/../blocksciEmulatorAnalysis"
+  DIRECT_WRAPPER_ROOT="${PBS_FRONTEND_WRAPPER_ROOT:-${SCRIPT_DIR}/../blocksciEmulatorAnalysis}"
   DIRECT_WRAPPER_SCRIPT="${DIRECT_WRAPPER_ROOT}/client/wrapper.py"
   DIRECT_WRAPPER_FROM_IMAGE=false
   if [[ ! -f "${DIRECT_WRAPPER_SCRIPT}" ]]; then
     DIRECT_WRAPPER_FROM_IMAGE=true
     check_runtime
     require_image "${WRAPPER_IMAGE}"
-    DIRECT_WRAPPER_ROOT="${PBS_FRONTEND_WRAPPER_ROOT:-${EMULATION_LOGS_DIR}/.pbs-wrapper-runtime}"
+    DIRECT_WRAPPER_ROOT="${EMULATION_LOGS_DIR}/.pbs-wrapper-runtime"
     DIRECT_WRAPPER_SCRIPT="${DIRECT_WRAPPER_ROOT}/wrapper.py"
     if [[ ! -f "${DIRECT_WRAPPER_SCRIPT}" ]]; then
       DIRECT_WRAPPER_CONTAINER="pbs-wrapper-runtime-$$"

@@ -10,10 +10,11 @@ IMAGE_NAMES = {
     "pipeline": "ghcr.io/ondrejman/coinjoin-pipeline",
     "emulator": "ghcr.io/ondrejman/coinjoin-emulator",
     "coinjoin_analysis": "ghcr.io/ondrejman/coinjoin-analysis",
-    "blocksci": "ghcr.io/ondrejman/blocksci",
+    "blocksci": "ghcr.io/ondrejman/blocksci-complete",
     "mappings": "ghcr.io/ondrejman/coinjoin-mappings-enumerator",
     "sake": "ghcr.io/ondrejman/coinjoin-mappings-sake",
 }
+DEFAULT_VERSION = "latest"
 
 TAG_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
 IMAGE_RE = re.compile(
@@ -45,18 +46,16 @@ def validate_image(image: str) -> None:
 
 
 def resolve_images(version: str | None, overrides: dict[str, str | None]) -> Images:
-    if version:
-        validate_version(version)
+    effective_version = version or DEFAULT_VERSION
+    validate_version(effective_version)
     resolved: dict[str, str] = {}
     for component, name in IMAGE_NAMES.items():
         override = overrides.get(component)
         if override:
             validate_image(override)
             resolved[component] = override
-        elif version:
-            resolved[component] = f"{name}:{version}"
         else:
-            resolved[component] = name
+            resolved[component] = f"{name}:{effective_version}"
     return Images(**resolved)
 
 
