@@ -12,7 +12,6 @@ import sys
 import tempfile
 from pathlib import Path
 from types import ModuleType
-from typing import Any
 
 
 SCHEMA_VERSION = 1
@@ -75,7 +74,7 @@ def normalize_default(value: object) -> object:
     return str(value)
 
 
-def option_record(action: argparse.Action[Any]) -> tuple[str, dict[str, object]] | None:
+def option_record(action: argparse.Action) -> tuple[str, dict[str, object]] | None:
     long_flags = [flag for flag in action.option_strings if flag.startswith("--")]
     if not long_flags or "--help" in long_flags or "--runtime" in long_flags:
         return None

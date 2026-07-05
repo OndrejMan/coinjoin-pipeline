@@ -119,7 +119,7 @@ except ImportError:
     from pbs import (  # type: ignore[import-not-found,no-redef]
         DEFAULT_BLOCKSCI_IMAGE as DEFAULT_PBS_BLOCKSCI_IMAGE,
     )
-    from pbs import (  # type: ignore[no-redef]
+    from pbs import (  # type: ignore[no-redef,assignment]
         DEFAULT_BLOCKSCI_MEM,
         DEFAULT_BLOCKSCI_NCPUS,
         DEFAULT_BLOCKSCI_SCRATCH,

@@ -811,7 +811,7 @@ def collect_command() -> Command:
                 elif option_takes_value:
                     value = text(
                         "Option value",
-                        action_option.default_text() if action_option else "",
+                        (action_option.default_text() if action_option else "") or "",
                         _nonempty,
                         flag,
                     )

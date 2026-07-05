@@ -81,8 +81,8 @@ def main(argv: list[str] | None = None) -> int:
         )).expanduser().resolve()
         overrides = image_overrides(host)
         images = local_images() if host["local_build"] else resolve_images(host.get("version"), overrides)  # type: ignore[arg-type]
-    except ValueError as error:
-        return fail(str(error))
+    except ValueError as exc:
+        return fail(str(exc))
 
     top_action = passthrough[0] if passthrough else "full-run"
     if top_action == "version":

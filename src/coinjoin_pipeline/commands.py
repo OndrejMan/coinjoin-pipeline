@@ -7,6 +7,7 @@ import json
 from importlib.resources import files
 from pathlib import Path
 import shlex
+from typing import Any
 
 from .images import Images
 
@@ -18,7 +19,7 @@ MUTATING_ACTIONS = {
 RESEARCH_PREFIXES = {"runs", "scenarios", "external"}
 
 
-def metadata() -> dict[str, object]:
+def metadata() -> dict[str, Any]:
     path = files("coinjoin_pipeline").joinpath("metadata/command_metadata.json")
     return json.loads(path.read_text(encoding="utf-8"))
 
