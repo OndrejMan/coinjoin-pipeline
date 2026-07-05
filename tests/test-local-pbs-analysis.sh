@@ -40,7 +40,9 @@ cleanup() {
       tail -n 200 "${output}" >&2 || true
     done < <(find "${WORK_DIR}" -type f \( -name '*.o[0-9]*' -o -name '*.e[0-9]*' \) -print 2>/dev/null)
   fi
-  docker_cmd rm -f "${RUN_ID}-btc" >/dev/null 2>&1 || true
+  # btc-node declares /home/bitcoin/.bitcoin as a VOLUME. Remove anonymous
+  # volumes together with the container so self-hosted CI runs do not leak them.
+  docker_cmd rm -fv "${RUN_ID}-btc" >/dev/null 2>&1 || true
   docker_cmd rm -f "${PBS_CONTAINER_NAME}" >/dev/null 2>&1 || true
   docker_cmd run --rm --user root -v "${WORK_DIR}:/test-work" \
     --entrypoint chmod "${BTC_NODE_IMAGE:-ghcr.io/ondrejman/btc-node:latest}" \
@@ -65,6 +67,7 @@ chmod -R a+rwX "${WORK_DIR}"
 
 echo "Reconstructing the fixture's Bitcoin Core datadir..."
 docker_cmd run -d --name "${RUN_ID}-btc" -p 127.0.0.1::18443 \
+  --tmpfs /home/bitcoin/.bitcoin \
   -v "${BITCOIN_DATADIR}:/home/bitcoin/data:rw" --entrypoint bitcoind \
   "${BTC_NODE_IMAGE:-ghcr.io/ondrejman/btc-node:latest}" \
   -datadir=/home/bitcoin/data -regtest -server=1 -rpcbind=0.0.0.0 \
