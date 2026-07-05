@@ -13,7 +13,7 @@ WAIT_TIMEOUT="${WAIT_TIMEOUT:-180s}"
 SCENARIO="${SCENARIO:-overactive-local.json}"
 ACTION="${ACTION:-recreate}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
-WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/blocksciemulatoranalysis:latest}"
+WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/coinjoin-pipeline:latest}"
 EMULATOR_IMAGE="${EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
 # The wrapper reads COINJOIN_EMULATOR_IMAGE. Keep it aligned with the image
 # selected for this test so local-image validation does not fall back to GHCR.
@@ -237,7 +237,9 @@ else:
 PY
 )
 
-pull_image "${WRAPPER_IMAGE}"
+if [[ "${WRAPPER_PULL_POLICY:-}" != never ]]; then
+  pull_image "${WRAPPER_IMAGE}"
+fi
 pull_image "${EMULATOR_IMAGE}"
 for image in "${ARTIFACT_IMAGES[@]}"; do
   pull_image "${image}"

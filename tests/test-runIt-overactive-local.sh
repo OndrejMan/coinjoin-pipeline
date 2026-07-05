@@ -27,7 +27,7 @@ EOF
 chmod +x "${FAKE_BIN}/docker"
 
 export DOCKER_LOG
-export WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/blocksciemulatoranalysis:latest}"
+export WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/coinjoin-pipeline:latest}"
 export BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-complete:latest}"
 export COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}"
 export COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
@@ -35,7 +35,7 @@ export COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coi
 (
   cd "${PROJECT_DIR}"
   EMULATION_LOGS_DIR="${FAKE_LOGS}" \
-  WRAPPER_IMAGE="ghcr.io/ondrejman/blocksciemulatoranalysis:latest" \
+  WRAPPER_IMAGE="ghcr.io/ondrejman/coinjoin-pipeline:latest" \
   WRAPPER_PULL_POLICY="" \
   COINJOIN_EMULATOR_IMAGE_PREFIX=registry.example/ \
   COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD=1 \
@@ -67,7 +67,7 @@ LOCAL_DOCKER_LOG="${TMP_DIR}/docker-local.args"
 (
   cd "${PROJECT_DIR}"
   EMULATION_LOGS_DIR="${FAKE_LOGS}" \
-  WRAPPER_IMAGE="blocksciemulatoranalysis:bitcoinanalysis-local" \
+  WRAPPER_IMAGE="coinjoin-pipeline:local" \
   WRAPPER_PULL_POLICY="" \
   PATH="${FAKE_BIN}:${PATH}" \
   DOCKER_LOG="${LOCAL_DOCKER_LOG}" \
@@ -286,7 +286,7 @@ if ! grep -q -- "-e KUBERNETES_STORAGE_UID=$(id -u) -e KUBERNETES_STORAGE_GID=$(
   exit 1
 fi
 
-ISOLATED_PROJECT="${TMP_DIR}/isolated/bitcoinAnalysis"
+ISOLATED_PROJECT="${TMP_DIR}/isolated/coinjoin-pipeline"
 ISOLATED_LOGS="${TMP_DIR}/isolated/logs"
 mkdir -p "${ISOLATED_PROJECT}/container" "${ISOLATED_PROJECT}/scenarios" "${ISOLATED_PROJECT}/notebooks" "${ISOLATED_LOGS}"
 cp "${PROJECT_DIR}/runIt.sh" "${ISOLATED_PROJECT}/runIt.sh"

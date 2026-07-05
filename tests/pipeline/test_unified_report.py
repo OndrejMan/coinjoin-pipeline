@@ -252,7 +252,7 @@ def complete_image_digests():
         "blocksci": "ghcr.io/ondrejman/blocksci-complete@sha256:blocksci",
         "coinjoin_analysis": "ghcr.io/ondrejman/coinjoin-analysis@sha256:analysis",
         "coinjoin_emulator": "ghcr.io/ondrejman/coinjoin-emulator@sha256:emulator",
-        "wrapper": "ghcr.io/ondrejman/blocksciemulatoranalysis@sha256:wrapper",
+        "wrapper": "ghcr.io/ondrejman/coinjoin-pipeline@sha256:wrapper",
     }
 
 

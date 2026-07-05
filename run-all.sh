@@ -10,7 +10,7 @@ LOCAL_BLOCKSCI_IMAGE="${LOCAL_BLOCKSCI_IMAGE:-blocksci-complete:${LOCAL_TAG}}"
 LOCAL_COINJOIN_EMULATOR_IMAGE="${LOCAL_COINJOIN_EMULATOR_IMAGE:-coinjoin-emulator:${LOCAL_TAG}}"
 LOCAL_COINJOIN_ANALYSIS_IMAGE="${LOCAL_COINJOIN_ANALYSIS_IMAGE:-coinjoin-analysis:${LOCAL_TAG}}"
 
-UPSTREAM_WRAPPER_IMAGE="${UPSTREAM_WRAPPER_IMAGE:-ghcr.io/ondrejman/blocksciemulatoranalysis:latest}"
+UPSTREAM_WRAPPER_IMAGE="${UPSTREAM_WRAPPER_IMAGE:-ghcr.io/ondrejman/coinjoin-pipeline:latest}"
 UPSTREAM_BLOCKSCI_IMAGE="${UPSTREAM_BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-complete:latest}"
 UPSTREAM_COINJOIN_EMULATOR_IMAGE="${UPSTREAM_COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
 UPSTREAM_COINJOIN_ANALYSIS_IMAGE="${UPSTREAM_COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}"
@@ -23,7 +23,7 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") <local|github> [--build-only] [--pull-only] [--skip-build] [--skip-pull] [--skip-tests] [--tests-only] [--scenario <name-or-path>]...
 
-Run the bundled bitcoinAnalysis workflows with a selected image source.
+Run the bundled coinjoin-pipeline workflows with a selected image source.
 
 Modes:
   local                       Build local images and run tests with those tags.
@@ -481,10 +481,10 @@ fi
 
 completed_parts=()
 if [[ "${RUN_SCENARIOS}" == "1" ]]; then
-  completed_parts+=("${#SCENARIOS[@]} ${IMAGE_MODE} bitcoinAnalysis run(s)")
+  completed_parts+=("${#SCENARIOS[@]} ${IMAGE_MODE} coinjoin-pipeline run(s)")
 fi
 if [[ "${RUN_TESTS}" == "1" ]]; then
-  completed_parts+=("all bitcoinAnalysis shell tests")
+  completed_parts+=("all coinjoin-pipeline shell tests")
 fi
 
 if [[ "${#completed_parts[@]}" -eq 0 ]]; then

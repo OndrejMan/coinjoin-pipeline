@@ -3,12 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-REPO_ROOT="$(cd "${PROJECT_DIR}/.." && pwd)"
 FIXTURE_ARCHIVE="${PBS_TEST_FIXTURE:-${SCRIPT_DIR}/pbs-overactive-local-emulation.zip}"
-PBS_HELPER="${REPO_ROOT}/scripts/local-pbs.sh"
-if [[ -x "${SCRIPT_DIR}/support/pbs/local-pbs.sh" ]]; then
-  PBS_HELPER="${SCRIPT_DIR}/support/pbs/local-pbs.sh"
-fi
+PBS_HELPER="${SCRIPT_DIR}/support/pbs/local-pbs.sh"
+PBS_ENV="${SCRIPT_DIR}/support/pbs/pbs-env.sh"
 PBS_CONTAINER_NAME="${PBS_CONTAINER_NAME:-pbs-analysis-itest-$$}"
 RUN_ID="pbs-overactive-local-$RANDOM-$$"
 STORAGE_BASE="${PBS_TEST_STORAGE_ROOT:-/storage/gitlab-runner}"
@@ -84,11 +81,7 @@ docker_cmd run --rm --user root -v "${BITCOIN_DATADIR}:/bitcoin-data" \
 export PBS_CONTAINER_NAME PBS_WORKDIR_HOST="${WORK_DIR}" PBS_WORKDIR_CONTAINER="${WORK_DIR}"
 "${PBS_HELPER}" start
 
-if [[ -f "${SCRIPT_DIR}/support/pbs/pbs-env.sh" ]]; then
-  source "${SCRIPT_DIR}/support/pbs/pbs-env.sh"
-else
-  source "${REPO_ROOT}/scripts/pbs-env.sh"
-fi
+source "${PBS_ENV}"
 export PBS_CLIENT_WORKDIR="${WORK_DIR}"
 export EMULATION_LOGS_DIR="${WORK_DIR}"
 export PBS_FRONTEND_DIRECT=1

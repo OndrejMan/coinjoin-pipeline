@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
-WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/blocksciemulatoranalysis:latest}"
+WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/coinjoin-pipeline:latest}"
 COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
 EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR:-${SCRIPT_DIR}/emulation_logs}"
 NOTEBOOKS_DIR="${NOTEBOOKS_DIR:-${EMULATION_LOGS_DIR}/.notebooks}"
@@ -181,7 +181,7 @@ if [[ "${PBS_FRONTEND_DIRECT:-0}" == 1 && ( "${HAS_ANALYSIS_PBS}" == true || "${
   if [[ ( "${ACTION}" == full-run || "${ACTION}" == analyze || "${ACTION}" == export ) && "${HAS_TEST_VALUES}" == false ]]; then
     DIRECT_WRAPPER_ARGS+=(--test-values)
   fi
-  DIRECT_WRAPPER_ROOT="${PBS_FRONTEND_WRAPPER_ROOT:-${SCRIPT_DIR}/../blocksciEmulatorAnalysis}"
+  DIRECT_WRAPPER_ROOT="${PBS_FRONTEND_WRAPPER_ROOT:-}"
   DIRECT_WRAPPER_SCRIPT="${DIRECT_WRAPPER_ROOT}/client/wrapper.py"
   DIRECT_WRAPPER_FROM_IMAGE=false
   if [[ ! -f "${DIRECT_WRAPPER_SCRIPT}" ]]; then
@@ -273,11 +273,6 @@ if [[ -z "${COINJOIN_EMULATOR_DOCKER_PLATFORM:-}" && "${DOCTOR_ENGINE}" == joinm
   case "$(uname -m)" in
     arm64|aarch64) COINJOIN_EMULATOR_DOCKER_PLATFORM=linux/amd64 ;;
   esac
-fi
-LOCAL_WRAPPER_COMPOSE="${SCRIPT_DIR}/../blocksciEmulatorAnalysis/compose.yaml"
-if [[ -f "${LOCAL_WRAPPER_COMPOSE}" ]]; then
-  LOCAL_WRAPPER_COMPOSE="$(cd "$(dirname "${LOCAL_WRAPPER_COMPOSE}")" && pwd)/$(basename "${LOCAL_WRAPPER_COMPOSE}")"
-  CONTAINER_EXTRA_ARGS+=("-v" "${LOCAL_WRAPPER_COMPOSE}:/compose.yaml:ro")
 fi
 WRAPPER_PULL_ARGS=()
 while IFS= read -r wrapper_pull_arg; do

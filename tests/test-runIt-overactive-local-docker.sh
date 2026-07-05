@@ -18,12 +18,12 @@ if [[ $# -gt 1 || ( "${IMAGE_MODE}" != "upstream" && "${IMAGE_MODE}" != "local" 
   exit 2
 fi
 
-LOCAL_TAG="${LOCAL_TAG:-bitcoinanalysis-local}"
-LOCAL_WRAPPER_IMAGE="${LOCAL_WRAPPER_IMAGE:-blocksciemulatoranalysis:${LOCAL_TAG}}"
+LOCAL_TAG="${LOCAL_TAG:-coinjoin-pipeline-local}"
+LOCAL_WRAPPER_IMAGE="${LOCAL_WRAPPER_IMAGE:-coinjoin-pipeline:${LOCAL_TAG}}"
 LOCAL_BLOCKSCI_IMAGE="${LOCAL_BLOCKSCI_IMAGE:-blocksci-complete:${LOCAL_TAG}}"
 LOCAL_EMULATOR_IMAGE="${LOCAL_EMULATOR_IMAGE:-coinjoin-emulator:${LOCAL_TAG}}"
 LOCAL_COINJOIN_ANALYSIS_IMAGE="${LOCAL_COINJOIN_ANALYSIS_IMAGE:-coinjoin-analysis:${LOCAL_TAG}}"
-WRAPPER_SOURCE_DIR="${WRAPPER_SOURCE_DIR:-${REPO_ROOT}/blocksciEmulatorAnalysis}"
+WRAPPER_SOURCE_DIR="${WRAPPER_SOURCE_DIR:-${PROJECT_DIR}}"
 BLOCKSCI_SOURCE_DIR="${BLOCKSCI_SOURCE_DIR:-${REPO_ROOT}/blocksci}"
 EMULATOR_SOURCE_DIR="${EMULATOR_SOURCE_DIR:-${REPO_ROOT}/coinjoin-emulator}"
 COINJOIN_ANALYSIS_SOURCE_DIR="${COINJOIN_ANALYSIS_SOURCE_DIR:-${REPO_ROOT}/coinjoin-analysis}"
@@ -64,7 +64,7 @@ if [[ "${IMAGE_MODE}" == "local" ]]; then
   docker build -t "${LOCAL_EMULATOR_IMAGE}" "${EMULATOR_SOURCE_DIR}"
 
   echo "Building local wrapper image ${LOCAL_WRAPPER_IMAGE} from ${WRAPPER_SOURCE_DIR}..."
-  docker build -t "${LOCAL_WRAPPER_IMAGE}" -f "${WRAPPER_SOURCE_DIR}/client/Dockerfile" "${WRAPPER_SOURCE_DIR}"
+  docker build -t "${LOCAL_WRAPPER_IMAGE}" -f "${WRAPPER_SOURCE_DIR}/Dockerfile" "${WRAPPER_SOURCE_DIR}"
 
   echo "Building local coinjoin-analysis image ${LOCAL_COINJOIN_ANALYSIS_IMAGE} from ${COINJOIN_ANALYSIS_SOURCE_DIR}..."
   docker build -t "${LOCAL_COINJOIN_ANALYSIS_IMAGE}" -f "${COINJOIN_ANALYSIS_SOURCE_DIR}/docker/analysis.Dockerfile" "${COINJOIN_ANALYSIS_SOURCE_DIR}"
@@ -79,7 +79,7 @@ if [[ "${IMAGE_MODE}" == "local" ]]; then
   COINJOIN_EMULATOR_IMAGE_PREFIX=""
   COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD=1
 else
-  WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/blocksciemulatoranalysis:latest}"
+  WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/coinjoin-pipeline:latest}"
   BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-complete:latest}"
   COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
   COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}"

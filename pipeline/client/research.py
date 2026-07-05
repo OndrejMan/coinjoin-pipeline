@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host-side researcher commands used by bitcoinAnalysis/runIt.sh."""
+"""Host-side researcher commands used by the coinjoin-pipeline CLI."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ from client.scenarios import packaged_scenarios, resolve_scenario, validate_scen
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RUNS_ROOT = Path(
-    os.environ.get("EMULATION_LOGS_DIR", ROOT.parent / "bitcoinAnalysis" / "emulation_logs")
+    os.environ.get("EMULATION_LOGS_DIR", ROOT.parent / "coinjoin-runs")
 ).expanduser()
 
 

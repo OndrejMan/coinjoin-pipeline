@@ -10,7 +10,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-ISOLATED_PROJECT="${TMP_DIR}/repo/bitcoinAnalysis"
+ISOLATED_PROJECT="${TMP_DIR}/repo/coinjoin-pipeline"
 FAKE_BIN="${TMP_DIR}/bin"
 RUN_LOG="${TMP_DIR}/run-all.log"
 CHILD_STARTED="${TMP_DIR}/child.started"

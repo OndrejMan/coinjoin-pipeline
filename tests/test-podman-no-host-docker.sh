@@ -47,7 +47,7 @@ EOF
 chmod +x "${FAKE_BIN}/kubectl"
 
 export DOCKER_LOG PODMAN_LOG KUBECTL_LOG
-export WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/blocksciemulatoranalysis:latest}"
+export WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/coinjoin-pipeline:latest}"
 export BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-complete:latest}"
 export COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}"
 export COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
@@ -164,7 +164,7 @@ touch "${KUBE_CONFIG}"
   CONTAINER_SOCKET="${SOCKET_PATH}" \
   EMULATION_LOGS_DIR="${FAKE_LOGS}" \
   KUBERNETES_CONTROL_IP="172.17.0.1" \
-  WRAPPER_IMAGE="ghcr.io/ondrejman/blocksciemulatoranalysis:latest" \
+  WRAPPER_IMAGE="ghcr.io/ondrejman/coinjoin-pipeline:latest" \
   PATH="${FAKE_BIN}:${PATH}" \
   ./runIt.sh container podman recreate \
     --engine wasabi \
@@ -177,7 +177,7 @@ touch "${KUBE_CONFIG}"
     --image-prefix ghcr.io/test/
 )
 
-if ! grep -q -- "ghcr.io/ondrejman/blocksciemulatoranalysis:latest" "${PODMAN_LOG}"; then
+if ! grep -q -- "ghcr.io/ondrejman/coinjoin-pipeline:latest" "${PODMAN_LOG}"; then
   echo "FAIL: expected WRAPPER_IMAGE override to select the wrapper image" >&2
   echo "Observed: $(cat "${PODMAN_LOG}")" >&2
   exit 1

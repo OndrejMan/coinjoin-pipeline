@@ -15,6 +15,10 @@ permissions:
   contents: read
   packages: read
 
+concurrency:
+  group: coinjoin-pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   command-builder-unit-tests:
     runs-on: [self-hosted, x64]
@@ -63,6 +67,9 @@ jobs:
   docker-overactive-local:
     runs-on: [self-hosted, x64]
     needs: podman-wrapper
+    env:
+      WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
+      WRAPPER_PULL_POLICY: never
 
     steps:
       - name: Checkout repository
@@ -75,16 +82,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build current pipeline image
+        run: docker build -t "${WRAPPER_IMAGE}" .
+
       - name: Run overactive-local through real Docker
         env:
           CONTAINER_RUNTIME: docker
-          WRAPPER_IMAGE: ghcr.io/ondrejman/blocksciemulatoranalysis:latest
-          EMULATION_LOGS_DIR: ${{ runner.temp }}/bitcoinAnalysis-docker-emulation-logs
+          EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-docker-emulation-logs
         run: ./tests/test-runIt-overactive-local-docker.sh
 
   docker-joinmarket:
     runs-on: [self-hosted, x64]
     needs: podman-wrapper
+    env:
+      WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
+      WRAPPER_PULL_POLICY: never
 
     steps:
       - name: Checkout repository
@@ -97,15 +109,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build current pipeline image
+        run: docker build -t "${WRAPPER_IMAGE}" .
+
       - name: Run JoinMarket through real Docker with upstream images
         env:
           CONTAINER_RUNTIME: docker
-          EMULATION_LOGS_DIR: ${{ runner.temp }}/bitcoinAnalysis-joinmarket-emulation-logs
+          EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-joinmarket-emulation-logs
         run: ./tests/test-runIt-joinmarket-local-docker.sh
 
   docker-parallel:
     runs-on: [self-hosted, x64]
     needs: podman-wrapper
+    env:
+      WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
+      WRAPPER_PULL_POLICY: never
 
     steps:
       - name: Checkout repository
@@ -118,11 +136,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build current pipeline image
+        run: docker build -t "${WRAPPER_IMAGE}" .
+
       - name: Run overactive-local through real Docker with --parallel
         env:
           CONTAINER_RUNTIME: docker
-          WRAPPER_IMAGE: ghcr.io/ondrejman/blocksciemulatoranalysis:latest
-          EMULATION_LOGS_DIR: ${{ runner.temp }}/bitcoinAnalysis-parallel-emulation-logs
+          EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-parallel-emulation-logs
         run: ./tests/test-runIt-parallel-local-docker.sh
 
   kubernetes-k3d:
@@ -131,6 +151,9 @@ jobs:
       - docker-overactive-local
       - docker-joinmarket
       - docker-parallel
+    env:
+      WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
+      WRAPPER_PULL_POLICY: never
 
     steps:
       - name: Checkout repository
@@ -142,6 +165,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build current pipeline image
+        run: docker build -t "${WRAPPER_IMAGE}" .
 
       - name: Install kubectl
         run: |
@@ -159,8 +185,7 @@ jobs:
       - name: Run k3d Kubernetes integration test
         env:
           CONTAINER_RUNTIME: docker
-          WRAPPER_IMAGE: ghcr.io/ondrejman/blocksciemulatoranalysis:latest
-          EMULATION_LOGS_DIR: ${{ runner.temp }}/bitcoinAnalysis-emulation-logs
+          EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-emulation-logs
           WAIT_TIMEOUT: 240s
         run: ./tests/test-kubernetes-k3d.sh
 
@@ -220,10 +245,16 @@ jobs:
     runs-on: [self-hosted, x64]
     needs: pbs-fixture-analysis
     timeout-minutes: 90
+    env:
+      WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
+      WRAPPER_PULL_POLICY: never
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Build current pipeline image
+        run: docker build -t "${WRAPPER_IMAGE}" .
 
       - name: Run Kubernetes+PBS analysis (wasabi)
         env:
@@ -242,10 +273,16 @@ jobs:
     runs-on: [self-hosted, x64]
     needs: kubernetes-pbs-wasabi
     timeout-minutes: 90
+    env:
+      WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
+      WRAPPER_PULL_POLICY: never
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Build current pipeline image
+        run: docker build -t "${WRAPPER_IMAGE}" .
 
       - name: Run Kubernetes+PBS analysis (joinmarket)
         env:
@@ -263,6 +300,9 @@ jobs:
   kubernetes-pbs-parallel:
     runs-on: [self-hosted, x64]
     needs: kubernetes-pbs-joinmarket
+    env:
+      WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
+      WRAPPER_PULL_POLICY: never
 
     steps:
       - name: Checkout repository
@@ -274,6 +314,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build current pipeline image
+        run: docker build -t "${WRAPPER_IMAGE}" .
 
       - name: Install kubectl
         run: |
@@ -291,10 +334,21 @@ jobs:
       - name: Run parallel PBS analysis integration test (wasabi + joinmarket)
         env:
           CONTAINER_RUNTIME: docker
-          WRAPPER_IMAGE: ghcr.io/ondrejman/blocksciemulatoranalysis:latest
           COINJOIN_EMULATOR_IMAGE: ghcr.io/ondrejman/coinjoin-emulator:latest
           IMAGE_PREFIX: ghcr.io/ondrejman/
-          EMULATION_LOGS_DIR: ${{ runner.temp }}/bitcoinAnalysis-parallel-pbs-logs
+          EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-parallel-pbs-logs
           PBS_TEST_STORAGE_ROOT: /storage/github-runner
           KUBERNETES_PBS_TIMEOUT: 85m
         run: ./tests/test-parallel-pbs-analysis.sh all
+
+  publish-pipeline-image:
+    needs:
+      - kubernetes-k3d
+      - kubernetes-pbs-parallel
+    if: >-
+      ${{ success() && github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/publish-pipeline-image.yaml

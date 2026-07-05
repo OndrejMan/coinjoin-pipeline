@@ -6,7 +6,7 @@
 #   "rich>=13.9,<15",
 # ]
 # ///
-"""Interactive command builder for the bitcoinAnalysis pipeline."""
+"""Interactive command builder for coinjoin-pipeline."""
 
 from __future__ import annotations
 
@@ -1095,7 +1095,7 @@ def main() -> None:
     console.print(
         Panel(
             "Answer a few questions; no pipeline command will be executed.",
-            title="bitcoinAnalysis command builder",
+            title="coinjoin-pipeline command builder",
             border_style="cyan",
         )
     )

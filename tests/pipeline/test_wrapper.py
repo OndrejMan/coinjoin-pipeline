@@ -439,7 +439,7 @@ class WrapperExportTest(unittest.TestCase):
 
     def test_compose_env_targets_active_run_with_emulation_logs_override(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            logs_dir = Path(tmpdir) / "bitcoinAnalysis" / "emulation_logs"
+            logs_dir = Path(tmpdir) / "coinjoin-pipeline" / "coinjoin-runs"
             with mock.patch.dict(os.environ, {"EMULATION_LOGS_DIR": str(logs_dir)}):
                 env = compose_env(active_run_id="run-a")
 

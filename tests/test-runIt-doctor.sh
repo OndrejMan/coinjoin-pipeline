@@ -42,7 +42,7 @@ run_it() {
   (
   cd "${PROJECT_DIR}"
     EMULATION_LOGS_DIR="${FAKE_LOGS}" \
-    WRAPPER_IMAGE="ghcr.io/ondrejman/blocksciemulatoranalysis:latest" \
+    WRAPPER_IMAGE="ghcr.io/ondrejman/coinjoin-pipeline:latest" \
     BLOCKSCI_IMAGE="ghcr.io/ondrejman/blocksci-complete:latest" \
     COINJOIN_EMULATOR_IMAGE="ghcr.io/ondrejman/coinjoin-emulator:latest" \
     COINJOIN_ANALYSIS_IMAGE="ghcr.io/ondrejman/coinjoin-analysis:latest" \
@@ -54,12 +54,12 @@ run_it() {
 # A successful normal run executes doctor first and then launches the wrapper.
 run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/overactive-local.json
 grep -q '^info ' "${FAKE_LOG}"
-grep -q '^manifest inspect ghcr.io/ondrejman/blocksciemulatoranalysis:latest ' "${FAKE_LOG}"
+grep -q '^manifest inspect ghcr.io/ondrejman/coinjoin-pipeline:latest ' "${FAKE_LOG}"
 grep -q '^run ' "${FAKE_LOG}"
 
 # Dry runs perform the same checks but never launch the wrapper container.
 run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/overactive-local.json --dry-run
-grep -q '^manifest inspect ghcr.io/ondrejman/blocksciemulatoranalysis:latest ' "${FAKE_LOG}"
+grep -q '^manifest inspect ghcr.io/ondrejman/coinjoin-pipeline:latest ' "${FAKE_LOG}"
 if grep -q '^run ' "${FAKE_LOG}"; then
   echo "FAIL: doctor-only dry run launched the wrapper" >&2
   exit 1
@@ -99,7 +99,7 @@ fi
 # Images may be supplied locally; otherwise an inaccessible registry blocks execution.
 mkdir -p "${FAKE_LOGS}/existing-run"
 run_it env LOCAL_IMAGES=1 bash "${LAUNCHER}" export --engine wasabi --run-dir existing-run
-grep -q '^image inspect ghcr.io/ondrejman/blocksciemulatoranalysis:latest ' "${FAKE_LOG}"
+grep -q '^image inspect ghcr.io/ondrejman/coinjoin-pipeline:latest ' "${FAKE_LOG}"
 if grep -q '^manifest inspect ' "${FAKE_LOG}"; then
   echo "FAIL: locally available image was unnecessarily resolved from registry" >&2
   exit 1

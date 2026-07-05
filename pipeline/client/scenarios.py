@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 SCENARIOS_ROOT = Path(
-    os.environ.get("SCENARIOS_ROOT", Path(__file__).resolve().parents[2] / "bitcoinAnalysis" / "scenarios")
+    os.environ.get("SCENARIOS_ROOT", Path(__file__).resolve().parents[2] / "scenarios")
 ).expanduser()
 
 

@@ -17,7 +17,7 @@ MODULE_PATH = Path(__file__).parents[1] / "command_builder.py"
 PROJECT_DIR = MODULE_PATH.parent
 SNAPSHOT_PATH = PROJECT_DIR / "command_metadata.json"
 GENERATOR_PATH = PROJECT_DIR / "scripts" / "generate-command-metadata.py"
-WRAPPER_ROOT = PROJECT_DIR.parent / "blocksciEmulatorAnalysis"
+WRAPPER_ROOT = PROJECT_DIR / "pipeline"
 SPEC = importlib.util.spec_from_file_location("command_builder", MODULE_PATH)
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -90,7 +90,7 @@ class CommandBuilderTests(unittest.TestCase):
     def test_leading_env_assignments_round_trip_through_render(self) -> None:
         source = (
             "CONTAINER_SOCKET=/run/podman/podman.sock "
-            "WRAPPER_IMAGE=ghcr.io/ondrejman/blocksciemulatoranalysis:latest "
+            "WRAPPER_IMAGE=ghcr.io/ondrejman/coinjoin-pipeline:latest "
             "./runIt.sh container podman full-run \\\n"
             "  --engine joinmarket \\\n"
             "  --analysisPbs"
@@ -100,14 +100,14 @@ class CommandBuilderTests(unittest.TestCase):
             command.env,
             [
                 ("CONTAINER_SOCKET", "/run/podman/podman.sock"),
-                ("WRAPPER_IMAGE", "ghcr.io/ondrejman/blocksciemulatoranalysis:latest"),
+                ("WRAPPER_IMAGE", "ghcr.io/ondrejman/coinjoin-pipeline:latest"),
             ],
         )
         rendered = MODULE.render_command(command)
         self.assertTrue(
             rendered.startswith(
                 "CONTAINER_SOCKET=/run/podman/podman.sock "
-                "WRAPPER_IMAGE=ghcr.io/ondrejman/blocksciemulatoranalysis:latest "
+                "WRAPPER_IMAGE=ghcr.io/ondrejman/coinjoin-pipeline:latest "
                 "coinjoin-pipeline --runtime podman full-run"
             ),
             rendered,
@@ -419,7 +419,7 @@ class CommandBuilderTests(unittest.TestCase):
 
     def test_metadata_loader_works_in_a_standalone_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            standalone = Path(temporary) / "bitcoinAnalysis"
+            standalone = Path(temporary) / "coinjoin-pipeline"
             standalone.mkdir()
             shutil.copy2(PROJECT_DIR / "command_builder.py", standalone)
             shutil.copytree(PROJECT_DIR / "src", standalone / "src")
@@ -446,7 +446,7 @@ class CommandBuilderTests(unittest.TestCase):
             self.assertIn("coinjoin-pipeline --runtime docker full-run", completed.stdout)
             self.assertIn("--driver kubernetes", completed.stdout)
 
-    @unittest.skipUnless(WRAPPER_ROOT.is_dir(), "live sibling parsers are unavailable")
+    @unittest.skipUnless(WRAPPER_ROOT.is_dir(), "bundled wrapper parsers are unavailable")
     def test_generator_is_deterministic_and_check_detects_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "metadata.json"
@@ -494,7 +494,7 @@ class CommandBuilderTests(unittest.TestCase):
             self.assertIn("invalid command record: full-run", malformed.stderr)
             self.assertNotIn("Traceback", malformed.stderr)
 
-    @unittest.skipUnless(WRAPPER_ROOT.is_dir(), "live sibling parsers are unavailable")
+    @unittest.skipUnless(WRAPPER_ROOT.is_dir(), "bundled wrapper parsers are unavailable")
     def test_generator_restores_parser_environment(self) -> None:
         expected = {
             "PBS_BITCOIN_DATADIR": "/storage/restore-me",
