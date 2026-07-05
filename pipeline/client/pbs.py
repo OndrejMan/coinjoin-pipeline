@@ -15,8 +15,21 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
+
+from client.artifacts import (
+    render_s5cmd_check,
+    render_s5cmd_cp,
+    render_s5cmd_sync,
+    shell_assignment,
+    validate_artifact_uri,
+    validate_credentials_file,
+    validate_run_id,
+    validate_s3_endpoint_url,
+    validate_s3_profile,
+)
 
 DEFAULT_BLOCKSCI_NCPUS = 8
 DEFAULT_BLOCKSCI_MEM = "64gb"
@@ -43,18 +56,14 @@ class PBSError(RuntimeError):
 def require_qsub() -> None:
     """Ensure ``qsub`` is available; this must run on a MetaCentrum frontend."""
     if shutil.which("qsub") is None:
-        raise PBSError(
-            "PBS stages must be run on a MetaCentrum frontend with qsub available"
-        )
+        raise PBSError("PBS stages must be run on a MetaCentrum frontend with qsub available")
 
 
 def require_storage_path(run_dir: Path) -> None:
     """PBS jobs need the run directory on shared MetaCentrum storage (/storage)."""
     resolved = str(run_dir.resolve())
     if not resolved.startswith("/storage/"):
-        raise PBSError(
-            f"PBS jobs need run-dir on shared MetaCentrum storage (/storage), not: {resolved}"
-        )
+        raise PBSError(f"PBS jobs need run-dir on shared MetaCentrum storage (/storage), not: {resolved}")
 
 
 def require_existing_path(path: Path, description: str) -> None:
@@ -67,10 +76,7 @@ def require_bitcoin_datadir(path: Path) -> None:
     """Ensure the supplied Bitcoin Core datadir has the shape BlockSci expects."""
     require_existing_path(path, "PBS Bitcoin datadir")
     if not (path / "regtest" / "blocks").is_dir():
-        raise PBSError(
-            "PBS Bitcoin datadir must contain regtest/blocks so BlockSci can read it: "
-            f"{path}"
-        )
+        raise PBSError(f"PBS Bitcoin datadir must contain regtest/blocks so BlockSci can read it: {path}")
 
 
 def render_blocksci_pbs(
@@ -133,28 +139,50 @@ def render_coinjoin_analysis_pbs(
     )
 
 
-def render_mappings_pbs(run_dir: Path, enumerator_image: str, sake_image: str, *,
-                        mining_fee_rate: int = 1, coordination_fee_rate: float = 0.003,
-                        max_decomposition_fee: int = 6000, mode: str = "numeric",
-                        timeout: int = 60, retry_timeout: int = 600, sake_seed: int = 20260704,
-                        ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
-                        mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
-                        scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
-                        walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME) -> str:
+def render_mappings_pbs(
+    run_dir: Path,
+    enumerator_image: str,
+    sake_image: str,
+    *,
+    mining_fee_rate: int = 1,
+    coordination_fee_rate: float = 0.003,
+    max_decomposition_fee: int = 6000,
+    mode: str = "numeric",
+    timeout: int = 60,
+    retry_timeout: int = 600,
+    sake_seed: int = 20260704,
+    ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
+    mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
+    scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
+    walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+) -> str:
     template = (Path(__file__).parent / "mappings_template.sh").read_text(encoding="utf-8")
     return template.format(
-        run_dir=run_dir, enumerator_image=enumerator_image, sake_image=sake_image,
-        mining_fee_rate=mining_fee_rate, coordination_fee_rate=coordination_fee_rate,
-        max_decomposition_fee=max_decomposition_fee, mode=mode, timeout=timeout,
-        retry_timeout=retry_timeout, sake_seed=sake_seed, ncpus=ncpus, mem=mem,
-        scratch=scratch, walltime=walltime,
+        run_dir=run_dir,
+        enumerator_image=enumerator_image,
+        sake_image=sake_image,
+        mining_fee_rate=mining_fee_rate,
+        coordination_fee_rate=coordination_fee_rate,
+        max_decomposition_fee=max_decomposition_fee,
+        mode=mode,
+        timeout=timeout,
+        retry_timeout=retry_timeout,
+        sake_seed=sake_seed,
+        ncpus=ncpus,
+        mem=mem,
+        scratch=scratch,
+        walltime=walltime,
     )
 
 
-def submit_pbs(script_path: Path) -> str:
+def submit_pbs(script_path: Path, dependency_job_id: str | None = None) -> str:
     """Submit a PBS script via ``qsub`` and return the job ID."""
+    command = ["qsub"]
+    if dependency_job_id:
+        command.extend(["-W", f"depend=afterok:{dependency_job_id}"])
+    command.append(str(script_path))
     result = subprocess.run(
-        ["qsub", str(script_path)],
+        command,
         check=False,
         text=True,
         stdout=subprocess.PIPE,
@@ -163,6 +191,178 @@ def submit_pbs(script_path: Path) -> str:
     if result.returncode != 0:
         raise PBSError(f"qsub failed (exit {result.returncode}): {result.stderr.strip()}")
     return result.stdout.strip()
+
+
+def _s3_values(
+    artifact_uri: str,
+    run_id: str,
+    endpoint_url: str,
+    credentials_file: str,
+    profile: str,
+) -> dict[str, str]:
+    return {
+        "artifact_uri": shell_assignment("ARTIFACT_URI", validate_artifact_uri(artifact_uri)).split("=", 1)[1],
+        "run_id": shell_assignment("RUN_ID", validate_run_id(run_id)).split("=", 1)[1],
+        "endpoint_url": shell_assignment("S3_ENDPOINT_URL", validate_s3_endpoint_url(endpoint_url)).split("=", 1)[1],
+        "credentials_file": shell_assignment("S3_CREDENTIALS_FILE", validate_credentials_file(credentials_file)).split(
+            "=", 1
+        )[1],
+        "profile": shell_assignment("S3_PROFILE", validate_s3_profile(profile)).split("=", 1)[1],
+    }
+
+
+def render_coinjoin_analysis_s3_pbs(
+    artifact_uri: str,
+    run_id: str,
+    endpoint_url: str,
+    credentials_file: str,
+    profile: str,
+    image: str,
+    command: str,
+    *,
+    ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
+    mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
+    scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
+    walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+) -> str:
+    values = _s3_values(artifact_uri, run_id, endpoint_url, credentials_file, profile)
+    template = (Path(__file__).parent / "coinjoin_analysis_s3_template.sh").read_text(encoding="utf-8")
+    return template.format(
+        **values,
+        image=shell_assignment("IMAGE", image).split("=", 1)[1],
+        command=command,
+        ncpus=ncpus,
+        mem=mem,
+        scratch=scratch,
+        walltime=walltime,
+        s5cmd_check=render_s5cmd_check(),
+        download_run=render_s5cmd_sync('"$ARTIFACT_URI/$RUN_ID/*"', '"$RUN_WORK/"'),
+        upload_results=render_s5cmd_sync(
+            '"$RUN_WORK/coinjoin-analysis_data/"', '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/"'
+        ),
+        upload_failed=render_s5cmd_cp('"$FAILED_MARKER"', '"$ARTIFACT_URI/$RUN_ID/.pbs/coinjoin-analysis.failed"'),
+        upload_done=render_s5cmd_cp('"$DONE_MARKER"', '"$ARTIFACT_URI/$RUN_ID/.pbs/coinjoin-analysis.done"'),
+    )
+
+
+def render_blocksci_s3_pbs(
+    artifact_uri: str,
+    run_id: str,
+    endpoint_url: str,
+    credentials_file: str,
+    profile: str,
+    image: str,
+    command: str,
+    *,
+    ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
+    mem: str = DEFAULT_BLOCKSCI_MEM,
+    scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
+    walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
+) -> str:
+    values = _s3_values(artifact_uri, run_id, endpoint_url, credentials_file, profile)
+    template = (Path(__file__).parent / "blocksci_s3_template.sh").read_text(encoding="utf-8")
+    return template.format(
+        **values,
+        image=shell_assignment("IMAGE", image).split("=", 1)[1],
+        command=command,
+        ncpus=ncpus,
+        mem=mem,
+        scratch=scratch,
+        walltime=walltime,
+        s5cmd_check=render_s5cmd_check(),
+        download_run=render_s5cmd_sync('"$ARTIFACT_URI/$RUN_ID/*"', '"$RUN_WORK/"'),
+        upload_blocksci=render_s5cmd_sync('"$RUN_WORK/blocksci_data/"', '"$ARTIFACT_URI/$RUN_ID/blocksci_data/"'),
+        upload_report=render_s5cmd_sync(
+            '"$RUN_WORK/blocksciEmulatorAnalysis_data/"', '"$ARTIFACT_URI/$RUN_ID/blocksciEmulatorAnalysis_data/"'
+        ),
+        upload_logs=render_s5cmd_sync('"$RUN_WORK/logs/"', '"$ARTIFACT_URI/$RUN_ID/logs/"'),
+        upload_failed=render_s5cmd_cp('"$FAILED_MARKER"', '"$ARTIFACT_URI/$RUN_ID/.pbs/blocksci.failed"'),
+        upload_done=render_s5cmd_cp('"$DONE_MARKER"', '"$ARTIFACT_URI/$RUN_ID/.pbs/blocksci.done"'),
+    )
+
+
+def _submit_s3_script(
+    script: str,
+    stage: str,
+    dry_run: bool,
+    dependency_job_id: str | None = None,
+) -> str | None:
+    if dry_run:
+        print(f"[dry-run] PBS S3-compatible script for {stage}:\n{script}")
+        return None
+    require_qsub()
+    with tempfile.TemporaryDirectory(prefix="coinjoin-pbs-") as directory:
+        path = Path(directory)
+        path.chmod(0o700)
+        script_path = path / f"{stage}.pbs"
+        script_path.write_text(script, encoding="utf-8")
+        script_path.chmod(0o700)
+        job_id = submit_pbs(script_path, dependency_job_id)
+    print(f"[pbs] Submitted {stage} S3-compatible PBS job: {job_id}")
+    return job_id
+
+
+def submit_coinjoin_analysis_s3_pbs(
+    artifact_uri: str,
+    run_id: str,
+    endpoint_url: str,
+    credentials_file: str,
+    profile: str,
+    image: str,
+    command: str,
+    *,
+    ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
+    mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
+    scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
+    walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+    dry_run: bool = False,
+) -> str | None:
+    script = render_coinjoin_analysis_s3_pbs(
+        artifact_uri,
+        run_id,
+        endpoint_url,
+        credentials_file,
+        profile,
+        image,
+        command,
+        ncpus=ncpus,
+        mem=mem,
+        scratch=scratch,
+        walltime=walltime,
+    )
+    return _submit_s3_script(script, "coinjoin-analysis", dry_run)
+
+
+def submit_blocksci_s3_pbs(
+    artifact_uri: str,
+    run_id: str,
+    endpoint_url: str,
+    credentials_file: str,
+    profile: str,
+    image: str,
+    command: str,
+    *,
+    ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
+    mem: str = DEFAULT_BLOCKSCI_MEM,
+    scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
+    walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
+    dry_run: bool = False,
+    dependency_job_id: str | None = None,
+) -> str | None:
+    script = render_blocksci_s3_pbs(
+        artifact_uri,
+        run_id,
+        endpoint_url,
+        credentials_file,
+        profile,
+        image,
+        command,
+        ncpus=ncpus,
+        mem=mem,
+        scratch=scratch,
+        walltime=walltime,
+    )
+    return _submit_s3_script(script, "blocksci", dry_run, dependency_job_id)
 
 
 def wait_for_pbs_marker(run_dir: Path, stage: str, poll_interval: int = POLL_INTERVAL_SECONDS) -> None:
@@ -202,9 +402,18 @@ def submit_blocksci_pbs(
     require_existing_path(exporters_dir, "PBS exporters directory")
     require_bitcoin_datadir(bitcoin_datadir)
     script = render_blocksci_pbs(
-        run_dir, logs_root, bitcoin_datadir, exporters_dir, image, command,
-        ncpus=ncpus, mem=mem, scratch=scratch, walltime=walltime,
-        stage=stage, job_name=job_name,
+        run_dir,
+        logs_root,
+        bitcoin_datadir,
+        exporters_dir,
+        image,
+        command,
+        ncpus=ncpus,
+        mem=mem,
+        scratch=scratch,
+        walltime=walltime,
+        stage=stage,
+        job_name=job_name,
     )
     script_path = run_dir / ".pbs" / f"{stage}.pbs"
     script_path.parent.mkdir(parents=True, exist_ok=True)
@@ -237,8 +446,15 @@ def submit_coinjoin_analysis_pbs(
     require_storage_path(input_data_dir)
     require_existing_path(input_data_dir, "PBS coinjoin-analysis input data directory")
     script = render_coinjoin_analysis_pbs(
-        run_dir, output_dir, input_data_dir, image, command,
-        ncpus=ncpus, mem=mem, scratch=scratch, walltime=walltime,
+        run_dir,
+        output_dir,
+        input_data_dir,
+        image,
+        command,
+        ncpus=ncpus,
+        mem=mem,
+        scratch=scratch,
+        walltime=walltime,
     )
     script_path = run_dir / ".pbs" / "coinjoin-analysis.pbs"
     script_path.parent.mkdir(parents=True, exist_ok=True)
@@ -252,23 +468,41 @@ def submit_coinjoin_analysis_pbs(
     return job_id
 
 
-def submit_mappings_pbs(run_dir: Path, enumerator_image: str, sake_image: str, *,
-                        mining_fee_rate: int = 1, coordination_fee_rate: float = 0.003,
-                        max_decomposition_fee: int = 6000, mode: str = "numeric",
-                        timeout: int = 60, retry_timeout: int = 600, sake_seed: int = 20260704,
-                        ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
-                        mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
-                        scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
-                        walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
-                        dry_run: bool = False) -> str | None:
+def submit_mappings_pbs(
+    run_dir: Path,
+    enumerator_image: str,
+    sake_image: str,
+    *,
+    mining_fee_rate: int = 1,
+    coordination_fee_rate: float = 0.003,
+    max_decomposition_fee: int = 6000,
+    mode: str = "numeric",
+    timeout: int = 60,
+    retry_timeout: int = 600,
+    sake_seed: int = 20260704,
+    ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
+    mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
+    scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
+    walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+    dry_run: bool = False,
+) -> str | None:
     require_storage_path(run_dir)
-    require_existing_path(run_dir / "coinjoin-analysis_data" / "coinjoin_tx_info.json",
-                          "CoinJoin mappings input")
+    require_existing_path(run_dir / "coinjoin-analysis_data" / "coinjoin_tx_info.json", "CoinJoin mappings input")
     script = render_mappings_pbs(
-        run_dir, enumerator_image, sake_image, mining_fee_rate=mining_fee_rate,
-        coordination_fee_rate=coordination_fee_rate, max_decomposition_fee=max_decomposition_fee,
-        mode=mode, timeout=timeout, retry_timeout=retry_timeout, sake_seed=sake_seed,
-        ncpus=ncpus, mem=mem, scratch=scratch, walltime=walltime,
+        run_dir,
+        enumerator_image,
+        sake_image,
+        mining_fee_rate=mining_fee_rate,
+        coordination_fee_rate=coordination_fee_rate,
+        max_decomposition_fee=max_decomposition_fee,
+        mode=mode,
+        timeout=timeout,
+        retry_timeout=retry_timeout,
+        sake_seed=sake_seed,
+        ncpus=ncpus,
+        mem=mem,
+        scratch=scratch,
+        walltime=walltime,
     )
     script_path = run_dir / ".pbs" / "coinjoin-mappings.pbs"
     script_path.parent.mkdir(parents=True, exist_ok=True)
@@ -375,7 +609,4 @@ def blocksci_export_pbs_command(
 
 def coinjoin_analysis_pbs_command(action: str = "collect_docker") -> str:
     """Build the in-container command for the coinjoin-analysis PBS stage."""
-    return (
-        f"python -m cj_process.parse_cj_logs --action {action} "
-        "--target-path /runs/emulation/selected"
-    )
+    return f"python -m cj_process.parse_cj_logs --action {action} --target-path /runs/emulation/selected"

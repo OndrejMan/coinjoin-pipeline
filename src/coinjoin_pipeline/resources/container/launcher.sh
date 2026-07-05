@@ -137,11 +137,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-SELECTED_ACTION=""; DOCTOR_ENGINE=""; DOCTOR_SCENARIO=""; HAS_HELP=false; HAS_DRY_RUN=false; HAS_YES=false; HAS_TEST_VALUES=false; HAS_ANALYSIS_PBS=false; HAS_BLOCKSCI_PBS=false; HAS_MAPPINGS_PBS=false; HAS_COPY_TO_HOST=false
+SELECTED_ACTION=""; DOCTOR_ENGINE=""; DOCTOR_SCENARIO=""; HAS_HELP=false; HAS_DRY_RUN=false; HAS_YES=false; HAS_TEST_VALUES=false; HAS_ANALYSIS_PBS=false; HAS_BLOCKSCI_PBS=false; HAS_MAPPINGS_PBS=false; HAS_COPY_TO_HOST=false; HAS_S3_BACKEND=false
 for ((index=0; index<${#WRAPPER_ARGS[@]}; index++)); do
   item="${WRAPPER_ARGS[index]}"
   case "${item}" in
-    full-run|recreate|clean|analyze|export|coinjoin-analysis|coinjoin|mappings|initialize) [[ -z "${SELECTED_ACTION}" ]] && SELECTED_ACTION="${item}" ;;
+    full-run|recreate|clean|analyze|export|coinjoin-analysis|coinjoin|mappings|initialize|pbs-from-s3) [[ -z "${SELECTED_ACTION}" ]] && SELECTED_ACTION="${item}" ;;
     --engine) DOCTOR_ENGINE="${WRAPPER_ARGS[index + 1]:-}" ;;
     --engine=*) DOCTOR_ENGINE="${item#--engine=}" ;;
     --scenario) DOCTOR_SCENARIO="${WRAPPER_ARGS[index + 1]:-}" ;;
@@ -154,6 +154,8 @@ for ((index=0; index<${#WRAPPER_ARGS[@]}; index++)); do
     --blocksciPbs) HAS_BLOCKSCI_PBS=true ;;
     --mappingsPbs) HAS_MAPPINGS_PBS=true ;;
     --copy-to-host) HAS_COPY_TO_HOST=true ;;
+    --artifact-backend=s3) HAS_S3_BACKEND=true ;;
+    --artifact-backend) [[ "${WRAPPER_ARGS[index + 1]:-}" == s3 ]] && HAS_S3_BACKEND=true ;;
   esac
 done
 ACTION="${SELECTED_ACTION:-full-run}"
@@ -162,6 +164,7 @@ if [[ "${HAS_DRY_RUN}" == true ]]; then
   if [[ "${ACTION}" == analyze && "${HAS_BLOCKSCI_PBS}" == true ]]; then HAS_PBS_STAGE_DRY_RUN=true; fi
   if [[ ( "${ACTION}" == coinjoin-analysis || "${ACTION}" == coinjoin ) && "${HAS_ANALYSIS_PBS}" == true ]]; then HAS_PBS_STAGE_DRY_RUN=true; fi
   if [[ "${ACTION}" == mappings && "${HAS_MAPPINGS_PBS}" == true ]]; then HAS_PBS_STAGE_DRY_RUN=true; fi
+  if [[ "${ACTION}" == pbs-from-s3 || ( "${ACTION}" == recreate && "${HAS_S3_BACKEND}" == true ) ]]; then HAS_PBS_STAGE_DRY_RUN=true; fi
 fi
 if [[ "${HAS_HELP}" == false && ( "${ACTION}" == full-run || "${ACTION}" == recreate || "${ACTION}" == analyze || "${ACTION}" == export ) ]] && [[ "${DOCTOR_ENGINE}" != wasabi && "${DOCTOR_ENGINE}" != joinmarket ]]; then
   fail "${ACTION} requires --engine wasabi or --engine joinmarket."
@@ -209,8 +212,10 @@ if [[ "${PBS_FRONTEND_DIRECT:-0}" == 1 && ( "${HAS_ANALYSIS_PBS}" == true || "${
   export NOTEBOOKS_DIR
   export EMULATION_LOGS_DIR
   export EXPORTERS_DIR="${EXPORTERS_DIR:-${EMULATION_LOGS_DIR}/.wrapper-exporters}"
-  mkdir -p "${EXPORTERS_DIR}"
-  cp -a "${DIRECT_WRAPPER_ROOT}/exporters/." "${EXPORTERS_DIR}/"
+  if [[ "${ACTION}" != pbs-from-s3 ]]; then
+    mkdir -p "${EXPORTERS_DIR}"
+    cp -a "${DIRECT_WRAPPER_ROOT}/exporters/." "${EXPORTERS_DIR}/"
+  fi
   exec python3 "${DIRECT_WRAPPER_SCRIPT}" "${DIRECT_WRAPPER_ARGS[@]}"
 fi
 if [[ "${ACTION}" == analyze || "${ACTION}" == export || "${ACTION}" == coinjoin-analysis || "${ACTION}" == coinjoin || "${ACTION}" == mappings ]]; then
@@ -234,7 +239,7 @@ if [[ -n "${BLOCKSCI_SCRIPT_PATH}" ]]; then
   done
 fi
 if [[ -n "${DOCTOR_SCENARIO}" && ! -f "${DOCTOR_SCENARIO}" && ! -f "${SCRIPT_DIR}/${DOCTOR_SCENARIO}" && ! -f "${SCRIPT_DIR}/scenarios/${DOCTOR_SCENARIO}" ]]; then fail "Scenario not found: ${DOCTOR_SCENARIO}"; fi
-if [[ "${DRIVER}" == kubernetes ]]; then
+if [[ "${DRIVER}" == kubernetes && "${HAS_DRY_RUN}" == false ]]; then
   KUBE_CFG="${KUBECONFIG_PATH:-${HOME}/.kube/config}"
   [[ -f "${KUBE_CFG}" ]] || fail "kubeconfig not found at ${KUBE_CFG}"
   command -v kubectl >/dev/null 2>&1 && kubectl --kubeconfig "${KUBE_CFG}" get --raw=/version >/dev/null 2>&1 || fail "Kubernetes API is not reachable with ${KUBE_CFG}"

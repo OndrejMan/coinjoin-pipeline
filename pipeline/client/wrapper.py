@@ -18,6 +18,13 @@ if __package__ in (None, ""):
 
 # Explicit self-aliases preserve wrapper's historical re-export surface.
 # pylint: disable=useless-import-alias,unused-import
+from client.artifacts import (
+    validate_artifact_uri,
+    validate_credentials_file,
+    validate_run_id,
+    validate_s3_endpoint_url,
+    validate_s3_profile,
+)
 from client.cli_options import (
     DEFAULT_COINJOIN_TYPE,
     add_coinjoin_type_argument,
@@ -26,10 +33,12 @@ from client.cli_options import (
     add_runtime_argument,
 )
 from client.kubernetes import (
-    kubectl_auth_can_i as kubectl_auth_can_i,
+    apply_s3_emulation_resources,
+    kubernetes_auth_preflight,
+    render_s3_emulation_resources,
 )
 from client.kubernetes import (
-    kubernetes_auth_preflight,
+    kubectl_auth_can_i as kubectl_auth_can_i,
 )
 from client.kubernetes import (
     run_kubectl_preflight_command as run_kubectl_preflight_command,
@@ -108,7 +117,9 @@ try:
         blocksci_pbs_command,
         coinjoin_analysis_pbs_command,
         submit_blocksci_pbs,
+        submit_blocksci_s3_pbs,
         submit_coinjoin_analysis_pbs,
+        submit_coinjoin_analysis_s3_pbs,
         submit_mappings_pbs,
         wait_for_pbs_marker,
     )
@@ -135,7 +146,9 @@ except ImportError:
         blocksci_pbs_command,
         coinjoin_analysis_pbs_command,
         submit_blocksci_pbs,
+        submit_blocksci_s3_pbs,
         submit_coinjoin_analysis_pbs,
+        submit_coinjoin_analysis_s3_pbs,
         submit_mappings_pbs,
         wait_for_pbs_marker,
     )
@@ -164,6 +177,7 @@ WRAPPER_ACTIONS = (
     "coinjoin",
     "mappings",
     "initialize",
+    "pbs-from-s3",
     DEFAULT_ACTION,
 )
 OPTIONS_WITH_VALUES = (
@@ -202,6 +216,13 @@ OPTIONS_WITH_VALUES = (
     "--pbs-bitcoin-datadir",
     "--blocksci-script",
     "--blocksciScript",
+    "--artifact-backend",
+    "--artifact-uri",
+    "--s3-endpoint-url",
+    "--s3-credentials-file",
+    "--s3-profile",
+    "--s3-secret-name",
+    "--run-id",
 )
 OPTIONS_WITHOUT_VALUES = (
     "--test-values",
@@ -230,9 +251,7 @@ DEFAULT_RUN_TIMEZONE = "Europe/Prague"
 VALID_PULL_POLICIES = ("always", "missing", "never")
 RUNS_ROOT_CONTAINER = "/runs/emulation/logs"
 COINJOIN_ANALYSIS_SELECTED_ROOT_CONTAINER = "/runs/emulation/selected"
-RUN_MARKER_FILES = (
-    "coinjoin_emulator_data/scenario.json",
-)
+RUN_MARKER_FILES = ("coinjoin_emulator_data/scenario.json",)
 IMAGE_PROVENANCE_ENV = {
     "BLOCKSCI_IMAGE": ("BLOCKSCI_IMAGE_ID", "BLOCKSCI_IMAGE_DIGEST"),
     "COINJOIN_ANALYSIS_IMAGE": ("COINJOIN_ANALYSIS_IMAGE_ID", "COINJOIN_ANALYSIS_IMAGE_DIGEST"),
@@ -360,9 +379,7 @@ def compose_env(
     env["EXPORTERS_DIR"] = str(exporters_dir)
     env["COINJOIN_ENGINE"] = engine
     env["BLOCKSCI_COINJOIN_TYPE"] = coinjoin_type
-    env["BLOCKSCI_MIN_INPUT_COUNT"] = (
-        "default" if min_input_count is None else str(min_input_count)
-    )
+    env["BLOCKSCI_MIN_INPUT_COUNT"] = "default" if min_input_count is None else str(min_input_count)
     env["BLOCKSCI_TEST_VALUES"] = "true" if test_values else "false"
     env["BLOCKSCI_JOINMARKET_DETECTOR"] = joinmarket_detector
     env["BLOCKSCI_JOINMARKET_MIN_BASE_FEE"] = str(joinmarket_min_base_fee)
@@ -380,13 +397,9 @@ def compose_env(
         analysis_dir = run_dir / "coinjoin-analysis_data"
         analysis_dir.mkdir(parents=True, exist_ok=True)
         env[COINJOIN_ANALYSIS_SOURCE_PATH_ENV] = str(analysis_dir)
-        env[COINJOIN_ANALYSIS_MOUNT_PATH_ENV] = (
-            f"{COINJOIN_ANALYSIS_SELECTED_ROOT_CONTAINER}/{active_run_id}"
-        )
+        env[COINJOIN_ANALYSIS_MOUNT_PATH_ENV] = f"{COINJOIN_ANALYSIS_SELECTED_ROOT_CONTAINER}/{active_run_id}"
         env[COINJOIN_ANALYSIS_TARGET_PATH_ENV] = COINJOIN_ANALYSIS_SELECTED_ROOT_CONTAINER
-        env[COINJOIN_ANALYSIS_INPUT_DATA_PATH_ENV] = str(
-            run_dir / "coinjoin_emulator_data" / "data"
-        )
+        env[COINJOIN_ANALYSIS_INPUT_DATA_PATH_ENV] = str(run_dir / "coinjoin_emulator_data" / "data")
     else:
         env.pop("ACTIVE_RUN_ID", None)
         env.pop(COINJOIN_ANALYSIS_SOURCE_PATH_ENV, None)
@@ -412,7 +425,7 @@ def inspect_image_provenance(image: str, runtime: str) -> tuple[str | None, str 
             text=True,
             timeout=5,
         )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+    except OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired:
         return None, None
 
     lines = result.stdout.splitlines()
@@ -480,11 +493,7 @@ def is_run_dir(path: Path) -> bool:
 def run_dirs(emulation_logs_dir: Path) -> set[Path]:
     if not emulation_logs_dir.exists():
         return set()
-    return {
-        child.resolve()
-        for child in emulation_logs_dir.iterdir()
-        if is_run_dir(child)
-    }
+    return {child.resolve() for child in emulation_logs_dir.iterdir() if is_run_dir(child)}
 
 
 def newest_run_dir(emulation_logs_dir: Path) -> Path | None:
@@ -607,8 +616,7 @@ def run_coinjoin_analysis(
 
     if not active_run_ids:
         print(
-            "[ERROR] No grouped emulation run folder found. Run recreate/full-run first "
-            "or pass --run-dir explicitly.",
+            "[ERROR] No grouped emulation run folder found. Run recreate/full-run first or pass --run-dir explicitly.",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -711,9 +719,7 @@ def run_kubernetes_emulation(
     scenarios_dir = Path(env["SCENARIOS_DIR"]).expanduser().resolve()
     local_btc_data_dir = host_root_dir / "btc-data"
     local_download_path = local_btc_data_dir / "data"
-    shared_btc_data_path = Path(
-        kubernetes_btc_datadir or local_download_path
-    ).expanduser().resolve()
+    shared_btc_data_path = Path(kubernetes_btc_datadir or local_download_path).expanduser().resolve()
 
     emulation_logs_dir.mkdir(parents=True, exist_ok=True)
     if copy_to_host:
@@ -733,8 +739,7 @@ def run_kubernetes_emulation(
 
     if not kubeconfig_path.exists():
         print(
-            f"[ERROR] Kubeconfig not found at {kubeconfig_path}. "
-            "Pass --kubeconfig or ensure ~/.kube/config exists.",
+            f"[ERROR] Kubeconfig not found at {kubeconfig_path}. Pass --kubeconfig or ensure ~/.kube/config exists.",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -747,9 +752,7 @@ def run_kubernetes_emulation(
         namespace=namespace,
         reuse_namespace=reuse_namespace,
         image_prefix=image_prefix,
-        btc_data_path=(
-            "/btc-data/data" if copy_to_host else str(shared_btc_data_path)
-        ),
+        btc_data_path=("/btc-data/data" if copy_to_host else str(shared_btc_data_path)),
         copy_to_host=copy_to_host,
         control_ip=os.environ.get("KUBERNETES_CONTROL_IP", DEFAULT_K8S_CONTROL_IP),
         coinjoin_infrastructure_local_build=coinjoin_infrastructure_local_build,
@@ -761,12 +764,18 @@ def run_kubernetes_emulation(
     runtime = container_runtime()
     emulator_image = os.environ.get("COINJOIN_EMULATOR_IMAGE", DEFAULT_EMULATOR_IMAGE)
     docker_cmd = [
-        runtime, "run", "--rm",
+        runtime,
+        "run",
+        "--rm",
         *container_run_pull_args(emulator_image, "COINJOIN_EMULATOR_PULL_POLICY"),
-        "-v", f"{kubeconfig_path}:/root/.kube/config:ro",
-        "-v", f"{scenarios_dir}:/mnt/scenarios:ro",
-        "-v", f"{emulation_logs_dir}:/app/logs:rw",
-        "-e", "PYTHONUNBUFFERED=1",
+        "-v",
+        f"{kubeconfig_path}:/root/.kube/config:ro",
+        "-v",
+        f"{scenarios_dir}:/mnt/scenarios:ro",
+        "-v",
+        f"{emulation_logs_dir}:/app/logs:rw",
+        "-e",
+        "PYTHONUNBUFFERED=1",
     ]
     if copy_to_host:
         docker_cmd.extend(["-v", f"{local_btc_data_dir}:/btc-data:rw"])
@@ -782,10 +791,7 @@ def run_kubernetes_emulation(
     print(f"[kubernetes] Kubeconfig: {kubeconfig_path}")
     transfer_mode = "copy to host" if copy_to_host else "direct shared mount"
     print(f"[kubernetes] BTC data mode: {transfer_mode}")
-    print(
-        "[kubernetes] BTC data output: "
-        f"{local_download_path if copy_to_host else shared_btc_data_path}"
-    )
+    print(f"[kubernetes] BTC data output: {local_download_path if copy_to_host else shared_btc_data_path}")
     print(f"[kubernetes] Control IP: {os.environ.get('KUBERNETES_CONTROL_IP', DEFAULT_K8S_CONTROL_IP)}")
 
     try:
@@ -798,9 +804,7 @@ def run_kubernetes_emulation(
         sys.exit(exc.returncode)
 
     if prepare_local_analysis:
-        populate_btc_data_volume(
-            local_download_path if copy_to_host else shared_btc_data_path
-        )
+        populate_btc_data_volume(local_download_path if copy_to_host else shared_btc_data_path)
     print("[kubernetes] Emulation complete. BTC data ready for analysis.")
 
 
@@ -810,8 +814,7 @@ def container_run_pull_args(image: str, env_name: str) -> list[str]:
         pull_policy = "always" if "/" in image else "missing"
     if pull_policy not in VALID_PULL_POLICIES:
         print(
-            f"[ERROR] Invalid {env_name}={pull_policy!r}; expected one of: "
-            f"{', '.join(VALID_PULL_POLICIES)}.",
+            f"[ERROR] Invalid {env_name}={pull_policy!r}; expected one of: {', '.join(VALID_PULL_POLICIES)}.",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -885,11 +888,17 @@ def populate_btc_data_volume(btc_data_dir: Path) -> None:
     try:
         run_command(
             [
-                runtime, "run", "--rm",
-                "-v", f"{volume_name}:/vol:rw",
-                "-v", f"{btc_data_dir}:/src:ro",
+                runtime,
+                "run",
+                "--rm",
+                "-v",
+                f"{volume_name}:/vol:rw",
+                "-v",
+                f"{btc_data_dir}:/src:ro",
                 "alpine",
-                "sh", "-c", "cp -a /src/. /vol/",
+                "sh",
+                "-c",
+                "cp -a /src/. /vol/",
             ],
         )
         print(f"[kubernetes] Volume '{volume_name}' populated successfully.")
@@ -1032,8 +1041,7 @@ def run_export_only(args: argparse.Namespace) -> None:
     active_run_id = resolve_run_id(args.run_dir, env)
     if not active_run_id:
         print(
-            "[ERROR] No emulation run folder found. Run recreate/full-run first, "
-            "or pass --run-dir explicitly.",
+            "[ERROR] No emulation run folder found. Run recreate/full-run first, or pass --run-dir explicitly.",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -1140,12 +1148,31 @@ def add_kubernetes_arguments(arg_parser: argparse.ArgumentParser) -> None:
         "--copy-to-host",
         action="store_true",
         default=False,
-        help=(
-            "Use the legacy pod-to-wrapper Bitcoin datadir download instead "
-            "of writing directly to shared storage."
-        ),
+        help=("Use the legacy pod-to-wrapper Bitcoin datadir download instead of writing directly to shared storage."),
     )
     add_emulator_infrastructure_image_arguments(arg_parser)
+
+
+def add_artifact_arguments(
+    arg_parser: argparse.ArgumentParser,
+    *,
+    pbs_credentials: bool = False,
+    kubernetes_secret: bool = False,
+) -> None:
+    arg_parser.add_argument(
+        "--artifact-backend",
+        choices=("shared-storage", "s3"),
+        default="shared-storage",
+        help="Artifact transport backend (default: shared-storage).",
+    )
+    arg_parser.add_argument("--artifact-uri", help="S3-compatible run prefix, for example s3://bucket/runs.")
+    arg_parser.add_argument("--s3-endpoint-url", help="CESNET/MetaCentrum S3-compatible endpoint URL.")
+    arg_parser.add_argument("--run-id", help="Deterministic artifact run identifier.")
+    if pbs_credentials:
+        arg_parser.add_argument("--s3-credentials-file", help="Absolute s5cmd credentials-file path for PBS jobs.")
+        arg_parser.add_argument("--s3-profile", help="Named profile in the s5cmd credentials file.")
+    if kubernetes_secret:
+        arg_parser.add_argument("--s3-secret-name", help="Pre-created Kubernetes Secret for S3-compatible upload.")
 
 
 def add_emulator_infrastructure_image_arguments(arg_parser: argparse.ArgumentParser) -> None:
@@ -1228,8 +1255,12 @@ def add_pbs_arguments(arg_parser: argparse.ArgumentParser) -> None:
         default=False,
         help="Submit BlockSci analysis as a PBS job on MetaCentrum.",
     )
-    arg_parser.add_argument("--mappingsPbs", action="store_true", default=False,
-                            help="Submit the Wasabi mapping enumerator and Sake as one PBS job.")
+    arg_parser.add_argument(
+        "--mappingsPbs",
+        action="store_true",
+        default=False,
+        help="Submit the Wasabi mapping enumerator and Sake as one PBS job.",
+    )
     arg_parser.add_argument(
         "--pbs-ncpus",
         type=int,
@@ -1289,6 +1320,7 @@ def add_pbs_arguments(arg_parser: argparse.ArgumentParser) -> None:
     )
     arg_parser.add_argument("--pbs-mappings-enumerator-image", default=DEFAULT_MAPPINGS_ENUMERATOR_IMAGE)
     arg_parser.add_argument("--pbs-sake-image", default=DEFAULT_SAKE_IMAGE)
+
     def non_negative_int(value: str) -> int:
         parsed = int(value)
         if parsed < 0:
@@ -1433,12 +1465,16 @@ def run_mappings_pbs_stage(args: argparse.Namespace, run_dir: Path) -> None:
     if args.engine != "wasabi" or args.coinjoin_type != "wasabi2":
         raise PBSError("CoinJoin mappings are supported only for Wasabi/wasabi2 runs")
     submit_mappings_pbs(
-        run_dir, args.pbs_mappings_enumerator_image, args.pbs_sake_image,
+        run_dir,
+        args.pbs_mappings_enumerator_image,
+        args.pbs_sake_image,
         mining_fee_rate=args.mapping_mining_fee_rate,
         coordination_fee_rate=args.mapping_coordination_fee_rate,
         max_decomposition_fee=args.mapping_max_decomposition_fee,
-        mode=args.mapping_mode, timeout=args.mapping_timeout,
-        retry_timeout=args.mapping_retry_timeout, sake_seed=args.sake_seed,
+        mode=args.mapping_mode,
+        timeout=args.mapping_timeout,
+        retry_timeout=args.mapping_retry_timeout,
+        sake_seed=args.sake_seed,
         ncpus=resolve_pbs_resource(args, "pbs_ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS),
         mem=resolve_pbs_resource(args, "pbs_mem", DEFAULT_COINJOIN_ANALYSIS_MEM),
         scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH),
@@ -1499,9 +1535,9 @@ def run_parallel_analysis(args: argparse.Namespace, run_dir: Path, logs_root: Pa
                 except Exception as error:
                     failures["coinjoin-analysis (PBS)"] = error
             else:
-                futures[
-                    executor.submit(run_coinjoin_analysis_docker_stage, run_dir.name)
-                ] = "coinjoin-analysis (Docker)"
+                futures[executor.submit(run_coinjoin_analysis_docker_stage, run_dir.name)] = (
+                    "coinjoin-analysis (Docker)"
+                )
 
             if getattr(args, "blocksciPbs", False):
                 try:
@@ -1510,9 +1546,9 @@ def run_parallel_analysis(args: argparse.Namespace, run_dir: Path, logs_root: Pa
                 except Exception as error:
                     failures["BlockSci (PBS)"] = error
             else:
-                futures[
-                    executor.submit(run_blocksci_docker_stage, args, run_dir, include_report=False)
-                ] = "BlockSci (Docker)"
+                futures[executor.submit(run_blocksci_docker_stage, args, run_dir, include_report=False)] = (
+                    "BlockSci (Docker)"
+                )
 
             baseline_future = next(
                 (future for future, name in futures.items() if name.startswith("coinjoin-analysis")), None
@@ -1534,7 +1570,6 @@ def run_parallel_analysis(args: argparse.Namespace, run_dir: Path, logs_root: Pa
         if failures:
             details = "; ".join(f"{stage}: {error}" for stage, error in failures.items())
             raise RuntimeError(f"Parallel analysis failed: {details}")
-
 
     with captured_pipeline_stage(logs_root, "Unified report export", run_dir):
         if getattr(args, "blocksciPbs", False):
@@ -1595,6 +1630,140 @@ def run_serial_analysis(args: argparse.Namespace, run_dir: Path, logs_root: Path
         )
 
 
+def validate_artifact_arguments(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    backend = getattr(args, "artifact_backend", "shared-storage")
+    if args.action == "pbs-from-s3":
+        args.artifact_backend = "s3"
+        required = (
+            ("artifact_uri", "--artifact-uri"),
+            ("s3_endpoint_url", "--s3-endpoint-url"),
+            ("run_id", "--run-id"),
+            ("s3_credentials_file", "--s3-credentials-file"),
+            ("s3_profile", "--s3-profile"),
+        )
+        for attribute, flag in required:
+            if not getattr(args, attribute, None):
+                parser.error(f"pbs-from-s3 requires {flag}")
+        if not args.analysisPbs and not args.blocksciPbs:
+            parser.error("pbs-from-s3 requires --analysisPbs or --blocksciPbs")
+        if args.mappingsPbs:
+            parser.error("S3-compatible mappings are not implemented yet")
+    elif backend == "s3":
+        if args.action == "full-run":
+            parser.error(
+                "S3-compatible full-run orchestration is not implemented yet. "
+                "Use independent recreate --artifact-backend s3 and pbs-from-s3 workflows."
+            )
+        if args.action != "recreate" or getattr(args, "driver", None) != "kubernetes":
+            parser.error("--artifact-backend s3 is supported only by recreate --driver kubernetes")
+        for attribute, flag in (
+            ("artifact_uri", "--artifact-uri"),
+            ("s3_endpoint_url", "--s3-endpoint-url"),
+            ("run_id", "--run-id"),
+            ("s3_secret_name", "--s3-secret-name"),
+        ):
+            if not getattr(args, attribute, None):
+                parser.error(f"Kubernetes S3-compatible mode requires {flag}")
+        if (
+            getattr(args, "kubernetes_btc_datadir", None)
+            or getattr(args, "pbs_bitcoin_datadir", None)
+            or getattr(args, "copy_to_host", False)
+        ):
+            parser.error(
+                "Kubernetes S3-compatible mode does not support --kubernetes-btc-datadir, "
+                "--pbs-bitcoin-datadir, or --copy-to-host"
+            )
+    try:
+        if getattr(args, "artifact_uri", None):
+            args.artifact_uri = validate_artifact_uri(args.artifact_uri)
+        if getattr(args, "s3_endpoint_url", None):
+            args.s3_endpoint_url = validate_s3_endpoint_url(args.s3_endpoint_url)
+        if getattr(args, "run_id", None):
+            args.run_id = validate_run_id(args.run_id)
+        if getattr(args, "s3_credentials_file", None):
+            args.s3_credentials_file = validate_credentials_file(args.s3_credentials_file)
+        if getattr(args, "s3_profile", None):
+            args.s3_profile = validate_s3_profile(args.s3_profile)
+    except ValueError as error:
+        parser.error(str(error))
+
+
+def run_kubernetes_s3_emulation(args: argparse.Namespace) -> None:
+    env = compose_env(engine=args.engine, scenario=args.scenario, run_timezone_name=args.run_timezone)
+    scenarios_dir = Path(env["SCENARIOS_DIR"]).expanduser().resolve()
+    scenario_container = (
+        container_scenario_path(args.scenario, scenarios_dir, args.engine)
+        if args.scenario
+        else default_container_scenario(args.engine)
+    )
+    scenario_path = scenarios_dir / Path(scenario_container).name
+    if not scenario_path.is_file():
+        raise RuntimeError(f"Scenario file not found: {scenario_path}")
+    kubeconfig_path = Path(args.kubeconfig).expanduser().resolve() if args.kubeconfig else Path.home() / ".kube/config"
+    if not args.dry_run and not kubeconfig_path.is_file():
+        raise RuntimeError(f"Kubeconfig not found: {kubeconfig_path}")
+    manifest = render_s3_emulation_resources(
+        namespace=args.namespace,
+        run_id=args.run_id,
+        scenario_json=scenario_path.read_text(encoding="utf-8"),
+        engine=args.engine,
+        image_prefix=args.image_prefix,
+        emulator_image=os.environ.get("COINJOIN_EMULATOR_IMAGE", DEFAULT_EMULATOR_IMAGE),
+        uploader_image=os.environ.get("WRAPPER_IMAGE", "ghcr.io/ondrejman/coinjoin-pipeline:latest"),
+        artifact_uri=args.artifact_uri,
+        endpoint_url=args.s3_endpoint_url,
+        secret_name=args.s3_secret_name,
+        reuse_namespace=args.reuse_namespace,
+    )
+    if args.dry_run:
+        print(f"[dry-run] Kubernetes S3-compatible resources:\n{manifest}")
+        return
+    apply_s3_emulation_resources(manifest, kubeconfig_path)
+    print(f"[kubernetes] Submitted S3-compatible emulation job for run {args.run_id}")
+
+
+def run_pbs_from_s3(args: argparse.Namespace) -> None:
+    common = dict(
+        artifact_uri=args.artifact_uri,
+        run_id=args.run_id,
+        endpoint_url=args.s3_endpoint_url,
+        credentials_file=args.s3_credentials_file,
+        profile=args.s3_profile,
+        dry_run=args.dry_run,
+    )
+    analysis_job_id = None
+    if args.analysisPbs:
+        analysis_job_id = submit_coinjoin_analysis_s3_pbs(
+            **common,
+            image=resolve_pbs_image(args, DEFAULT_PBS_COINJOIN_ANALYSIS_IMAGE, "pbs_coinjoin_analysis_image"),
+            command=coinjoin_analysis_pbs_command("collect_docker"),
+            ncpus=resolve_pbs_resource(args, "pbs_ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS),
+            mem=resolve_pbs_resource(args, "pbs_mem", DEFAULT_COINJOIN_ANALYSIS_MEM),
+            scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH),
+            walltime=resolve_pbs_resource(args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME),
+        )
+    if args.blocksciPbs:
+        submit_blocksci_s3_pbs(
+            **common,
+            image=resolve_pbs_image(args, DEFAULT_PBS_BLOCKSCI_IMAGE, "pbs_blocksci_image"),
+            command=blocksci_pbs_command(
+                args.run_id,
+                args.coinjoin_type,
+                args.min_input_count,
+                args.joinmarket_detector,
+                args.joinmarket_min_base_fee,
+                args.joinmarket_percentage_fee,
+                args.joinmarket_max_depth,
+                args.test_values,
+            ),
+            ncpus=resolve_pbs_resource(args, "pbs_ncpus", DEFAULT_BLOCKSCI_NCPUS),
+            mem=resolve_pbs_resource(args, "pbs_mem", DEFAULT_BLOCKSCI_MEM),
+            scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_BLOCKSCI_SCRATCH),
+            walltime=resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME),
+            dependency_job_id=analysis_job_id,
+        )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the public wrapper parser for CLI and metadata consumers."""
     parser = argparse.ArgumentParser(description="Run analysis pipeline via project shell scripts.")
@@ -1617,6 +1786,12 @@ def build_parser() -> argparse.ArgumentParser:
     recreate_parser.add_argument("--scenario", help="JSON scenario path.")
     add_run_timezone_argument(recreate_parser)
     add_kubernetes_arguments(recreate_parser)
+    add_artifact_arguments(recreate_parser, kubernetes_secret=True)
+    recreate_parser.add_argument(
+        "--pbs-bitcoin-datadir",
+        default=None,
+        help="Shared-storage-only PBS Bitcoin datadir; rejected by Kubernetes S3-compatible mode.",
+    )
 
     clean_parser = subparsers.add_parser("clean", help="Run delete.sh (remove containers + volumes).")
     add_runtime_argument(clean_parser)
@@ -1694,9 +1869,21 @@ def build_parser() -> argparse.ArgumentParser:
     add_runtime_argument(initialize_parser)
     add_dry_run_argument(initialize_parser)
 
-    full_parser = subparsers.add_parser(
-        "full-run", help="Run delete.sh, then recreate.sh, then analysis.sh."
+    s3_pbs_parser = subparsers.add_parser(
+        "pbs-from-s3",
+        help="Submit PBS analysis for an existing CESNET/MetaCentrum S3-compatible run.",
     )
+    add_runtime_argument(s3_pbs_parser)
+    add_engine_argument(s3_pbs_parser, required=True)
+    add_dry_run_argument(s3_pbs_parser)
+    add_artifact_arguments(s3_pbs_parser, pbs_credentials=True)
+    add_coinjoin_type_argument(s3_pbs_parser)
+    s3_pbs_parser.add_argument("--min-input-count", type=int, default=DEFAULT_MIN_INPUT_COUNT)
+    s3_pbs_parser.add_argument("--test-values", action="store_true")
+    add_joinmarket_detector_arguments(s3_pbs_parser)
+    add_pbs_arguments(s3_pbs_parser)
+
+    full_parser = subparsers.add_parser("full-run", help="Run delete.sh, then recreate.sh, then analysis.sh.")
     add_runtime_argument(full_parser)
     add_engine_argument(full_parser, required=True)
     add_dry_run_argument(full_parser)
@@ -1714,6 +1901,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_blocksci_script_argument(full_parser)
     add_kubernetes_arguments(full_parser)
     add_pbs_arguments(full_parser)
+    add_artifact_arguments(full_parser, pbs_credentials=True, kubernetes_secret=True)
     full_parser.add_argument(
         "--parallel",
         action="store_true",
@@ -1728,6 +1916,7 @@ def main() -> None:
     parser = build_parser()
 
     args = parser.parse_args(normalize_argv(sys.argv[1:]))
+    validate_artifact_arguments(parser, args)
     if getattr(args, "blocksci_script", None):
         script_path = Path(args.blocksci_script).expanduser().resolve()
         if not script_path.is_file():
@@ -1747,8 +1936,7 @@ def main() -> None:
         if (
             kubernetes_datadir
             and pbs_datadir
-            and Path(kubernetes_datadir).expanduser().resolve()
-            != Path(pbs_datadir).expanduser().resolve()
+            and Path(kubernetes_datadir).expanduser().resolve() != Path(pbs_datadir).expanduser().resolve()
         ):
             parser.error(
                 "direct Kubernetes storage requires --kubernetes-btc-datadir and "
@@ -1771,6 +1959,8 @@ def main() -> None:
         (args.action == "analyze" and getattr(args, "blocksciPbs", False))
         or (args.action in ("coinjoin-analysis", "coinjoin") and getattr(args, "analysisPbs", False))
         or (args.action == "mappings" and getattr(args, "mappingsPbs", False))
+        or args.action == "pbs-from-s3"
+        or (args.action == "recreate" and getattr(args, "artifact_backend", "shared-storage") == "s3")
     )
     if args.dry_run:
         print(f"[dry-run] action: {args.action}")
@@ -1778,7 +1968,10 @@ def main() -> None:
         if hasattr(args, "engine"):
             print(f"[dry-run] engine: {args.engine}")
         if use_pbs_dry_run:
-            print("[dry-run] PBS job script will be rendered but not submitted with qsub.")
+            if args.action == "recreate":
+                print("[dry-run] Kubernetes resources will be rendered but not applied with kubectl.")
+            else:
+                print("[dry-run] PBS job script will be rendered but not submitted with qsub.")
         else:
             print("[dry-run] No containers, files, reports, or Kubernetes resources will be created.")
             return
@@ -1788,33 +1981,47 @@ def main() -> None:
     requested_run = getattr(args, "run_dir", None)
     if requested_run and args.action in ("analyze", "export", "coinjoin-analysis", "coinjoin", "mappings"):
         lock_path = logs_root / Path(requested_run).name / ".research.lock"
-    try:
-        _lock = acquire_lock(lock_path)
-    except RuntimeError as error:
-        print(f"[ERROR] {error}", file=sys.stderr)
-        sys.exit(2)
+    if args.action != "pbs-from-s3":
+        try:
+            _lock = acquire_lock(lock_path)
+        except RuntimeError as error:
+            print(f"[ERROR] {error}", file=sys.stderr)
+            sys.exit(2)
 
     coinjoin_infrastructure_local_build = getattr(
         args,
         "coinjoin_infrastructure_local_build",
         False,
-    ) or truthy_env(
-        "COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD"
-    )
+    ) or truthy_env("COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD")
 
     if coinjoin_infrastructure_local_build:
         os.environ["COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD"] = "1"
     # Helper to detect if the user requested Kubernetes mode
     use_kubernetes = getattr(args, "driver", DEFAULT_DRIVER) == "kubernetes"
 
-    if args.action == "recreate":
+    if args.action == "pbs-from-s3":
+        try:
+            run_pbs_from_s3(args)
+        except PBSError as error:
+            print(f"[ERROR] {error}", file=sys.stderr)
+            sys.exit(2)
+    elif args.action == "recreate":
         logs_root = Path(compose_env().get("EMULATION_LOGS_DIR", ".")).expanduser().resolve()
-        if use_kubernetes:
+        if use_kubernetes and getattr(args, "artifact_backend", "shared-storage") == "s3":
+            try:
+                run_kubernetes_s3_emulation(args)
+            except RuntimeError as error:
+                print(f"[ERROR] {error}", file=sys.stderr)
+                sys.exit(2)
+        elif use_kubernetes:
             before = run_dirs(logs_root)
             with captured_pipeline_stage(logs_root, "Kubernetes emulation") as stage_log:
                 run_kubernetes_emulation(
-                    scenario=args.scenario, engine=args.engine, namespace=args.namespace,
-                    reuse_namespace=args.reuse_namespace, image_prefix=args.image_prefix,
+                    scenario=args.scenario,
+                    engine=args.engine,
+                    namespace=args.namespace,
+                    reuse_namespace=args.reuse_namespace,
+                    image_prefix=args.image_prefix,
                     kubeconfig=args.kubeconfig,
                     coinjoin_infrastructure_local_build=coinjoin_infrastructure_local_build,
                     run_timezone_name=args.run_timezone,
@@ -1958,9 +2165,7 @@ def main() -> None:
                     kubeconfig=args.kubeconfig,
                     coinjoin_infrastructure_local_build=coinjoin_infrastructure_local_build,
                     run_timezone_name=args.run_timezone,
-                    kubernetes_btc_datadir=(
-                        args.kubernetes_btc_datadir or args.pbs_bitcoin_datadir
-                    ),
+                    kubernetes_btc_datadir=(args.kubernetes_btc_datadir or args.pbs_bitcoin_datadir),
                     copy_to_host=args.copy_to_host,
                     prepare_local_analysis=not getattr(args, "blocksciPbs", False),
                 )

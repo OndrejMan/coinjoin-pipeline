@@ -45,7 +45,7 @@ from an installed wheel).
 
 Host commands are `doctor`, `pull`, `version`, and `builder`. All merged parser
 commands remain represented by `command_metadata.json`: `full-run`, `recreate`,
-`clean`, `analyze`, `export`, `coinjoin-analysis`, `mappings`, `initialize`, and
+`clean`, `analyze`, `export`, `coinjoin-analysis`, `pbs-from-s3`, `mappings`, `initialize`, and
 the `runs`, `scenarios`, and `external` command groups.
 
 Install the `builder` extra and run `coinjoin-pipeline builder` for the existing
@@ -63,6 +63,78 @@ wrapper/report fields. It records structured arguments, the exact rendered
 runtime command, requested version, effective images, runtime, timestamps,
 working directory, status, and exit code. Sensitive-looking keys are redacted.
 The wrapper report separately records resolved image IDs and repository digests.
+
+## Artifact backends
+
+`shared-storage` remains the default. Kubernetes and PBS continue to use the
+same `/storage` paths in this mode.
+
+The optional `s3` backend uses CESNET/MetaCentrum S3-compatible object storage,
+not Amazon AWS. Kubernetes uploads from inside its Job. PBS compute nodes
+download into `$SCRATCHDIR`, analyze locally, and upload results. The frontend
+only submits `kubectl` and `qsub`.
+
+The bucket must already exist. MetaCentrum PBS jobs use `s5cmd` with a named
+profile in a credentials file such as
+`/storage/brno2/home/<login>/.aws/credentials`:
+
+```ini
+[coinjoin]
+aws_access_key_id = <access_key_from_gatekeeper>
+aws_secret_access_key = <secret_key_from_gatekeeper>
+max_concurrent_requests = 200
+max_queue_size = 20000
+multipart_threshold = 128MB
+multipart_chunksize = 32MB
+```
+
+Those two `aws_*` names are credentials-file fields consumed by `s5cmd`, not
+supported environment-variable configuration. The pipeline never accepts
+credential values through CLI arguments.
+
+Provision the Kubernetes Secret separately:
+
+```bash
+kubectl create secret generic coinjoin-s3-credentials \
+  --from-literal=S3_ACCESS_KEY_ID='<access-key>' \
+  --from-literal=S3_SECRET_ACCESS_KEY='<secret-key>' \
+  --from-literal=S3_DEFAULT_REGION='us-east-1'
+```
+
+Submit Kubernetes emulation and upload:
+
+```bash
+coinjoin-pipeline recreate \
+  --driver kubernetes \
+  --artifact-backend s3 \
+  --artifact-uri s3://coinjoin-thesis/runs \
+  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
+  --s3-secret-name coinjoin-s3-credentials \
+  --run-id wasabi-test-001 \
+  --engine wasabi
+```
+
+Submit PBS analysis for the existing run:
+
+```bash
+PBS_FRONTEND_DIRECT=1 coinjoin-pipeline pbs-from-s3 \
+  --run-id wasabi-test-001 \
+  --artifact-uri s3://coinjoin-thesis/runs \
+  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
+  --s3-credentials-file /storage/brno2/home/xman/.aws/credentials \
+  --s3-profile coinjoin \
+  --engine wasabi \
+  --analysisPbs \
+  --blocksciPbs
+```
+
+`s5cmd` must be available on PBS compute nodes and is included in the pipeline
+image used by the Kubernetes uploader. S3-compatible `full-run`, mappings, and
+frontend marker polling are deferred.
+
+When both PBS stages are selected, BlockSci is submitted with an `afterok`
+dependency on coinjoin-analysis. `--blocksciPbs` by itself requires the remote
+run to already contain `coinjoin-analysis_data/coinjoin_tx_info.json`.
 
 ## Security
 

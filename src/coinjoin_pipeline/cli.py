@@ -50,7 +50,7 @@ def usage() -> None:
 
 Host actions: doctor, pull, version, builder
 Pipeline actions: full-run, recreate, clean, analyze, export,
-  coinjoin-analysis, mappings, initialize, runs ..., scenarios ..., external ...
+  coinjoin-analysis, pbs-from-s3, mappings, initialize, runs ..., scenarios ..., external ...
 
 Host options:
   --version TAG                 coordinated image tag (default: latest)
@@ -135,6 +135,7 @@ def main(argv: list[str] | None = None) -> int:
             (action == "analyze" and "--blocksciPbs" in passthrough)
             or (action == "coinjoin-analysis" and "--analysisPbs" in passthrough)
             or (action == "mappings" and "--mappingsPbs" in passthrough)
+            or action == "pbs-from-s3"
         )
         if "--dry-run" in passthrough and not stage_pbs_dry_run:
             print("[dry-run] validation passed; command was not executed")

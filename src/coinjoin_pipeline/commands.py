@@ -15,6 +15,7 @@ from .images import Images
 MUTATING_ACTIONS = {
     "full-run", "recreate", "analyze", "export", "coinjoin-analysis",
     "coinjoin", "mappings", "initialize", "external analyze", "clean",
+    "pbs-from-s3",
 }
 RESEARCH_PREFIXES = {"runs", "scenarios", "external"}
 
@@ -86,12 +87,33 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
         for flag in ("--kubeconfig", "--namespace", "--reuse-namespace", "--copy-to-host"):
             if has_option(argv, flag):
                 errors.append(f"{flag} requires --driver kubernetes")
-    if has_option(argv, "--analysisPbs") and action not in {"full-run", "coinjoin-analysis", "coinjoin"}:
+    if has_option(argv, "--analysisPbs") and action not in {"full-run", "coinjoin-analysis", "coinjoin", "pbs-from-s3"}:
         errors.append("--analysisPbs is supported only by full-run and coinjoin-analysis")
-    if has_option(argv, "--blocksciPbs") and action not in {"full-run", "analyze"}:
+    if has_option(argv, "--blocksciPbs") and action not in {"full-run", "analyze", "pbs-from-s3"}:
         errors.append("--blocksciPbs is supported only by full-run and analyze")
     if has_option(argv, "--mappingsPbs") and action not in {"full-run", "mappings"}:
         errors.append("--mappingsPbs is supported only by full-run and mappings")
+    backend = option_value(argv, "--artifact-backend") or "shared-storage"
+    if action == "pbs-from-s3":
+        for flag in ("--run-id", "--artifact-uri", "--s3-endpoint-url", "--s3-credentials-file", "--s3-profile", "--engine"):
+            if not has_option(argv, flag):
+                errors.append(f"pbs-from-s3 requires {flag}")
+        if not has_option(argv, "--analysisPbs") and not has_option(argv, "--blocksciPbs"):
+            errors.append("pbs-from-s3 requires --analysisPbs or --blocksciPbs")
+    if backend == "s3" and action == "full-run":
+        errors.append(
+            "S3-compatible full-run orchestration is not implemented yet. "
+            "Use independent recreate --artifact-backend s3 and pbs-from-s3 workflows."
+        )
+    if backend == "s3" and action == "recreate":
+        for flag in ("--run-id", "--artifact-uri", "--s3-endpoint-url", "--s3-secret-name"):
+            if not has_option(argv, flag):
+                errors.append(f"Kubernetes S3-compatible mode requires {flag}")
+        if option_value(argv, "--driver") != "kubernetes":
+            errors.append("--artifact-backend s3 requires --driver kubernetes")
+        for flag in ("--kubernetes-btc-datadir", "--pbs-bitcoin-datadir", "--copy-to-host"):
+            if has_option(argv, flag):
+                errors.append(f"Kubernetes S3-compatible mode does not support {flag}")
     engine = option_value(argv, "--engine")
     if engine is not None and engine not in {"wasabi", "joinmarket"}:
         errors.append("--engine must be wasabi or joinmarket")

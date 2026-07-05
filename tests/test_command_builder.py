@@ -377,7 +377,7 @@ class CommandBuilderTests(unittest.TestCase):
             set(metadata),
             {
                 "recreate", "clean", "analyze", "export", "coinjoin-analysis", "mappings",
-                "initialize", "full-run", "runs list", "runs inspect", "runs validate",
+                "initialize", "full-run", "pbs-from-s3", "runs list", "runs inspect", "runs validate",
                 "scenarios list", "scenarios show", "scenarios validate", "external analyze",
             },
         )

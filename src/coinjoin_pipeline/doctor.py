@@ -21,14 +21,15 @@ def validate_arguments(arguments: list[str], runs_root: Path) -> list[str]:
         packaged = files("coinjoin_pipeline").joinpath(f"resources/scenarios/{candidate.name}")
         if not candidate.is_file() and not (Path.cwd() / candidate).is_file() and not packaged.is_file():
             errors.append(f"scenario not found: {scenario}")
-    if option_value(arguments, "--driver") == "kubernetes":
+    dry_run = has_option(arguments, "--dry-run")
+    if option_value(arguments, "--driver") == "kubernetes" and not dry_run:
         kubeconfig = Path(option_value(arguments, "--kubeconfig") or Path.home() / ".kube/config").expanduser()
         if not kubeconfig.is_file():
             errors.append(f"kubeconfig not found: {kubeconfig}")
         if shutil.which("kubectl") is None:
             errors.append("kubectl command not found for Kubernetes driver")
     uses_pbs = any(has_option(arguments, flag) for flag in ("--analysisPbs", "--blocksciPbs", "--mappingsPbs"))
-    if uses_pbs and os.environ.get("PBS_FRONTEND_DIRECT") == "1":
+    if uses_pbs and os.environ.get("PBS_FRONTEND_DIRECT") == "1" and not dry_run:
         if shutil.which("qsub") is None:
             errors.append("qsub command not found for direct PBS execution")
     run_dir = option_value(arguments, "--run-dir")

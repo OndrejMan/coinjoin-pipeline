@@ -38,6 +38,7 @@ from client.wrapper import (
     run_dirs,
     run_kubernetes_emulation,
     run_parallel_analysis,
+    run_pbs_from_s3,
     run_timezone,
     stage_blocksci_script,
     stage_separator,
@@ -50,6 +51,41 @@ def _kubectl_cmd(*parts: str) -> list[str]:
 
 
 class WrapperExportTest(unittest.TestCase):
+    def test_pbs_from_s3_orders_blocksci_after_coinjoin_analysis(self):
+        args = Namespace(
+            artifact_uri="s3://bucket/runs",
+            run_id="run-1",
+            s3_endpoint_url="https://s3.cl4.du.cesnet.cz",
+            s3_credentials_file="/storage/user/.aws/credentials",
+            s3_profile="coinjoin",
+            dry_run=False,
+            analysisPbs=True,
+            blocksciPbs=True,
+            pbs_image=None,
+            pbs_coinjoin_analysis_image=None,
+            pbs_blocksci_image=None,
+            pbs_ncpus=None,
+            pbs_mem=None,
+            pbs_scratch=None,
+            pbs_walltime=None,
+            coinjoin_type="wasabi2",
+            min_input_count=1,
+            joinmarket_detector="definite",
+            joinmarket_min_base_fee=5000,
+            joinmarket_percentage_fee=0.00004,
+            joinmarket_max_depth=200000,
+            test_values=False,
+        )
+        with (
+            mock.patch(
+                "client.wrapper.submit_coinjoin_analysis_s3_pbs",
+                return_value="analysis.job",
+            ),
+            mock.patch("client.wrapper.submit_blocksci_s3_pbs") as blocksci,
+        ):
+            run_pbs_from_s3(args)
+        self.assertEqual(blocksci.call_args.kwargs["dependency_job_id"], "analysis.job")
+
     def test_stage_blocksci_script_preserves_script_in_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -373,6 +409,36 @@ class WrapperExportTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("[dry-run] action: full-run", result.stdout)
         self.assertIn("No containers", result.stdout)
+
+    def test_pbs_from_s3_requires_transport_and_stage_options(self):
+        result = subprocess.run(
+            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"),
+             "pbs-from-s3", "--engine", "wasabi", "--dry-run"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("requires --artifact-uri", result.stderr)
+
+    def test_full_run_s3_reports_deferred_orchestration(self):
+        result = subprocess.run(
+            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"),
+             "full-run", "--engine", "wasabi", "--artifact-backend", "s3", "--dry-run"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("S3-compatible full-run orchestration is not implemented yet", result.stderr)
+
+    def test_kubernetes_s3_rejects_shared_storage_flags(self):
+        result = subprocess.run(
+            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"), "recreate",
+             "--engine", "wasabi", "--driver", "kubernetes", "--artifact-backend", "s3",
+             "--artifact-uri", "s3://bucket/runs", "--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz",
+             "--s3-secret-name", "coinjoin-s3", "--run-id", "run-1",
+             "--copy-to-host", "--dry-run"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("does not support", result.stderr)
 
     def test_clean_requires_explicit_confirmation(self):
         result = subprocess.run(

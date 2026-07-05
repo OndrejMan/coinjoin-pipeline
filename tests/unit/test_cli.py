@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stdout
 import io
 import json
 from pathlib import Path
@@ -8,8 +8,16 @@ import tempfile
 import unittest
 from unittest import mock
 
-from coinjoin_pipeline.cli import add_effective_image_arguments, main, parse_host_options
-from coinjoin_pipeline.commands import action_from, launcher_command, validate_passthrough
+from coinjoin_pipeline.cli import (
+    add_effective_image_arguments,
+    main,
+    parse_host_options,
+)
+from coinjoin_pipeline.commands import (
+    action_from,
+    launcher_command,
+    validate_passthrough,
+)
 from coinjoin_pipeline.images import resolve_images
 from coinjoin_pipeline.manifest import atomic_write
 from coinjoin_pipeline.builder import Command, parse_command, render_command
@@ -30,9 +38,16 @@ class CliTests(unittest.TestCase):
             resolve_images("ok", {"blocksci": "not valid image"})
 
     def test_host_options_are_removed_from_pipeline_arguments(self) -> None:
-        args, host = parse_host_options([
-            "full-run", "--engine", "joinmarket", "--version", "v1", "--runtime=podman"
-        ])
+        args, host = parse_host_options(
+            [
+                "full-run",
+                "--engine",
+                "joinmarket",
+                "--version",
+                "v1",
+                "--runtime=podman",
+            ]
+        )
         self.assertEqual(args, ["full-run", "--engine", "joinmarket"])
         self.assertEqual(host["version"], "v1")
         self.assertEqual(host["runtime"], "podman")
@@ -41,14 +56,19 @@ class CliTests(unittest.TestCase):
         self.assertEqual(action_from(["analyze", "--engine", "joinmarket"]), "analyze")
         errors = validate_passthrough(["analyze", "--engine", "joinmarket"], "analyze")
         self.assertTrue(any("requires --run-dir" in error for error in errors))
-        self.assertEqual(action_from(["coinjoin", "--run-dir", "run-1"]), "coinjoin-analysis")
+        self.assertEqual(
+            action_from(["coinjoin", "--run-dir", "run-1"]), "coinjoin-analysis"
+        )
 
     def test_pbs_images_are_pinned_from_effective_version(self) -> None:
         args = add_effective_image_arguments(
-            "full-run", ["full-run", "--engine", "wasabi", "--mappingsPbs"],
+            "full-run",
+            ["full-run", "--engine", "wasabi", "--mappingsPbs"],
             resolve_images("v1", {}),
         )
-        self.assertIn("docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:v1", args)
+        self.assertIn(
+            "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:v1", args
+        )
         self.assertIn("docker://ghcr.io/ondrejman/coinjoin-mappings-sake:v1", args)
 
     def test_cleanup_requires_confirmation(self) -> None:
@@ -61,9 +81,12 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             command = launcher_command(
-                root / "launcher with spaces.sh", "docker",
-                ["full-run", "--engine", "joinmarket"], resolve_images("v1", {}),
-                root / "runs with spaces", "coinjoin-pipeline full-run",
+                root / "launcher with spaces.sh",
+                "docker",
+                ["full-run", "--engine", "joinmarket"],
+                resolve_images("v1", {}),
+                root / "runs with spaces",
+                "coinjoin-pipeline full-run",
             )
             self.assertIn("'", command.rendered())
             self.assertIn("launcher with spaces.sh", command.rendered())
@@ -72,20 +95,29 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "research_manifest.json"
             atomic_write(target, {"token": "secret", "nested": {"password": "hidden"}})
-            self.assertEqual(json.loads(target.read_text()), {
-                "nested": {"password": "<redacted>"}, "token": "<redacted>"
-            })
+            self.assertEqual(
+                json.loads(target.read_text()),
+                {"nested": {"password": "<redacted>"}, "token": "<redacted>"},
+            )
 
     def test_dry_run_renders_without_runtime_access(self) -> None:
         output = io.StringIO()
-        with redirect_stdout(output), mock.patch("coinjoin_pipeline.cli.doctor_check", return_value=[]):
-            code = main(["full-run", "--engine", "joinmarket", "--version", "v1", "--dry-run"])
+        with (
+            redirect_stdout(output),
+            mock.patch("coinjoin_pipeline.cli.doctor_check", return_value=[]),
+        ):
+            code = main(
+                ["full-run", "--engine", "joinmarket", "--version", "v1", "--dry-run"]
+            )
         self.assertEqual(code, 0)
         self.assertIn("Generated runtime command:", output.getvalue())
 
     def test_mutating_command_uses_explicit_latest_by_default(self) -> None:
         output = io.StringIO()
-        with redirect_stdout(output), mock.patch("coinjoin_pipeline.cli.doctor_check", return_value=[]):
+        with (
+            redirect_stdout(output),
+            mock.patch("coinjoin_pipeline.cli.doctor_check", return_value=[]),
+        ):
             code = main(["full-run", "--engine", "joinmarket", "--dry-run"])
         self.assertEqual(code, 0)
         self.assertIn("coinjoin-pipeline:latest", output.getvalue())
@@ -93,11 +125,15 @@ class CliTests(unittest.TestCase):
     def test_latest_defaults_match_published_runtime_images(self) -> None:
         images = resolve_images(None, {})
         self.assertEqual(images.blocksci, "ghcr.io/ondrejman/blocksci-complete:latest")
-        self.assertTrue(all(image.endswith(":latest") for image in images.as_dict().values()))
+        self.assertTrue(
+            all(image.endswith(":latest") for image in images.as_dict().values())
+        )
 
     def test_recreate_checks_only_images_used_by_that_stage(self) -> None:
         self.assertEqual(
-            required_image_components("recreate", ["recreate", "--driver", "kubernetes"]),
+            required_image_components(
+                "recreate", ["recreate", "--driver", "kubernetes"]
+            ),
             {"pipeline", "emulator"},
         )
 
@@ -114,25 +150,43 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with (
                 mock.patch.dict("os.environ", {"PBS_FRONTEND_DIRECT": "1"}),
-                mock.patch("coinjoin_pipeline.doctor.shutil.which", return_value="/usr/bin/qsub"),
+                mock.patch(
+                    "coinjoin_pipeline.doctor.shutil.which",
+                    return_value="/usr/bin/qsub",
+                ),
                 mock.patch("coinjoin_pipeline.cli.doctor_check") as check,
                 mock.patch("coinjoin_pipeline.cli.run", return_value=0),
                 redirect_stdout(io.StringIO()),
             ):
-                code = main([
-                    "coinjoin-analysis", "--run-dir", directory, "--analysisPbs"
-                ])
+                code = main(
+                    ["coinjoin-analysis", "--run-dir", directory, "--analysisPbs"]
+                )
         self.assertEqual(code, 0)
         check.assert_not_called()
 
     def test_metadata_required_fields_and_choices_are_enforced(self) -> None:
-        self.assertTrue(any("requires --engine" in error for error in validate_passthrough(
-            ["full-run", "--dry-run"], "full-run"
-        )))
-        self.assertTrue(any("must be one of" in error for error in validate_passthrough(
-            ["full-run", "--engine", "joinmarket", "--driver", "invalid", "--dry-run"],
-            "full-run",
-        )))
+        self.assertTrue(
+            any(
+                "requires --engine" in error
+                for error in validate_passthrough(["full-run", "--dry-run"], "full-run")
+            )
+        )
+        self.assertTrue(
+            any(
+                "must be one of" in error
+                for error in validate_passthrough(
+                    [
+                        "full-run",
+                        "--engine",
+                        "joinmarket",
+                        "--driver",
+                        "invalid",
+                        "--dry-run",
+                    ],
+                    "full-run",
+                )
+            )
+        )
 
     def test_environment_image_overrides_preserve_legacy_workflows(self) -> None:
         environment = {
@@ -143,16 +197,24 @@ class CliTests(unittest.TestCase):
         }
         with mock.patch.dict("os.environ", environment, clear=False):
             _, host = parse_host_options(["full-run", "--engine", "joinmarket"])
-            from coinjoin_pipeline.host import image_overrides, required_image_components
+            from coinjoin_pipeline.host import (
+                image_overrides,
+                required_image_components,
+            )
             from coinjoin_pipeline.images import all_images_overridden
+
             overrides = image_overrides(host)
-            self.assertTrue(all_images_overridden(
-                overrides, required_image_components("full-run", ["full-run"])
-            ))
+            self.assertTrue(
+                all_images_overridden(
+                    overrides, required_image_components("full-run", ["full-run"])
+                )
+            )
 
     def test_builder_round_trips_generated_host_options(self) -> None:
         command = Command(
-            "full-run", runtime="podman", version="v1",
+            "full-run",
+            runtime="podman",
+            version="v1",
             options=[("--engine", "joinmarket")],
         )
         parsed = parse_command(render_command(command))
@@ -174,7 +236,10 @@ class CliTests(unittest.TestCase):
         command = runtime_command(config)
         self.assertIn("/var/run/docker.sock:/var/run/docker.sock", command)
         self.assertNotIn("--privileged", command)
-        self.assertEqual(command[-4:], ["--driver", "kubernetes", "--kubeconfig", "/root/.kube/config"])
+        self.assertEqual(
+            command[-4:],
+            ["--driver", "kubernetes", "--kubeconfig", "/root/.kube/config"],
+        )
 
 
 if __name__ == "__main__":
