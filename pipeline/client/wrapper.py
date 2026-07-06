@@ -870,6 +870,8 @@ def kubernetes_emulator_command(
         control_ip,
         "--btc-node-arg=-blocksxor=0",
     ]
+    if engine == "joinmarket":
+        command.append("--joinmarket-descriptor-regtest-fallback")
     if copy_to_host:
         command.extend(["--download-btc-data", btc_data_path])
     else:

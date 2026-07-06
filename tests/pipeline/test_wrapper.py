@@ -822,6 +822,15 @@ class WrapperExportTest(unittest.TestCase):
         self.assertEqual(command[command.index("--run-timezone") + 1], "Europe/Prague")
         self.assertIn("--control-ip", command)
         self.assertEqual(command[command.index("--control-ip") + 1], "172.17.0.1")
+        self.assertIn("--joinmarket-descriptor-regtest-fallback", command)
+
+    def test_kubernetes_emulator_command_keeps_wasabi_descriptor_fallback_disabled(self):
+        command = kubernetes_emulator_command(
+            scenario="/app/scenarios/overactive-local.json",
+            engine="wasabi",
+        )
+
+        self.assertNotIn("--joinmarket-descriptor-regtest-fallback", command)
 
     def test_kubernetes_emulator_command_can_reuse_namespace(self):
         command = kubernetes_emulator_command(
