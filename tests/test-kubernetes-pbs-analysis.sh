@@ -72,6 +72,9 @@ dump_kubernetes_diagnostics() {
   local pod
   while IFS= read -r pod; do
     [[ -n "${pod}" ]] || continue
+    echo "===== description and events: ${pod} =====" >&2
+    kubectl --kubeconfig "${HOST_KUBECONFIG}" describe -n "${NAMESPACE}" \
+      "${pod}" >&2 || true
     echo "===== final 200 log lines: ${pod} =====" >&2
     kubectl --kubeconfig "${HOST_KUBECONFIG}" logs -n "${NAMESPACE}" \
       "${pod}" --all-containers --tail=200 >&2 || true
