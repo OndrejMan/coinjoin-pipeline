@@ -291,8 +291,15 @@ if [[ "${DRIVER}" == kubernetes ]]; then
   [[ -n "${NAMESPACE}" ]] && WRAPPER_EXTRA_ARGS+=(--namespace "${NAMESPACE}")
   [[ "${CONTAINER_RUNTIME}" == docker ]] && CONTAINER_EXTRA_ARGS+=(--add-host host.docker.internal:host-gateway)
   [[ -n "${KUBERNETES_CONTROL_IP:-}" ]] && CONTAINER_EXTRA_ARGS+=("-e" "KUBERNETES_CONTROL_IP=${KUBERNETES_CONTROL_IP}")
-  if [[ "${DIRECT_KUBERNETES_BTC}" == true ]]; then
-    CONTAINER_EXTRA_ARGS+=("-e" "KUBERNETES_STORAGE_UID=$(id -u)" "-e" "KUBERNETES_STORAGE_GID=$(id -g)")
+  CONTAINER_EXTRA_ARGS+=("-e" "KUBERNETES_STORAGE_UID=$(id -u)" "-e" "KUBERNETES_STORAGE_GID=$(id -g)")
+  if [[ "${HAS_COPY_TO_HOST}" == true ]]; then
+    KUBERNETES_COPY_TO_HOST_DIR="${KUBERNETES_COPY_TO_HOST_DIR:-${EMULATION_LOGS_DIR}/.kubernetes-btc-data}"
+    mkdir -p "${KUBERNETES_COPY_TO_HOST_DIR}"
+    KUBERNETES_COPY_TO_HOST_DIR="$(cd "${KUBERNETES_COPY_TO_HOST_DIR}" && pwd)"
+    CONTAINER_EXTRA_ARGS+=(
+      "-e" "KUBERNETES_COPY_TO_HOST_DIR=${KUBERNETES_COPY_TO_HOST_DIR}"
+      "-v" "${KUBERNETES_COPY_TO_HOST_DIR}:${KUBERNETES_COPY_TO_HOST_DIR}:rw"
+    )
   fi
 fi
 if [[ "${HAS_BLOCKSCI_PBS}" == true && -n "${PBS_BITCOIN_DATADIR_PATH}" ]]; then

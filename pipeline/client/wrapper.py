@@ -717,8 +717,16 @@ def run_kubernetes_emulation(
     host_root_dir = default_host_root_dir()
     emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
     scenarios_dir = Path(env["SCENARIOS_DIR"]).expanduser().resolve()
+    copy_to_host_dir = os.environ.get("KUBERNETES_COPY_TO_HOST_DIR")
+    if copy_to_host and not copy_to_host_dir:
+        print(
+            "[ERROR] --copy-to-host requires KUBERNETES_COPY_TO_HOST_DIR; "
+            "the launcher must mount an explicit host-owned output directory.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     local_btc_data_dir = Path(
-        os.environ.get("KUBERNETES_COPY_TO_HOST_DIR", host_root_dir / "btc-data")
+        copy_to_host_dir or host_root_dir / "btc-data"
     ).expanduser().resolve()
     local_download_path = local_btc_data_dir / "data"
     shared_btc_data_path = Path(kubernetes_btc_datadir or local_download_path).expanduser().resolve()

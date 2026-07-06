@@ -286,6 +286,33 @@ if ! grep -q -- "-e KUBERNETES_STORAGE_UID=$(id -u) -e KUBERNETES_STORAGE_GID=$(
   exit 1
 fi
 
+COPY_TO_HOST_DIR="${TMP_DIR}/kubernetes-copy-to-host"
+: >"${DOCKER_LOG}"
+(
+  cd "${PROJECT_DIR}"
+  EMULATION_LOGS_DIR="${FAKE_LOGS}" \
+  KUBERNETES_COPY_TO_HOST_DIR="${COPY_TO_HOST_DIR}" \
+  PATH="${FAKE_BIN}:${PATH}" \
+  bash "${LAUNCHER}" recreate --engine wasabi --driver kubernetes \
+    --kubeconfig "${KUBE_CONFIG}" --copy-to-host
+)
+
+if ! grep -q -- "-e KUBERNETES_COPY_TO_HOST_DIR=${COPY_TO_HOST_DIR}" "${DOCKER_LOG}"; then
+  echo "FAIL: Kubernetes copy-to-host directory must be forwarded to the wrapper" >&2
+  echo "Observed: $(cat "${DOCKER_LOG}")" >&2
+  exit 1
+fi
+if ! grep -q -- "-v ${COPY_TO_HOST_DIR}:${COPY_TO_HOST_DIR}:rw" "${DOCKER_LOG}"; then
+  echo "FAIL: Kubernetes copy-to-host directory must be mounted into the wrapper" >&2
+  echo "Observed: $(cat "${DOCKER_LOG}")" >&2
+  exit 1
+fi
+if ! grep -q -- "-e KUBERNETES_STORAGE_UID=$(id -u) -e KUBERNETES_STORAGE_GID=$(id -g)" "${DOCKER_LOG}"; then
+  echo "FAIL: Kubernetes copy-to-host mode must preserve host storage ownership" >&2
+  echo "Observed: $(cat "${DOCKER_LOG}")" >&2
+  exit 1
+fi
+
 ISOLATED_PROJECT="${TMP_DIR}/isolated/coinjoin-pipeline"
 ISOLATED_LOGS="${TMP_DIR}/isolated/logs"
 mkdir -p "${ISOLATED_PROJECT}/container" "${ISOLATED_PROJECT}/scenarios" "${ISOLATED_PROJECT}/notebooks" "${ISOLATED_LOGS}"

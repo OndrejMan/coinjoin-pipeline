@@ -1055,6 +1055,8 @@ class WrapperExportTest(unittest.TestCase):
                 "CONTAINER_RUNTIME": "podman",
                 "COINJOIN_EMULATOR_IMAGE": "coinjoin-emulator:test",
                 "KUBERNETES_COPY_TO_HOST_DIR": str(root / "kubernetes-download"),
+                "KUBERNETES_STORAGE_UID": "1234",
+                "KUBERNETES_STORAGE_GID": "5678",
             }
             with mock.patch.dict(os.environ, env, clear=False), \
                 mock.patch("client.wrapper.run_command") as run_mock, \
@@ -1069,7 +1071,7 @@ class WrapperExportTest(unittest.TestCase):
             docker_cmd = run_mock.call_args.args[0]
             self.assertEqual(
                 docker_cmd[docker_cmd.index("--user") + 1],
-                f"{os.getuid()}:{os.getgid()}",
+                "1234:5678",
             )
             self.assertIn(f"{kubeconfig.resolve()}:/tmp/coinjoin-kubeconfig:ro", docker_cmd)
             self.assertIn("--download-btc-data", docker_cmd)
@@ -1079,6 +1081,29 @@ class WrapperExportTest(unittest.TestCase):
             )
             self.assertIn(f"{(root / 'kubernetes-download').resolve()}:/btc-data:rw", docker_cmd)
             populate_mock.assert_called_once_with((root / "kubernetes-download" / "data").resolve())
+
+    def test_kubernetes_emulation_copy_to_host_requires_explicit_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            host_client_dir = root / "client"
+            scenarios_dir = host_client_dir / "scenarios"
+            kubeconfig = root / "kubeconfig.yaml"
+            scenarios_dir.mkdir(parents=True)
+            kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+
+            env = {
+                "HOST_CLIENT_DIR": str(host_client_dir),
+                "CONTAINER_RUNTIME": "podman",
+                "COINJOIN_EMULATOR_IMAGE": "coinjoin-emulator:test",
+            }
+            with mock.patch.dict(os.environ, env, clear=True), self.assertRaises(SystemExit) as error:
+                run_kubernetes_emulation(
+                    scenario="overactive-local.json",
+                    kubeconfig=str(kubeconfig),
+                    copy_to_host=True,
+                )
+
+            self.assertEqual(error.exception.code, 2)
 
     def test_container_run_pull_args_default_to_always_for_registry_images(self):
         with mock.patch.dict(os.environ, {}, clear=True):
