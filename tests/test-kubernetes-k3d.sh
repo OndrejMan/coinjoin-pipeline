@@ -24,7 +24,6 @@ KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
 PRE_CLEANUP="${PRE_CLEANUP:-1}"
 PRE_CLEANUP_PREFIX="${PRE_CLEANUP_PREFIX-coinjoin-k3d-}"
 PRE_CLEANUP_CONTAINERS="${PRE_CLEANUP_CONTAINERS:-1}"
-K3D_NODEPORT_RANGE="${K3D_NODEPORT_RANGE:-30000-30029}"
 
 if [[ -z "${CONTAINER_KUBE_HOST:-}" ]]; then
   if [[ "${CONTAINER_RUNTIME}" == "docker" ]]; then
@@ -274,9 +273,7 @@ k3d cluster create "${CLUSTER_NAME}" \
   --servers "${SERVERS}" \
   --agents "${AGENTS}" \
   --wait \
-  --timeout "${WAIT_TIMEOUT}" \
-  -p "${K3D_NODEPORT_RANGE}:${K3D_NODEPORT_RANGE}@server:0" \
-  --k3s-arg "--kube-apiserver-arg=service-node-port-range=${K3D_NODEPORT_RANGE}@server:*"
+  --timeout "${WAIT_TIMEOUT}"
 
 k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
 

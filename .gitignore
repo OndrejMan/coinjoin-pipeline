@@ -3,6 +3,7 @@ coinjoin-runs/
 .btc-rpc-explorer.env
 
 gitlab-test-results/
+src/coinjoin_pipeline/btc-data/
 
 __pycache__/
 build/

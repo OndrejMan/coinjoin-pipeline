@@ -32,6 +32,7 @@ docker info >/dev/null 2>&1 || {
 [[ -f "${PBS_ENV}" ]] || { echo "FAIL: PBS environment not found: ${PBS_ENV}" >&2; exit 2; }
 
 RUN_TOKEN="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM}"
+RESOURCE_ID="${GITHUB_RUN_ID:-$$}"
 STORAGE_BASE="${PBS_TEST_STORAGE_ROOT:-/storage/gitlab-runner}"
 [[ -d "${STORAGE_BASE}" && -w "${STORAGE_BASE}" ]] || {
   echo "FAIL: pre-provisioned writable storage is required: ${STORAGE_BASE}" >&2
@@ -40,9 +41,9 @@ STORAGE_BASE="${PBS_TEST_STORAGE_ROOT:-/storage/gitlab-runner}"
 WORK_ROOT="$(mktemp -d "${STORAGE_BASE}/k3d-pbs-${ENGINE}-${RUN_TOKEN}.XXXXXX")"
 LOGS_ROOT="${WORK_ROOT}/emulation_logs"
 BITCOIN_DATADIR="${WORK_ROOT}/bitcoin-regtest-data"
-CLUSTER_NAME="${CLUSTER_NAME:-cj-${ENGINE}-pbs-$$}"
+CLUSTER_NAME="${CLUSTER_NAME:-cj-${ENGINE}-pbs-${RESOURCE_ID}}"
 NAMESPACE="${NAMESPACE:-cj-${ENGINE}-pbs-$$}"
-PBS_CONTAINER_NAME="${PBS_CONTAINER_NAME:-pbs-${ENGINE}-itest-$$}"
+PBS_CONTAINER_NAME="${PBS_CONTAINER_NAME:-pbs-${ENGINE}-itest-${RESOURCE_ID}}"
 HOST_KUBECONFIG="${WORK_ROOT}/kubeconfig-host.yaml"
 CONTAINER_KUBECONFIG="${WORK_ROOT}/kubeconfig-container.yaml"
 IMAGE_PREFIX="${IMAGE_PREFIX:-ghcr.io/ondrejman/}"
@@ -108,6 +109,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Remove only resources owned by this test name before attempting to recreate
+# them. This recovers safely from an interrupted previous run without touching
+# unrelated Docker containers or k3d clusters on the shared runner.
+k3d cluster delete "${CLUSTER_NAME}" >/dev/null 2>&1 || true
+docker rm -f "${PBS_CONTAINER_NAME}" >/dev/null 2>&1 || true
+
 mkdir -p "${LOGS_ROOT}" "${BITCOIN_DATADIR}"
 chmod 0777 "${WORK_ROOT}" "${LOGS_ROOT}" "${BITCOIN_DATADIR}"
 
@@ -115,9 +122,7 @@ CONTAINER_KUBE_HOST="${CONTAINER_KUBE_HOST:-$(docker network inspect bridge --fo
 echo "Creating k3d cluster ${CLUSTER_NAME} with direct shared storage ${WORK_ROOT}..."
 k3d cluster create "${CLUSTER_NAME}" \
   --servers 1 --agents "${K3D_AGENTS:-2}" --wait --timeout "${K3D_WAIT_TIMEOUT:-240s}" \
-  --volume "${WORK_ROOT}:${WORK_ROOT}@all" \
-  -p "30000-30029:30000-30029@server:0" \
-  --k3s-arg '--kube-apiserver-arg=service-node-port-range=30000-30029@server:*'
+  --volume "${WORK_ROOT}:${WORK_ROOT}@all"
 k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
 kubectl --kubeconfig "${HOST_KUBECONFIG}" wait node --all --for=condition=Ready --timeout=240s
 
