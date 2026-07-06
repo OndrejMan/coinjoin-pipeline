@@ -187,6 +187,7 @@ jobs:
           CONTAINER_RUNTIME: docker
           EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-emulation-logs
           WAIT_TIMEOUT: 240s
+          EMULATION_TIMEOUT: 30m
         run: ./tests/test-kubernetes-k3d.sh
 
   pbs-apptainer-image:

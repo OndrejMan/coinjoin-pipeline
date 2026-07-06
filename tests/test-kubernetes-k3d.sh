@@ -10,6 +10,7 @@ NAMESPACE="${NAMESPACE:-coinjoin-itest-$$}"
 SERVERS="${SERVERS:-1}"
 AGENTS="${AGENTS:-2}"
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-180s}"
+EMULATION_TIMEOUT="${EMULATION_TIMEOUT:-30m}"
 SCENARIO="${SCENARIO:-overactive-local.json}"
 ACTION="${ACTION:-recreate}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
@@ -41,7 +42,27 @@ export KUBERNETES_COPY_TO_HOST_DIR="${KUBERNETES_COPY_TO_HOST_DIR:-${TMP_DIR}/bt
 HOST_KUBECONFIG="${TMP_DIR}/kubeconfig-host.yaml"
 CONTAINER_KUBECONFIG="${TMP_DIR}/kubeconfig-container.yaml"
 
+dump_kubernetes_diagnostics() {
+  if [[ ! -s "${HOST_KUBECONFIG}" ]]; then
+    return 0
+  fi
+
+  echo "Kubernetes diagnostics for namespace '${NAMESPACE}':" >&2
+  kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" get pods -o wide >&2 || true
+  kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" describe pods >&2 || true
+  kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" \
+    get events --sort-by=.lastTimestamp >&2 || true
+  kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" logs \
+    --all-containers=true --prefix=true --tail=200 \
+    -l app.kubernetes.io/managed-by=coinjoin-emulator >&2 || true
+}
+
 cleanup() {
+  local exit_status=$?
+  trap - EXIT
+  if [[ "${exit_status}" -ne 0 ]]; then
+    dump_kubernetes_diagnostics
+  fi
   if [[ "${KEEP_CLUSTER}" != "1" ]]; then
     k3d cluster delete "${CLUSTER_NAME}" >/dev/null 2>&1 || true
   else
@@ -51,6 +72,7 @@ cleanup() {
   if [[ "${KEEP_CLUSTER}" != "1" ]]; then
     rm -rf "${TMP_DIR}"
   fi
+  return "${exit_status}"
 }
 trap cleanup EXIT
 
@@ -173,6 +195,7 @@ require_command k3d
 require_command kubectl
 require_command "${CONTAINER_RUNTIME}"
 require_command python3
+require_command timeout
 
 pre_cleanup_running_containers
 pre_cleanup_clusters
@@ -277,7 +300,8 @@ rewrite_kubeconfig_for_container "${HOST_KUBECONFIG}" "${CONTAINER_KUBECONFIG}"
 echo "Running Kubernetes emulation test action '${ACTION}' in namespace '${NAMESPACE}'..."
 (
   cd "${PROJECT_DIR}"
-  ./runIt.sh container "${CONTAINER_RUNTIME}" "${ACTION}" \
+  timeout --foreground "${EMULATION_TIMEOUT}" \
+    ./runIt.sh container "${CONTAINER_RUNTIME}" "${ACTION}" \
     --engine wasabi \
     --scenario "${SCENARIO}" \
     --driver kubernetes \
