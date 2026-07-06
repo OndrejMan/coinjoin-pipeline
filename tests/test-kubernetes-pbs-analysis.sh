@@ -52,6 +52,11 @@ COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-e
 RESULT_DIR="${TEST_RESULT_DIR:-}"
 KEEP_WORK="${KEEP_TEST_WORK:-0}"
 KUBERNETES_PBS_TIMEOUT="${KUBERNETES_PBS_TIMEOUT:-85m}"
+KUBERNETES_DIAGNOSTICS_FILE="${WORK_ROOT}/kubernetes-diagnostics.txt"
+PIPELINE_OUTPUT_FILE="${WORK_ROOT}/pipeline-output.log"
+INJECT_KUBERNETES_CLIENT_FAILURE="${INJECT_KUBERNETES_CLIENT_FAILURE:-0}"
+INJECT_KUBERNETES_CLIENT_NAME="${INJECT_KUBERNETES_CLIENT_NAME:-wasabi-client-002}"
+FAILURE_INJECTOR_PID=""
 
 if [[ "${ENGINE}" == "wasabi" ]]; then
   SCENARIO="${SCENARIO:-overactive-local.json}"
@@ -64,28 +69,63 @@ else
 fi
 
 dump_kubernetes_diagnostics() {
-  [[ -s "${HOST_KUBECONFIG}" ]] || return 0
-  echo "Kubernetes workflow failed; collecting diagnostics for namespace ${NAMESPACE}..." >&2
-  kubectl --kubeconfig "${HOST_KUBECONFIG}" get pods -n "${NAMESPACE}" -o wide >&2 || true
-  kubectl --kubeconfig "${HOST_KUBECONFIG}" get services -n "${NAMESPACE}" -o wide >&2 || true
-  kubectl --kubeconfig "${HOST_KUBECONFIG}" get endpoints -n "${NAMESPACE}" -o wide >&2 || true
+  {
+    echo "Kubernetes workflow failed; collecting diagnostics for namespace ${NAMESPACE}..."
+    if [[ ! -s "${HOST_KUBECONFIG}" ]]; then
+      echo "Kubeconfig is unavailable: ${HOST_KUBECONFIG}"
+    else
+      kubectl --kubeconfig "${HOST_KUBECONFIG}" get pods -n "${NAMESPACE}" -o wide || true
+      kubectl --kubeconfig "${HOST_KUBECONFIG}" get services -n "${NAMESPACE}" -o wide || true
+      kubectl --kubeconfig "${HOST_KUBECONFIG}" get endpoints -n "${NAMESPACE}" -o wide || true
+      echo "===== namespace events ====="
+      kubectl --kubeconfig "${HOST_KUBECONFIG}" get events -n "${NAMESPACE}" \
+        --sort-by=.metadata.creationTimestamp || true
 
-  local pod
-  while IFS= read -r pod; do
-    [[ -n "${pod}" ]] || continue
-    echo "===== description and events: ${pod} =====" >&2
-    kubectl --kubeconfig "${HOST_KUBECONFIG}" describe -n "${NAMESPACE}" \
-      "${pod}" >&2 || true
-    echo "===== final 200 log lines: ${pod} =====" >&2
-    kubectl --kubeconfig "${HOST_KUBECONFIG}" logs -n "${NAMESPACE}" \
-      "${pod}" --all-containers --tail=200 >&2 || true
-  done < <(kubectl --kubeconfig "${HOST_KUBECONFIG}" get pods -n "${NAMESPACE}" \
-    -o name 2>/dev/null || true)
+      local pod
+      while IFS= read -r pod; do
+        [[ -n "${pod}" ]] || continue
+        echo "===== description and events: ${pod} ====="
+        kubectl --kubeconfig "${HOST_KUBECONFIG}" describe -n "${NAMESPACE}" \
+          "${pod}" || true
+        echo "===== final 200 log lines: ${pod} ====="
+        kubectl --kubeconfig "${HOST_KUBECONFIG}" logs -n "${NAMESPACE}" \
+          "${pod}" --all-containers --tail=200 --timestamps || true
+        echo "===== previous final 200 log lines: ${pod} ====="
+        kubectl --kubeconfig "${HOST_KUBECONFIG}" logs -n "${NAMESPACE}" \
+          "${pod}" --all-containers --tail=200 --timestamps --previous || true
+      done < <(kubectl --kubeconfig "${HOST_KUBECONFIG}" get pods -n "${NAMESPACE}" \
+        -o name 2>/dev/null || true)
+    fi
+  } >"${KUBERNETES_DIAGNOSTICS_FILE}" 2>&1
+  cat "${KUBERNETES_DIAGNOSTICS_FILE}" >&2
+}
+
+inject_kubernetes_client_failure() {
+  local deadline=$((SECONDS + ${INJECT_KUBERNETES_CLIENT_APPEAR_TIMEOUT_SECONDS:-1200}))
+  until kubectl --kubeconfig "${HOST_KUBECONFIG}" get pod -n "${NAMESPACE}" \
+    "${INJECT_KUBERNETES_CLIENT_NAME}" >/dev/null 2>&1
+  do
+    if (( SECONDS >= deadline )); then
+      echo "FAIL: pod ${INJECT_KUBERNETES_CLIENT_NAME} did not appear before fault injection" >&2
+      return 1
+    fi
+    sleep 2
+  done
+  kubectl --kubeconfig "${HOST_KUBECONFIG}" wait -n "${NAMESPACE}" \
+    --for=condition=Ready "pod/${INJECT_KUBERNETES_CLIENT_NAME}" --timeout=20m
+  sleep "${INJECT_KUBERNETES_CLIENT_DELAY_SECONDS:-15}"
+  kubectl --kubeconfig "${HOST_KUBECONFIG}" delete pod -n "${NAMESPACE}" \
+    "${INJECT_KUBERNETES_CLIENT_NAME}" --wait=false
+  touch "${WORK_ROOT}/client-failure-injected"
 }
 
 cleanup() {
   local status=$?
   trap - EXIT
+  if [[ -n "${FAILURE_INJECTOR_PID}" ]]; then
+    kill "${FAILURE_INJECTOR_PID}" >/dev/null 2>&1 || true
+    wait "${FAILURE_INJECTOR_PID}" >/dev/null 2>&1 || true
+  fi
   if (( status != 0 )); then
     dump_kubernetes_diagnostics
   fi
@@ -93,6 +133,15 @@ cleanup() {
     mkdir -p "${RESULT_DIR}/${ENGINE}/pbs-logs"
     find "${WORK_ROOT}" -type f \( -name '*.o[0-9]*' -o -name '*.e[0-9]*' \) \
       -exec cp -t "${RESULT_DIR}/${ENGINE}/pbs-logs" {} + 2>/dev/null || true
+    if [[ -s "${KUBERNETES_DIAGNOSTICS_FILE}" ]]; then
+      mkdir -p "${RESULT_DIR}/${ENGINE}/kubernetes-diagnostics"
+      cp "${KUBERNETES_DIAGNOSTICS_FILE}" \
+        "${RESULT_DIR}/${ENGINE}/kubernetes-diagnostics/diagnostics.txt"
+      if [[ -s "${PIPELINE_OUTPUT_FILE}" ]]; then
+        cp "${PIPELINE_OUTPUT_FILE}" \
+          "${RESULT_DIR}/${ENGINE}/kubernetes-diagnostics/pipeline-output.log"
+      fi
+    fi
   fi
   docker rm -f "${PBS_CONTAINER_NAME}" >/dev/null 2>&1 || true
   if [[ "${KEEP_CLUSTER:-0}" != 1 ]]; then
@@ -161,6 +210,12 @@ export KUBERNETES_STORAGE_UID="$(id -u)"
 export KUBERNETES_STORAGE_GID="$(id -g)"
 
 echo "Running ${ENGINE} Kubernetes emulation followed by PBS analyzers..."
+if [[ "${INJECT_KUBERNETES_CLIENT_FAILURE}" == 1 ]]; then
+  inject_kubernetes_client_failure &
+  FAILURE_INJECTOR_PID=$!
+fi
+
+set +e
 (
   cd "${PROJECT_DIR}"
   timeout --foreground "${KUBERNETES_PBS_TIMEOUT}" ./runIt.sh full-run \
@@ -178,7 +233,34 @@ echo "Running ${ENGINE} Kubernetes emulation followed by PBS analyzers..."
     --pbs-mem 4gb \
     --pbs-scratch 2gb \
     --pbs-walltime 00:30:00
-)
+) 2>&1 | tee "${PIPELINE_OUTPUT_FILE}"
+PIPELINE_STATUS=${PIPESTATUS[0]}
+set -e
+
+if [[ -n "${FAILURE_INJECTOR_PID}" ]]; then
+  wait "${FAILURE_INJECTOR_PID}" || true
+  FAILURE_INJECTOR_PID=""
+fi
+
+if [[ "${INJECT_KUBERNETES_CLIENT_FAILURE}" == 1 ]]; then
+  [[ -f "${WORK_ROOT}/client-failure-injected" ]] || {
+    echo "FAIL: Kubernetes client failure was not injected" >&2
+    exit 1
+  }
+  (( PIPELINE_STATUS != 0 )) || {
+    echo "FAIL: pipeline succeeded after ${INJECT_KUBERNETES_CLIENT_NAME} was deleted" >&2
+    exit 1
+  }
+  dump_kubernetes_diagnostics
+  [[ -s "${KUBERNETES_DIAGNOSTICS_FILE}" ]] || {
+    echo "FAIL: Kubernetes diagnostics artifact is empty" >&2
+    exit 1
+  }
+  echo "PASS: deleting ${INJECT_KUBERNETES_CLIENT_NAME} failed the pipeline with diagnostics"
+  exit 0
+fi
+
+(( PIPELINE_STATUS == 0 )) || exit "${PIPELINE_STATUS}"
 
 RUN_DIR="$(find "${LOGS_ROOT}" -mindepth 1 -maxdepth 1 -type d \
   -exec test -s '{}/blocksciEmulatorAnalysis_data/unified_report.json' \; -print | sort | tail -n 1)"
