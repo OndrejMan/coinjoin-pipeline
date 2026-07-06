@@ -1020,6 +1020,10 @@ class WrapperExportTest(unittest.TestCase):
             docker_cmd = run_mock.call_args.args[0]
             self.assertIn("coinjoin-emulator:test", docker_cmd)
             self.assertIn("--pull=missing", docker_cmd)
+            self.assertEqual(docker_cmd[docker_cmd.index("--user") + 1], "1234:5678")
+            self.assertIn(f"{kubeconfig.resolve()}:/tmp/coinjoin-kubeconfig:ro", docker_cmd)
+            self.assertIn("HOME=/tmp", docker_cmd)
+            self.assertIn("KUBECONFIG=/tmp/coinjoin-kubeconfig", docker_cmd)
             self.assertIn(f"{scenarios_dir.resolve()}:/mnt/scenarios:ro", docker_cmd)
             self.assertIn("/mnt/scenarios/overactive-local.json", docker_cmd)
             self.assertIn("--control-ip", docker_cmd)
@@ -1050,6 +1054,7 @@ class WrapperExportTest(unittest.TestCase):
                 "HOST_CLIENT_DIR": str(host_client_dir),
                 "CONTAINER_RUNTIME": "podman",
                 "COINJOIN_EMULATOR_IMAGE": "coinjoin-emulator:test",
+                "KUBERNETES_COPY_TO_HOST_DIR": str(root / "kubernetes-download"),
             }
             with mock.patch.dict(os.environ, env, clear=False), \
                 mock.patch("client.wrapper.run_command") as run_mock, \
@@ -1062,13 +1067,18 @@ class WrapperExportTest(unittest.TestCase):
                 )
 
             docker_cmd = run_mock.call_args.args[0]
+            self.assertEqual(
+                docker_cmd[docker_cmd.index("--user") + 1],
+                f"{os.getuid()}:{os.getgid()}",
+            )
+            self.assertIn(f"{kubeconfig.resolve()}:/tmp/coinjoin-kubeconfig:ro", docker_cmd)
             self.assertIn("--download-btc-data", docker_cmd)
             self.assertEqual(
                 docker_cmd[docker_cmd.index("--download-btc-data") + 1],
                 "/btc-data/data",
             )
-            self.assertIn(f"{(root / 'btc-data').resolve()}:/btc-data:rw", docker_cmd)
-            populate_mock.assert_called_once_with((root / "btc-data" / "data").resolve())
+            self.assertIn(f"{(root / 'kubernetes-download').resolve()}:/btc-data:rw", docker_cmd)
+            populate_mock.assert_called_once_with((root / "kubernetes-download" / "data").resolve())
 
     def test_container_run_pull_args_default_to_always_for_registry_images(self):
         with mock.patch.dict(os.environ, {}, clear=True):

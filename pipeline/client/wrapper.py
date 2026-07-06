@@ -717,7 +717,9 @@ def run_kubernetes_emulation(
     host_root_dir = default_host_root_dir()
     emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
     scenarios_dir = Path(env["SCENARIOS_DIR"]).expanduser().resolve()
-    local_btc_data_dir = host_root_dir / "btc-data"
+    local_btc_data_dir = Path(
+        os.environ.get("KUBERNETES_COPY_TO_HOST_DIR", host_root_dir / "btc-data")
+    ).expanduser().resolve()
     local_download_path = local_btc_data_dir / "data"
     shared_btc_data_path = Path(kubernetes_btc_datadir or local_download_path).expanduser().resolve()
 
@@ -763,27 +765,33 @@ def run_kubernetes_emulation(
     # can reach the Kubernetes cluster
     runtime = container_runtime()
     emulator_image = os.environ.get("COINJOIN_EMULATOR_IMAGE", DEFAULT_EMULATOR_IMAGE)
+    storage_uid = os.environ.get("KUBERNETES_STORAGE_UID", str(os.getuid()))
+    storage_gid = os.environ.get("KUBERNETES_STORAGE_GID", str(os.getgid()))
     docker_cmd = [
         runtime,
         "run",
         "--rm",
         *container_run_pull_args(emulator_image, "COINJOIN_EMULATOR_PULL_POLICY"),
+        "--user",
+        f"{storage_uid}:{storage_gid}",
         "-v",
-        f"{kubeconfig_path}:/root/.kube/config:ro",
+        f"{kubeconfig_path}:/tmp/coinjoin-kubeconfig:ro",
         "-v",
         f"{scenarios_dir}:/mnt/scenarios:ro",
         "-v",
         f"{emulation_logs_dir}:/app/logs:rw",
         "-e",
         "PYTHONUNBUFFERED=1",
+        "-e",
+        "HOME=/tmp",
+        "-e",
+        "KUBECONFIG=/tmp/coinjoin-kubeconfig",
     ]
     if copy_to_host:
         docker_cmd.extend(["-v", f"{local_btc_data_dir}:/btc-data:rw"])
     else:
-        for name in ("KUBERNETES_STORAGE_UID", "KUBERNETES_STORAGE_GID"):
-            value = os.environ.get(name)
-            if value:
-                docker_cmd.extend(["-e", f"{name}={value}"])
+        docker_cmd.extend(["-e", f"KUBERNETES_STORAGE_UID={storage_uid}"])
+        docker_cmd.extend(["-e", f"KUBERNETES_STORAGE_GID={storage_gid}"])
     docker_cmd.extend([emulator_image, *emulator_cmd])
 
     print(f"[kubernetes] Running emulator with driver=kubernetes, namespace={namespace}")
