@@ -33,6 +33,10 @@ docker info >/dev/null 2>&1 || {
 
 RUN_TOKEN="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM}"
 RESOURCE_ID="${GITHUB_RUN_ID:-$$}"
+case "${ENGINE}" in
+  wasabi) ENGINE_CLUSTER_ID="w" ;;
+  joinmarket) ENGINE_CLUSTER_ID="jm" ;;
+esac
 STORAGE_BASE="${PBS_TEST_STORAGE_ROOT:-/storage/gitlab-runner}"
 [[ -d "${STORAGE_BASE}" && -w "${STORAGE_BASE}" ]] || {
   echo "FAIL: pre-provisioned writable storage is required: ${STORAGE_BASE}" >&2
@@ -41,7 +45,7 @@ STORAGE_BASE="${PBS_TEST_STORAGE_ROOT:-/storage/gitlab-runner}"
 WORK_ROOT="$(mktemp -d "${STORAGE_BASE}/k3d-pbs-${ENGINE}-${RUN_TOKEN}.XXXXXX")"
 LOGS_ROOT="${WORK_ROOT}/emulation_logs"
 BITCOIN_DATADIR="${WORK_ROOT}/bitcoin-regtest-data"
-CLUSTER_NAME="${CLUSTER_NAME:-cj-${ENGINE}-pbs-${RESOURCE_ID}}"
+CLUSTER_NAME="${CLUSTER_NAME:-cj-${ENGINE_CLUSTER_ID}-pbs-${RESOURCE_ID}}"
 NAMESPACE="${NAMESPACE:-cj-${ENGINE}-pbs-$$}"
 PBS_CONTAINER_NAME="${PBS_CONTAINER_NAME:-pbs-${ENGINE}-itest-${RESOURCE_ID}}"
 HOST_KUBECONFIG="${WORK_ROOT}/kubeconfig-host.yaml"
