@@ -6,7 +6,17 @@ import unittest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TEXT_SUFFIXES = {".md", ".py", ".sh", ".yaml", ".yml", ".toml", ".json"}
-GENERATED_DIRS = {"build", ".venv", ".pytest_cache", ".mypy_cache", ".ruff_cache", "__pycache__"}
+GENERATED_DIRS = {
+    "build",
+    ".venv",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "__pycache__",
+    "coinjoin-runs",
+    "emulation_logs",
+    "gitlab-test-results",
+}
 FORBIDDEN = (
     "../bitcoinAnalysis",
     "../blocksciEmulatorAnalysis",
@@ -28,8 +38,6 @@ class RepositoryIndependenceTests(unittest.TestCase):
                 or ".git" in path.parts
                 or any(part in GENERATED_DIRS for part in path.parts)
                 or path.name == "MIGRATION.md"
-                or "coinjoin-runs" in path.parts
-                or "gitlab-test-results" in path.parts
             ):
                 continue
             content = path.read_text(encoding="utf-8", errors="replace")

@@ -116,12 +116,14 @@ try:
         blocksci_export_pbs_command,
         blocksci_pbs_command,
         coinjoin_analysis_pbs_command,
+        qdel_pbs_stage,
         submit_blocksci_pbs,
         submit_blocksci_s3_pbs,
         submit_coinjoin_analysis_pbs,
         submit_coinjoin_analysis_s3_pbs,
         submit_mappings_pbs,
         wait_for_pbs_marker,
+        walltime_to_seconds,
     )
     from client.pbs import (
         DEFAULT_COINJOIN_ANALYSIS_IMAGE as DEFAULT_PBS_COINJOIN_ANALYSIS_IMAGE,
@@ -145,12 +147,14 @@ except ImportError:
         blocksci_export_pbs_command,
         blocksci_pbs_command,
         coinjoin_analysis_pbs_command,
+        qdel_pbs_stage,
         submit_blocksci_pbs,
         submit_blocksci_s3_pbs,
         submit_coinjoin_analysis_pbs,
         submit_coinjoin_analysis_s3_pbs,
         submit_mappings_pbs,
         wait_for_pbs_marker,
+        walltime_to_seconds,
     )
     from pbs import (  # type: ignore[no-redef]
         DEFAULT_COINJOIN_ANALYSIS_IMAGE as DEFAULT_PBS_COINJOIN_ANALYSIS_IMAGE,
@@ -1392,8 +1396,12 @@ PBSResource = TypeVar("PBSResource", int, str)
 
 
 def resolve_pbs_resource(args: argparse.Namespace, name: str, default: PBSResource) -> PBSResource:
-    value = getattr(args, name)
+    value = getattr(args, name, None)
     return default if value is None else cast(PBSResource, value)
+
+
+def pbs_wait_timeout(walltime: str) -> int:
+    return walltime_to_seconds(walltime) + 60 * 60
 
 
 def run_blocksci_pbs_stage(
@@ -1432,6 +1440,7 @@ def run_blocksci_pbs_stage(
         include_report=include_report,
         blocksci_script=staged_script,
     )
+    walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME)
     submit_blocksci_pbs(
         run_dir=run_dir,
         logs_root=Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve(),
@@ -1442,11 +1451,11 @@ def run_blocksci_pbs_stage(
         ncpus=resolve_pbs_resource(args, "pbs_ncpus", DEFAULT_BLOCKSCI_NCPUS),
         mem=resolve_pbs_resource(args, "pbs_mem", DEFAULT_BLOCKSCI_MEM),
         scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_BLOCKSCI_SCRATCH),
-        walltime=resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME),
+        walltime=walltime,
         dry_run=args.dry_run,
     )
     if wait and not args.dry_run:
-        wait_for_pbs_marker(run_dir, "blocksci")
+        wait_for_pbs_marker(run_dir, "blocksci", timeout_seconds=pbs_wait_timeout(walltime))
 
 
 def run_coinjoin_analysis_pbs_stage(
@@ -1462,6 +1471,7 @@ def run_coinjoin_analysis_pbs_stage(
         raise PBSError(f"analyze_only requires an existing baseline: {baseline_path}")
     image = resolve_pbs_image(args, DEFAULT_PBS_COINJOIN_ANALYSIS_IMAGE, "pbs_coinjoin_analysis_image")
     command = coinjoin_analysis_pbs_command(analysis_action)
+    walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME)
     submit_coinjoin_analysis_pbs(
         run_dir=run_dir,
         output_dir=run_dir / "coinjoin-analysis_data",
@@ -1471,17 +1481,18 @@ def run_coinjoin_analysis_pbs_stage(
         ncpus=resolve_pbs_resource(args, "pbs_ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS),
         mem=resolve_pbs_resource(args, "pbs_mem", DEFAULT_COINJOIN_ANALYSIS_MEM),
         scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH),
-        walltime=resolve_pbs_resource(args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME),
+        walltime=walltime,
         dry_run=args.dry_run,
     )
     if wait and not args.dry_run:
-        wait_for_pbs_marker(run_dir, "coinjoin-analysis")
+        wait_for_pbs_marker(run_dir, "coinjoin-analysis", timeout_seconds=pbs_wait_timeout(walltime))
 
 
 def run_mappings_pbs_stage(args: argparse.Namespace, run_dir: Path) -> None:
     """Run both Wasabi mapping tools in one PBS allocation."""
     if args.engine != "wasabi" or args.coinjoin_type != "wasabi2":
         raise PBSError("CoinJoin mappings are supported only for Wasabi/wasabi2 runs")
+    walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME)
     submit_mappings_pbs(
         run_dir,
         args.pbs_mappings_enumerator_image,
@@ -1496,11 +1507,11 @@ def run_mappings_pbs_stage(args: argparse.Namespace, run_dir: Path) -> None:
         ncpus=resolve_pbs_resource(args, "pbs_ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS),
         mem=resolve_pbs_resource(args, "pbs_mem", DEFAULT_COINJOIN_ANALYSIS_MEM),
         scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH),
-        walltime=resolve_pbs_resource(args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME),
+        walltime=walltime,
         dry_run=args.dry_run,
     )
     if not args.dry_run:
-        wait_for_pbs_marker(run_dir, "coinjoin-mappings")
+        wait_for_pbs_marker(run_dir, "coinjoin-mappings", timeout_seconds=pbs_wait_timeout(walltime))
 
 
 def run_blocksci_export_pbs_stage(args: argparse.Namespace, run_dir: Path) -> None:
@@ -1518,6 +1529,7 @@ def run_blocksci_export_pbs_stage(args: argparse.Namespace, run_dir: Path) -> No
         joinmarket_max_depth=args.joinmarket_max_depth,
         test_values=args.test_values,
     )
+    walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME)
     submit_blocksci_pbs(
         run_dir=run_dir,
         logs_root=Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve(),
@@ -1528,28 +1540,35 @@ def run_blocksci_export_pbs_stage(args: argparse.Namespace, run_dir: Path) -> No
         ncpus=resolve_pbs_resource(args, "pbs_ncpus", DEFAULT_BLOCKSCI_NCPUS),
         mem=resolve_pbs_resource(args, "pbs_mem", DEFAULT_BLOCKSCI_MEM),
         scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_BLOCKSCI_SCRATCH),
-        walltime=resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME),
+        walltime=walltime,
         dry_run=args.dry_run,
         stage="unified-report",
         job_name="blocksci_unified_report",
     )
     if not args.dry_run:
-        wait_for_pbs_marker(run_dir, "unified-report")
+        wait_for_pbs_marker(run_dir, "unified-report", timeout_seconds=pbs_wait_timeout(walltime))
 
 
 def run_parallel_analysis(args: argparse.Namespace, run_dir: Path, logs_root: Path) -> None:
     """Launch both analyzers independently, join them, then export once."""
     failures: dict[str, BaseException] = {}
     futures: dict[concurrent.futures.Future[None], str] = {}
+    pbs_futures: dict[concurrent.futures.Future[None], str] = {}
 
     with captured_pipeline_stage(logs_root, "Parallel analysis", run_dir):
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             if getattr(args, "analysisPbs", False):
                 try:
                     run_coinjoin_analysis_pbs_stage(args, run_dir, wait=False)
-                    futures[executor.submit(wait_for_pbs_marker, run_dir, "coinjoin-analysis")] = (
-                        "coinjoin-analysis (PBS)"
+                    walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME)
+                    future = executor.submit(
+                        wait_for_pbs_marker,
+                        run_dir,
+                        "coinjoin-analysis",
+                        timeout_seconds=pbs_wait_timeout(walltime),
                     )
+                    futures[future] = "coinjoin-analysis (PBS)"
+                    pbs_futures[future] = "coinjoin-analysis"
                 except Exception as error:
                     failures["coinjoin-analysis (PBS)"] = error
             else:
@@ -1560,7 +1579,15 @@ def run_parallel_analysis(args: argparse.Namespace, run_dir: Path, logs_root: Pa
             if getattr(args, "blocksciPbs", False):
                 try:
                     run_blocksci_pbs_stage(args, run_dir, wait=False, include_report=False)
-                    futures[executor.submit(wait_for_pbs_marker, run_dir, "blocksci")] = "BlockSci (PBS)"
+                    walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME)
+                    future = executor.submit(
+                        wait_for_pbs_marker,
+                        run_dir,
+                        "blocksci",
+                        timeout_seconds=pbs_wait_timeout(walltime),
+                    )
+                    futures[future] = "BlockSci (PBS)"
+                    pbs_futures[future] = "blocksci"
                 except Exception as error:
                     failures["BlockSci (PBS)"] = error
             else:
@@ -1573,17 +1600,22 @@ def run_parallel_analysis(args: argparse.Namespace, run_dir: Path, logs_root: Pa
             )
             if baseline_future is not None and getattr(args, "mappingsPbs", False):
                 baseline_name = futures.pop(baseline_future)
+                pbs_futures.pop(baseline_future, None)
                 try:
                     baseline_future.result()
                     futures[executor.submit(run_mappings_pbs_stage, args, run_dir)] = "CoinJoin mappings (PBS)"
                 except Exception as error:
                     failures[baseline_name] = error
 
-            for future, stage_name in futures.items():
+            for future in concurrent.futures.as_completed(futures):
+                stage_name = futures[future]
                 try:
                     future.result()
                 except Exception as error:
                     failures[stage_name] = error
+                    for other_future, pbs_stage in pbs_futures.items():
+                        if other_future is not future and not other_future.done():
+                            qdel_pbs_stage(run_dir, pbs_stage)
 
         if failures:
             details = "; ".join(f"{stage}: {error}" for stage, error in failures.items())

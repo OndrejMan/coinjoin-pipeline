@@ -123,6 +123,34 @@ inject_kubernetes_client_failure() {
   touch "${WORK_ROOT}/client-failure-injected"
 }
 
+copy_analysis_artifacts() {
+  [[ -n "${RESULT_DIR}" && -d "${LOGS_ROOT}" ]] || return 0
+  local run_dir=""
+  local report_json=""
+  local baseline_json=""
+
+  report_json="$(find "${LOGS_ROOT}" -mindepth 3 -maxdepth 3 -type f \
+    -path '*/blocksciEmulatorAnalysis_data/unified_report.json' -print 2>/dev/null | sort | tail -n 1)"
+  if [[ -n "${report_json}" ]]; then
+    run_dir="${report_json%/blocksciEmulatorAnalysis_data/unified_report.json}"
+  else
+    baseline_json="$(find "${LOGS_ROOT}" -mindepth 3 -maxdepth 3 -type f \
+      -path '*/coinjoin-analysis_data/coinjoin_tx_info.json' -print 2>/dev/null | sort | tail -n 1)"
+    if [[ -n "${baseline_json}" ]]; then
+      run_dir="${baseline_json%/coinjoin-analysis_data/coinjoin_tx_info.json}"
+    fi
+  fi
+
+  [[ -n "${run_dir}" ]] || return 0
+  mkdir -p "${RESULT_DIR}/${ENGINE}"
+  [[ -s "${run_dir}/blocksciEmulatorAnalysis_data/unified_report.json" ]] \
+    && cp "${run_dir}/blocksciEmulatorAnalysis_data/unified_report.json" "${RESULT_DIR}/${ENGINE}/"
+  [[ -s "${run_dir}/blocksciEmulatorAnalysis_data/unified_report.md" ]] \
+    && cp "${run_dir}/blocksciEmulatorAnalysis_data/unified_report.md" "${RESULT_DIR}/${ENGINE}/"
+  [[ -s "${run_dir}/coinjoin-analysis_data/coinjoin_tx_info.json" ]] \
+    && cp "${run_dir}/coinjoin-analysis_data/coinjoin_tx_info.json" "${RESULT_DIR}/${ENGINE}/"
+}
+
 cleanup() {
   local status=$?
   trap - EXIT
@@ -137,6 +165,7 @@ cleanup() {
     mkdir -p "${RESULT_DIR}/${ENGINE}/pbs-logs"
     find "${WORK_ROOT}" -type f \( -name '*.o[0-9]*' -o -name '*.e[0-9]*' \) \
       -exec cp -t "${RESULT_DIR}/${ENGINE}/pbs-logs" {} + 2>/dev/null || true
+    copy_analysis_artifacts || true
     if [[ -s "${KUBERNETES_DIAGNOSTICS_FILE}" ]]; then
       mkdir -p "${RESULT_DIR}/${ENGINE}/kubernetes-diagnostics"
       cp "${KUBERNETES_DIAGNOSTICS_FILE}" \

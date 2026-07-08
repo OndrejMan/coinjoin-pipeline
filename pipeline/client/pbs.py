@@ -47,10 +47,29 @@ DEFAULT_MAPPINGS_ENUMERATOR_IMAGE = "docker://ghcr.io/ondrejman/coinjoin-mapping
 DEFAULT_SAKE_IMAGE = "docker://ghcr.io/ondrejman/coinjoin-mappings-sake:latest"
 
 POLL_INTERVAL_SECONDS = 30
+PBS_TERMINAL_STATES = {"C", "F"}
+PBS_ACTIVE_STATES = {"B", "E", "H", "M", "Q", "R", "S", "T", "U", "W"}
+PBS_QUEUE_MARGIN_SECONDS = 60 * 60
 
 
 class PBSError(RuntimeError):
     """Raised when PBS submission or execution fails."""
+
+
+def walltime_to_seconds(walltime: str) -> int:
+    """Convert PBS walltime (HH:MM:SS or DD:HH:MM:SS) to seconds."""
+    parts = walltime.split(":")
+    if len(parts) == 3:
+        days = 0
+        hours, minutes, seconds = parts
+    elif len(parts) == 4:
+        days, hours, minutes, seconds = parts
+    else:
+        raise PBSError(f"Unsupported PBS walltime format: {walltime}")
+    try:
+        return (((int(days) * 24) + int(hours)) * 60 + int(minutes)) * 60 + int(seconds)
+    except ValueError as error:
+        raise PBSError(f"Unsupported PBS walltime format: {walltime}") from error
 
 
 def require_qsub() -> None:
@@ -191,6 +210,60 @@ def submit_pbs(script_path: Path, dependency_job_id: str | None = None) -> str:
     if result.returncode != 0:
         raise PBSError(f"qsub failed (exit {result.returncode}): {result.stderr.strip()}")
     return result.stdout.strip()
+
+
+def persist_pbs_job_id(run_dir: Path, stage: str, job_id: str) -> None:
+    marker_dir = run_dir / ".pbs"
+    marker_dir.mkdir(parents=True, exist_ok=True)
+    (marker_dir / f"{stage}.jobid").write_text(f"{job_id}\n", encoding="utf-8")
+
+
+def _read_pbs_job_id(run_dir: Path, stage: str) -> str | None:
+    jobid_path = run_dir / ".pbs" / f"{stage}.jobid"
+    if not jobid_path.is_file():
+        return None
+    job_id = jobid_path.read_text(encoding="utf-8").strip()
+    return job_id or None
+
+
+def _qstat_job_state(job_id: str) -> str | None:
+    if shutil.which("qstat") is None:
+        return None
+    result = subprocess.run(
+        ["qstat", "-x", "-f", job_id],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        return "MISSING"
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("job_state ="):
+            return line.split("=", 1)[1].strip()
+    return None
+
+
+def qdel_pbs_job(job_id: str) -> None:
+    if shutil.which("qdel") is None:
+        print(f"[pbs] qdel unavailable; cannot cancel PBS job {job_id}")
+        return
+    result = subprocess.run(
+        ["qdel", job_id],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        print(f"[pbs] qdel {job_id} failed (exit {result.returncode}): {result.stderr.strip()}")
+
+
+def qdel_pbs_stage(run_dir: Path, stage: str) -> None:
+    job_id = _read_pbs_job_id(run_dir, stage)
+    if job_id:
+        qdel_pbs_job(job_id)
 
 
 def _s3_values(
@@ -365,16 +438,33 @@ def submit_blocksci_s3_pbs(
     return _submit_s3_script(script, "blocksci", dry_run, dependency_job_id)
 
 
-def wait_for_pbs_marker(run_dir: Path, stage: str, poll_interval: int = POLL_INTERVAL_SECONDS) -> None:
-    """Block until the PBS stage writes a ``.done`` or ``.failed`` marker."""
+def wait_for_pbs_marker(
+    run_dir: Path,
+    stage: str,
+    poll_interval: int = POLL_INTERVAL_SECONDS,
+    *,
+    job_id: str | None = None,
+    timeout_seconds: int | None = None,
+) -> None:
+    """Block until the PBS stage writes a marker, with qstat and deadline fallbacks."""
     done = run_dir / ".pbs" / f"{stage}.done"
     failed = run_dir / ".pbs" / f"{stage}.failed"
+    job_id = job_id or _read_pbs_job_id(run_dir, stage)
+    deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
 
     while True:
         if failed.exists():
             raise PBSError(f"PBS stage failed: {stage}")
         if done.exists():
             return
+        if deadline is not None and time.monotonic() >= deadline:
+            raise PBSError(f"Timed out waiting for PBS stage marker: {stage}")
+        if job_id:
+            state = _qstat_job_state(job_id)
+            if state in PBS_TERMINAL_STATES or state == "MISSING":
+                raise PBSError(f"PBS stage ended without marker: {stage} (job {job_id}, state {state})")
+            if state is not None and state not in PBS_ACTIVE_STATES:
+                raise PBSError(f"PBS stage has unexpected qstat state: {stage} (job {job_id}, state {state})")
         time.sleep(poll_interval)
 
 
@@ -401,6 +491,7 @@ def submit_blocksci_pbs(
     require_storage_path(exporters_dir)
     require_existing_path(exporters_dir, "PBS exporters directory")
     require_bitcoin_datadir(bitcoin_datadir)
+    (run_dir / "logs").mkdir(parents=True, exist_ok=True)
     script = render_blocksci_pbs(
         run_dir,
         logs_root,
@@ -423,6 +514,7 @@ def submit_blocksci_pbs(
         return None
     require_qsub()
     job_id = submit_pbs(script_path)
+    persist_pbs_job_id(run_dir, stage, job_id)
     print(f"[pbs] Submitted {stage} PBS job: {job_id}")
     return job_id
 
@@ -445,6 +537,7 @@ def submit_coinjoin_analysis_pbs(
     require_storage_path(output_dir)
     require_storage_path(input_data_dir)
     require_existing_path(input_data_dir, "PBS coinjoin-analysis input data directory")
+    (run_dir / "logs").mkdir(parents=True, exist_ok=True)
     script = render_coinjoin_analysis_pbs(
         run_dir,
         output_dir,
@@ -464,6 +557,7 @@ def submit_coinjoin_analysis_pbs(
         return None
     require_qsub()
     job_id = submit_pbs(script_path)
+    persist_pbs_job_id(run_dir, "coinjoin-analysis", job_id)
     print(f"[pbs] Submitted coinjoin-analysis PBS job: {job_id}")
     return job_id
 
@@ -488,6 +582,7 @@ def submit_mappings_pbs(
 ) -> str | None:
     require_storage_path(run_dir)
     require_existing_path(run_dir / "coinjoin-analysis_data" / "coinjoin_tx_info.json", "CoinJoin mappings input")
+    (run_dir / "logs").mkdir(parents=True, exist_ok=True)
     script = render_mappings_pbs(
         run_dir,
         enumerator_image,
@@ -512,6 +607,7 @@ def submit_mappings_pbs(
         return None
     require_qsub()
     job_id = submit_pbs(script_path)
+    persist_pbs_job_id(run_dir, "coinjoin-mappings", job_id)
     print(f"[pbs] Submitted coinjoin-mappings PBS job: {job_id}")
     return job_id
 

@@ -12,21 +12,28 @@ S3_CREDENTIALS_FILE={credentials_file}
 S3_PROFILE={profile}
 IMAGE={image}
 test -n "${{SCRATCHDIR:-}}" || {{ echo "SCRATCHDIR is not set" >&2; exit 1; }}
-test -r "$S3_CREDENTIALS_FILE" || {{ echo "S3 credentials file is not readable: $S3_CREDENTIALS_FILE" >&2; exit 1; }}
-{s5cmd_check}
-export TMPDIR="$SCRATCHDIR" SINGULARITY_CACHEDIR="$SCRATCHDIR" SINGULARITY_TMPDIR="$SCRATCHDIR" SINGULARITY_LOCALCACHEDIR="$SCRATCHDIR"
 RUNS_ROOT="$SCRATCHDIR/coinjoin-run"
 RUN_WORK="$SCRATCHDIR/coinjoin-run/$RUN_ID"
 mkdir -p "$RUN_WORK/.pbs" "$RUN_WORK/logs"
 FAILED_MARKER="$RUN_WORK/.pbs/blocksci.failed"
 DONE_MARKER="$RUN_WORK/.pbs/blocksci.done"
-upload_failed() {{
+on_exit() {{
   status=$?
-  printf 'failed\n' > "$FAILED_MARKER"
-  {upload_failed}
+  trap - EXIT TERM
+  if [ "$status" -eq 0 ]; then
+    printf 'done\n' > "$DONE_MARKER"
+    {upload_done}
+  else
+    printf 'failed\n' > "$FAILED_MARKER"
+    {upload_failed}
+  fi
   exit "$status"
 }}
-trap upload_failed ERR
+trap on_exit EXIT
+trap 'exit 143' TERM
+test -r "$S3_CREDENTIALS_FILE" || {{ echo "S3 credentials file is not readable: $S3_CREDENTIALS_FILE" >&2; exit 1; }}
+{s5cmd_check}
+export TMPDIR="$SCRATCHDIR" SINGULARITY_CACHEDIR="$SCRATCHDIR" SINGULARITY_TMPDIR="$SCRATCHDIR" SINGULARITY_LOCALCACHEDIR="$SCRATCHDIR"
 {download_run}
 test -d "$RUN_WORK/bitcoin_data/regtest/blocks"
 test -d "$RUN_WORK/.pipeline/exporters"
@@ -45,6 +52,3 @@ singularity exec \
 {upload_blocksci}
 {upload_report}
 {upload_logs}
-printf 'done\n' > "$DONE_MARKER"
-{upload_done}
-trap - ERR
