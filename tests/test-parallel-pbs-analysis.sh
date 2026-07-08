@@ -219,6 +219,15 @@ fi
 RUN_DIR="$(find "${LOGS_ROOT}" -mindepth 1 -maxdepth 1 -type d \
   -exec test -s '{}/blocksciEmulatorAnalysis_data/unified_report.json' \; -print | sort | tail -n 1)"
 [[ -n "${RUN_DIR}" ]] || { echo "FAIL: no completed report under ${LOGS_ROOT}" >&2; exit 1; }
+
+# Copy the reports before the semantic assertions so a failed run still
+# leaves the evidence needed to debug detector misses.
+if [[ -n "${RESULT_DIR}" ]]; then
+  mkdir -p "${RESULT_DIR}/${ENGINE}"
+  cp "${RUN_DIR}/blocksciEmulatorAnalysis_data/unified_report.json" "${RESULT_DIR}/${ENGINE}/" || true
+  cp "${RUN_DIR}/blocksciEmulatorAnalysis_data/unified_report.md" "${RESULT_DIR}/${ENGINE}/" 2>/dev/null || true
+  cp "${RUN_DIR}/coinjoin-analysis_data/coinjoin_tx_info.json" "${RESULT_DIR}/${ENGINE}/" 2>/dev/null || true
+fi
 [[ -s "${BITCOIN_DATADIR}/regtest/blocks/blk00000.dat" ]] || {
   echo "FAIL: Kubernetes did not write the directly mounted Bitcoin datadir" >&2
   exit 1
@@ -254,10 +263,3 @@ print(
     f"baseline={len(baseline)}, blocksci={summary['blocksci_detected_coinjoins']}"
 )
 PY
-
-if [[ -n "${RESULT_DIR}" ]]; then
-  mkdir -p "${RESULT_DIR}/${ENGINE}"
-  cp "${RUN_DIR}/blocksciEmulatorAnalysis_data/unified_report.json" "${RESULT_DIR}/${ENGINE}/"
-  cp "${RUN_DIR}/blocksciEmulatorAnalysis_data/unified_report.md" "${RESULT_DIR}/${ENGINE}/"
-  cp "${RUN_DIR}/coinjoin-analysis_data/coinjoin_tx_info.json" "${RESULT_DIR}/${ENGINE}/"
-fi

@@ -340,7 +340,16 @@ jobs:
           EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-parallel-pbs-logs
           PBS_TEST_STORAGE_ROOT: /storage/github-runner
           KUBERNETES_PBS_TIMEOUT: 85m
+          TEST_RESULT_DIR: ${{ github.workspace }}/gitlab-test-results
         run: ./tests/test-parallel-pbs-analysis.sh all
+
+      - name: Upload parallel PBS artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubernetes-pbs-parallel-results
+          path: gitlab-test-results/
+          retention-days: 14
 
   publish-pipeline-image:
     needs:

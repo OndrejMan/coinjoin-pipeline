@@ -231,7 +231,7 @@
   "default_redcoin_isolation": null,
   "backend": {
     "MaxInputCountByRound": 100,
-    "MinInputCountByRoundMultiplier": 0.02,
+    "MinInputCountByRoundMultiplier": 0.12,
     "StandardInputRegistrationTimeout": "0d 0h 6m 0s",
     "ConnectionConfirmationTimeout": "0d 0h 1m 30s",
     "OutputRegistrationTimeout": "0d 0h 1m 30s",
