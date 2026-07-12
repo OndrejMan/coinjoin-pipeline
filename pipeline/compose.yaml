@@ -6,6 +6,7 @@ services:
       pull_policy: always
       container_name: isolated_docker_daemon
       privileged: true # REQUIRED for a container to run its own Docker daemon
+      command: ["--tls=false"]
       environment:
         - DOCKER_TLS_CERTDIR= # Disables TLS for easier local networking
       volumes:
@@ -15,6 +16,7 @@ services:
         - dind_cache:/var/lib/docker
       healthcheck:
         test: ["CMD", "docker", "-H", "tcp://127.0.0.1:2375", "info"]
+        start_period: 20s
         interval: 2s
         timeout: 5s
         retries: 10
