@@ -507,6 +507,34 @@ def newest_run_dir(emulation_logs_dir: Path) -> Path | None:
     return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
+def pipeline_run_id_env() -> str:
+    """Run id the host CLI chose for this emulation, forwarded via PIPELINE_RUN_ID."""
+    run_id_value = os.environ.get("PIPELINE_RUN_ID", "")
+    if not run_id_value:
+        return ""
+    try:
+        return validate_run_id(run_id_value)
+    except ValueError as error:
+        print(f"[WARN] Ignoring invalid PIPELINE_RUN_ID: {error}", file=sys.stderr)
+        return ""
+
+
+def detect_active_run(emulation_logs_dir: Path, before: set[Path]) -> Path | None:
+    """Locate the run directory produced by the emulation that just finished.
+
+    When the host CLI pinned the run id, only that directory counts; a stale
+    older run must not be silently analyzed in its place.
+    """
+    expected_run_id = pipeline_run_id_env()
+    if expected_run_id:
+        run_dir = (emulation_logs_dir / expected_run_id).resolve()
+        return run_dir if is_run_dir(run_dir) else None
+    created = sorted(run_dirs(emulation_logs_dir) - before, key=lambda path: path.stat().st_mtime)
+    if created:
+        return created[-1]
+    return newest_run_dir(emulation_logs_dir)
+
+
 def resolve_run_id(run_dir_arg: str | None, env: dict[str, str]) -> str | None:
     emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
     if run_dir_arg:
@@ -874,6 +902,9 @@ def kubernetes_emulator_command(
         control_ip,
         "--btc-node-arg=-blocksxor=0",
     ]
+    pinned_run_id = pipeline_run_id_env()
+    if pinned_run_id:
+        command.extend(["--run-id", pinned_run_id])
     if engine == "joinmarket":
         command.append("--joinmarket-descriptor-regtest-fallback")
     if copy_to_host:
@@ -2078,11 +2109,14 @@ def main() -> None:
                     kubernetes_btc_datadir=args.kubernetes_btc_datadir,
                     copy_to_host=args.copy_to_host,
                 )
-            created = sorted(run_dirs(logs_root) - before, key=lambda path: path.stat().st_mtime)
-            if created:
-                stage_log.relocate_to_run(created[-1])
+            active_run = detect_active_run(logs_root, before)
+            if active_run is not None:
+                stage_log.relocate_to_run(active_run)
             else:
                 stage_log.relocate(logs_root / "_failed")
+                if pipeline_run_id_env():
+                    print("[ERROR] Emulator did not produce the expected run directory.", file=sys.stderr)
+                    sys.exit(2)
         else:
             with captured_pipeline_stage(logs_root, "Docker emulation") as stage_log:
                 env = compose_env(engine=args.engine)
@@ -2094,14 +2128,15 @@ def main() -> None:
                     engine=args.engine,
                     run_timezone_name=args.run_timezone,
                 )
-                after = run_dirs(emulation_logs_dir)
-                created = sorted(after - before, key=lambda path: path.stat().st_mtime)
-                latest = created[-1] if created else newest_run_dir(emulation_logs_dir)
+                latest = detect_active_run(emulation_logs_dir, before)
                 if latest:
                     print(f"Active run: {latest.name}")
                     stage_log.relocate_to_run(latest)
                 else:
                     stage_log.relocate(logs_root / "_failed")
+                    if pipeline_run_id_env():
+                        print("[ERROR] Emulator did not produce the expected run directory.", file=sys.stderr)
+                        sys.exit(2)
     elif args.action == "clean":
         with captured_pipeline_stage(logs_root, "Clean containers and volumes", logs_root / "_maintenance"):
             run_script(DELETE_SCRIPT)
@@ -2219,9 +2254,7 @@ def main() -> None:
                     copy_to_host=args.copy_to_host,
                     prepare_local_analysis=not getattr(args, "blocksciPbs", False),
                 )
-            after = run_dirs(emulation_logs_dir)
-            created = sorted(after - before, key=lambda path: path.stat().st_mtime)
-            active_run = created[-1] if created else newest_run_dir(emulation_logs_dir)
+            active_run = detect_active_run(emulation_logs_dir, before)
             if active_run is None:
                 emulation_log.relocate(logs_root / "_failed")
                 print("[ERROR] Emulator completed without creating a run directory.", file=sys.stderr)
@@ -2248,9 +2281,7 @@ def main() -> None:
                     engine=args.engine,
                     run_timezone_name=args.run_timezone,
                 )
-            after = run_dirs(emulation_logs_dir)
-            created = sorted(after - before, key=lambda path: path.stat().st_mtime)
-            active_run = created[-1] if created else newest_run_dir(emulation_logs_dir)
+            active_run = detect_active_run(emulation_logs_dir, before)
             if active_run is None:
                 emulation_log.relocate(logs_root / "_failed")
                 print("[ERROR] Emulator completed without creating a run directory.", file=sys.stderr)

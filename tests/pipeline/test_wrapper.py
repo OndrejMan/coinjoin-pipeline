@@ -651,6 +651,39 @@ class WrapperExportTest(unittest.TestCase):
 
         self.assertEqual(found, {"grouped-run"})
 
+    def test_detect_active_run_requires_pinned_run_dir(self):
+        from client.wrapper import detect_active_run
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            stale_run = root / "2026-07-09_09-07_default-joinmarket"
+            (stale_run / "coinjoin_emulator_data").mkdir(parents=True)
+            (stale_run / "coinjoin_emulator_data" / "scenario.json").write_text("{}", encoding="utf-8")
+            pinned = root / "2026-07-12_22-37_default-joinmarket"
+            pinned.mkdir()
+            (pinned / "research_manifest.json").write_text("{}", encoding="utf-8")
+
+            with mock.patch.dict(os.environ, {"PIPELINE_RUN_ID": pinned.name}):
+                # The emulator never stored artifacts: the stale run must not win.
+                self.assertIsNone(detect_active_run(root, set()))
+
+                (pinned / "coinjoin_emulator_data").mkdir()
+                (pinned / "coinjoin_emulator_data" / "scenario.json").write_text("{}", encoding="utf-8")
+                self.assertEqual(detect_active_run(root, set()), pinned.resolve())
+
+    def test_detect_active_run_falls_back_without_pinned_id(self):
+        from client.wrapper import detect_active_run
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            run = root / "2026-07-12_22-37_default-joinmarket"
+            (run / "coinjoin_emulator_data").mkdir(parents=True)
+            (run / "coinjoin_emulator_data" / "scenario.json").write_text("{}", encoding="utf-8")
+
+            environment = {key: value for key, value in os.environ.items() if key != "PIPELINE_RUN_ID"}
+            with mock.patch.dict(os.environ, environment, clear=True):
+                self.assertEqual(detect_active_run(root, set()), run.resolve())
+
     def test_run_coinjoin_analysis_targets_requested_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -951,6 +984,7 @@ class WrapperExportTest(unittest.TestCase):
 
         self.assertIn(
             "python manager.py --engine ${COINJOIN_ENGINE:-wasabi} --run-timezone \\\"$${RUN_TIMEZONE}\\\" run "
+            "$${PIPELINE_RUN_ID:+--run-id \\\"$${PIPELINE_RUN_ID}\\\"} "
             "--joinmarket-descriptor-regtest-fallback",
             compose_yaml,
         )

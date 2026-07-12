@@ -23,6 +23,7 @@ from coinjoin_pipeline.manifest import atomic_write
 from coinjoin_pipeline.builder import Command, parse_command, render_command
 from coinjoin_pipeline.pipeline_image import Configuration, runtime_command
 from coinjoin_pipeline.host import required_image_components
+from coinjoin_pipeline.runs import manifest_target, run_id_for, valid_run_id
 
 
 class CliTests(unittest.TestCase):
@@ -51,6 +52,25 @@ class CliTests(unittest.TestCase):
         self.assertEqual(args, ["full-run", "--engine", "joinmarket"])
         self.assertEqual(host["version"], "v1")
         self.assertEqual(host["runtime"], "podman")
+
+    def test_full_run_manifest_uses_precomputed_run_id(self) -> None:
+        target = manifest_target(
+            "full-run",
+            ["full-run", "--engine", "joinmarket"],
+            Path("/runs"),
+            "2026-07-12_12-00_default-joinmarket",
+        )
+        self.assertEqual(
+            target,
+            Path("/runs/2026-07-12_12-00_default-joinmarket/research_manifest.json"),
+        )
+
+    def test_run_id_validation_matches_emulator_rules(self) -> None:
+        self.assertTrue(valid_run_id(run_id_for(["full-run", "--engine", "joinmarket"])))
+        self.assertTrue(valid_run_id("2026-07-12_22-37_default-joinmarket"))
+        self.assertFalse(valid_run_id("-leading-dash"))
+        self.assertFalse(valid_run_id("a/../b"))
+        self.assertFalse(valid_run_id("x" * 64))
 
     def test_stage_actions_require_explicit_run(self) -> None:
         self.assertEqual(action_from(["analyze", "--engine", "joinmarket"]), "analyze")

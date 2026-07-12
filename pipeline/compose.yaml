@@ -96,6 +96,7 @@ services:
       - DOCKER_HOST=tcp://dind:2375
       - PYTHONUNBUFFERED=1
       - RUN_TIMEZONE=${RUN_TIMEZONE:-Europe/Prague}
+      - PIPELINE_RUN_ID=${PIPELINE_RUN_ID:-}
     depends_on:
       dind:
         condition: service_healthy
@@ -105,7 +106,7 @@ services:
           condition: service_completed_successfully
     command: >
           sh -c "python manager.py clean && 
-                python manager.py --engine ${COINJOIN_ENGINE:-wasabi} --run-timezone \"$${RUN_TIMEZONE}\" run --joinmarket-descriptor-regtest-fallback ${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:+--coinjoin-infrastructure-local-build} --control-ip dind --scenario ${SCENARIO_PATH:-/app/scenarios/overactive-local.json} --image-prefix ${COINJOIN_EMULATOR_IMAGE_PREFIX:-ghcr.io/ondrejman/} --btcFolder /home/bitcoin/data --btc-node-arg=-blocksxor=0 --download-btc-data /home/bitcoin/data"
+                python manager.py --engine ${COINJOIN_ENGINE:-wasabi} --run-timezone \"$${RUN_TIMEZONE}\" run $${PIPELINE_RUN_ID:+--run-id \"$${PIPELINE_RUN_ID}\"} --joinmarket-descriptor-regtest-fallback ${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:+--coinjoin-infrastructure-local-build} --control-ip dind --scenario ${SCENARIO_PATH:-/app/scenarios/overactive-local.json} --image-prefix ${COINJOIN_EMULATOR_IMAGE_PREFIX:-ghcr.io/ondrejman/} --btcFolder /home/bitcoin/data --btc-node-arg=-blocksxor=0 --download-btc-data /home/bitcoin/data"
 
   blocksci:
       profiles: ["analysis"]

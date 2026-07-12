@@ -9,7 +9,7 @@ import shlex
 import sys
 
 from . import MANIFEST_SCHEMA_VERSION, __version__
-from .commands import action_from, launcher_command, validate_passthrough
+from .commands import action_from, launcher_command, option_value, validate_passthrough
 from .doctor import check as doctor_check, validate_arguments
 from .host import (
     add_effective_image_arguments,
@@ -21,7 +21,7 @@ from .host import (
 from .images import DEFAULT_VERSION, IMAGE_NAMES, Images, resolve_images
 from .manifest import initial_manifest, mark_finished
 from .process import run
-from .runs import manifest_target, store_host_manifest
+from .runs import manifest_target, run_id_for, store_host_manifest, valid_run_id
 
 
 def fail(message: str, code: int = 2) -> int:
@@ -118,6 +118,12 @@ def main(argv: list[str] | None = None) -> int:
     launcher_resource = files("coinjoin_pipeline").joinpath("resources/container/launcher.sh")
     with as_file(launcher_resource) as launcher:
         command = launcher_command(launcher, runtime, passthrough, images, runs_root, reproduction)
+        pipeline_run_id: str | None = None
+        if action in {"full-run", "recreate"} and not option_value(passthrough, "--run-dir"):
+            candidate_run_id = run_id_for(passthrough)
+            if valid_run_id(candidate_run_id):
+                pipeline_run_id = candidate_run_id
+                command.environment["PIPELINE_RUN_ID"] = candidate_run_id
         source_root = Path(__file__).resolve().parents[2]
         local_wrapper_root = source_root / "pipeline"
         if os.environ.get("PBS_FRONTEND_DIRECT") == "1" and (local_wrapper_root / "client/wrapper.py").is_file():
@@ -140,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
         if "--dry-run" in passthrough and not stage_pbs_dry_run:
             print("[dry-run] validation passed; command was not executed")
             return 0
-        target = manifest_target(action, passthrough, runs_root)
+        target = manifest_target(action, passthrough, runs_root, pipeline_run_id)
         manifest = initial_manifest(
             action=action,
             requested_version=("local" if host["local_build"] else host.get("version") or DEFAULT_VERSION),
