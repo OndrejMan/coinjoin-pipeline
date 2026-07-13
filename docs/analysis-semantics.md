@@ -87,3 +87,27 @@ and are not interpolated into PBS directives or shell assignments.
 
 Stage command bodies are generated internally by the wrapper and remain the
 only deliberate shell fragments in the templates.
+
+## Run catalog report statuses
+
+`runs list` (`pipeline/client/run_catalog.py::report_status`) classifies each
+run's `unified_report/unified_report.json` into one of:
+
+- `missing` — no report file exists; the export stage has not run.
+- `invalid` — the report file exists but cannot be parsed as JSON.
+- `baseline_agreement_only` — external mode; the report compares BlockSci with
+  `coinjoin-analysis` only and intentionally has no ground-truth metrics.
+- `emulator_labels_unavailable` — emulator mode, but independent producer
+  labels could not be verified (missing/incomplete/hash-mismatched
+  `coinjoin_label_manifest.json`, unparseable sources, or unmatched producer
+  positives). `is_coinjoin` is `null` everywhere and no confusion matrix or
+  precision/recall is emitted; the reason is in
+  `emulator_data.label_provenance.unavailable_reason`.
+- `diagnostics_missing` — the report predates or omits
+  `integration_diagnostics`.
+- `diagnostics_not_ok` — integration diagnostics ran and found a problem.
+- `complete` — emulator ground truth was available and diagnostics passed.
+
+Runs made with an emulator image that predates the producer-label manifest
+always classify as `emulator_labels_unavailable` after re-export; regenerate
+them with a rebuilt emulator image if ground-truth metrics are needed.
