@@ -209,8 +209,14 @@ if grep -q -- "-e COINJOIN_EMULATOR_IRC_SERVER_IMAGE" "${DOCKER_LOG}"; then
   exit 1
 fi
 
-if ! grep -q -- "_ --engine wasabi --scenario scenarios/overactive-local.json --test-values" "${DOCKER_LOG}"; then
-  echo "FAIL: expected exact overactive-local scenario path and default test values to be forwarded" >&2
+if ! grep -q -- "_ --engine wasabi --scenario scenarios/overactive-local.json" "${DOCKER_LOG}"; then
+  echo "FAIL: expected exact overactive-local scenario path to be forwarded" >&2
+  echo "Observed: $(cat "${DOCKER_LOG}")" >&2
+  exit 1
+fi
+
+if grep -q -- "--test-values" "${DOCKER_LOG}"; then
+  echo "FAIL: BlockSci test values must require an explicit --test-values option" >&2
   echo "Observed: $(cat "${DOCKER_LOG}")" >&2
   exit 1
 fi

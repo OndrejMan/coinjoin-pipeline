@@ -59,18 +59,24 @@ class PBSError(RuntimeError):
 
 def walltime_to_seconds(walltime: str) -> int:
     """Convert PBS walltime (HH:MM:SS or DD:HH:MM:SS) to seconds."""
+    if not isinstance(walltime, str) or not re.fullmatch(r"[0-9]+(?::[0-9]+){2,3}", walltime):
+        raise PBSError(f"Unsupported PBS walltime format: {walltime}")
     parts = walltime.split(":")
     if len(parts) == 3:
-        days = 0
+        days = "0"
         hours, minutes, seconds = parts
     elif len(parts) == 4:
         days, hours, minutes, seconds = parts
     else:
         raise PBSError(f"Unsupported PBS walltime format: {walltime}")
-    try:
-        return (((int(days) * 24) + int(hours)) * 60 + int(minutes)) * 60 + int(seconds)
-    except ValueError as error:
-        raise PBSError(f"Unsupported PBS walltime format: {walltime}") from error
+    day_value, hour_value = int(days), int(hours)
+    minute_value, second_value = int(minutes), int(seconds)
+    if minute_value >= 60 or second_value >= 60 or (len(parts) == 4 and hour_value >= 24):
+        raise PBSError(f"Unsupported PBS walltime format: {walltime}")
+    total = (((day_value * 24) + hour_value) * 60 + minute_value) * 60 + second_value
+    if total <= 0:
+        raise PBSError("PBS walltime must be greater than zero")
+    return total
 
 
 def require_qsub() -> None:
@@ -82,11 +88,36 @@ def require_qsub() -> None:
 # Paths are rendered into PBS shell templates via str.format; restrict them to
 # characters that survive both PBS directives and unquoted shell contexts.
 SAFE_TEMPLATE_PATH_RE = re.compile(r"^[A-Za-z0-9/._+:@-]+$")
+SAFE_PBS_SIZE_RE = re.compile(r"^[1-9][0-9]*(?:b|kb|mb|gb|tb)$", re.IGNORECASE)
+SAFE_IMAGE_RE = re.compile(r"^[A-Za-z0-9/._+:@%=-]+$")
+SAFE_PBS_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 def require_safe_template_path(path: Path, description: str) -> None:
     if not SAFE_TEMPLATE_PATH_RE.fullmatch(str(path)):
         raise PBSError(f"{description} contains characters unsafe for PBS job templates: {path}")
+
+
+def require_safe_image(image: str, description: str = "container image") -> None:
+    """Reject shell metacharacters before interpolating an image into a PBS script."""
+    if not isinstance(image, str) or not image or not SAFE_IMAGE_RE.fullmatch(image):
+        raise PBSError(f"{description} contains characters unsafe for PBS job templates: {image}")
+
+
+def require_safe_pbs_resources(ncpus: int, mem: str, scratch: str, walltime: str) -> None:
+    """Validate values interpolated into ``#PBS -l`` directives."""
+    if isinstance(ncpus, bool) or not isinstance(ncpus, int) or ncpus <= 0:
+        raise PBSError("PBS ncpus must be a positive integer")
+    if not isinstance(mem, str) or not SAFE_PBS_SIZE_RE.fullmatch(mem):
+        raise PBSError(f"Unsupported PBS memory value: {mem}")
+    if not isinstance(scratch, str) or not SAFE_PBS_SIZE_RE.fullmatch(scratch):
+        raise PBSError(f"Unsupported PBS scratch value: {scratch}")
+    walltime_to_seconds(walltime)
+
+
+def require_safe_pbs_token(value: str, description: str) -> None:
+    if not isinstance(value, str) or not value or not SAFE_PBS_TOKEN_RE.fullmatch(value):
+        raise PBSError(f"{description} contains characters unsafe for PBS job templates: {value}")
 
 
 def require_storage_path(run_dir: Path) -> None:
@@ -126,6 +157,17 @@ def render_blocksci_pbs(
     job_name: str = "blocksci_analysis",
 ) -> str:
     """Render a PBS script for the BlockSci analysis stage."""
+    for path, description in (
+        (run_dir, "run directory"),
+        (logs_root, "logs root"),
+        (bitcoin_datadir, "Bitcoin datadir"),
+        (exporters_dir, "exporters directory"),
+    ):
+        require_safe_template_path(path, description)
+    require_safe_image(image)
+    require_safe_pbs_resources(ncpus, mem, scratch, walltime)
+    require_safe_pbs_token(stage, "PBS stage")
+    require_safe_pbs_token(job_name, "PBS job name")
     template = (Path(__file__).parent / "blocksci_template.sh").read_text(encoding="utf-8")
     return template.format(
         ncpus=ncpus,
@@ -156,6 +198,14 @@ def render_coinjoin_analysis_pbs(
     walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
 ) -> str:
     """Render a PBS script for the coinjoin-analysis stage."""
+    for path, description in (
+        (run_dir, "run directory"),
+        (output_dir, "output directory"),
+        (input_data_dir, "input data directory"),
+    ):
+        require_safe_template_path(path, description)
+    require_safe_image(image)
+    require_safe_pbs_resources(ncpus, mem, scratch, walltime)
     template = (Path(__file__).parent / "coinjoin_analysis_template.sh").read_text(encoding="utf-8")
     return template.format(
         ncpus=ncpus,
@@ -187,6 +237,10 @@ def render_mappings_pbs(
     scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
     walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
 ) -> str:
+    require_safe_template_path(run_dir, "run directory")
+    require_safe_image(enumerator_image, "enumerator image")
+    require_safe_image(sake_image, "Sake image")
+    require_safe_pbs_resources(ncpus, mem, scratch, walltime)
     template = (Path(__file__).parent / "mappings_template.sh").read_text(encoding="utf-8")
     return template.format(
         run_dir=run_dir,
@@ -316,6 +370,8 @@ def render_coinjoin_analysis_s3_pbs(
     scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
     walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
 ) -> str:
+    require_safe_image(image)
+    require_safe_pbs_resources(ncpus, mem, scratch, walltime)
     values = _s3_values(artifact_uri, run_id, endpoint_url, credentials_file, profile)
     template = (Path(__file__).parent / "coinjoin_analysis_s3_template.sh").read_text(encoding="utf-8")
     return template.format(
@@ -350,6 +406,8 @@ def render_blocksci_s3_pbs(
     scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
     walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
 ) -> str:
+    require_safe_image(image)
+    require_safe_pbs_resources(ncpus, mem, scratch, walltime)
     values = _s3_values(artifact_uri, run_id, endpoint_url, credentials_file, profile)
     template = (Path(__file__).parent / "blocksci_s3_template.sh").read_text(encoding="utf-8")
     return template.format(

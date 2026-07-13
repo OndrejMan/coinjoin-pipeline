@@ -123,7 +123,7 @@ services:
       environment:
         - ACTIVE_RUN_ID=${ACTIVE_RUN_ID:-}
         - BLOCKSCI_COINJOIN_TYPE=${BLOCKSCI_COINJOIN_TYPE:-wasabi2}
-        - BLOCKSCI_MIN_INPUT_COUNT=${BLOCKSCI_MIN_INPUT_COUNT:-1}
+        - BLOCKSCI_MIN_INPUT_COUNT=${BLOCKSCI_MIN_INPUT_COUNT:-default}
         - BLOCKSCI_TEST_VALUES=${BLOCKSCI_TEST_VALUES:-false}
         - BLOCKSCI_JOINMARKET_DETECTOR=${BLOCKSCI_JOINMARKET_DETECTOR:-definite}
         - BLOCKSCI_JOINMARKET_MIN_BASE_FEE=${BLOCKSCI_JOINMARKET_MIN_BASE_FEE:-5000}
@@ -189,7 +189,7 @@ services:
               --run-dir "/runs/emulation/logs/${ACTIVE_RUN_ID:-}" \
               --scenario "${SCENARIO_FALLBACK_PATH:-/mnt/scenarios/overactive-local.json}" \
               --coinjoin-type "${BLOCKSCI_COINJOIN_TYPE:-wasabi2}" \
-              --min-input-count "${BLOCKSCI_MIN_INPUT_COUNT:-1}" \
+              --min-input-count "${BLOCKSCI_MIN_INPUT_COUNT:-default}" \
               --joinmarket-detector "${BLOCKSCI_JOINMARKET_DETECTOR:-definite}" \
               --joinmarket-min-base-fee "${BLOCKSCI_JOINMARKET_MIN_BASE_FEE:-5000}" \
               --joinmarket-percentage-fee "${BLOCKSCI_JOINMARKET_PERCENTAGE_FEE:-0.00004}" \

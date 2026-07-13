@@ -224,9 +224,9 @@
             "--min-input-count"
           ],
           "choices": [],
-          "default": 1,
+          "default": null,
           "flag": "--min-input-count",
-          "help": "Minimum transaction input count considered by detection (default: 1).",
+          "help": "Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -827,9 +827,9 @@
             "--min-input-count"
           ],
           "choices": [],
-          "default": 1,
+          "default": null,
           "flag": "--min-input-count",
-          "help": "Minimum transaction input count considered by detection (default: 1).",
+          "help": "Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -1327,9 +1327,9 @@
             "--min-input-count"
           ],
           "choices": [],
-          "default": 1,
+          "default": null,
           "flag": "--min-input-count",
-          "help": "Minimum transaction input count considered by detection (default: 1).",
+          "help": "Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -2155,7 +2155,7 @@
             "--min-input-count"
           ],
           "choices": [],
-          "default": 1,
+          "default": null,
           "flag": "--min-input-count",
           "help": "",
           "metavar": null,

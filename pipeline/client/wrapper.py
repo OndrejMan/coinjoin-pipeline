@@ -238,7 +238,7 @@ OPTIONS_WITHOUT_VALUES = (
 )
 DEFAULT_DRIVER = "docker"
 DEFAULT_ENGINE = "wasabi"
-DEFAULT_MIN_INPUT_COUNT = 1
+DEFAULT_MIN_INPUT_COUNT: int | None = None
 DEFAULT_JOINMARKET_DETECTOR = "definite"
 DEFAULT_JOINMARKET_MIN_BASE_FEE = 5000
 DEFAULT_JOINMARKET_PERCENTAGE_FEE = 0.00004
@@ -1893,7 +1893,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-input-count",
         type=int,
         default=DEFAULT_MIN_INPUT_COUNT,
-        help=f"Minimum transaction input count considered by detection (default: {DEFAULT_MIN_INPUT_COUNT}).",
+        help="Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
     )
     analyze_parser.add_argument("--test-values", action="store_true", help="Use BlockSci test heuristic thresholds.")
     add_joinmarket_detector_arguments(analyze_parser)
@@ -1920,7 +1920,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-input-count",
         type=int,
         default=DEFAULT_MIN_INPUT_COUNT,
-        help=f"Minimum transaction input count considered by detection (default: {DEFAULT_MIN_INPUT_COUNT}).",
+        help="Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
     )
     export_parser.add_argument("--test-values", action="store_true", help="Use BlockSci test heuristic thresholds.")
     add_joinmarket_detector_arguments(export_parser)
@@ -1979,7 +1979,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-input-count",
         type=int,
         default=DEFAULT_MIN_INPUT_COUNT,
-        help=f"Minimum transaction input count considered by detection (default: {DEFAULT_MIN_INPUT_COUNT}).",
+        help="Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
     )
     full_parser.add_argument("--test-values", action="store_true", help="Use BlockSci test heuristic thresholds.")
     add_joinmarket_detector_arguments(full_parser)

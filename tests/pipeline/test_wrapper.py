@@ -473,6 +473,9 @@ class WrapperExportTest(unittest.TestCase):
 
         self.assertEqual(env["BLOCKSCI_TEST_VALUES"], "true")
 
+    def test_compose_env_uses_blocksci_detector_default_input_count(self):
+        self.assertEqual(compose_env()["BLOCKSCI_MIN_INPUT_COUNT"], "default")
+
     def test_compose_env_sets_default_run_timezone(self):
         self.assertEqual(compose_env()["RUN_TIMEZONE"], DEFAULT_RUN_TIMEZONE)
 

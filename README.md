@@ -20,9 +20,12 @@ coinjoin-pipeline full-run --engine joinmarket --dry-run
 coinjoin-pipeline full-run --engine joinmarket
 ```
 
-BlockSci analysis uses production heuristic thresholds by default. Pass
-`--test-values` explicitly for the reduced thresholds used by small emulated
-regtest rounds.
+By default the wrapper leaves `--min-input-count` unset, so BlockSci applies
+its height-aware production threshold (or its test threshold when
+`--test-values` is explicitly selected). Pass `--min-input-count N` only for
+an intentional override. Independent emulator labels, raw detector metrics,
+and provenance rules are defined in
+[Analysis semantics](docs/analysis-semantics.md).
 
 Outputs default to `./coinjoin-runs`; override this with `--runs-root`. Images
 default to the explicit `latest` tag. Use `--version TAG` to apply one coordinated
@@ -46,6 +49,12 @@ socket; `--build` requires a source checkout (use `--source-root` when running
 from an installed wheel).
 
 ## Commands and contracts
+
+The report label provenance, BlockSci threshold precedence, and distinction
+between raw and linked detector results are documented in
+[Analysis semantics](docs/analysis-semantics.md). The PBS filesystem, marker,
+and scheduler contract is documented in
+[PBS stage contract](docs/pbs-stage-contract.md).
 
 Host commands are `doctor`, `pull`, `version`, and `builder`. All merged parser
 commands remain represented by `command_metadata.json`: `full-run`, `recreate`,

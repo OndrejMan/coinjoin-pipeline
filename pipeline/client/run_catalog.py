@@ -72,6 +72,8 @@ def report_status(run_dir: Path) -> str:
         return "invalid"
     if report.get("evaluation_scope") == "baseline_agreement_only":
         return "baseline_agreement_only"
+    if report.get("evaluation_scope") == "emulator_labels_unavailable":
+        return "emulator_labels_unavailable"
     diagnostics = report.get("integration_diagnostics")
     if not isinstance(diagnostics, dict):
         return "diagnostics_missing"

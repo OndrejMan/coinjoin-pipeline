@@ -816,6 +816,12 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
             "> This report compares BlockSci with `coinjoin-analysis`. It has no emulator ground truth; "
             "precision, recall, and F1 are intentionally unavailable.",
         ])
+    elif report.get("evaluation_scope") == "emulator_labels_unavailable":
+        lines.extend([
+            "",
+            "> Independent emulator producer labels were unavailable. Transaction labels remain unknown; "
+            "precision, recall, and F1 are intentionally unavailable.",
+        ])
     baseline_filter = report.get("baseline_filter") or {}
     if baseline_filter.get("enabled"):
         source_names = ", ".join(

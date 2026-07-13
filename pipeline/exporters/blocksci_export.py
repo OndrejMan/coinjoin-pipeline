@@ -113,10 +113,16 @@ def export_blocksci_records(
             for txid in (to_json_text(safe_attr(tx, "hash")) for tx in skipped)
             if txid
         )
-    elif min_input_count is None:
-        txes = chain.filter_coinjoin_txes(0, len(chain), coinjoin_type)
     else:
-        txes = chain.filter_coinjoin_txes(0, len(chain), coinjoin_type, min_input_count)
+        if not hasattr(chain, "filter_coinjoin_txes_raw"):
+            raise RuntimeError(
+                "This BlockSci build does not expose Blockchain.filter_coinjoin_txes_raw; "
+                "rebuild BlockSci with the raw CoinJoin report binding."
+            )
+        if min_input_count is None:
+            txes = chain.filter_coinjoin_txes_raw(0, len(chain), coinjoin_type)
+        else:
+            txes = chain.filter_coinjoin_txes_raw(0, len(chain), coinjoin_type, min_input_count)
 
     records = [normalize_blocksci_tx(tx) for tx in txes]
     return {

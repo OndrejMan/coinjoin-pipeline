@@ -189,6 +189,37 @@ class PBSTemplateTest(unittest.TestCase):
 
 
 class PBSValidationTest(unittest.TestCase):
+    def test_render_rejects_resource_directive_injection(self):
+        with self.assertRaisesRegex(PBSError, "memory"):
+            render_blocksci_pbs(
+                Path("/storage/run-a"),
+                Path("/storage/logs"),
+                Path("/storage/bitcoin-data"),
+                Path("/storage/exporters"),
+                "docker://image",
+                "echo hello",
+                mem="64gb\n#PBS -q attacker",
+            )
+
+    def test_render_rejects_image_shell_injection(self):
+        with self.assertRaisesRegex(PBSError, "container image"):
+            render_coinjoin_analysis_pbs(
+                Path("/storage/run-a"),
+                Path("/storage/run-a/output"),
+                Path("/storage/run-a/input"),
+                'docker://image"; touch /tmp/injected; #',
+                "analyze-emul",
+            )
+
+    def test_render_rejects_invalid_walltime_components(self):
+        with self.assertRaisesRegex(PBSError, "walltime"):
+            render_mappings_pbs(
+                Path("/storage/run-a"),
+                "docker://enumerator",
+                "docker://sake",
+                walltime="04:99:00",
+            )
+
     def test_require_qsub_raises_when_missing(self):
         with mock.patch("client.pbs.shutil.which", return_value=None):
             with self.assertRaises(PBSError):

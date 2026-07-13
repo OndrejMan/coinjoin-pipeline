@@ -82,7 +82,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--coinjoin-type", default="wasabi2")
     parser.add_argument(
         "--min-input-count",
-        default="1",
+        default="default",
         help="Override BlockSci detector min input count; use 'default' for BlockSci's default.",
     )
     parser.add_argument("--test-values", action="store_true", help="Use BlockSci test heuristic thresholds.")
@@ -160,11 +160,11 @@ def main(argv: list[str] | None = None) -> int:
     analysis_dir = coinjoin_analysis_dir(run_dir)
     output_dir = report_dir(run_dir)
     config_path = args.config or run_dir / "blocksci_data" / "config.json"
-    truth_path = analysis_dir / "coinjoin_tx_info.json"
-    if not truth_path.exists():
-        raise FileNotFoundError(f"Ground-truth CoinJoin file not found: {truth_path}")
+    baseline_path = analysis_dir / "coinjoin_tx_info.json"
+    if not baseline_path.exists():
+        raise FileNotFoundError(f"Baseline coinjoin-analysis file not found: {baseline_path}")
 
-    coinjoin_analysis_data = load_json(truth_path)
+    coinjoin_analysis_data = load_json(baseline_path)
     false_positive_txids, false_positive_sources = load_false_positive_txids(analysis_dir)
     coinjoin_analysis_data, filtered_txids = filter_coinjoin_analysis_false_positives(
         coinjoin_analysis_data,

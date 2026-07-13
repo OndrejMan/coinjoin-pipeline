@@ -2,12 +2,187 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from pathlib import Path
 
 from exporters.artifact_paths import coinjoin_analysis_dir, emulator_dir
-from exporters.common import EMULATOR_DATA_SCHEMA_VERSION, JsonObject, JsonValue, coerce_sats, load_json, to_json_text
+from exporters.common import (
+    EMULATOR_DATA_SCHEMA_VERSION,
+    JsonObject,
+    JsonValue,
+    coerce_sats,
+    load_json,
+    to_json_text,
+)
 from exporters.normalization import block_height_from_path, is_coinbase_tx, output_address
+
+WASABI_BROADCAST_RE = re.compile(
+    r"^(?P<timestamp>.+?)\s+\[.*?Round \((?P<round_id>[0-9a-fA-F]+)\): "
+    r"Successfully broadcast the coinjoin: (?P<txid>[0-9a-fA-F]{64})\.\s*$"
+)
+PRODUCER_LABEL_MANIFEST = "coinjoin_label_manifest.json"
+PRODUCER_LABEL_MANIFEST_SCHEMA_VERSION = "1.0"
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _label_provenance(
+    *,
+    independent: bool,
+    sources: list[str] | None = None,
+    positive_rule: str | None = None,
+    manifest: str | None = None,
+    manifest_schema_version: str | None = None,
+    unavailable_reason: str | None = None,
+) -> JsonObject:
+    return {
+        "independent": independent,
+        "sources": sources or [],
+        "positive_rule": positive_rule,
+        "baseline_used_for_labels": False,
+        "manifest": manifest,
+        "manifest_schema_version": manifest_schema_version,
+        "unavailable_reason": unavailable_reason,
+    }
+
+
+def verified_producer_label_sources(
+    run_dir: Path,
+    coinjoin_type: str,
+) -> tuple[list[Path], JsonObject]:
+    """Return complete, hash-verified producer sources or fail closed."""
+
+    expected_engine = {"joinmarket": "joinmarket", "wasabi2": "wasabi"}.get(coinjoin_type)
+    if expected_engine is None:
+        return [], _label_provenance(
+            independent=False,
+            unavailable_reason=f"unsupported coinjoin type: {coinjoin_type}",
+        )
+
+    data_dir = run_dir / "data"
+    manifest_path = data_dir / PRODUCER_LABEL_MANIFEST
+    manifest_source = str(manifest_path.relative_to(run_dir))
+    if not manifest_path.is_file():
+        return [], _label_provenance(
+            independent=False,
+            manifest=None,
+            unavailable_reason=f"producer label manifest is missing: {manifest_source}",
+        )
+
+    try:
+        manifest = load_json(manifest_path)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        return [], _label_provenance(
+            independent=False,
+            manifest=manifest_source,
+            unavailable_reason=f"producer label manifest cannot be read: {error}",
+        )
+
+    positive_rule = manifest.get("positive_rule")
+    manifest_schema_version = to_json_text(manifest.get("schema_version"))
+    if manifest.get("schema_version") != PRODUCER_LABEL_MANIFEST_SCHEMA_VERSION:
+        return [], _label_provenance(
+            independent=False,
+            manifest=manifest_source,
+            manifest_schema_version=manifest_schema_version,
+            positive_rule=str(positive_rule) if positive_rule else None,
+            unavailable_reason="unsupported producer label manifest schema version",
+        )
+    if manifest.get("engine") != expected_engine:
+        return [], _label_provenance(
+            independent=False,
+            manifest=manifest_source,
+            manifest_schema_version=manifest_schema_version,
+            positive_rule=str(positive_rule) if positive_rule else None,
+            unavailable_reason="producer label manifest engine does not match the run",
+        )
+    if manifest.get("complete") is not True:
+        return [], _label_provenance(
+            independent=False,
+            manifest=manifest_source,
+            manifest_schema_version=manifest_schema_version,
+            positive_rule=str(positive_rule) if positive_rule else None,
+            unavailable_reason=str(manifest.get("reason") or "producer labels are incomplete"),
+        )
+
+    source_records = manifest.get("sources")
+    if not isinstance(source_records, list) or not source_records:
+        return [], _label_provenance(
+            independent=False,
+            manifest=manifest_source,
+            manifest_schema_version=manifest_schema_version,
+            positive_rule=str(positive_rule) if positive_rule else None,
+            unavailable_reason="complete producer label manifest has no sources",
+        )
+
+    data_root = data_dir.resolve()
+    source_paths: list[Path] = []
+    source_names: list[str] = []
+    for record in source_records:
+        if not isinstance(record, dict):
+            reason = "producer label manifest contains an invalid source record"
+            break
+        relative_value = record.get("path")
+        if not isinstance(relative_value, str) or not relative_value:
+            reason = "producer label manifest source path is missing"
+            break
+        source_path = (data_dir / relative_value).resolve()
+        try:
+            source_path.relative_to(data_root)
+        except ValueError:
+            reason = "producer label manifest source escapes the data directory"
+            break
+        if expected_engine == "joinmarket" and relative_value != "joinmarket_round_events.json":
+            reason = "JoinMarket producer manifest contains an unexpected source"
+            break
+        if expected_engine == "wasabi" and source_path.name != "Logs.txt":
+            reason = "Wasabi producer manifest contains an unexpected source"
+            break
+        if not source_path.is_file():
+            reason = f"producer label source is missing: data/{relative_value}"
+            break
+        expected_size = record.get("size_bytes")
+        expected_sha256 = record.get("sha256")
+        if (
+            not isinstance(expected_size, int)
+            or expected_size < 0
+            or not isinstance(expected_sha256, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)
+        ):
+            reason = "producer label manifest source metadata is invalid"
+            break
+        if source_path.stat().st_size != expected_size:
+            reason = f"producer label source size does not match manifest: data/{relative_value}"
+            break
+        if _sha256_file(source_path) != expected_sha256:
+            reason = f"producer label source hash does not match manifest: data/{relative_value}"
+            break
+        source_paths.append(source_path)
+        source_names.append(f"data/{relative_value}")
+    else:
+        return source_paths, _label_provenance(
+            independent=True,
+            sources=source_names,
+            positive_rule=str(positive_rule) if positive_rule else None,
+            manifest=manifest_source,
+            manifest_schema_version=manifest_schema_version,
+        )
+
+    return [], _label_provenance(
+        independent=False,
+        manifest=manifest_source,
+        manifest_schema_version=manifest_schema_version,
+        positive_rule=str(positive_rule) if positive_rule else None,
+        unavailable_reason=reason,
+    )
 
 
 def load_wallet_address_mapping(run_dir: Path, coinjoin_analysis_data: JsonObject) -> dict[str, str]:
@@ -86,25 +261,44 @@ def build_emulator_data(
     raw_emulator_dir = emulator_dir(run_dir)
     block_dir = raw_emulator_dir / "data" / "btc-node"
     wallet_mapping = load_wallet_address_mapping(coinjoin_analysis_dir(run_dir), coinjoin_analysis_data)
-    coinjoins = coinjoin_analysis_data.get("coinjoins") or {}
-    coinjoin_txids = {str(tx.get("txid") or txid) for txid, tx in coinjoins.items()}
-    round_by_txid = {
-        str(tx.get("txid") or txid): to_json_text(tx.get("round_id"))
-        for txid, tx in coinjoins.items()
-    }
     output_index: dict[tuple[str, str], JsonObject] = {}
     transactions: JsonObject = {}
-    joinmarket_round_labels = load_joinmarket_round_labels(raw_emulator_dir) if coinjoin_type == "joinmarket" else []
+    label_source_paths, label_provenance = verified_producer_label_sources(
+        raw_emulator_dir,
+        coinjoin_type,
+    )
+    independent_labels_available = label_provenance["independent"] is True
+    joinmarket_round_labels: list[JsonObject] = []
+    wasabi_round_labels: list[JsonObject] = []
+    if independent_labels_available:
+        try:
+            if coinjoin_type == "joinmarket":
+                joinmarket_round_labels = load_joinmarket_round_labels(label_source_paths[0])
+            elif coinjoin_type == "wasabi2":
+                wasabi_round_labels = load_wasabi_round_labels(
+                    raw_emulator_dir,
+                    label_source_paths,
+                )
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            label_provenance["independent"] = False
+            label_provenance["unavailable_reason"] = (
+                f"producer label source cannot be parsed: {error}"
+            )
+            independent_labels_available = False
+            joinmarket_round_labels = []
+            wasabi_round_labels = []
     joinmarket_labels_by_txid = {
         str(label["txid"]): label
         for label in joinmarket_round_labels
+        if label.get("txid") and label.get("status") == "confirmed"
+    }
+    wasabi_labels_by_txid = {
+        str(label["txid"]): label
+        for label in wasabi_round_labels
         if label.get("txid")
     }
-    joinmarket_labels_by_destination = {
-        str(label["destination_address"]): label
-        for label in joinmarket_round_labels
-        if label.get("destination_address")
-    }
+    producer_positive_txids = set(joinmarket_labels_by_txid) | set(wasabi_labels_by_txid)
+    matched_positive_txids: set[str] = set()
 
     if block_dir.exists():
         for block_path in sorted(block_dir.glob("block_*.json"), key=lambda path: block_height_from_path(path) or -1):
@@ -167,32 +361,39 @@ def build_emulator_data(
                 input_wallets = sorted({item["wallet_name"] for item in inputs if item.get("wallet_name")})
                 output_wallets = sorted({item["wallet_name"] for item in outputs if item.get("wallet_name")})
                 participant_wallets = sorted(set(input_wallets) | set(output_wallets))
-                is_coinjoin = txid in coinjoin_txids
+                label = None
+                if coinjoin_type == "joinmarket":
+                    label = joinmarket_labels_by_txid.get(txid)
+                elif coinjoin_type == "wasabi2":
+                    label = wasabi_labels_by_txid.get(txid)
+
+                is_coinjoin = label is not None if independent_labels_available else None
+                if is_coinjoin:
+                    matched_positive_txids.add(txid)
                 tx_record = {
                     "txid": txid,
                     "block_height": height,
                     "is_coinjoin": is_coinjoin,
                     "protocol": coinjoin_type if is_coinjoin else None,
-                    "round_id": round_by_txid.get(txid),
+                    "round_id": to_json_text(label.get("round_id")) if label else None,
                     "participant_wallets": participant_wallets,
                     "input_wallets": input_wallets,
                     "output_wallets": output_wallets,
-                    "label_source": "emulator_round" if is_coinjoin else "wallet_ownership",
+                    "label_source": (
+                        f"emulator_{coinjoin_type}_producer"
+                        if is_coinjoin
+                        else "emulator_producer_absence"
+                        if independent_labels_available
+                        else "unknown"
+                    ),
                     "inputs": inputs,
                     "outputs": outputs,
                 }
                 if coinjoin_type == "joinmarket":
                     tx_record["input_owners"] = input_wallets
                     tx_record["output_owners"] = output_wallets
-                    label = joinmarket_labels_by_txid.get(txid)
-                    if label is None:
-                        for output in outputs:
-                            label = joinmarket_labels_by_destination.get(str(output.get("address")))
-                            if label is not None:
-                                break
                     if label is not None:
                         tx_record["joinmarket_round_label"] = label
-                        tx_record["round_id"] = tx_record.get("round_id") or to_json_text(label.get("round_id"))
                         tx_record["taker"] = label.get("taker")
                         tx_record["candidate_makers"] = label.get("candidate_makers", [])
                         tx_record["label_source"] = (
@@ -200,6 +401,9 @@ def build_emulator_data(
                             if is_coinjoin
                             else "emulator_joinmarket_round_candidate"
                         )
+                elif coinjoin_type == "wasabi2" and label is not None:
+                    tx_record["wasabi_round_label"] = label
+                    tx_record["label_source"] = "emulator_wasabi_coordinator_broadcast"
                 transactions[txid] = tx_record
 
     true_count = sum(1 for tx in transactions.values() if tx.get("is_coinjoin") is True)
@@ -223,6 +427,7 @@ def build_emulator_data(
         "schema_version": EMULATOR_DATA_SCHEMA_VERSION,
         "run_id": run_dir.name,
         "coinjoin_type": coinjoin_type,
+        "label_provenance": label_provenance,
         "summary": {
             "transactions": len(transactions),
             "coinjoin_transactions": true_count,
@@ -231,6 +436,8 @@ def build_emulator_data(
             "wallet_addresses": len(wallet_mapping),
             "labeled_io_records": labeled_io,
             "total_io_records": total_io,
+            "producer_positive_labels": len(producer_positive_txids),
+            "unmatched_positive_txids": sorted(producer_positive_txids - matched_positive_txids),
         },
         "transactions": {
             txid: transactions[txid]
@@ -239,19 +446,26 @@ def build_emulator_data(
     }
 
 
-def load_joinmarket_round_labels(run_dir: Path) -> list[JsonObject]:
-    candidates = [
-        run_dir / "data" / "joinmarket_round_events.json",
-        run_dir / "joinmarket_round_events.json",
-    ]
-    for path in candidates:
-        if not path.exists():
-            continue
-        with path.open("r", encoding="utf-8") as file:
-            data = json.load(file)
-        if isinstance(data, list):
-            return [item for item in data if isinstance(item, dict)]
-    return []
+def load_joinmarket_round_labels(path: Path) -> list[JsonObject]:
+    with path.open("r", encoding="utf-8") as file:
+        data = json.load(file)
+    if not isinstance(data, list) or any(not isinstance(item, dict) for item in data):
+        raise ValueError(f"JoinMarket round labels must be a JSON list of objects: {path}")
+    return data
+
+
+def load_wasabi_round_labels(run_dir: Path, log_paths: list[Path]) -> list[JsonObject]:
+    labels_by_txid: dict[str, JsonObject] = {}
+    for path in log_paths:
+        with path.open("r", encoding="utf-8", errors="replace") as stream:
+            for line in stream:
+                match = WASABI_BROADCAST_RE.match(line.rstrip("\n"))
+                if match is None:
+                    continue
+                label = match.groupdict()
+                label["source_file"] = str(path.relative_to(run_dir))
+                labels_by_txid[label["txid"]] = label
+    return [labels_by_txid[txid] for txid in sorted(labels_by_txid)]
 
 
 def wallet_address_labels(emulator_data: JsonObject | None) -> dict[str, str]:

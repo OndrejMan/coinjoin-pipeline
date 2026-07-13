@@ -48,6 +48,21 @@ class RunCatalogTests(unittest.TestCase):
             )
             self.assertEqual(report_status(run_dir), "diagnostics_not_ok")
 
+    def test_report_status_surfaces_unavailable_emulator_labels(self):
+        with tempfile.TemporaryDirectory() as temp:
+            run_dir = Path(temp)
+            report_dir = run_dir / "blocksciEmulatorAnalysis_data"
+            report_dir.mkdir()
+            (report_dir / "unified_report.json").write_text(
+                json.dumps(
+                    {
+                        "evaluation_scope": "emulator_labels_unavailable",
+                        "integration_diagnostics": {"status": "ok"},
+                    }
+                )
+            )
+            self.assertEqual(report_status(run_dir), "emulator_labels_unavailable")
+
     def test_external_manifest_fingerprints_baseline_without_copying_datadir(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -129,8 +129,8 @@ if ! grep -q -- "-e EXPORTERS_FROM_IMAGE=1" "${PODMAN_LOG}"; then
   exit 1
 fi
 
-if ! grep -q -- "--test-values" "${PODMAN_LOG}"; then
-  echo "FAIL: expected runIt.sh to enable BlockSci test values by default" >&2
+if grep -q -- "--test-values" "${PODMAN_LOG}"; then
+  echo "FAIL: BlockSci test values must require an explicit --test-values option" >&2
   echo "Observed: $(cat "${PODMAN_LOG}")" >&2
   exit 1
 fi

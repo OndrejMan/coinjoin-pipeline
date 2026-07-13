@@ -148,7 +148,7 @@ def build_detection_confusion_matrix(
     emulator_data: JsonObject | None,
     blocksci_records: dict[str, JsonObject],
 ) -> JsonObject | None:
-    if not emulator_data:
+    if not emulator_data or not (emulator_data.get("label_provenance") or {}).get("independent"):
         return None
 
     detected_txids = set(blocksci_records)
