@@ -335,6 +335,17 @@ def run_timezone(value: str) -> str:
     return value
 
 
+def positive_int(value: str) -> int:
+    """Parse a strictly positive command-line integer."""
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be an integer") from error
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return parsed
+
+
 def default_host_root_dir() -> Path:
     host_client_dir = os.environ.get("HOST_CLIENT_DIR")
     if host_client_dir:
@@ -1390,12 +1401,6 @@ def add_pbs_arguments(arg_parser: argparse.ArgumentParser) -> None:
             raise argparse.ArgumentTypeError("must be non-negative")
         return parsed
 
-    def positive_int(value: str) -> int:
-        parsed = int(value)
-        if parsed <= 0:
-            raise argparse.ArgumentTypeError("must be greater than zero")
-        return parsed
-
     arg_parser.add_argument("--mapping-mining-fee-rate", type=non_negative_int, default=1)
     arg_parser.add_argument("--mapping-coordination-fee-rate", type=non_negative_float, default=0.003)
     arg_parser.add_argument("--mapping-max-decomposition-fee", type=non_negative_int, default=6000)
@@ -1891,7 +1896,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_coinjoin_type_argument(analyze_parser)
     analyze_parser.add_argument(
         "--min-input-count",
-        type=int,
+        type=positive_int,
         default=DEFAULT_MIN_INPUT_COUNT,
         help="Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
     )
@@ -1918,7 +1923,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_coinjoin_type_argument(export_parser)
     export_parser.add_argument(
         "--min-input-count",
-        type=int,
+        type=positive_int,
         default=DEFAULT_MIN_INPUT_COUNT,
         help="Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
     )
@@ -1963,7 +1968,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_dry_run_argument(s3_pbs_parser)
     add_artifact_arguments(s3_pbs_parser, pbs_credentials=True)
     add_coinjoin_type_argument(s3_pbs_parser)
-    s3_pbs_parser.add_argument("--min-input-count", type=int, default=DEFAULT_MIN_INPUT_COUNT)
+    s3_pbs_parser.add_argument("--min-input-count", type=positive_int, default=DEFAULT_MIN_INPUT_COUNT)
     s3_pbs_parser.add_argument("--test-values", action="store_true")
     add_joinmarket_detector_arguments(s3_pbs_parser)
     add_pbs_arguments(s3_pbs_parser)
@@ -1977,7 +1982,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_coinjoin_type_argument(full_parser)
     full_parser.add_argument(
         "--min-input-count",
-        type=int,
+        type=positive_int,
         default=DEFAULT_MIN_INPUT_COUNT,
         help="Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
     )

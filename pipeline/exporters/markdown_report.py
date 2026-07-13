@@ -750,6 +750,11 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
         "> `_N` means the block height was inferred from exported `block_*.json` files, not present in original "
         "`coinjoin_tx_info.json`.",
     ]
+    warnings = report.get("warnings") or []
+    if warnings:
+        lines.extend(["", "## Warnings", ""])
+        for warning in warnings:
+            lines.append(f"> **{warning.get('code')}:** {warning.get('message')}")
     lines.extend(render_integration_diagnostics(report))
     lines.extend([
         "",
@@ -817,11 +822,15 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
             "precision, recall, and F1 are intentionally unavailable.",
         ])
     elif report.get("evaluation_scope") == "emulator_labels_unavailable":
+        label_provenance = (report.get("emulator_data") or {}).get("label_provenance") or {}
+        unavailable_reason = label_provenance.get("unavailable_reason")
         lines.extend([
             "",
             "> Independent emulator producer labels were unavailable. Transaction labels remain unknown; "
             "precision, recall, and F1 are intentionally unavailable.",
         ])
+        if unavailable_reason:
+            lines.append(f"> Reason: {unavailable_reason}")
     baseline_filter = report.get("baseline_filter") or {}
     if baseline_filter.get("enabled"):
         source_names = ", ".join(

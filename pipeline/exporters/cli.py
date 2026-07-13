@@ -61,8 +61,13 @@ def parse_min_input_count(value: str | None) -> int | None:
     normalized = value.strip().lower()
     if normalized in {"", "none", "null", "default"}:
         return None
-    parsed = int(normalized)
-    return parsed if parsed > 0 else None
+    try:
+        parsed = int(normalized)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a positive integer or 'default'") from error
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return parsed
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -82,7 +87,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--coinjoin-type", default="wasabi2")
     parser.add_argument(
         "--min-input-count",
-        default="default",
+        type=parse_min_input_count,
+        default=None,
         help="Override BlockSci detector min input count; use 'default' for BlockSci's default.",
     )
     parser.add_argument("--test-values", action="store_true", help="Use BlockSci test heuristic thresholds.")
@@ -184,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
     if emulator_data is not None:
         save_json(output_dir / "emulator_data.json", emulator_data)
 
-    min_input_count = parse_min_input_count(args.min_input_count)
+    min_input_count = args.min_input_count
     first_wasabi2_block = load_first_wasabi2_block(config_path)
 
     blocksci.heuristics.set_test_values_enabled(args.test_values)

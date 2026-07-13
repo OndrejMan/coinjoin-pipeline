@@ -5,6 +5,7 @@ import sys
 import tempfile
 import types
 import unittest
+from argparse import ArgumentTypeError
 from pathlib import Path
 from unittest import mock
 
@@ -45,9 +46,11 @@ from exporters.unified_report import (
     load_exported_block_tx_index,
     load_false_positive_txids,
     load_scenario,
+    load_wasabi_round_labels,
     normalize_coinjoin_analysis,
     normalize_scenario,
     parse_args,
+    parse_min_input_count,
     save_json,
     sha256_json,
 )
@@ -357,6 +360,18 @@ class UnifiedReportTest(unittest.TestCase):
         args = parse_args(["--test-values"])
 
         self.assertTrue(args.test_values)
+
+    def test_min_input_count_requires_a_positive_integer_or_default(self):
+        self.assertIsNone(parse_min_input_count("default"))
+        self.assertEqual(parse_min_input_count("7"), 7)
+        for value in ("0", "-1", "not-a-number"):
+            with self.subTest(value=value), self.assertRaises(ArgumentTypeError):
+                parse_min_input_count(value)
+
+    def test_parse_args_reports_invalid_min_input_count_as_a_cli_error(self):
+        for value in ("0", "-1", "not-a-number"):
+            with self.subTest(value=value), self.assertRaises(SystemExit):
+                parse_args(["--min-input-count", value])
 
     def test_parse_args_accepts_joinmarket_detector_settings(self):
         args = parse_args([
@@ -678,6 +693,23 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertTrue(emulator_data["label_provenance"]["independent"])
         self.assertFalse(emulator_data["label_provenance"]["baseline_used_for_labels"])
 
+    def test_wasabi_broadcast_parser_accepts_legacy_format_drift(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            log_path = run_dir / "wasabi-backend" / "Logs.txt"
+            log_path.parent.mkdir()
+            txid = "A" * 64
+            log_path.write_text(
+                "2026-01-01 00:00:00 [14]\tINFO\tLegacy.Backend\tROUND (legacy-id): "
+                f"Successfully broadcasted coinjoin transaction: {txid}\n",
+                encoding="utf-8",
+            )
+
+            labels = load_wasabi_round_labels(run_dir, [log_path])
+
+        self.assertEqual(labels[0]["round_id"], "legacy-id")
+        self.assertEqual(labels[0]["txid"], txid.lower())
+
     def test_build_emulator_data_leaves_labels_unknown_without_producer_evidence(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir) / "run"
@@ -740,6 +772,93 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertTrue(emulator_data["label_provenance"]["independent"])
         self.assertFalse(emulator_data["transactions"]["txA"]["is_coinjoin"])
         self.assertEqual(emulator_data["summary"]["non_coinjoin_transactions"], 1)
+
+    def test_empty_wasabi_parse_result_with_candidate_transaction_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            data_dir = run_dir / "coinjoin_emulator_data" / "data"
+            block_dir = data_dir / "btc-node"
+            coordinator_dir = data_dir / "wasabi-backend"
+            block_dir.mkdir(parents=True)
+            coordinator_dir.mkdir(parents=True)
+            (coordinator_dir / "Logs.txt").write_text(
+                "legacy backend says the round completed in an unknown format\n",
+                encoding="utf-8",
+            )
+            write_producer_label_manifest(
+                run_dir / "coinjoin_emulator_data",
+                "wasabi",
+                ["wasabi-backend/Logs.txt"],
+            )
+            save_json(
+                block_dir / "block_1.json",
+                {
+                    "height": 1,
+                    "tx": [
+                        {
+                            "txid": "candidate",
+                            "vin": [
+                                {"txid": f"funding-{index}", "vout": 0}
+                                for index in range(5)
+                            ],
+                            "vout": [],
+                        }
+                    ],
+                },
+            )
+
+            emulator_data = build_emulator_data(
+                run_dir,
+                coinjoin_analysis_fixture(),
+                "wasabi2",
+            )
+
+        self.assertFalse(emulator_data["label_provenance"]["independent"])
+        self.assertIn("no parseable broadcast records", emulator_data["label_provenance"]["unavailable_reason"])
+        self.assertIsNone(emulator_data["transactions"]["candidate"]["is_coinjoin"])
+        self.assertEqual(emulator_data["summary"]["wasabi_parseability_candidate_txids"], ["candidate"])
+
+    def test_unmatched_producer_positive_fails_closed_and_is_rendered(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            data_dir = run_dir / "coinjoin_emulator_data" / "data"
+            block_dir = data_dir / "btc-node"
+            coordinator_dir = data_dir / "wasabi-coordinator"
+            block_dir.mkdir(parents=True)
+            coordinator_dir.mkdir(parents=True)
+            missing_txid = "a" * 64
+            (coordinator_dir / "Logs.txt").write_text(
+                "2026-01-01 00:00:00 [INFO] Round (abc): "
+                f"Successfully broadcast the coinjoin: {missing_txid}.\n",
+                encoding="utf-8",
+            )
+            write_producer_label_manifest(
+                run_dir / "coinjoin_emulator_data",
+                "wasabi",
+                ["wasabi-coordinator/Logs.txt"],
+            )
+            save_json(
+                block_dir / "block_1.json",
+                {
+                    "height": 1,
+                    "tx": [
+                        {
+                            "txid": "exported-tx",
+                            "vin": [{"txid": "funding", "vout": 0}],
+                            "vout": [],
+                        }
+                    ],
+                },
+            )
+
+            emulator_data = build_emulator_data(run_dir, coinjoin_analysis_fixture(), "wasabi2")
+            report = build_report(run_dir, {}, {}, "wasabi2", emulator_data=emulator_data)
+
+        self.assertFalse(emulator_data["label_provenance"]["independent"])
+        self.assertEqual(emulator_data["summary"]["unmatched_positive_txids"], [missing_txid])
+        self.assertIsNone(emulator_data["transactions"]["exported-tx"]["is_coinjoin"])
+        self.assertEqual(report["evaluation_scope"], "emulator_labels_unavailable")
+        self.assertIn("producer-positive transactions are missing", render_report(report))
 
     def test_modified_producer_source_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1074,6 +1193,24 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(matrix["recall"], 0.0)
         self.assertEqual(matrix["false_positive_txids"], ["txB"])
         self.assertEqual(matrix["false_negative_txids"], ["txA"])
+
+    def test_report_warns_when_production_thresholds_detect_no_regtest_wasabi(self):
+        emulator_data = emulator_data_fixture()
+        for transaction in emulator_data["transactions"].values():
+            transaction["block_height"] = 100
+        report = build_report(
+            Path("/tmp/run"),
+            {},
+            {},
+            "wasabi2",
+            emulator_data=emulator_data,
+        )
+
+        self.assertEqual(
+            report["warnings"][0]["code"],
+            "wasabi_production_threshold_zero_detections",
+        )
+        self.assertIn("production minimum-input threshold", render_report(report))
 
     def test_clustering_unavailable_reason_is_reported(self):
         evaluation = evaluate_cluster_assignments(

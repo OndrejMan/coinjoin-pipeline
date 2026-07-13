@@ -20,6 +20,7 @@ from client.wrapper import (
     DEFAULT_RUN_TIMEZONE,
     RUNS_ROOT_CONTAINER,
     blocksci_output_exists,
+    build_parser,
     captured_pipeline_stage,
     compose_command,
     compose_env,
@@ -238,6 +239,18 @@ class WrapperExportTest(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_min_input_count_rejects_zero_negative_and_non_numeric_values(self):
+        parser = build_parser()
+        for value in ("0", "-1", "not-a-number"):
+            with self.subTest(value=value), self.assertRaises(SystemExit):
+                parser.parse_args([
+                    "full-run",
+                    "--engine",
+                    "wasabi",
+                    "--min-input-count",
+                    value,
+                ])
 
     def test_blocksci_docker_stage_is_independent_and_can_defer_report(self):
         with tempfile.TemporaryDirectory() as tmpdir:

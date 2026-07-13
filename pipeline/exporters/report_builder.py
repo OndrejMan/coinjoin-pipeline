@@ -11,6 +11,7 @@ from exporters.common import (
     DEFAULT_JOINMARKET_MIN_BASE_FEE,
     DEFAULT_JOINMARKET_PERCENTAGE_FEE,
     SCHEMA_VERSION,
+    WASABI2_THRESHOLD_CHANGE_BLOCK,
     JsonObject,
     parse_run_started_at,
 )
@@ -115,6 +116,31 @@ def build_report(
     independent_emulator_labels = bool(
         emulator_data and (emulator_data.get("label_provenance") or {}).get("independent")
     )
+    warnings: list[JsonObject] = []
+    emulator_block_heights = [
+        int(record["block_height"])
+        for record in ((emulator_data or {}).get("transactions") or {}).values()
+        if record.get("block_height") is not None
+    ]
+    if (
+        mode == "emulator"
+        and coinjoin_type == "wasabi2"
+        and min_input_count is None
+        and not test_values
+        and not blocksci_records
+        and emulator_block_heights
+        and max(emulator_block_heights) < WASABI2_THRESHOLD_CHANGE_BLOCK
+    ):
+        warnings.append(
+            {
+                "code": "wasabi_production_threshold_zero_detections",
+                "message": (
+                    "BlockSci detected no Wasabi2 CoinJoins at regtest-height blocks while using "
+                    "the production minimum-input threshold. Use --test-values explicitly for "
+                    "small emulated rounds, or keep this run as a production-threshold comparison."
+                ),
+            }
+        )
     clustering_evaluation = evaluate_cluster_assignments(
         emulator_data,
         predicted_address_clusters,
@@ -212,6 +238,7 @@ def build_report(
         },
         "run_manifest": run_manifest,
         "run_manifest_comparison": compare_run_manifests(previous_run_manifest, run_manifest),
+        "warnings": warnings,
         "integration_diagnostics": integration_diagnostics,
         "scenario": scenario,
         "emulator_data": {

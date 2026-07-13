@@ -22,6 +22,13 @@ Emulator-mode labels are independent of `coinjoin-analysis` detector output:
   modified, or truncated, every `is_coinjoin` value is `null`,
   `evaluation_scope` is `emulator_labels_unavailable`, and no confusion matrix
   or precision/recall values are emitted.
+- A complete Wasabi manifest is also rejected when its logs contain no
+  parseable broadcast record while exported blocks contain a transaction with
+  at least five inputs. This guards legacy log-format drift from becoming a
+  confident all-negative ground truth.
+- Producer-positive txids must all occur in the exported block set. Any
+  unmatched positive makes the complete label set unavailable instead of
+  silently removing that transaction from the confusion matrix.
 
 `coinjoin_tx_info.json` remains the baseline-analyzer input to the agreement
 comparison. Its wallet/address ownership data may enrich emulator transaction
@@ -48,7 +55,13 @@ The wrapper and exporter now leave the option unset by default. Thus
 `--test-values` affects the internal threshold as designed. An explicit
 `--min-input-count N` still overrides the internal height/test-mode threshold,
 and the run manifest records that override as `N`; no override is recorded as
-`null`.
+`null`. Overrides must be positive integers; zero, negative, and non-numeric
+values are command-line errors.
+
+Small regtest Wasabi rounds generally need an explicit `--test-values`. When
+production thresholds are used on pre-850237 emulator blocks and BlockSci
+detects zero transactions, the JSON and Markdown reports carry a
+`wasabi_production_threshold_zero_detections` warning.
 
 ## BlockSci bulk detector APIs
 

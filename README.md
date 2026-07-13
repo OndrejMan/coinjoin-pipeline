@@ -18,12 +18,19 @@ cjp doctor
 coinjoin-pipeline pull
 coinjoin-pipeline full-run --engine joinmarket --dry-run
 coinjoin-pipeline full-run --engine joinmarket
+# Small regtest Wasabi rounds need an explicit test-threshold opt-in.
+coinjoin-pipeline full-run --engine wasabi \
+  --scenario scenarios/overactive-local.json \
+  --test-values
 ```
 
 By default the wrapper leaves `--min-input-count` unset, so BlockSci applies
 its height-aware production threshold (or its test threshold when
 `--test-values` is explicitly selected). Pass `--min-input-count N` only for
-an intentional override. Independent emulator labels, raw detector metrics,
+an intentional positive override. Values below 1 are rejected. Small Wasabi
+regtest scenarios normally require explicit `--test-values`; otherwise a
+zero-detection report includes a prominent production-threshold warning.
+Independent emulator labels, raw detector metrics,
 and provenance rules are defined in
 [Analysis semantics](docs/analysis-semantics.md).
 
@@ -137,6 +144,7 @@ PBS_FRONTEND_DIRECT=1 coinjoin-pipeline pbs-from-s3 \
   --s3-credentials-file /storage/brno2/home/xman/.aws/credentials \
   --s3-profile coinjoin \
   --engine wasabi \
+  --test-values \
   --analysisPbs \
   --blocksciPbs
 ```

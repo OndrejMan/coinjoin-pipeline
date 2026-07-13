@@ -68,10 +68,12 @@ if [[ "${ENGINE}" == "wasabi" ]]; then
   SCENARIO="${SCENARIO:-overactive-local.json}"
   EXPECTED_SCENARIO="overactive-local"
   EXPECTED_COINJOIN_TYPE="wasabi2"
+  TEST_VALUES_ARGS=(--test-values)
 else
   SCENARIO="${SCENARIO:-defaultJoinMarket.json}"
   EXPECTED_SCENARIO="default-joinmarket"
   EXPECTED_COINJOIN_TYPE="joinmarket"
+  TEST_VALUES_ARGS=()
 fi
 
 dump_kubernetes_diagnostics() {
@@ -188,6 +190,7 @@ set +e
     --kubernetes-btc-datadir "${BITCOIN_DATADIR}" \
     --analysisPbs \
     --blocksciPbs \
+    "${TEST_VALUES_ARGS[@]}" \
     --parallel \
     --pbs-bitcoin-datadir "${BITCOIN_DATADIR}" \
     --pbs-ncpus 2 \

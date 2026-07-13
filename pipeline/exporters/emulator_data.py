@@ -19,11 +19,14 @@ from exporters.common import (
 from exporters.normalization import block_height_from_path, is_coinbase_tx, output_address
 
 WASABI_BROADCAST_RE = re.compile(
-    r"^(?P<timestamp>.+?)\s+\[.*?Round \((?P<round_id>[0-9a-fA-F]+)\): "
-    r"Successfully broadcast the coinjoin: (?P<txid>[0-9a-fA-F]{64})\.\s*$"
+    r"^(?P<timestamp>.*?)\bRound\s+\((?P<round_id>[^)]+)\):\s+"
+    r"Successfully\s+broadcast(?:ed)?\s+(?:the\s+)?coinjoin(?:\s+transaction)?:\s+"
+    r"(?P<txid>[0-9a-f]{64})\.?\s*$",
+    re.IGNORECASE,
 )
 PRODUCER_LABEL_MANIFEST = "coinjoin_label_manifest.json"
 PRODUCER_LABEL_MANIFEST_SCHEMA_VERSION = "1.0"
+WASABI_PARSEABILITY_MIN_INPUTS = 5
 
 
 def _sha256_file(path: Path) -> str:
@@ -253,6 +256,19 @@ def normalize_emulator_io_record(
     return record
 
 
+def _mark_transaction_labels_unavailable(
+    transactions: JsonObject,
+    label_provenance: JsonObject,
+    reason: str,
+) -> None:
+    label_provenance["independent"] = False
+    label_provenance["unavailable_reason"] = reason
+    for record in transactions.values():
+        record["is_coinjoin"] = None
+        record["protocol"] = None
+        record["label_source"] = "unknown"
+
+
 def build_emulator_data(
     run_dir: Path,
     coinjoin_analysis_data: JsonObject,
@@ -299,6 +315,7 @@ def build_emulator_data(
     }
     producer_positive_txids = set(joinmarket_labels_by_txid) | set(wasabi_labels_by_txid)
     matched_positive_txids: set[str] = set()
+    wasabi_parseability_candidate_txids: set[str] = set()
 
     if block_dir.exists():
         for block_path in sorted(block_dir.glob("block_*.json"), key=lambda path: block_height_from_path(path) or -1):
@@ -324,6 +341,12 @@ def build_emulator_data(
 
                 if is_coinbase_tx(tx):
                     continue
+
+                if (
+                    coinjoin_type == "wasabi2"
+                    and len(tx.get("vin", [])) >= WASABI_PARSEABILITY_MIN_INPUTS
+                ):
+                    wasabi_parseability_candidate_txids.add(txid)
 
                 inputs = []
                 for index, input_value in enumerate(tx.get("vin", [])):
@@ -396,15 +419,34 @@ def build_emulator_data(
                         tx_record["joinmarket_round_label"] = label
                         tx_record["taker"] = label.get("taker")
                         tx_record["candidate_makers"] = label.get("candidate_makers", [])
-                        tx_record["label_source"] = (
-                            "emulator_joinmarket_round"
-                            if is_coinjoin
-                            else "emulator_joinmarket_round_candidate"
-                        )
+                        tx_record["label_source"] = "emulator_joinmarket_round"
                 elif coinjoin_type == "wasabi2" and label is not None:
                     tx_record["wasabi_round_label"] = label
                     tx_record["label_source"] = "emulator_wasabi_coordinator_broadcast"
                 transactions[txid] = tx_record
+
+    unmatched_positive_txids = sorted(producer_positive_txids - matched_positive_txids)
+    if (
+        independent_labels_available
+        and coinjoin_type == "wasabi2"
+        and not wasabi_round_labels
+        and wasabi_parseability_candidate_txids
+    ):
+        candidates = ", ".join(sorted(wasabi_parseability_candidate_txids))
+        _mark_transaction_labels_unavailable(
+            transactions,
+            label_provenance,
+            "complete Wasabi producer logs contained no parseable broadcast records "
+            f"while exported transactions had at least {WASABI_PARSEABILITY_MIN_INPUTS} inputs: "
+            f"{candidates}",
+        )
+    elif independent_labels_available and unmatched_positive_txids:
+        _mark_transaction_labels_unavailable(
+            transactions,
+            label_provenance,
+            "producer-positive transactions are missing from the exported block set: "
+            + ", ".join(unmatched_positive_txids),
+        )
 
     true_count = sum(1 for tx in transactions.values() if tx.get("is_coinjoin") is True)
     false_count = sum(1 for tx in transactions.values() if tx.get("is_coinjoin") is False)
@@ -437,7 +479,8 @@ def build_emulator_data(
             "labeled_io_records": labeled_io,
             "total_io_records": total_io,
             "producer_positive_labels": len(producer_positive_txids),
-            "unmatched_positive_txids": sorted(producer_positive_txids - matched_positive_txids),
+            "unmatched_positive_txids": unmatched_positive_txids,
+            "wasabi_parseability_candidate_txids": sorted(wasabi_parseability_candidate_txids),
         },
         "transactions": {
             txid: transactions[txid]
@@ -459,10 +502,11 @@ def load_wasabi_round_labels(run_dir: Path, log_paths: list[Path]) -> list[JsonO
     for path in log_paths:
         with path.open("r", encoding="utf-8", errors="replace") as stream:
             for line in stream:
-                match = WASABI_BROADCAST_RE.match(line.rstrip("\n"))
+                match = WASABI_BROADCAST_RE.search(line.rstrip("\n"))
                 if match is None:
                     continue
                 label = match.groupdict()
+                label["txid"] = label["txid"].lower()
                 label["source_file"] = str(path.relative_to(run_dir))
                 labels_by_txid[label["txid"]] = label
     return [labels_by_txid[txid] for txid in sorted(labels_by_txid)]
