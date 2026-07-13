@@ -63,58 +63,30 @@ def wasabi2_default_input_threshold(block_height: int | None, test_values: bool)
 
 
 def wasabi2_blocksci_denominations() -> set[int]:
+    """Mirror of BlockSci's CoinjoinUtils::compute_ww2_denominations.
+
+    Each series only contributes values inside [min, max]; the bound check
+    happens before insertion, exactly like the C++ implementation.
+    """
     denominations = {WASABI2_MIN_SATOSHIS, WASABI2_MAX_SATOSHIS}
 
-    denom = 1
-    while True:
-        denom *= 2
-        if denom >= WASABI2_MIN_SATOSHIS:
-            denominations.add(denom)
-        if denom > WASABI2_MAX_SATOSHIS:
-            break
+    def add_series(base: int, factor: int, multiplier: int) -> None:
+        value = base
+        while True:
+            value *= factor
+            candidate = value * multiplier
+            if candidate < WASABI2_MIN_SATOSHIS:
+                continue
+            if candidate > WASABI2_MAX_SATOSHIS:
+                break
+            denominations.add(candidate)
 
-    denom = 3
-    while True:
-        denom *= 3
-        if denom >= WASABI2_MIN_SATOSHIS:
-            denominations.add(denom)
-        if denom > WASABI2_MAX_SATOSHIS:
-            break
-
-    denom = 3
-    while True:
-        denom *= 3
-        next_denom = denom * 2
-        if denom >= WASABI2_MIN_SATOSHIS:
-            denominations.add(next_denom)
-        if denom > WASABI2_MAX_SATOSHIS:
-            break
-
-    denom = 10
-    while True:
-        denom *= 10
-        if denom >= WASABI2_MIN_SATOSHIS:
-            denominations.add(denom)
-        if denom > WASABI2_MAX_SATOSHIS:
-            break
-
-    denom = 10
-    while True:
-        denom *= 10
-        next_denom = denom * 5
-        if denom >= WASABI2_MIN_SATOSHIS:
-            denominations.add(next_denom)
-        if denom > WASABI2_MAX_SATOSHIS:
-            break
-
-    denom = 10
-    while True:
-        denom *= 10
-        next_denom = denom * 2
-        if denom >= WASABI2_MIN_SATOSHIS:
-            denominations.add(next_denom)
-        if denom > WASABI2_MAX_SATOSHIS:
-            break
+    add_series(1, 2, 1)  # powers of 2
+    add_series(3, 3, 1)  # powers of 3
+    add_series(3, 3, 2)  # powers of 3, times 2
+    add_series(10, 10, 1)  # powers of 10 (1-2-5 series)
+    add_series(10, 10, 2)
+    add_series(10, 10, 5)
 
     return denominations
 

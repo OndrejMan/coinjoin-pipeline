@@ -91,6 +91,25 @@ class CliTests(unittest.TestCase):
         )
         self.assertIn("docker://ghcr.io/ondrejman/coinjoin-mappings-sake:v1", args)
 
+    def test_test_values_are_explicit_opt_in(self) -> None:
+        for enabled in (False, True):
+            arguments = ["full-run", "--engine", "wasabi", "--dry-run"]
+            if enabled:
+                arguments.append("--test-values")
+            output = io.StringIO()
+            with (
+                redirect_stdout(output),
+                mock.patch("coinjoin_pipeline.cli.doctor_check", return_value=[]),
+            ):
+                code = main(arguments)
+
+            self.assertEqual(code, 0)
+            rendered_command = output.getvalue()
+            if enabled:
+                self.assertIn("--test-values", rendered_command)
+            else:
+                self.assertNotIn("--test-values", rendered_command)
+
     def test_cleanup_requires_confirmation(self) -> None:
         self.assertIn(
             "clean is destructive; pass --yes or --dry-run",

@@ -142,6 +142,7 @@ def main(argv: list[str] | None = None) -> int:
             or (action == "coinjoin-analysis" and "--analysisPbs" in passthrough)
             or (action == "mappings" and "--mappingsPbs" in passthrough)
             or action == "pbs-from-s3"
+            or (action == "recreate" and option_value(passthrough, "--artifact-backend") == "s3")
         )
         if "--dry-run" in passthrough and not stage_pbs_dry_run:
             print("[dry-run] validation passed; command was not executed")

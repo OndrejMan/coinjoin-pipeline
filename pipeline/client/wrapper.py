@@ -429,7 +429,7 @@ def inspect_image_provenance(image: str, runtime: str) -> tuple[str | None, str 
             text=True,
             timeout=5,
         )
-    except OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired:
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None, None
 
     lines = result.stdout.splitlines()
@@ -929,6 +929,9 @@ def populate_btc_data_volume(btc_data_dir: Path) -> None:
     """
     volume_name = f"{COMPOSE_PROJECT}_btc_data"
     runtime = container_runtime()
+    # Reuse the wrapper image for the copy helper instead of pulling an
+    # unpinned `alpine`; it is already present and provides sh/cp.
+    helper_image = os.environ.get("WRAPPER_IMAGE", "ghcr.io/ondrejman/coinjoin-pipeline:latest")
 
     # Ensure the volume exists
     subprocess.run(
@@ -944,12 +947,13 @@ def populate_btc_data_volume(btc_data_dir: Path) -> None:
                 runtime,
                 "run",
                 "--rm",
+                "--entrypoint",
+                "sh",
                 "-v",
                 f"{volume_name}:/vol:rw",
                 "-v",
                 f"{btc_data_dir}:/src:ro",
-                "alpine",
-                "sh",
+                helper_image,
                 "-c",
                 "cp -a /src/. /vol/",
             ],
@@ -2267,7 +2271,7 @@ def main() -> None:
                     run_parallel_analysis(args, active_run, logs_root)
                 else:
                     run_serial_analysis(args, active_run, logs_root)
-            except (PBSError, RuntimeError, subprocess.CalledProcessError) as error:
+            except (PBSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
                 print(f"[ERROR] {error}", file=sys.stderr)
                 sys.exit(2)
         else:
@@ -2294,7 +2298,7 @@ def main() -> None:
                     run_parallel_analysis(args, active_run, logs_root)
                 else:
                     run_serial_analysis(args, active_run, logs_root)
-            except (PBSError, RuntimeError, subprocess.CalledProcessError) as error:
+            except (PBSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
                 print(f"[ERROR] {error}", file=sys.stderr)
                 sys.exit(2)
 

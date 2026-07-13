@@ -12,6 +12,12 @@ ORIGINAL_ARGS=("$@")
 
 fail() { echo "ERROR: $*" >&2; exit 2; }
 
+# Argument validation and defaulting policy (required options, run selection,
+# destructive-action confirmation and threshold selection) live in the
+# installed Python CLI (coinjoin_pipeline.commands/doctor/host), which always
+# runs before this launcher. This script only performs container-runtime
+# mechanics: socket setup, mounts, environment forwarding, and cleanup.
+
 # Bash 3.2, still the default /bin/bash on macOS, treats "${empty_array[@]}"
 # as an unbound variable under set -u. Expand optional arrays through the
 # ${array[@]+...} guard at command boundaries where zero arguments are valid.
@@ -137,38 +143,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-SELECTED_ACTION=""; DOCTOR_ENGINE=""; DOCTOR_SCENARIO=""; HAS_HELP=false; HAS_DRY_RUN=false; HAS_YES=false; HAS_TEST_VALUES=false; HAS_ANALYSIS_PBS=false; HAS_BLOCKSCI_PBS=false; HAS_MAPPINGS_PBS=false; HAS_COPY_TO_HOST=false; HAS_S3_BACKEND=false
+SELECTED_ACTION=""; DOCTOR_ENGINE=""; HAS_DRY_RUN=false; HAS_ANALYSIS_PBS=false; HAS_BLOCKSCI_PBS=false; HAS_MAPPINGS_PBS=false; HAS_COPY_TO_HOST=false
 for ((index=0; index<${#WRAPPER_ARGS[@]}; index++)); do
   item="${WRAPPER_ARGS[index]}"
   case "${item}" in
     full-run|recreate|clean|analyze|export|coinjoin-analysis|coinjoin|mappings|initialize|pbs-from-s3) [[ -z "${SELECTED_ACTION}" ]] && SELECTED_ACTION="${item}" ;;
     --engine) DOCTOR_ENGINE="${WRAPPER_ARGS[index + 1]:-}" ;;
     --engine=*) DOCTOR_ENGINE="${item#--engine=}" ;;
-    --scenario) DOCTOR_SCENARIO="${WRAPPER_ARGS[index + 1]:-}" ;;
-    --scenario=*) DOCTOR_SCENARIO="${item#--scenario=}" ;;
-    --help|-h) HAS_HELP=true ;;
     --dry-run) HAS_DRY_RUN=true ;;
-    --yes) HAS_YES=true ;;
-    --test-values) HAS_TEST_VALUES=true ;;
     --analysisPbs) HAS_ANALYSIS_PBS=true ;;
     --blocksciPbs) HAS_BLOCKSCI_PBS=true ;;
     --mappingsPbs) HAS_MAPPINGS_PBS=true ;;
     --copy-to-host) HAS_COPY_TO_HOST=true ;;
-    --artifact-backend=s3) HAS_S3_BACKEND=true ;;
-    --artifact-backend) [[ "${WRAPPER_ARGS[index + 1]:-}" == s3 ]] && HAS_S3_BACKEND=true ;;
   esac
 done
 ACTION="${SELECTED_ACTION:-full-run}"
-HAS_PBS_STAGE_DRY_RUN=false
-if [[ "${HAS_DRY_RUN}" == true ]]; then
-  if [[ "${ACTION}" == analyze && "${HAS_BLOCKSCI_PBS}" == true ]]; then HAS_PBS_STAGE_DRY_RUN=true; fi
-  if [[ ( "${ACTION}" == coinjoin-analysis || "${ACTION}" == coinjoin ) && "${HAS_ANALYSIS_PBS}" == true ]]; then HAS_PBS_STAGE_DRY_RUN=true; fi
-  if [[ "${ACTION}" == mappings && "${HAS_MAPPINGS_PBS}" == true ]]; then HAS_PBS_STAGE_DRY_RUN=true; fi
-  if [[ "${ACTION}" == pbs-from-s3 || ( "${ACTION}" == recreate && "${HAS_S3_BACKEND}" == true ) ]]; then HAS_PBS_STAGE_DRY_RUN=true; fi
-fi
-if [[ "${HAS_HELP}" == false && ( "${ACTION}" == full-run || "${ACTION}" == recreate || "${ACTION}" == analyze || "${ACTION}" == export ) ]] && [[ "${DOCTOR_ENGINE}" != wasabi && "${DOCTOR_ENGINE}" != joinmarket ]]; then
-  fail "${ACTION} requires --engine wasabi or --engine joinmarket."
-fi
 
 # PBS frontends already provide qsub and shared storage. This opt-in path keeps
 # the documented runIt.sh interface while avoiding an unnecessary wrapper
@@ -180,9 +169,6 @@ if [[ "${PBS_FRONTEND_DIRECT:-0}" == 1 && ( "${HAS_ANALYSIS_PBS}" == true || "${
   [[ -z "${KUBECONFIG_PATH}" ]] || DIRECT_WRAPPER_ARGS+=(--kubeconfig "${KUBECONFIG_PATH}")
   if [[ "${HAS_BLOCKSCI_PBS}" == true && -n "${PBS_BITCOIN_DATADIR_PATH}" ]]; then
     DIRECT_WRAPPER_ARGS+=(--pbs-bitcoin-datadir "${PBS_BITCOIN_DATADIR_PATH}")
-  fi
-  if [[ ( "${ACTION}" == full-run || "${ACTION}" == analyze || "${ACTION}" == export ) && "${HAS_TEST_VALUES}" == false ]]; then
-    DIRECT_WRAPPER_ARGS+=(--test-values)
   fi
   DIRECT_WRAPPER_ROOT="${PBS_FRONTEND_WRAPPER_ROOT:-}"
   DIRECT_WRAPPER_SCRIPT="${DIRECT_WRAPPER_ROOT}/client/wrapper.py"
@@ -218,15 +204,6 @@ if [[ "${PBS_FRONTEND_DIRECT:-0}" == 1 && ( "${HAS_ANALYSIS_PBS}" == true || "${
   fi
   exec python3 "${DIRECT_WRAPPER_SCRIPT}" "${DIRECT_WRAPPER_ARGS[@]}"
 fi
-if [[ "${ACTION}" == analyze || "${ACTION}" == export || "${ACTION}" == coinjoin-analysis || "${ACTION}" == coinjoin || "${ACTION}" == mappings ]]; then
-  HAS_SELECTED_RUN=false
-  for item in ${WRAPPER_ARGS[@]+"${WRAPPER_ARGS[@]}"}; do
-    [[ "${item}" == --all-runs || "${item}" == --run-dir || "${item}" == --run-dir=* ]] && HAS_SELECTED_RUN=true
-  done
-  [[ "${HAS_SELECTED_RUN}" == true ]] || fail "${ACTION} requires --run-dir <run-id>. Use './runIt.sh runs list' to select a run."
-fi
-[[ "${ACTION}" != clean || "${HAS_DRY_RUN}" == true || "${HAS_YES}" == true ]] || fail "clean is destructive; rerun with --yes or preview with --dry-run."
-
 check_runtime
 if [[ -n "${BLOCKSCI_SCRIPT_PATH}" ]]; then
   [[ -f "${BLOCKSCI_SCRIPT_PATH}" ]] || fail "BlockSci script not found: ${BLOCKSCI_SCRIPT_PATH}"
@@ -238,7 +215,6 @@ if [[ -n "${BLOCKSCI_SCRIPT_PATH}" ]]; then
     esac
   done
 fi
-if [[ -n "${DOCTOR_SCENARIO}" && ! -f "${DOCTOR_SCENARIO}" && ! -f "${SCRIPT_DIR}/${DOCTOR_SCENARIO}" && ! -f "${SCRIPT_DIR}/scenarios/${DOCTOR_SCENARIO}" ]]; then fail "Scenario not found: ${DOCTOR_SCENARIO}"; fi
 if [[ "${DRIVER}" == kubernetes && "${HAS_DRY_RUN}" == false ]]; then
   KUBE_CFG="${KUBECONFIG_PATH:-${HOME}/.kube/config}"
   [[ -f "${KUBE_CFG}" ]] || fail "kubeconfig not found at ${KUBE_CFG}"
@@ -258,13 +234,6 @@ fi
 require_image "${WRAPPER_IMAGE}"
 echo "[doctor] OK: action=${ACTION} runtime=${CONTAINER_RUNTIME}${DOCTOR_ENGINE:+ engine=${DOCTOR_ENGINE}}"
 
-if [[ "${HAS_DRY_RUN}" == true && "${HAS_PBS_STAGE_DRY_RUN}" == false ]]; then
-  echo "[dry-run] No containers, Kubernetes resources, files, or reports will be created."
-  echo "[dry-run] runtime: ${CONTAINER_RUNTIME}"
-  echo "[dry-run] action: ${ACTION}"
-  exit 0
-fi
-
 mkdir -p "${EMULATION_LOGS_DIR}"
 EXPORTERS_DIR="${EXPORTERS_DIR:-${EMULATION_LOGS_DIR}/.wrapper-exporters}"
 mkdir -p "${EXPORTERS_DIR}"
@@ -283,10 +252,13 @@ WRAPPER_PULL_ARGS=()
 while IFS= read -r wrapper_pull_arg; do
   WRAPPER_PULL_ARGS+=("${wrapper_pull_arg}")
 done < <(wrapper_pull_args)
-if [[ "${ACTION}" == full-run || "${ACTION}" == analyze || "${ACTION}" == export ]] && [[ "${HAS_HELP}" == false && "${HAS_TEST_VALUES}" == false ]]; then WRAPPER_EXTRA_ARGS+=(--test-values); fi
 if [[ "${DRIVER}" == kubernetes ]]; then
-  KUBE_CFG="$(cd "$(dirname "${KUBE_CFG}")" && pwd)/$(basename "${KUBE_CFG}")"
-  CONTAINER_EXTRA_ARGS+=("-v" "${KUBE_CFG}:${KUBE_CFG}:ro" "-v" "$(dirname "${KUBE_CFG}"):$(dirname "${KUBE_CFG}"):ro")
+  # Dry runs skip the reachability check above, so KUBE_CFG may be unset here.
+  KUBE_CFG="${KUBE_CFG:-${KUBECONFIG_PATH:-${HOME}/.kube/config}}"
+  if [[ -f "${KUBE_CFG}" ]]; then
+    KUBE_CFG="$(cd "$(dirname "${KUBE_CFG}")" && pwd)/$(basename "${KUBE_CFG}")"
+    CONTAINER_EXTRA_ARGS+=("-v" "${KUBE_CFG}:${KUBE_CFG}:ro" "-v" "$(dirname "${KUBE_CFG}"):$(dirname "${KUBE_CFG}"):ro")
+  fi
   WRAPPER_EXTRA_ARGS+=(--driver kubernetes --kubeconfig "${KUBE_CFG}")
   [[ -n "${NAMESPACE}" ]] && WRAPPER_EXTRA_ARGS+=(--namespace "${NAMESPACE}")
   [[ "${CONTAINER_RUNTIME}" == docker ]] && CONTAINER_EXTRA_ARGS+=(--add-host host.docker.internal:host-gateway)

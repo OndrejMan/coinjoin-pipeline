@@ -13,6 +13,7 @@ the expected artifacts.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import tempfile
@@ -78,11 +79,22 @@ def require_qsub() -> None:
         raise PBSError("PBS stages must be run on a MetaCentrum frontend with qsub available")
 
 
+# Paths are rendered into PBS shell templates via str.format; restrict them to
+# characters that survive both PBS directives and unquoted shell contexts.
+SAFE_TEMPLATE_PATH_RE = re.compile(r"^[A-Za-z0-9/._+:@-]+$")
+
+
+def require_safe_template_path(path: Path, description: str) -> None:
+    if not SAFE_TEMPLATE_PATH_RE.fullmatch(str(path)):
+        raise PBSError(f"{description} contains characters unsafe for PBS job templates: {path}")
+
+
 def require_storage_path(run_dir: Path) -> None:
     """PBS jobs need the run directory on shared MetaCentrum storage (/storage)."""
     resolved = str(run_dir.resolve())
     if not resolved.startswith("/storage/"):
         raise PBSError(f"PBS jobs need run-dir on shared MetaCentrum storage (/storage), not: {resolved}")
+    require_safe_template_path(run_dir.resolve(), "PBS path")
 
 
 def require_existing_path(path: Path, description: str) -> None:
@@ -237,7 +249,13 @@ def _qstat_job_state(job_id: str) -> str | None:
         stderr=subprocess.PIPE,
     )
     if result.returncode != 0:
-        return "MISSING"
+        # Only an explicit unknown-job answer means the job is gone. Any other
+        # failure (PBS server restart, network hiccup) is inconclusive and must
+        # not be treated as job death.
+        stderr = result.stderr.lower()
+        if "unknown job" in stderr or "job has finished" in stderr:
+            return "MISSING"
+        return None
     for line in result.stdout.splitlines():
         line = line.strip()
         if line.startswith("job_state ="):
@@ -451,6 +469,7 @@ def wait_for_pbs_marker(
     failed = run_dir / ".pbs" / f"{stage}.failed"
     job_id = job_id or _read_pbs_job_id(run_dir, stage)
     deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
+    terminal_state_seen: str | None = None
 
     while True:
         if failed.exists():
@@ -459,11 +478,17 @@ def wait_for_pbs_marker(
             return
         if deadline is not None and time.monotonic() >= deadline:
             raise PBSError(f"Timed out waiting for PBS stage marker: {stage}")
+        if terminal_state_seen is not None:
+            # The compute node writes the marker over shared storage, which can
+            # lag behind qstat; one extra poll cycle already passed without it.
+            raise PBSError(
+                f"PBS stage ended without marker: {stage} (job {job_id}, state {terminal_state_seen})"
+            )
         if job_id:
             state = _qstat_job_state(job_id)
             if state in PBS_TERMINAL_STATES or state == "MISSING":
-                raise PBSError(f"PBS stage ended without marker: {stage} (job {job_id}, state {state})")
-            if state is not None and state not in PBS_ACTIVE_STATES:
+                terminal_state_seen = state
+            elif state is not None and state not in PBS_ACTIVE_STATES:
                 raise PBSError(f"PBS stage has unexpected qstat state: {stage} (job {job_id}, state {state})")
         time.sleep(poll_interval)
 

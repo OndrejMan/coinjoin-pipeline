@@ -40,13 +40,15 @@ The frontend polls every `POLL_INTERVAL_SECONDS` (30 s):
    a terminal state (`C`/`F`) or a missing job without a marker means the job
    ended without writing its marker, which is treated as a failure.
 
-Caveats of the current implementation (see the repo review notes):
+Robustness rules:
 
-- Any non-zero `qstat` exit is mapped to `MISSING`, so a transient PBS-server
-  outage while a job is still running is indistinguishable from a vanished job.
-- Markers are written to shared storage by the compute node; NFS attribute
+- A non-zero `qstat` exit only counts as job death when stderr explicitly says
+  the job is unknown/finished; any other failure (PBS server restart, network
+  hiccup) is inconclusive and polling continues.
+- Markers are written to shared storage by the compute node, and NFS attribute
   caching can briefly show a finished (`F`) job before its `done` marker is
-  visible to the frontend.
+  visible; the frontend therefore waits one extra poll cycle after seeing a
+  terminal state before declaring "ended without marker".
 
 ## Requirements checked before submission
 

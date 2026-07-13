@@ -20,6 +20,10 @@ coinjoin-pipeline full-run --engine joinmarket --dry-run
 coinjoin-pipeline full-run --engine joinmarket
 ```
 
+BlockSci analysis uses production heuristic thresholds by default. Pass
+`--test-values` explicitly for the reduced thresholds used by small emulated
+regtest rounds.
+
 Outputs default to `./coinjoin-runs`; override this with `--runs-root`. Images
 default to the explicit `latest` tag. Use `--version TAG` to apply one coordinated
 tag to every default image, or `--local-build` for local development tags.
