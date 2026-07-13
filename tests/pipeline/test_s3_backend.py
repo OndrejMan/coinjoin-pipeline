@@ -25,6 +25,24 @@ COMMON = dict(
 )
 
 
+def render_kubernetes_manifest(*, reuse_namespace: bool = False) -> dict:
+    return json.loads(
+        render_s3_emulation_resources(
+            namespace="coinjoin",
+            run_id="run-1",
+            scenario_json="{}",
+            engine="wasabi",
+            image_prefix="ghcr.io/ondrejman/",
+            emulator_image="emulator:latest",
+            uploader_image="pipeline:latest",
+            artifact_uri="s3://bucket/runs",
+            endpoint_url="https://s3.cl4.du.cesnet.cz",
+            secret_name="coinjoin-s3",
+            reuse_namespace=reuse_namespace,
+        )
+    )
+
+
 def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
     coinjoin = render_coinjoin_analysis_s3_pbs(
         **COMMON, image="docker://coinjoin", command="analyze"
@@ -123,27 +141,59 @@ def test_rendered_pbs_script_calls_fake_s5cmd_only_on_compute_path() -> None:
 
 
 def test_kubernetes_manifest_has_controller_uploader_secret_and_rbac() -> None:
-    manifest = json.loads(
-        render_s3_emulation_resources(
-            namespace="coinjoin",
-            run_id="run-1",
-            scenario_json="{}",
-            engine="wasabi",
-            image_prefix="ghcr.io/ondrejman/",
-            emulator_image="emulator:latest",
-            uploader_image="pipeline:latest",
-            artifact_uri="s3://bucket/runs",
-            endpoint_url="https://s3.cl4.du.cesnet.cz",
-            secret_name="coinjoin-s3",
-        )
-    )
+    manifest = render_kubernetes_manifest()
     kinds = {item["kind"] for item in manifest["items"]}
     assert {"ServiceAccount", "Role", "RoleBinding", "Job"}.issubset(kinds)
+    assert "ClusterRole" not in kinds
+    assert "ClusterRoleBinding" not in kinds
+    rbac = [
+        item
+        for item in manifest["items"]
+        if item["apiVersion"] == "rbac.authorization.k8s.io/v1"
+    ]
+    assert {item["kind"] for item in rbac} == {"Role", "RoleBinding"}
+    assert all(item["metadata"]["namespace"] == "coinjoin" for item in rbac)
+    role_binding = next(item for item in rbac if item["kind"] == "RoleBinding")
+    assert role_binding["roleRef"]["kind"] == "Role"
+
     job = next(item for item in manifest["items"] if item["kind"] == "Job")
     spec = job["spec"]["template"]["spec"]
-    assert any(volume.get("emptyDir") == {} for volume in spec["volumes"])
+    assert spec["securityContext"] == {
+        "runAsNonRoot": True,
+        "runAsUser": 1000,
+        "runAsGroup": 1000,
+        "fsGroup": 1000,
+        "seccompProfile": {"type": "RuntimeDefault"},
+    }
+
+    volumes = {volume["name"]: volume for volume in spec["volumes"]}
+    assert volumes["artifacts"]["emptyDir"] == {}
+    assert volumes["credentials"]["emptyDir"] == {"medium": "Memory"}
+
     containers = {container["name"]: container for container in spec["containers"]}
     assert set(containers) == {"controller", "uploader"}
+    expected_resources = {
+        "controller": {
+            "requests": {"cpu": "250m", "memory": "512Mi"},
+            "limits": {"cpu": "1", "memory": "1Gi"},
+        },
+        "uploader": {
+            "requests": {"cpu": "100m", "memory": "128Mi"},
+            "limits": {"cpu": "500m", "memory": "512Mi"},
+        },
+    }
+    for container_name, container in containers.items():
+        security_context = container["securityContext"]
+        assert security_context["allowPrivilegeEscalation"] is False
+        assert security_context["capabilities"]["drop"] == ["ALL"]
+        assert "privileged" not in security_context
+        assert container["resources"] == expected_resources[container_name]
+        assert any(mount["name"] == "artifacts" for mount in container["volumeMounts"])
+
+    assert any(
+        mount["name"] == "credentials"
+        for mount in containers["uploader"]["volumeMounts"]
+    )
     rendered = json.dumps(manifest)
     assert (
         "s5cmd" in rendered
@@ -157,3 +207,12 @@ def test_kubernetes_manifest_has_controller_uploader_secret_and_rbac() -> None:
     assert "state.terminated.exitCode" in rendered
     assert "ImagePullBackOff" in rendered
     assert 's5 cp \\"/artifacts/$RUN_ID/.k8s/upload.failed\\"' in rendered
+
+
+def test_kubernetes_manifest_reuses_existing_namespace() -> None:
+    manifest = render_kubernetes_manifest(reuse_namespace=True)
+
+    assert all(item["kind"] != "Namespace" for item in manifest["items"])
+    assert all(
+        item["metadata"].get("namespace") == "coinjoin" for item in manifest["items"]
+    )

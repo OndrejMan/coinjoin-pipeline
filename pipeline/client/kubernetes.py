@@ -8,6 +8,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+S3_CONTROLLER_RESOURCE_REQUESTS = {"cpu": "250m", "memory": "512Mi"}
+S3_CONTROLLER_RESOURCE_LIMITS = {"cpu": "1", "memory": "1Gi"}
+S3_UPLOADER_RESOURCE_REQUESTS = {"cpu": "100m", "memory": "128Mi"}
+S3_UPLOADER_RESOURCE_LIMITS = {"cpu": "500m", "memory": "512Mi"}
+
 
 def run_kubectl_preflight_command(command: list[str]) -> str:
     try:
@@ -217,6 +222,13 @@ rm -f /credentials/credentials"""
                     "spec": {
                         "serviceAccountName": name,
                         "restartPolicy": "Never",
+                        "securityContext": {
+                            "runAsNonRoot": True,
+                            "runAsUser": 1000,
+                            "runAsGroup": 1000,
+                            "fsGroup": 1000,
+                            "seccompProfile": {"type": "RuntimeDefault"},
+                        },
                         "volumes": [
                             {"name": "artifacts", "emptyDir": {}},
                             {"name": "credentials", "emptyDir": {"medium": "Memory"}},
@@ -228,6 +240,14 @@ rm -f /credentials/credentials"""
                                 "image": emulator_image,
                                 "command": ["sh", "-c", controller],
                                 "env": env,
+                                "securityContext": {
+                                    "allowPrivilegeEscalation": False,
+                                    "capabilities": {"drop": ["ALL"]},
+                                },
+                                "resources": {
+                                    "requests": S3_CONTROLLER_RESOURCE_REQUESTS,
+                                    "limits": S3_CONTROLLER_RESOURCE_LIMITS,
+                                },
                                 "volumeMounts": [
                                     {"name": "artifacts", "mountPath": "/app/logs"},
                                     {"name": "scenario", "mountPath": "/config", "readOnly": True},
@@ -238,6 +258,14 @@ rm -f /credentials/credentials"""
                                 "image": uploader_image,
                                 "command": ["sh", "-c", uploader],
                                 "env": uploader_env,
+                                "securityContext": {
+                                    "allowPrivilegeEscalation": False,
+                                    "capabilities": {"drop": ["ALL"]},
+                                },
+                                "resources": {
+                                    "requests": S3_UPLOADER_RESOURCE_REQUESTS,
+                                    "limits": S3_UPLOADER_RESOURCE_LIMITS,
+                                },
                                 "volumeMounts": [
                                     {"name": "artifacts", "mountPath": "/artifacts"},
                                     {"name": "credentials", "mountPath": "/credentials"},
