@@ -66,7 +66,7 @@ if [[ "${ENGINE}" == "wasabi" ]]; then
   SCENARIO="${SCENARIO:-overactive-local.json}"
   EXPECTED_SCENARIO="overactive-local"
   EXPECTED_COINJOIN_TYPE="wasabi2"
-  TEST_VALUES_ARGS=(--test-values)
+  TEST_VALUES_ARGS=(--test-values --min-input-count 15)
 else
   SCENARIO="${SCENARIO:-defaultJoinMarket.json}"
   EXPECTED_SCENARIO="default-joinmarket"

@@ -21,15 +21,17 @@ coinjoin-pipeline full-run --engine joinmarket
 # Small regtest Wasabi rounds need an explicit test-threshold opt-in.
 coinjoin-pipeline full-run --engine wasabi \
   --scenario scenarios/overactive-local.json \
-  --test-values
+  --test-values \
+  --min-input-count 15
 ```
 
 By default the wrapper leaves `--min-input-count` unset, so BlockSci applies
 its height-aware production threshold (or its test threshold when
 `--test-values` is explicitly selected). Pass `--min-input-count N` only for
 an intentional positive override. Values below 1 are rejected. Small Wasabi
-regtest scenarios normally require explicit `--test-values`; otherwise a
-zero-detection report includes a prominent production-threshold warning.
+regtest scenarios normally require explicit `--test-values` and may need a
+scenario-appropriate `--min-input-count`; otherwise a zero-detection report
+includes a prominent production-threshold warning.
 Independent emulator labels, raw detector metrics,
 and provenance rules are defined in
 [Analysis semantics](docs/analysis-semantics.md).

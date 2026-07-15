@@ -36,6 +36,7 @@ fi
 
 LOG_PID=""
 WAIT_PID=""
+WAIT_RESULT_FILE="$(mktemp)"
 STACK_STARTED=false
 
 cleanup_recreate_stack() {
@@ -54,6 +55,8 @@ cleanup_recreate_stack() {
       echo "WARN: compose down failed during cleanup" >&2
     fi
   fi
+
+  rm -f "${WAIT_RESULT_FILE}"
 }
 
 handle_interrupt() {
@@ -101,13 +104,24 @@ LOG_PID=$!
 
 # 3. Wait ONLY for the manager to exit and capture its exit code
 MANAGER_CONTAINER_ID=$("${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile recreate ps -q manager)
-"${CONTAINER_RUNTIME}" wait "${MANAGER_CONTAINER_ID}" &
+"${CONTAINER_RUNTIME}" wait "${MANAGER_CONTAINER_ID}" >"${WAIT_RESULT_FILE}" &
 WAIT_PID=$!
 set +e
 wait "${WAIT_PID}"
-EXIT_CODE=$?
+WAIT_COMMAND_EXIT_CODE=$?
 set -e
 WAIT_PID=""
+
+if [[ "${WAIT_COMMAND_EXIT_CODE}" -ne 0 ]]; then
+  echo "ERROR: ${CONTAINER_RUNTIME} wait failed with code ${WAIT_COMMAND_EXIT_CODE}" >&2
+  exit "${WAIT_COMMAND_EXIT_CODE}"
+fi
+
+read -r EXIT_CODE <"${WAIT_RESULT_FILE}" || EXIT_CODE=""
+if [[ ! "${EXIT_CODE}" =~ ^[0-9]+$ || "${EXIT_CODE}" -gt 255 ]]; then
+  echo "ERROR: invalid manager exit code from ${CONTAINER_RUNTIME} wait: ${EXIT_CODE:-<empty>}" >&2
+  exit 1
+fi
 
 # Exit your terminal or CI/CD pipeline with the manager's exit code.
 # The EXIT trap tears the compose stack down while preserving this status.

@@ -105,7 +105,8 @@ echo "Using wrapper image ${WRAPPER_IMAGE}, BlockSci image ${BLOCKSCI_IMAGE}, em
     COINJOIN_EMULATOR_PULL_POLICY="${COINJOIN_EMULATOR_PULL_POLICY}" \
     COINJOIN_EMULATOR_IMAGE_PREFIX="${COINJOIN_EMULATOR_IMAGE_PREFIX}" \
     COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD}" \
-    bash runIt.sh --engine wasabi --scenario scenarios/overactive-local.json --test-values
+    bash runIt.sh --engine wasabi --scenario scenarios/overactive-local.json \
+      --test-values --min-input-count 15
   ) 2>&1 | tee "${RUN_LOG}"
 ) &
 RUN_PID=$!
