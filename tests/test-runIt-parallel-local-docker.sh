@@ -193,8 +193,8 @@ fi
 for artifact in \
   coinjoin_emulator_data/scenario.json \
   coinjoin-analysis_data/coinjoin_tx_info.json \
-  blocksciEmulatorAnalysis_data/unified_report.json \
-  blocksciEmulatorAnalysis_data/unified_report.md \
+  coinjoinPipeline_data/unified_report.json \
+  coinjoinPipeline_data/unified_report.md \
   blocksci_data/config.json; do
   if [[ ! -s "${RUN_DIR}/${artifact}" ]]; then
     echo "FAIL: expected artifact missing or empty: ${RUN_DIR}/${artifact}" >&2
@@ -209,7 +209,7 @@ from pathlib import Path
 
 run_dir = Path(sys.argv[1])
 scenario = json.loads((run_dir / "coinjoin_emulator_data" / "scenario.json").read_text(encoding="utf-8"))
-report = json.loads((run_dir / "blocksciEmulatorAnalysis_data" / "unified_report.json").read_text(encoding="utf-8"))
+report = json.loads((run_dir / "coinjoinPipeline_data" / "unified_report.json").read_text(encoding="utf-8"))
 baseline = json.loads((run_dir / "coinjoin-analysis_data" / "coinjoin_tx_info.json").read_text(encoding="utf-8"))
 
 if scenario.get("name") != "overactive-local":

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 MANIFEST_NAME = "research_manifest.json"
-REPORT_DIR = "blocksciEmulatorAnalysis_data"
+REPORT_DIR = "coinjoinPipeline_data"
 BASELINE_FILE = "coinjoin-analysis_data/coinjoin_tx_info.json"
 FALSE_CJTXS_FILE = "coinjoin-analysis_data/false_cjtxs.json"
 

@@ -89,7 +89,7 @@ class ResearchPreflightTests(unittest.TestCase):
             config = run_dir / "blocksci_data" / "config.json"
             config.parent.mkdir()
             config.write_text("{}")
-            report = run_dir / "blocksciEmulatorAnalysis_data" / "unified_report.json"
+            report = run_dir / "coinjoinPipeline_data" / "unified_report.json"
             report.parent.mkdir()
             report.write_text(json.dumps({
                 "run_manifest": {"images": {"blocksci": "blocksci:test"}},

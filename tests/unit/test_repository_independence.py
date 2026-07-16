@@ -41,9 +41,6 @@ class RepositoryIndependenceTests(unittest.TestCase):
             ):
                 continue
             content = path.read_text(encoding="utf-8", errors="replace")
-            # This directory name is a stable public report contract, not a
-            # source-repository dependency.
-            content = content.replace("blocksciEmulatorAnalysis_data", "REPORT_DATA")
             for forbidden in FORBIDDEN:
                 if forbidden in content:
                     violations.append(f"{path.relative_to(PROJECT_ROOT)}: {forbidden}")

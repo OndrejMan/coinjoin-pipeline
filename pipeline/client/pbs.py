@@ -422,7 +422,7 @@ def render_blocksci_s3_pbs(
         download_run=render_s5cmd_sync('"$ARTIFACT_URI/$RUN_ID/*"', '"$RUN_WORK/"'),
         upload_blocksci=render_s5cmd_sync('"$RUN_WORK/blocksci_data/"', '"$ARTIFACT_URI/$RUN_ID/blocksci_data/"'),
         upload_report=render_s5cmd_sync(
-            '"$RUN_WORK/blocksciEmulatorAnalysis_data/"', '"$ARTIFACT_URI/$RUN_ID/blocksciEmulatorAnalysis_data/"'
+            '"$RUN_WORK/coinjoinPipeline_data/"', '"$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"'
         ),
         upload_logs=render_s5cmd_sync('"$RUN_WORK/logs/"', '"$ARTIFACT_URI/$RUN_ID/logs/"'),
         upload_failed=render_s5cmd_cp('"$FAILED_MARKER"', '"$ARTIFACT_URI/$RUN_ID/.pbs/blocksci.failed"'),

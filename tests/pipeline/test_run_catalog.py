@@ -24,8 +24,8 @@ class RunCatalogTests(unittest.TestCase):
             root = Path(temp)
             emulator = root / "emulator-run"
             (emulator / "coinjoin_emulator_data").mkdir(parents=True)
-            (emulator / "blocksciEmulatorAnalysis_data").mkdir()
-            (emulator / "blocksciEmulatorAnalysis_data" / "unified_report.json").write_text("{}")
+            (emulator / "coinjoinPipeline_data").mkdir()
+            (emulator / "coinjoinPipeline_data" / "unified_report.json").write_text("{}")
             external = root / "external-run"
             external.mkdir()
             write_manifest(external, {"mode": "external", "run_id": "external-run"})
@@ -41,7 +41,7 @@ class RunCatalogTests(unittest.TestCase):
     def test_report_status_surfaces_failed_diagnostics(self):
         with tempfile.TemporaryDirectory() as temp:
             run_dir = Path(temp)
-            report_dir = run_dir / "blocksciEmulatorAnalysis_data"
+            report_dir = run_dir / "coinjoinPipeline_data"
             report_dir.mkdir()
             (report_dir / "unified_report.json").write_text(
                 json.dumps({"integration_diagnostics": {"status": "not_ok"}})
@@ -51,7 +51,7 @@ class RunCatalogTests(unittest.TestCase):
     def test_report_status_surfaces_unavailable_emulator_labels(self):
         with tempfile.TemporaryDirectory() as temp:
             run_dir = Path(temp)
-            report_dir = run_dir / "blocksciEmulatorAnalysis_data"
+            report_dir = run_dir / "coinjoinPipeline_data"
             report_dir.mkdir()
             (report_dir / "unified_report.json").write_text(
                 json.dumps(

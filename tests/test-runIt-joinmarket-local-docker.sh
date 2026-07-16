@@ -190,9 +190,9 @@ fi
 for artifact in \
   coinjoin_emulator_data/scenario.json \
   coinjoin-analysis_data/coinjoin_tx_info.json \
-  blocksciEmulatorAnalysis_data/unified_report.json \
-  blocksciEmulatorAnalysis_data/unified_report.md \
-  blocksciEmulatorAnalysis_data/emulator_data.json \
+  coinjoinPipeline_data/unified_report.json \
+  coinjoinPipeline_data/unified_report.md \
+  coinjoinPipeline_data/emulator_data.json \
   blocksci_data/config.json; do
   if [[ ! -s "${RUN_DIR}/${artifact}" ]]; then
     echo "FAIL: expected artifact missing or empty: ${RUN_DIR}/${artifact}" >&2
@@ -212,9 +212,9 @@ from pathlib import Path
 
 run_dir = Path(sys.argv[1])
 scenario = json.loads((run_dir / "coinjoin_emulator_data" / "scenario.json").read_text(encoding="utf-8"))
-report = json.loads((run_dir / "blocksciEmulatorAnalysis_data" / "unified_report.json").read_text(encoding="utf-8"))
+report = json.loads((run_dir / "coinjoinPipeline_data" / "unified_report.json").read_text(encoding="utf-8"))
 coinjoin_info = json.loads((run_dir / "coinjoin-analysis_data" / "coinjoin_tx_info.json").read_text(encoding="utf-8"))
-emulator_data = json.loads((run_dir / "blocksciEmulatorAnalysis_data" / "emulator_data.json").read_text(encoding="utf-8"))
+emulator_data = json.loads((run_dir / "coinjoinPipeline_data" / "emulator_data.json").read_text(encoding="utf-8"))
 round_events_path = run_dir / "coinjoin_emulator_data" / "data" / "joinmarket_round_events.json"
 if not round_events_path.exists():
     round_events_path = run_dir / "coinjoin_emulator_data" / "joinmarket_round_events.json"

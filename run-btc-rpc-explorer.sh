@@ -16,7 +16,7 @@ Usage:
   ./run-btc-rpc-explorer.sh down
 
 By default, RUN_DIR is the newest directory under emulation_logs that contains
-blocksciEmulatorAnalysis_data/unified_report.json. The helper starts a regtest bitcoind, imports the
+coinjoinPipeline_data/unified_report.json. The helper starts a regtest bitcoind, imports the
 emulator's coinjoin_emulator_data/data/btc-node/block_*.json files into a per-report Docker volume,
 then connects BTC RPC Explorer to that node.
 
@@ -53,7 +53,7 @@ compose_env_args() {
 
 latest_run_dir() {
   find "${EMULATION_LOGS_DIR}" -mindepth 1 -maxdepth 1 -type d \
-    -exec test -f "{}/blocksciEmulatorAnalysis_data/unified_report.json" \; -print |
+    -exec test -f "{}/coinjoinPipeline_data/unified_report.json" \; -print |
     sort |
     tail -n 1
 }

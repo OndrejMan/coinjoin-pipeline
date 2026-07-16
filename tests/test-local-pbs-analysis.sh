@@ -105,7 +105,7 @@ from pathlib import Path
 
 run_dir = Path(sys.argv[1])
 baseline = json.loads((run_dir / "coinjoin-analysis_data/coinjoin_tx_info.json").read_text())
-report = json.loads((run_dir / "blocksciEmulatorAnalysis_data/unified_report.json").read_text())
+report = json.loads((run_dir / "coinjoinPipeline_data/unified_report.json").read_text())
 if not baseline:
     raise SystemExit("FAIL: coinjoin-analysis returned no records")
 if (report.get("run") or {}).get("coinjoin_type") != "wasabi2":
@@ -118,7 +118,7 @@ PY
 
 if [[ -n "${RESULT_DIR}" ]]; then
   mkdir -p "${RESULT_DIR}/fixture"
-  cp "${RUN_DIR}/blocksciEmulatorAnalysis_data/unified_report.json" "${RESULT_DIR}/fixture/"
-  cp "${RUN_DIR}/blocksciEmulatorAnalysis_data/unified_report.md" "${RESULT_DIR}/fixture/"
+  cp "${RUN_DIR}/coinjoinPipeline_data/unified_report.json" "${RESULT_DIR}/fixture/"
+  cp "${RUN_DIR}/coinjoinPipeline_data/unified_report.md" "${RESULT_DIR}/fixture/"
   cp "${RUN_DIR}/coinjoin-analysis_data/coinjoin_tx_info.json" "${RESULT_DIR}/fixture/"
 fi

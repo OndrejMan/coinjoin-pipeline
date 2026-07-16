@@ -132,9 +132,9 @@ copy_analysis_artifacts() {
   local baseline_json=""
 
   report_json="$(find "${LOGS_ROOT}" -mindepth 3 -maxdepth 3 -type f \
-    -path '*/blocksciEmulatorAnalysis_data/unified_report.json' -print 2>/dev/null | sort | tail -n 1)"
+    -path '*/coinjoinPipeline_data/unified_report.json' -print 2>/dev/null | sort | tail -n 1)"
   if [[ -n "${report_json}" ]]; then
-    run_dir="${report_json%/blocksciEmulatorAnalysis_data/unified_report.json}"
+    run_dir="${report_json%/coinjoinPipeline_data/unified_report.json}"
   else
     baseline_json="$(find "${LOGS_ROOT}" -mindepth 3 -maxdepth 3 -type f \
       -path '*/coinjoin-analysis_data/coinjoin_tx_info.json' -print 2>/dev/null | sort | tail -n 1)"
@@ -145,10 +145,10 @@ copy_analysis_artifacts() {
 
   [[ -n "${run_dir}" ]] || return 0
   mkdir -p "${RESULT_DIR}/${ENGINE}"
-  [[ -s "${run_dir}/blocksciEmulatorAnalysis_data/unified_report.json" ]] \
-    && cp "${run_dir}/blocksciEmulatorAnalysis_data/unified_report.json" "${RESULT_DIR}/${ENGINE}/"
-  [[ -s "${run_dir}/blocksciEmulatorAnalysis_data/unified_report.md" ]] \
-    && cp "${run_dir}/blocksciEmulatorAnalysis_data/unified_report.md" "${RESULT_DIR}/${ENGINE}/"
+  [[ -s "${run_dir}/coinjoinPipeline_data/unified_report.json" ]] \
+    && cp "${run_dir}/coinjoinPipeline_data/unified_report.json" "${RESULT_DIR}/${ENGINE}/"
+  [[ -s "${run_dir}/coinjoinPipeline_data/unified_report.md" ]] \
+    && cp "${run_dir}/coinjoinPipeline_data/unified_report.md" "${RESULT_DIR}/${ENGINE}/"
   [[ -s "${run_dir}/coinjoin-analysis_data/coinjoin_tx_info.json" ]] \
     && cp "${run_dir}/coinjoin-analysis_data/coinjoin_tx_info.json" "${RESULT_DIR}/${ENGINE}/"
 }
@@ -299,7 +299,7 @@ fi
 (( PIPELINE_STATUS == 0 )) || exit "${PIPELINE_STATUS}"
 
 RUN_DIR="$(find "${LOGS_ROOT}" -mindepth 1 -maxdepth 1 -type d \
-  -exec test -s '{}/blocksciEmulatorAnalysis_data/unified_report.json' \; -print | sort | tail -n 1)"
+  -exec test -s '{}/coinjoinPipeline_data/unified_report.json' \; -print | sort | tail -n 1)"
 [[ -n "${RUN_DIR}" ]] || { echo "FAIL: no completed report under ${LOGS_ROOT}" >&2; exit 1; }
 [[ -s "${BITCOIN_DATADIR}/regtest/blocks/blk00000.dat" ]] || {
   echo "FAIL: Kubernetes did not write the directly mounted Bitcoin datadir" >&2
@@ -313,7 +313,7 @@ from pathlib import Path
 
 run_dir = Path(sys.argv[1])
 expected_scenario, expected_type = sys.argv[2:]
-report = json.loads((run_dir / "blocksciEmulatorAnalysis_data/unified_report.json").read_text())
+report = json.loads((run_dir / "coinjoinPipeline_data/unified_report.json").read_text())
 baseline = json.loads((run_dir / "coinjoin-analysis_data/coinjoin_tx_info.json").read_text())
 run = report.get("run") or {}
 summary = report.get("summary") or {}
@@ -339,7 +339,7 @@ PY
 
 if [[ -n "${RESULT_DIR}" ]]; then
   mkdir -p "${RESULT_DIR}/${ENGINE}"
-  cp "${RUN_DIR}/blocksciEmulatorAnalysis_data/unified_report.json" "${RESULT_DIR}/${ENGINE}/"
-  cp "${RUN_DIR}/blocksciEmulatorAnalysis_data/unified_report.md" "${RESULT_DIR}/${ENGINE}/"
+  cp "${RUN_DIR}/coinjoinPipeline_data/unified_report.json" "${RESULT_DIR}/${ENGINE}/"
+  cp "${RUN_DIR}/coinjoinPipeline_data/unified_report.md" "${RESULT_DIR}/${ENGINE}/"
   cp "${RUN_DIR}/coinjoin-analysis_data/coinjoin_tx_info.json" "${RESULT_DIR}/${ENGINE}/"
 fi

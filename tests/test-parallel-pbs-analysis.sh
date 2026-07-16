@@ -220,15 +220,15 @@ if ! grep -q "\[pipeline\] START: Unified report export" "${RUN_LOG}"; then
 fi
 
 RUN_DIR="$(find "${LOGS_ROOT}" -mindepth 1 -maxdepth 1 -type d \
-  -exec test -s '{}/blocksciEmulatorAnalysis_data/unified_report.json' \; -print | sort | tail -n 1)"
+  -exec test -s '{}/coinjoinPipeline_data/unified_report.json' \; -print | sort | tail -n 1)"
 [[ -n "${RUN_DIR}" ]] || { echo "FAIL: no completed report under ${LOGS_ROOT}" >&2; exit 1; }
 
 # Copy the reports before the semantic assertions so a failed run still
 # leaves the evidence needed to debug detector misses.
 if [[ -n "${RESULT_DIR}" ]]; then
   mkdir -p "${RESULT_DIR}/${ENGINE}"
-  cp "${RUN_DIR}/blocksciEmulatorAnalysis_data/unified_report.json" "${RESULT_DIR}/${ENGINE}/" || true
-  cp "${RUN_DIR}/blocksciEmulatorAnalysis_data/unified_report.md" "${RESULT_DIR}/${ENGINE}/" 2>/dev/null || true
+  cp "${RUN_DIR}/coinjoinPipeline_data/unified_report.json" "${RESULT_DIR}/${ENGINE}/" || true
+  cp "${RUN_DIR}/coinjoinPipeline_data/unified_report.md" "${RESULT_DIR}/${ENGINE}/" 2>/dev/null || true
   cp "${RUN_DIR}/coinjoin-analysis_data/coinjoin_tx_info.json" "${RESULT_DIR}/${ENGINE}/" 2>/dev/null || true
 fi
 [[ -s "${BITCOIN_DATADIR}/regtest/blocks/blk00000.dat" ]] || {
@@ -243,7 +243,7 @@ from pathlib import Path
 
 run_dir = Path(sys.argv[1])
 expected_scenario, expected_type = sys.argv[2:]
-report = json.loads((run_dir / "blocksciEmulatorAnalysis_data/unified_report.json").read_text())
+report = json.loads((run_dir / "coinjoinPipeline_data/unified_report.json").read_text())
 baseline = json.loads((run_dir / "coinjoin-analysis_data/coinjoin_tx_info.json").read_text())
 run = report.get("run") or {}
 summary = report.get("summary") or {}

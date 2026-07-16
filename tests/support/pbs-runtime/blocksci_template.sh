@@ -37,7 +37,7 @@ export SINGULARITY_TMPDIR="$SCRATCHDIR"
 export SINGULARITY_LOCALCACHEDIR="$SCRATCHDIR"
 
 mkdir -p "$RUN_DIR/blocksci_data"
-mkdir -p "$RUN_DIR/blocksciEmulatorAnalysis_data"
+mkdir -p "$RUN_DIR/coinjoinPipeline_data"
 
 # Discover the highest exported block to bound the parser.
 EXPORTED_MAX_BLOCK="$(find "$RUN_DIR/coinjoin_emulator_data/data/btc-node" \
