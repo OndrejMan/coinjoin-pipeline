@@ -10,7 +10,10 @@ NAMESPACE="${NAMESPACE:-coinjoin-itest-$$}"
 SERVERS="${SERVERS:-1}"
 AGENTS="${AGENTS:-2}"
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-180s}"
-EMULATION_TIMEOUT="${EMULATION_TIMEOUT:-30m}"
+# overactive-local now runs 10 rounds at ~3 min per successful broadcast plus
+# analysis/export; Kubernetes adds pod-startup overhead on top of the ~34 min
+# the docker path takes.
+EMULATION_TIMEOUT="${EMULATION_TIMEOUT:-90m}"
 SCENARIO="${SCENARIO:-overactive-local.json}"
 ACTION="${ACTION:-recreate}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
