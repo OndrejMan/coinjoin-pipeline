@@ -212,6 +212,7 @@ def write_producer_label_manifest(
     *,
     complete: bool = True,
     reason: str | None = None,
+    positive_count: int | None = None,
 ) -> None:
     data_dir = raw_emulator_dir / "data"
     sources = []
@@ -232,6 +233,7 @@ def write_producer_label_manifest(
             "complete": complete,
             "reason": reason,
             "positive_rule": "test producer rule",
+            "positive_count": positive_count,
             "sources": sources,
         },
     )
@@ -710,6 +712,22 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(labels[0]["round_id"], "legacy-id")
         self.assertEqual(labels[0]["txid"], txid.lower())
 
+    def test_wasabi_broadcast_parser_accepts_no_round_prefix_and_trailing_text(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            log_path = run_dir / "wasabi-coordinator" / "Logs.txt"
+            log_path.parent.mkdir()
+            txid = "b" * 64
+            log_path.write_text(
+                f"Successfully broadcast the coinjoin: {txid} after retry\n",
+                encoding="utf-8",
+            )
+
+            labels = load_wasabi_round_labels(run_dir, [log_path])
+
+        self.assertIsNone(labels[0]["round_id"])
+        self.assertEqual(labels[0]["txid"], txid)
+
     def test_build_emulator_data_leaves_labels_unknown_without_producer_evidence(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir) / "run"
@@ -817,6 +835,59 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertIn("no parseable broadcast records", emulator_data["label_provenance"]["unavailable_reason"])
         self.assertIsNone(emulator_data["transactions"]["candidate"]["is_coinjoin"])
         self.assertEqual(emulator_data["summary"]["wasabi_parseability_candidate_txids"], ["candidate"])
+
+    def test_manifest_zero_positive_count_allows_high_input_non_coinjoin(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            data_dir = run_dir / "coinjoin_emulator_data" / "data"
+            block_dir = data_dir / "btc-node"
+            coordinator_dir = data_dir / "wasabi-coordinator"
+            block_dir.mkdir(parents=True)
+            coordinator_dir.mkdir(parents=True)
+            (coordinator_dir / "Logs.txt").write_text("no successful rounds\n", encoding="utf-8")
+            write_producer_label_manifest(
+                run_dir / "coinjoin_emulator_data",
+                "wasabi",
+                ["wasabi-coordinator/Logs.txt"],
+                positive_count=0,
+            )
+            save_json(
+                block_dir / "block_1.json",
+                {
+                    "height": 1,
+                    "tx": [{
+                        "txid": "batch-payment",
+                        "vin": [{"txid": f"funding-{index}", "vout": 0} for index in range(5)],
+                        "vout": [],
+                    }],
+                },
+            )
+
+            emulator_data = build_emulator_data(run_dir, coinjoin_analysis_fixture(), "wasabi2")
+
+        self.assertTrue(emulator_data["label_provenance"]["independent"])
+        self.assertFalse(emulator_data["transactions"]["batch-payment"]["is_coinjoin"])
+
+    def test_manifest_positive_count_mismatch_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            data_dir = run_dir / "coinjoin_emulator_data" / "data"
+            block_dir = data_dir / "btc-node"
+            coordinator_dir = data_dir / "wasabi-coordinator"
+            block_dir.mkdir(parents=True)
+            coordinator_dir.mkdir(parents=True)
+            (coordinator_dir / "Logs.txt").write_text("unrecognized record\n", encoding="utf-8")
+            write_producer_label_manifest(
+                run_dir / "coinjoin_emulator_data",
+                "wasabi",
+                ["wasabi-coordinator/Logs.txt"],
+                positive_count=1,
+            )
+
+            emulator_data = build_emulator_data(run_dir, coinjoin_analysis_fixture(), "wasabi2")
+
+        self.assertFalse(emulator_data["label_provenance"]["independent"])
+        self.assertIn("does not match manifest", emulator_data["label_provenance"]["unavailable_reason"])
 
     def test_unmatched_producer_positive_fails_closed_and_is_rendered(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2044,6 +2115,17 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(report["summary"]["mapping_timed_out"], 1)
         self.assertEqual(report["run_manifest"]["image_digests"]["sake"], "sha256:sake")
         self.assertIn("Sake length match rate", render_report(report))
+
+    def test_sake_errors_make_mapping_artifact_partial(self):
+        mappings = {
+            "status": "complete",
+            "enumerator": {"summary": {"timed_out": 0, "errors": 0}},
+            "sake": {"summary": {"errors": 1}},
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report = build_report(Path(tmpdir) / "run", {}, {}, "wasabi2", coinjoin_mappings=mappings)
+
+        self.assertEqual(report["coinjoin_mappings"]["status"], "partial")
 
     def test_report_without_mapping_artifact_keeps_mapping_section_absent(self):
         with tempfile.TemporaryDirectory() as tmpdir:

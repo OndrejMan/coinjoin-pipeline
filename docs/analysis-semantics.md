@@ -13,8 +13,9 @@ Emulator-mode labels are independent of `coinjoin-analysis` detector output:
   coordinator `Logs.txt` (or the legacy combined backend log).
 - Every new emulator run includes `data/coinjoin_label_manifest.json`, which
   declares capture completeness plus the size and SHA-256 digest of each exact
-  producer source. Only sources verified against a complete, engine-matching
-  schema-1.0 manifest are used.
+  producer source and the producer-computed positive transaction count. Only
+  sources verified against a complete, engine-matching schema-1.0 manifest are
+  used, and the consumer's parsed positive count must match.
 - When a verified producer label source is present, exported non-coinbase
   transactions absent from its positive records are negative labels. A
   verified empty source is therefore valid evidence with zero positives.
@@ -22,10 +23,11 @@ Emulator-mode labels are independent of `coinjoin-analysis` detector output:
   modified, or truncated, every `is_coinjoin` value is `null`,
   `evaluation_scope` is `emulator_labels_unavailable`, and no confusion matrix
   or precision/recall values are emitted.
-- A complete Wasabi manifest is also rejected when its logs contain no
-  parseable broadcast record while exported blocks contain a transaction with
-  at least five inputs. This guards legacy log-format drift from becoming a
-  confident all-negative ground truth.
+- For older Wasabi manifests without a producer positive count, a manifest is
+  also rejected when its logs contain no parseable broadcast record while
+  exported blocks contain a transaction with at least five inputs. New
+  manifests can authoritatively declare zero positives without this
+  transaction-shape fallback.
 - Producer-positive txids must all occur in the exported block set. Any
   unmatched positive makes the complete label set unavailable instead of
   silently removing that transaction from the confusion matrix.

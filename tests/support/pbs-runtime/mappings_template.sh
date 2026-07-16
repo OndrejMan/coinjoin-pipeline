@@ -41,12 +41,30 @@ case "{sake_image}" in
 esac
 ENUMERATOR_DIGEST="sha256:$(sha256sum "$ENUMERATOR_SIF" | awk '{{print $1}}')"
 SAKE_DIGEST="sha256:$(sha256sum "$SAKE_SIF" | awk '{{print $1}}')"
+set +e
 singularity exec --bind "$RUN_DIR:$RUN_DIR:rw" "$ENUMERATOR_SIF" python3 /app/run.py \
   "$INPUT" --output "$OUT/enumerator.json" \
   --mining-fee-rate {mining_fee_rate} --coordination-fee-rate {coordination_fee_rate} \
   --max-decomposition-fee {max_decomposition_fee} --mode {mode} \
   --timeout {timeout} --retry-timeout {retry_timeout}
+ENUMERATOR_STATUS=$?
+set -e
+if [ "$ENUMERATOR_STATUS" -ne 0 ]; then
+  test "$ENUMERATOR_STATUS" -eq 1
+  singularity exec --bind "$RUN_DIR:$RUN_DIR:rw" "$ENUMERATOR_SIF" python3 -c \
+    'import json,sys; d=json.load(open(sys.argv[1])); assert d.get("summary",{{}}).get("errors",0)>0' \
+    "$OUT/enumerator.json"
+fi
+set +e
 singularity exec --bind "$RUN_DIR:$RUN_DIR:rw" "$SAKE_SIF" dotnet /app/Sake.dll \
   --input "$INPUT" --output "$OUT/sake.json" --seed {sake_seed}
+SAKE_STATUS=$?
+set -e
+if [ "$SAKE_STATUS" -ne 0 ]; then
+  test "$SAKE_STATUS" -eq 1
+  singularity exec --bind "$RUN_DIR:$RUN_DIR:rw" "$ENUMERATOR_SIF" python3 -c \
+    'import json,sys; d=json.load(open(sys.argv[1])); assert d.get("summary",{{}}).get("errors",0)>0' \
+    "$OUT/sake.json"
+fi
 singularity exec --bind "$RUN_DIR:$RUN_DIR:rw" "$ENUMERATOR_SIF" python3 -c \
-  'import json,sys; p,ed,sd=sys.argv[1:]; e=json.load(open(p+"/enumerator.json")); s=json.load(open(p+"/sake.json")); status="partial" if e["summary"]["timed_out"] else "complete"; json.dump({{"schema_version":"1.0","status":status,"provenance":{{"enumerator_image":"{enumerator_image}","sake_image":"{sake_image}","enumerator_image_digest":ed,"sake_image_digest":sd}},"enumerator":e,"sake":s}},open(p+"/coinjoin_mappings.json","w"),indent=2,sort_keys=True)' "$OUT" "$ENUMERATOR_DIGEST" "$SAKE_DIGEST"
+  'import json,sys; p,ed,sd=sys.argv[1:]; e=json.load(open(p+"/enumerator.json")); s=json.load(open(p+"/sake.json")); es=e.get("summary",{{}}); ss=s.get("summary",{{}}); status="partial" if any((es.get("timed_out",0),es.get("errors",0),ss.get("errors",0))) else "complete"; json.dump({{"schema_version":"1.0","status":status,"provenance":{{"enumerator_image":"{enumerator_image}","sake_image":"{sake_image}","enumerator_image_digest":ed,"sake_image_digest":sd}},"enumerator":e,"sake":s}},open(p+"/coinjoin_mappings.json","w"),indent=2,sort_keys=True)' "$OUT" "$ENUMERATOR_DIGEST" "$SAKE_DIGEST"

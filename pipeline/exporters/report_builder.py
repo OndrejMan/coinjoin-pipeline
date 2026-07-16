@@ -63,7 +63,15 @@ def build_report(
 ) -> JsonObject:
     if coinjoin_mappings:
         enumerator_summary = (coinjoin_mappings.get("enumerator") or {}).get("summary") or {}
-        if enumerator_summary.get("timed_out") and coinjoin_mappings.get("status") == "complete":
+        sake_summary = (coinjoin_mappings.get("sake") or {}).get("summary") or {}
+        if (
+            any((
+                enumerator_summary.get("timed_out"),
+                enumerator_summary.get("errors"),
+                sake_summary.get("errors"),
+            ))
+            and coinjoin_mappings.get("status") == "complete"
+        ):
             coinjoin_mappings = {**coinjoin_mappings, "status": "partial"}
     enrich_records_with_script_metadata(coinjoin_analysis, run_dir)
     enrich_records_with_script_metadata(blocksci_records, run_dir)

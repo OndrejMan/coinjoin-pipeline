@@ -43,6 +43,12 @@ Individual overrides (`--pipeline-image`, `--emulator-image`,
 `--coinjoin-analysis-image`, `--blocksci-image`, `--mappings-image`, and
 `--sake-image`) take precedence over the coordinated tag.
 
+When publishing component images separately, publish and verify the BlockSci
+and coinjoin-emulator images before the coinjoin-pipeline image. The pipeline
+requires BlockSci's raw CoinJoin binding and the emulator's in-cluster
+networking plus producer-label manifest contract. A coordinated `--version`
+tag avoids mixing incompatible generations.
+
 Developer compatibility entrypoints use the same CLI:
 
 ```bash

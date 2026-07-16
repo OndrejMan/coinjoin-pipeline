@@ -19,11 +19,11 @@ from exporters.common import (
 from exporters.normalization import block_height_from_path, is_coinbase_tx, output_address
 
 WASABI_BROADCAST_RE = re.compile(
-    r"^(?P<timestamp>.*?)\bRound\s+\((?P<round_id>[^)]+)\):\s+"
-    r"Successfully\s+broadcast(?:ed)?\s+(?:the\s+)?coinjoin(?:\s+transaction)?:\s+"
-    r"(?P<txid>[0-9a-f]{64})\.?\s*$",
+    r"successfully\s+broadcast(?:ed)?\s+(?:the\s+)?coinjoin(?:\s+transaction)?:\s*"
+    r"(?P<txid>[0-9a-f]{64})",
     re.IGNORECASE,
 )
+WASABI_ROUND_ID_RE = re.compile(r"\bRound\s+\((?P<round_id>[^)]+)\):", re.IGNORECASE)
 PRODUCER_LABEL_MANIFEST = "coinjoin_label_manifest.json"
 PRODUCER_LABEL_MANIFEST_SCHEMA_VERSION = "1.0"
 WASABI_PARSEABILITY_MIN_INPUTS = 5
@@ -44,6 +44,7 @@ def _label_provenance(
     positive_rule: str | None = None,
     manifest: str | None = None,
     manifest_schema_version: str | None = None,
+    producer_positive_count: int | None = None,
     unavailable_reason: str | None = None,
 ) -> JsonObject:
     return {
@@ -53,6 +54,7 @@ def _label_provenance(
         "baseline_used_for_labels": False,
         "manifest": manifest,
         "manifest_schema_version": manifest_schema_version,
+        "producer_positive_count": producer_positive_count,
         "unavailable_reason": unavailable_reason,
     }
 
@@ -90,6 +92,7 @@ def verified_producer_label_sources(
         )
 
     positive_rule = manifest.get("positive_rule")
+    producer_positive_count = manifest.get("positive_count")
     manifest_schema_version = to_json_text(manifest.get("schema_version"))
     if manifest.get("schema_version") != PRODUCER_LABEL_MANIFEST_SCHEMA_VERSION:
         return [], _label_provenance(
@@ -115,6 +118,18 @@ def verified_producer_label_sources(
             positive_rule=str(positive_rule) if positive_rule else None,
             unavailable_reason=str(manifest.get("reason") or "producer labels are incomplete"),
         )
+    if producer_positive_count is not None and (
+        isinstance(producer_positive_count, bool)
+        or not isinstance(producer_positive_count, int)
+        or producer_positive_count < 0
+    ):
+        return [], _label_provenance(
+            independent=False,
+            manifest=manifest_source,
+            manifest_schema_version=manifest_schema_version,
+            positive_rule=str(positive_rule) if positive_rule else None,
+            unavailable_reason="producer label manifest positive count is invalid",
+        )
 
     source_records = manifest.get("sources")
     if not isinstance(source_records, list) or not source_records:
@@ -122,6 +137,7 @@ def verified_producer_label_sources(
             independent=False,
             manifest=manifest_source,
             manifest_schema_version=manifest_schema_version,
+            producer_positive_count=producer_positive_count,
             positive_rule=str(positive_rule) if positive_rule else None,
             unavailable_reason="complete producer label manifest has no sources",
         )
@@ -177,6 +193,7 @@ def verified_producer_label_sources(
             positive_rule=str(positive_rule) if positive_rule else None,
             manifest=manifest_source,
             manifest_schema_version=manifest_schema_version,
+            producer_positive_count=producer_positive_count,
         )
 
     return [], _label_provenance(
@@ -314,6 +331,18 @@ def build_emulator_data(
         if label.get("txid")
     }
     producer_positive_txids = set(joinmarket_labels_by_txid) | set(wasabi_labels_by_txid)
+    producer_positive_count = label_provenance.get("producer_positive_count")
+    if (
+        independent_labels_available
+        and isinstance(producer_positive_count, int)
+        and len(producer_positive_txids) != producer_positive_count
+    ):
+        label_provenance["independent"] = False
+        label_provenance["unavailable_reason"] = (
+            "parsed producer-positive transaction count does not match manifest: "
+            f"parsed {len(producer_positive_txids)}, expected {producer_positive_count}"
+        )
+        independent_labels_available = False
     matched_positive_txids: set[str] = set()
     wasabi_parseability_candidate_txids: set[str] = set()
 
@@ -429,6 +458,7 @@ def build_emulator_data(
     if (
         independent_labels_available
         and coinjoin_type == "wasabi2"
+        and producer_positive_count is None
         and not wasabi_round_labels
         and wasabi_parseability_candidate_txids
     ):
@@ -502,10 +532,16 @@ def load_wasabi_round_labels(run_dir: Path, log_paths: list[Path]) -> list[JsonO
     for path in log_paths:
         with path.open("r", encoding="utf-8", errors="replace") as stream:
             for line in stream:
-                match = WASABI_BROADCAST_RE.search(line.rstrip("\n"))
+                text = line.rstrip("\n")
+                match = WASABI_BROADCAST_RE.search(text)
                 if match is None:
                     continue
-                label = match.groupdict()
+                round_match = WASABI_ROUND_ID_RE.search(text)
+                label = {
+                    "timestamp": text[:round_match.start()].strip() if round_match else None,
+                    "round_id": round_match.group("round_id") if round_match else None,
+                    "txid": match.group("txid"),
+                }
                 label["txid"] = label["txid"].lower()
                 label["source_file"] = str(path.relative_to(run_dir))
                 labels_by_txid[label["txid"]] = label
