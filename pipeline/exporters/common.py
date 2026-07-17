@@ -12,7 +12,7 @@ from pathlib import Path
 JsonValue = object
 JsonObject = dict
 
-SCHEMA_VERSION = "1.6"
+SCHEMA_VERSION = "1.7"
 EMULATOR_DATA_SCHEMA_VERSION = "1.0"
 SATS_IN_BTC = 100_000_000
 DEFAULT_FIRST_WASABI2_BLOCK = 0

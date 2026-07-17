@@ -38,6 +38,27 @@ records, but its `coinjoins` keys never determine `is_coinjoin`. Every report
 records `label_provenance`, including source paths and
 `baseline_used_for_labels: false`.
 
+When independent labels are available, schema-1.7 reports evaluate both
+BlockSci and `coinjoin-analysis` against the same set of exported non-coinbase
+transactions. The two confusion matrices are stored under
+`detector_evaluations.blocksci` and
+`detector_evaluations.coinjoin_analysis`. The legacy
+`detection_confusion_matrix` field remains an alias of the BlockSci matrix for
+schema-1.x consumers. `coinjoin-analysis` metrics use its normalized effective
+output after applying any `false_cjtxs.json*` sidecars recorded in
+`baseline_filter`; they do not describe the unfiltered raw detector output.
+
+Analyzer detections whose txids are absent from the exported emulator
+transaction universe are reported as `out_of_scope_detected_txids`. They are
+not silently discarded or classified as false positives because the producer
+label set contains no observation for them. Unknown emulator labels are counted
+in `unknown` and excluded from TP/FP/TN/FN rate denominators.
+
+The analyzer-agreement fields have a different meaning from the ground-truth
+matrices: `matched_by_both`, `missed_by_blocksci`, and `blocksci_only` compare
+the two detector outputs and do not by themselves establish a true positive,
+false negative, or false positive.
+
 The producer logs/events and manifest are run evidence and must be preserved.
 Historical runs without the manifest intentionally produce unavailable metrics
 when re-exported; regenerate them with a rebuilt emulator image rather than

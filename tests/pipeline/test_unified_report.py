@@ -347,6 +347,7 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(report["run"]["network"], "bitcoin")
         self.assertEqual(report["evaluation_scope"], "baseline_agreement_only")
         self.assertIsNone(report["detection_confusion_matrix"])
+        self.assertIsNone(report["detector_evaluations"])
         markdown = render_report(report)
         self.assertIn("precision, recall, and F1 are intentionally unavailable", markdown)
 
@@ -575,6 +576,10 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(
             report["detection_confusion_matrix"],
             {
+                "evaluated_transactions": 3,
+                "detected_transactions": 1,
+                "detected_in_scope": 1,
+                "out_of_scope_detected": 0,
                 "true_positives": 1,
                 "false_positives": 0,
                 "true_negatives": 2,
@@ -587,7 +592,16 @@ class UnifiedReportTest(unittest.TestCase):
                 "false_positive_rate": 0.0,
                 "false_positive_txids": [],
                 "false_negative_txids": [],
+                "out_of_scope_detected_txids": [],
             },
+        )
+        self.assertEqual(
+            report["detector_evaluations"]["blocksci"],
+            report["detection_confusion_matrix"],
+        )
+        self.assertEqual(
+            report["detector_evaluations"]["coinjoin_analysis"],
+            report["detection_confusion_matrix"],
         )
 
     def test_build_report_includes_image_digests(self):
@@ -756,6 +770,7 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(emulator_data["summary"]["unknown_transactions"], 1)
         self.assertFalse(emulator_data["label_provenance"]["independent"])
         self.assertIsNone(report["detection_confusion_matrix"])
+        self.assertIsNone(report["detector_evaluations"])
         self.assertEqual(report["evaluation_scope"], "emulator_labels_unavailable")
         self.assertIn("Independent emulator producer labels were unavailable", render_report(report))
 
@@ -1264,6 +1279,121 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(matrix["recall"], 0.0)
         self.assertEqual(matrix["false_positive_txids"], ["txB"])
         self.assertEqual(matrix["false_negative_txids"], ["txA"])
+
+    def test_detector_evaluations_compare_both_analyzers_to_same_emulator_truth(self):
+        report = build_report(
+            Path("/tmp/run"),
+            {**blocksci_fixture("txA"), **blocksci_fixture("txC")},
+            blocksci_fixture("txB"),
+            "wasabi2",
+            emulator_data=emulator_data_fixture(),
+        )
+
+        blocksci_matrix = report["detector_evaluations"]["blocksci"]
+        baseline_matrix = report["detector_evaluations"]["coinjoin_analysis"]
+        self.assertEqual(
+            (
+                blocksci_matrix["true_positives"],
+                blocksci_matrix["false_positives"],
+                blocksci_matrix["true_negatives"],
+                blocksci_matrix["false_negatives"],
+            ),
+            (0, 1, 1, 1),
+        )
+        self.assertEqual(
+            (
+                baseline_matrix["true_positives"],
+                baseline_matrix["false_positives"],
+                baseline_matrix["true_negatives"],
+                baseline_matrix["false_negatives"],
+            ),
+            (1, 1, 1, 0),
+        )
+        self.assertEqual(blocksci_matrix["false_positive_txids"], ["txB"])
+        self.assertEqual(blocksci_matrix["false_negative_txids"], ["txA"])
+        self.assertEqual(baseline_matrix["false_positive_txids"], ["txC"])
+        self.assertEqual(baseline_matrix["false_negative_txids"], [])
+        self.assertEqual(report["detection_confusion_matrix"], blocksci_matrix)
+
+        markdown = render_report(report)
+        self.assertIn("| BlockSci | 0 | 1 | 1 | 1 |", markdown)
+        self.assertIn("| coinjoin-analysis | 1 | 1 | 1 | 0 |", markdown)
+        self.assertIn("coinjoin-analysis` metrics use the normalized baseline", markdown)
+
+    def test_detector_evaluation_reports_detections_outside_emulator_universe(self):
+        report = build_report(
+            Path("/tmp/run"),
+            blocksci_fixture("baseline-outside"),
+            blocksci_fixture("blocksci-outside"),
+            "wasabi2",
+            emulator_data=emulator_data_fixture(),
+        )
+
+        blocksci_matrix = report["detector_evaluations"]["blocksci"]
+        baseline_matrix = report["detector_evaluations"]["coinjoin_analysis"]
+        self.assertEqual(blocksci_matrix["evaluated_transactions"], 3)
+        self.assertEqual(blocksci_matrix["detected_transactions"], 1)
+        self.assertEqual(blocksci_matrix["detected_in_scope"], 0)
+        self.assertEqual(blocksci_matrix["out_of_scope_detected"], 1)
+        self.assertEqual(
+            blocksci_matrix["out_of_scope_detected_txids"],
+            ["blocksci-outside"],
+        )
+        self.assertEqual(
+            baseline_matrix["out_of_scope_detected_txids"],
+            ["baseline-outside"],
+        )
+        self.assertEqual(
+            blocksci_matrix["true_positives"]
+            + blocksci_matrix["false_positives"]
+            + blocksci_matrix["true_negatives"]
+            + blocksci_matrix["false_negatives"]
+            + blocksci_matrix["unknown"],
+            blocksci_matrix["evaluated_transactions"],
+        )
+        self.assertIn("outside the exported emulator transaction universe", render_report(report))
+
+    def test_detector_evaluation_excludes_unknown_labels_from_classification_counts(self):
+        emulator_data = emulator_data_fixture()
+        emulator_data["transactions"]["txC"]["is_coinjoin"] = None
+        emulator_data["summary"]["non_coinjoin_transactions"] = 1
+        emulator_data["summary"]["unknown_transactions"] = 1
+        report = build_report(
+            Path("/tmp/run"),
+            blocksci_fixture("txC"),
+            {},
+            "wasabi2",
+            emulator_data=emulator_data,
+        )
+
+        matrix = report["detector_evaluations"]["coinjoin_analysis"]
+        self.assertEqual(matrix["unknown"], 1)
+        self.assertEqual(matrix["false_positives"], 0)
+        self.assertEqual(matrix["false_negatives"], 1)
+        self.assertEqual(matrix["true_negatives"], 1)
+        self.assertEqual(matrix["precision"], None)
+        self.assertEqual(matrix["recall"], 0.0)
+
+    def test_detector_evaluation_uses_none_for_rates_with_empty_denominators(self):
+        emulator_data = emulator_data_fixture()
+        for transaction in emulator_data["transactions"].values():
+            transaction["is_coinjoin"] = False
+        emulator_data["summary"]["coinjoin_transactions"] = 0
+        emulator_data["summary"]["non_coinjoin_transactions"] = 3
+        report = build_report(
+            Path("/tmp/run"),
+            {},
+            {},
+            "wasabi2",
+            emulator_data=emulator_data,
+        )
+
+        matrix = report["detector_evaluations"]["coinjoin_analysis"]
+        self.assertIsNone(matrix["precision"])
+        self.assertIsNone(matrix["recall"])
+        self.assertIsNone(matrix["f1"])
+        self.assertEqual(matrix["specificity"], 1.0)
+        self.assertEqual(matrix["false_positive_rate"], 0.0)
 
     def test_report_warns_when_production_thresholds_detect_no_regtest_wasabi(self):
         emulator_data = emulator_data_fixture()
@@ -2079,6 +2209,13 @@ class UnifiedReportTest(unittest.TestCase):
             filtered, removed = filter_coinjoin_analysis_false_positives(
                 coinjoin_analysis_fixture(), txids
             )
+            report = build_report(
+                Path(tmpdir) / "run",
+                normalize_coinjoin_analysis(filtered),
+                blocksci_fixture(),
+                "wasabi2",
+                emulator_data=emulator_data_fixture(),
+            )
 
         self.assertEqual(txids, {"txA", "not-in-baseline"})
         self.assertEqual([source["file"] for source in sources], [
@@ -2086,6 +2223,10 @@ class UnifiedReportTest(unittest.TestCase):
         ])
         self.assertEqual(removed, ["txA"])
         self.assertNotIn("txA", filtered["coinjoins"])
+        baseline_matrix = report["detector_evaluations"]["coinjoin_analysis"]
+        self.assertEqual(baseline_matrix["true_positives"], 0)
+        self.assertEqual(baseline_matrix["false_negatives"], 1)
+        self.assertEqual(baseline_matrix["false_negative_txids"], ["txA"])
 
     def test_mapping_results_are_summarized_and_timeout_marks_partial(self):
         mappings = {

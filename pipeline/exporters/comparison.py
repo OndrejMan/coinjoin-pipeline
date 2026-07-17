@@ -146,19 +146,23 @@ def compute_optional_rate(numerator: int, denominator: int) -> float | None:
 
 def build_detection_confusion_matrix(
     emulator_data: JsonObject | None,
-    blocksci_records: dict[str, JsonObject],
+    detected_records: dict[str, JsonObject],
 ) -> JsonObject | None:
     if not emulator_data or not (emulator_data.get("label_provenance") or {}).get("independent"):
         return None
 
-    detected_txids = set(blocksci_records)
+    emulator_transactions = emulator_data.get("transactions") or {}
+    evaluated_txids = set(emulator_transactions)
+    detected_txids = set(detected_records)
+    detected_in_scope_txids = detected_txids & evaluated_txids
+    out_of_scope_detected_txids = sorted(detected_txids - evaluated_txids)
     true_positive = false_positive = true_negative = false_negative = unknown = 0
     false_positives = []
     false_negatives = []
 
-    for txid, tx in (emulator_data.get("transactions") or {}).items():
+    for txid, tx in emulator_transactions.items():
         expected = tx.get("is_coinjoin")
-        detected = txid in detected_txids
+        detected = txid in detected_in_scope_txids
         if expected is True and detected:
             true_positive += 1
         elif expected is True:
@@ -181,6 +185,10 @@ def build_detection_confusion_matrix(
         f1 = round(2 * precision * recall / (precision + recall), 6)
 
     return {
+        "evaluated_transactions": len(evaluated_txids),
+        "detected_transactions": len(detected_txids),
+        "detected_in_scope": len(detected_in_scope_txids),
+        "out_of_scope_detected": len(out_of_scope_detected_txids),
         "true_positives": true_positive,
         "false_positives": false_positive,
         "true_negatives": true_negative,
@@ -193,6 +201,7 @@ def build_detection_confusion_matrix(
         "false_positive_rate": false_positive_rate,
         "false_positive_txids": sorted(false_positives),
         "false_negative_txids": sorted(false_negatives),
+        "out_of_scope_detected_txids": out_of_scope_detected_txids,
     }
 
 

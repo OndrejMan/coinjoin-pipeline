@@ -120,9 +120,24 @@ def build_report(
 
     detected_count = len(blocksci_records)
     coinjoin_analysis_count = len(coinjoin_analysis)
-    detection_confusion_matrix = build_detection_confusion_matrix(emulator_data, blocksci_records)
+    blocksci_detection_confusion_matrix = build_detection_confusion_matrix(
+        emulator_data,
+        blocksci_records,
+    )
+    coinjoin_analysis_detection_confusion_matrix = build_detection_confusion_matrix(
+        emulator_data,
+        coinjoin_analysis,
+    )
     independent_emulator_labels = bool(
         emulator_data and (emulator_data.get("label_provenance") or {}).get("independent")
+    )
+    detector_evaluations = (
+        {
+            "blocksci": blocksci_detection_confusion_matrix,
+            "coinjoin_analysis": coinjoin_analysis_detection_confusion_matrix,
+        }
+        if independent_emulator_labels
+        else None
     )
     warnings: list[JsonObject] = []
     emulator_block_heights = [
@@ -254,7 +269,10 @@ def build_report(
             "summary": emulator_data.get("summary"),
             "label_provenance": emulator_data.get("label_provenance"),
         } if emulator_data else None,
-        "detection_confusion_matrix": detection_confusion_matrix,
+        # Compatibility alias retained for schema 1.x consumers. New consumers
+        # should read both analyzers from detector_evaluations.
+        "detection_confusion_matrix": blocksci_detection_confusion_matrix,
+        "detector_evaluations": detector_evaluations,
         "evaluation_scope": (
             "baseline_agreement_only"
             if mode == "external"

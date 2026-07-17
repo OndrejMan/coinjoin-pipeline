@@ -193,9 +193,36 @@ def render_shared_mismatch_details(items: list[JsonObject]) -> list[str]:
 def render_emulator_detection(report: JsonObject, explorer_base_url: str) -> list[str]:
     emulator_data = report.get("emulator_data") or {}
     emulator_summary = emulator_data.get("summary") or {}
-    matrix = report.get("detection_confusion_matrix")
-    if not matrix:
+    detector_evaluations = report.get("detector_evaluations")
+    if not detector_evaluations:
+        legacy_matrix = report.get("detection_confusion_matrix")
+        detector_evaluations = {"blocksci": legacy_matrix} if legacy_matrix else None
+    if not detector_evaluations:
         return []
+
+    detector_labels = {
+        "blocksci": "BlockSci",
+        "coinjoin_analysis": "coinjoin-analysis",
+    }
+    evaluation_rows = []
+    for detector, matrix in detector_evaluations.items():
+        if not matrix:
+            continue
+        evaluation_rows.append(
+            [
+                detector_labels.get(detector, detector),
+                matrix.get("true_positives"),
+                matrix.get("false_positives"),
+                matrix.get("true_negatives"),
+                matrix.get("false_negatives"),
+                matrix.get("unknown"),
+                metric_value(matrix.get("precision")),
+                metric_value(matrix.get("recall")),
+                metric_value(matrix.get("f1")),
+                metric_value(matrix.get("specificity")),
+                metric_value(matrix.get("false_positive_rate")),
+            ]
+        )
 
     lines = [
         "",
@@ -217,34 +244,54 @@ def render_emulator_detection(report: JsonObject, explorer_base_url: str) -> lis
         "## Emulator Data Detection Confusion Matrix",
         "",
         *table(
-            ["metric", "value"],
-            [
-                ["true positives", matrix.get("true_positives")],
-                ["false positives", matrix.get("false_positives")],
-                ["false negatives", matrix.get("false_negatives")],
-                ["true negatives", matrix.get("true_negatives")],
-                ["unknown", matrix.get("unknown")],
-                ["precision", metric_value(matrix.get("precision"))],
-                ["recall", metric_value(matrix.get("recall"))],
-                ["F1", metric_value(matrix.get("f1"))],
-                ["specificity", metric_value(matrix.get("specificity"))],
-                ["false positive rate", metric_value(matrix.get("false_positive_rate"))],
-            ],
+            ["detector", "TP", "FP", "TN", "FN", "unknown", "precision", "recall", "F1", "specificity", "FPR"],
+            evaluation_rows,
         ),
     ]
 
-    false_negative_txids = matrix.get("false_negative_txids") or []
-    false_positive_txids = matrix.get("false_positive_txids") or []
-    if false_negative_txids or false_positive_txids:
-        lines.extend(["", "## Emulator Data Detection Divergences", ""])
+    if "coinjoin_analysis" in detector_evaluations:
+        lines.extend([
+            "",
+            "> `coinjoin-analysis` metrics use the normalized baseline after applying the "
+            "false-positive sidecar files recorded in this report.",
+        ])
+
+    divergence_lines = []
+    for detector, matrix in detector_evaluations.items():
+        if not matrix:
+            continue
+        detector_label = detector_labels.get(detector, detector)
+        false_negative_txids = matrix.get("false_negative_txids") or []
+        false_positive_txids = matrix.get("false_positive_txids") or []
+        out_of_scope_txids = matrix.get("out_of_scope_detected_txids") or []
         if false_negative_txids:
-            lines.append(f"- {len(false_negative_txids)} emulator_data CoinJoin was missed by BlockSci.")
+            divergence_lines.append(
+                f"- {detector_label}: {len(false_negative_txids)} emulator_data CoinJoin transaction(s) missed."
+            )
             for txid in false_negative_txids[:10]:
-                lines.append(f"- false negative: {tx_value(txid, explorer_base_url)}")
+                divergence_lines.append(
+                    f"  - false negative: {tx_value(txid, explorer_base_url)}"
+                )
         if false_positive_txids:
-            lines.append(f"- {len(false_positive_txids)} non-CoinJoin transaction was detected by BlockSci.")
+            divergence_lines.append(
+                f"- {detector_label}: {len(false_positive_txids)} non-CoinJoin transaction(s) detected."
+            )
             for txid in false_positive_txids[:10]:
-                lines.append(f"- false positive: {tx_value(txid, explorer_base_url)}")
+                divergence_lines.append(
+                    f"  - false positive: {tx_value(txid, explorer_base_url)}"
+                )
+        if out_of_scope_txids:
+            divergence_lines.append(
+                f"- {detector_label}: {len(out_of_scope_txids)} detected transaction(s) were outside the "
+                "exported emulator transaction universe."
+            )
+            for txid in out_of_scope_txids[:10]:
+                divergence_lines.append(
+                    f"  - out of scope: {tx_value(txid, explorer_base_url)}"
+                )
+
+    if divergence_lines:
+        lines.extend(["", "## Emulator Data Detection Divergences", "", *divergence_lines])
 
     return lines
 
