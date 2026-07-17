@@ -396,42 +396,48 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
         RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
         bash "${test_script}" "${CHILD_IMAGE_MODE}"
     elif [[ "${test_script}" == "tests/test-kubernetes-pbs-analysis.sh" ]]; then
-      # The Kubernetes frontend can use the freshly built local emulator image.
-      # PBS executes production docker:// references inside Apptainer, so local-only
-      # analyzer tags are not visible there and must remain registry-backed.
-      pbs_blocksci_image="${BLOCKSCI_IMAGE}"
-      pbs_coinjoin_analysis_image="${COINJOIN_ANALYSIS_IMAGE}"
+      # PBS executes analyzer images inside Apptainer, which cannot see host
+      # Docker tags. In github mode the analyzers stay registry-backed docker://
+      # references (MetaCentrum parity); in local mode the test exports the
+      # freshly built analyzer images as docker-archive tarballs so the whole
+      # suite runs offline against local code.
+      pbs_local_image_env=()
       if [[ "${IMAGE_MODE}" == "local" ]]; then
-        pbs_blocksci_image="${UPSTREAM_BLOCKSCI_IMAGE}"
-        pbs_coinjoin_analysis_image="${UPSTREAM_COINJOIN_ANALYSIS_IMAGE}"
+        pbs_local_image_env=(
+          "PBS_BLOCKSCI_LOCAL_IMAGE=${BLOCKSCI_IMAGE}"
+          "PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE=${COINJOIN_ANALYSIS_IMAGE}"
+        )
       fi
       run_in_dir "${SCRIPT_DIR}" env \
         EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
         WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
         COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         COINJOIN_EMULATOR_PULL_POLICY="${COINJOIN_EMULATOR_PULL_POLICY_VALUE}" \
-        BLOCKSCI_IMAGE="${pbs_blocksci_image}" \
-        COINJOIN_ANALYSIS_IMAGE="${pbs_coinjoin_analysis_image}" \
+        BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
+        COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
+        "${pbs_local_image_env[@]}" \
         IMAGE_PREFIX="${UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX}" \
         COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD= \
         bash "${test_script}" all
     elif [[ "${test_script}" == "tests/test-parallel-pbs-analysis.sh" ]]; then
-      # Same image constraints as the serial Kubernetes+PBS test: the local
-      # emulator image is usable by the Kubernetes frontend, but PBS Apptainer
-      # pulls production docker:// references, so analyzer tags stay registry-backed.
-      pbs_blocksci_image="${BLOCKSCI_IMAGE}"
-      pbs_coinjoin_analysis_image="${COINJOIN_ANALYSIS_IMAGE}"
+      # Same image constraints as the serial Kubernetes+PBS test: registry-backed
+      # docker:// analyzer references in github mode, docker-archive exports of
+      # the local analyzer images in local mode.
+      pbs_local_image_env=()
       if [[ "${IMAGE_MODE}" == "local" ]]; then
-        pbs_blocksci_image="${UPSTREAM_BLOCKSCI_IMAGE}"
-        pbs_coinjoin_analysis_image="${UPSTREAM_COINJOIN_ANALYSIS_IMAGE}"
+        pbs_local_image_env=(
+          "PBS_BLOCKSCI_LOCAL_IMAGE=${BLOCKSCI_IMAGE}"
+          "PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE=${COINJOIN_ANALYSIS_IMAGE}"
+        )
       fi
       run_in_dir "${SCRIPT_DIR}" env \
         EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
         WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
         COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         COINJOIN_EMULATOR_PULL_POLICY="${COINJOIN_EMULATOR_PULL_POLICY_VALUE}" \
-        BLOCKSCI_IMAGE="${pbs_blocksci_image}" \
-        COINJOIN_ANALYSIS_IMAGE="${pbs_coinjoin_analysis_image}" \
+        BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
+        COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
+        "${pbs_local_image_env[@]}" \
         IMAGE_PREFIX="${UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX}" \
         COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD= \
         bash "${test_script}" all

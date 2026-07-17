@@ -63,6 +63,26 @@ RESULT_DIR="${TEST_RESULT_DIR:-}"
 KEEP_WORK="${KEEP_TEST_WORK:-0}"
 KUBERNETES_PBS_TIMEOUT="${KUBERNETES_PBS_TIMEOUT:-85m}"
 RUN_LOG="${WORK_ROOT}/runIt.parallel.log"
+# Optional offline mode: run a PBS analyzer from a local Docker image instead
+# of a registry-backed docker:// reference. Apptainer cannot see host Docker
+# tags, so the image is exported into the shared workspace with `docker save`
+# and executed as a docker-archive reference.
+PBS_BLOCKSCI_LOCAL_IMAGE="${PBS_BLOCKSCI_LOCAL_IMAGE:-}"
+PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE="${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE:-}"
+PBS_IMAGE_ARGS=()
+
+export_pbs_docker_archive() {
+  local image="$1" archive_name="$2" image_flag="$3"
+  docker image inspect "${image}" >/dev/null 2>&1 || {
+    echo "FAIL: local image for PBS docker-archive export not found: ${image}" >&2
+    exit 2
+  }
+  mkdir -p "${WORK_ROOT}/pbs-images"
+  echo "Exporting ${image} as ${archive_name}.tar for offline PBS execution..."
+  docker save "${image}" -o "${WORK_ROOT}/pbs-images/${archive_name}.tar"
+  chmod 0644 "${WORK_ROOT}/pbs-images/${archive_name}.tar"
+  PBS_IMAGE_ARGS+=("${image_flag}" "docker-archive:${WORK_ROOT}/pbs-images/${archive_name}.tar")
+}
 
 if [[ "${ENGINE}" == "wasabi" ]]; then
   SCENARIO="${SCENARIO:-overactive-local.json}"
@@ -134,6 +154,13 @@ docker rm -f "${PBS_CONTAINER_NAME}" >/dev/null 2>&1 || true
 mkdir -p "${LOGS_ROOT}" "${BITCOIN_DATADIR}"
 chmod 0777 "${WORK_ROOT}" "${LOGS_ROOT}" "${BITCOIN_DATADIR}"
 
+if [[ -n "${PBS_BLOCKSCI_LOCAL_IMAGE}" ]]; then
+  export_pbs_docker_archive "${PBS_BLOCKSCI_LOCAL_IMAGE}" blocksci --pbs-blocksci-image
+fi
+if [[ -n "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" ]]; then
+  export_pbs_docker_archive "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" coinjoin-analysis --pbs-coinjoin-analysis-image
+fi
+
 CONTAINER_KUBE_HOST="${CONTAINER_KUBE_HOST:-$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')}"
 echo "Creating k3d cluster ${CLUSTER_NAME} with direct shared storage ${WORK_ROOT}..."
 k3d cluster create "${CLUSTER_NAME}" \
@@ -191,6 +218,7 @@ set +e
     --analysisPbs \
     --blocksciPbs \
     "${TEST_VALUES_ARGS[@]}" \
+    "${PBS_IMAGE_ARGS[@]}" \
     --parallel \
     --pbs-bitcoin-datadir "${BITCOIN_DATADIR}" \
     --pbs-ncpus 2 \
