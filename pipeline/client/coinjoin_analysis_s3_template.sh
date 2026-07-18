@@ -34,9 +34,21 @@ test -r "$S3_CREDENTIALS_FILE" || {{ echo "S3 credentials file is not readable: 
 {s5cmd_check}
 export TMPDIR="$SCRATCHDIR" SINGULARITY_CACHEDIR="$SCRATCHDIR" SINGULARITY_TMPDIR="$SCRATCHDIR" SINGULARITY_LOCALCACHEDIR="$SCRATCHDIR"
 {download_run}
+test -d "$RUN_WORK/coinjoin_emulator_data/data" || {{
+  echo "Coinjoin analysis S3-compatible reporting requires coinjoin_emulator_data/data" >&2
+  exit 1
+}}
 mkdir -p "$RUN_WORK/coinjoin-analysis_data"
+CONTAINER_WORK_ROOT="$SCRATCHDIR/coinjoin-analysis-selected"
+mkdir -p "$CONTAINER_WORK_ROOT/$RUN_ID"
 singularity exec \
-  --bind "$RUN_WORK:/runs/emulation/selected/$RUN_ID:rw" \
+  --bind "$CONTAINER_WORK_ROOT:/runs/emulation/selected:rw" \
+  --bind "$RUN_WORK/coinjoin-analysis_data:/runs/emulation/selected/$RUN_ID:rw" \
+  --bind "$RUN_WORK/coinjoin_emulator_data/data:/runs/emulation/selected/$RUN_ID/data:ro" \
   --env PBS_RUN_ID="$RUN_ID" "$IMAGE" \
   bash -c 'cd "/runs/emulation/selected/$PBS_RUN_ID" && {command}'
+test -f "$RUN_WORK/coinjoin-analysis_data/coinjoin_tx_info.json" || {{
+  echo "Coinjoin analysis did not produce coinjoin-analysis_data/coinjoin_tx_info.json" >&2
+  exit 1
+}}
 {upload_results}

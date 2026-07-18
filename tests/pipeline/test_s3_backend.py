@@ -58,6 +58,17 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
         assert "/storage:/storage" not in script
         assert ".failed" in script and ".done" in script
         assert "aws s3" not in script and "s3cmd" not in script
+    assert '"$CONTAINER_WORK_ROOT:/runs/emulation/selected:rw"' in coinjoin
+    assert (
+        '"$RUN_WORK/coinjoin-analysis_data:/runs/emulation/selected/$RUN_ID:rw"'
+        in coinjoin
+    )
+    assert (
+        '"$RUN_WORK/coinjoin_emulator_data/data:/runs/emulation/selected/$RUN_ID/data:ro"'
+        in coinjoin
+    )
+    assert '"$RUN_WORK:/runs/emulation/selected/$RUN_ID:rw"' not in coinjoin
+    assert "did not produce coinjoin-analysis_data/coinjoin_tx_info.json" in coinjoin
     assert 'BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"' in blocksci
     assert 'BITCOIN_DATADIR="$BITCOIN_DATADIR/data"' in blocksci
     assert '"$BITCOIN_DATADIR:/mnt/data:ro"' in blocksci
@@ -114,11 +125,22 @@ def test_rendered_pbs_script_calls_fake_s5cmd_only_on_compute_path() -> None:
         fake_s5cmd.write_text(
             "#!/bin/bash\n"
             'printf "%s\\n" "$*" >> "$S5CMD_CALLS"\n'
-            'if [[ "$*" == *" sync s3://"* ]]; then mkdir -p "${@: -1}"; fi\n'
+            'if [[ "$*" == *" sync s3://"* ]]; then '
+            'mkdir -p "${@: -1}/coinjoin_emulator_data/data"; fi\n'
         )
         fake_s5cmd.chmod(0o700)
         fake_singularity = bin_dir / "singularity"
-        fake_singularity.write_text("#!/bin/sh\nexit 0\n")
+        fake_singularity.write_text(
+            "#!/bin/bash\n"
+            'for argument in "$@"; do\n'
+            '  case "$argument" in\n'
+            '    *coinjoin-analysis_data:/runs/emulation/selected/*:rw)\n'
+            '      output_dir="${argument%%:*}"\n'
+            '      printf \'{"coinjoins": {}}\\n\' > "$output_dir/coinjoin_tx_info.json"\n'
+            "      ;;\n"
+            "  esac\n"
+            "done\n"
+        )
         fake_singularity.chmod(0o700)
         script = render_coinjoin_analysis_s3_pbs(
             artifact_uri="s3://bucket/runs",
