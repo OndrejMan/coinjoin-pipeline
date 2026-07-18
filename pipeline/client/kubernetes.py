@@ -206,6 +206,16 @@ rm -f /credentials/credentials"""
                     "resources": ["pods/log"],
                     "verbs": ["get"],
                 },
+                {
+                    "apiGroups": [""],
+                    "resources": ["pods/status"],
+                    "verbs": ["get", "list", "watch"],
+                },
+                {
+                    "apiGroups": [""],
+                    "resources": ["events"],
+                    "verbs": ["get", "list", "watch"],
+                },
                 {"apiGroups": [""], "resources": ["pods/exec"], "verbs": ["create", "get"]},
             ],
         },
