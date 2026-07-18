@@ -198,8 +198,13 @@ rm -f /credentials/credentials"""
             "rules": [
                 {
                     "apiGroups": [""],
-                    "resources": ["pods", "services", "pods/log"],
+                    "resources": ["pods", "services"],
                     "verbs": ["create", "get", "list", "watch", "delete"],
+                },
+                {
+                    "apiGroups": [""],
+                    "resources": ["pods/log"],
+                    "verbs": ["get"],
                 },
                 {"apiGroups": [""], "resources": ["pods/exec"], "verbs": ["create", "get"]},
             ],
