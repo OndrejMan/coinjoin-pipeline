@@ -35,7 +35,14 @@ test -r "$S3_CREDENTIALS_FILE" || {{ echo "S3 credentials file is not readable: 
 {s5cmd_check}
 export TMPDIR="$SCRATCHDIR" SINGULARITY_CACHEDIR="$SCRATCHDIR" SINGULARITY_TMPDIR="$SCRATCHDIR" SINGULARITY_LOCALCACHEDIR="$SCRATCHDIR"
 {download_run}
-test -d "$RUN_WORK/bitcoin_data/regtest/blocks"
+BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"
+if [ ! -d "$BITCOIN_DATADIR/regtest/blocks" ] && [ -d "$BITCOIN_DATADIR/data/regtest/blocks" ]; then
+  BITCOIN_DATADIR="$BITCOIN_DATADIR/data"
+fi
+test -d "$BITCOIN_DATADIR/regtest/blocks" || {{
+  echo "BlockSci S3-compatible reporting requires a Bitcoin datadir containing regtest/blocks; checked $RUN_WORK/bitcoin_data and $RUN_WORK/bitcoin_data/data" >&2
+  exit 1
+}}
 test -d "$RUN_WORK/.pipeline/exporters"
 test -f "$RUN_WORK/coinjoin-analysis_data/coinjoin_tx_info.json" || {{
   echo "BlockSci S3-compatible reporting requires coinjoin-analysis_data/coinjoin_tx_info.json" >&2
@@ -45,7 +52,7 @@ EXPORTED_MAX_BLOCK="$(find "$RUN_WORK/coinjoin_emulator_data/data/btc-node" -max
 test -n "$EXPORTED_MAX_BLOCK"
 singularity exec \
   --bind "$RUNS_ROOT:/runs/emulation/logs:rw" \
-  --bind "$RUN_WORK/bitcoin_data:/mnt/data:ro" \
+  --bind "$BITCOIN_DATADIR:/mnt/data:ro" \
   --bind "$RUN_WORK/.pipeline/exporters:/mnt/exporters:ro" \
   --env PBS_RUN_ID="$RUN_ID" --env PBS_EXPORTED_MAX_BLOCK="$EXPORTED_MAX_BLOCK" "$IMAGE" \
   bash -c 'cd "/runs/emulation/logs/$PBS_RUN_ID" && EXPORTED_MAX_BLOCK="$PBS_EXPORTED_MAX_BLOCK" && {command}'

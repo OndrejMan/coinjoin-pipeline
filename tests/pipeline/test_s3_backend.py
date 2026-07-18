@@ -58,7 +58,10 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
         assert "/storage:/storage" not in script
         assert ".failed" in script and ".done" in script
         assert "aws s3" not in script and "s3cmd" not in script
-    assert '"$RUN_WORK/bitcoin_data:/mnt/data:ro"' in blocksci
+    assert 'BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"' in blocksci
+    assert 'BITCOIN_DATADIR="$BITCOIN_DATADIR/data"' in blocksci
+    assert '"$BITCOIN_DATADIR:/mnt/data:ro"' in blocksci
+    assert "requires a Bitcoin datadir containing regtest/blocks" in blocksci
     assert "requires coinjoin-analysis_data/coinjoin_tx_info.json" in blocksci
 
 
@@ -157,6 +160,7 @@ def test_kubernetes_manifest_has_controller_uploader_secret_and_rbac() -> None:
     assert role_binding["roleRef"]["kind"] == "Role"
 
     job = next(item for item in manifest["items"] if item["kind"] == "Job")
+    assert job["spec"]["ttlSecondsAfterFinished"] == 3600
     spec = job["spec"]["template"]["spec"]
     assert spec["securityContext"] == {
         "runAsNonRoot": True,

@@ -12,6 +12,7 @@ S3_CONTROLLER_RESOURCE_REQUESTS = {"cpu": "250m", "memory": "512Mi"}
 S3_CONTROLLER_RESOURCE_LIMITS = {"cpu": "1", "memory": "1Gi"}
 S3_UPLOADER_RESOURCE_REQUESTS = {"cpu": "100m", "memory": "128Mi"}
 S3_UPLOADER_RESOURCE_LIMITS = {"cpu": "500m", "memory": "512Mi"}
+S3_JOB_TTL_SECONDS_AFTER_FINISHED = 3600
 
 
 def run_kubectl_preflight_command(command: list[str]) -> str:
@@ -232,6 +233,7 @@ rm -f /credentials/credentials"""
             "metadata": {"name": name, "namespace": namespace, "labels": labels},
             "spec": {
                 "backoffLimit": 0,
+                "ttlSecondsAfterFinished": S3_JOB_TTL_SECONDS_AFTER_FINISHED,
                 "template": {
                     "metadata": {"labels": labels},
                     "spec": {
