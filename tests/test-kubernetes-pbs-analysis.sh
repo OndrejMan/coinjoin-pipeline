@@ -37,7 +37,7 @@ case "${ENGINE}" in
   wasabi) ENGINE_CLUSTER_ID="w" ;;
   joinmarket) ENGINE_CLUSTER_ID="jm" ;;
 esac
-STORAGE_BASE="${PBS_TEST_STORAGE_ROOT:-/storage/gitlab-runner}"
+STORAGE_BASE="${PBS_TEST_STORAGE_ROOT:-/storage/github-runner}"
 [[ -d "${STORAGE_BASE}" && -w "${STORAGE_BASE}" ]] || {
   echo "FAIL: pre-provisioned writable storage is required: ${STORAGE_BASE}" >&2
   exit 2

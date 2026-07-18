@@ -8,7 +8,7 @@ PBS_HELPER="${SCRIPT_DIR}/support/pbs/local-pbs.sh"
 PBS_ENV="${SCRIPT_DIR}/support/pbs/pbs-env.sh"
 PBS_CONTAINER_NAME="${PBS_CONTAINER_NAME:-pbs-analysis-itest-$$}"
 RUN_ID="pbs-overactive-local-$RANDOM-$$"
-STORAGE_BASE="${PBS_TEST_STORAGE_ROOT:-/storage/gitlab-runner}"
+STORAGE_BASE="${PBS_TEST_STORAGE_ROOT:-/storage/github-runner}"
 [[ -d "${STORAGE_BASE}" && -w "${STORAGE_BASE}" ]] || {
   echo "FAIL: pre-provisioned writable storage is required: ${STORAGE_BASE}" >&2
   exit 2
@@ -26,19 +26,55 @@ docker_cmd() {
   fi
 }
 
+current_pbs_logs() {
+  if [[ -d "${RUN_DIR}/logs" ]]; then
+    find "${RUN_DIR}/logs" -maxdepth 1 -type f -name '*.pbs.log' -print 2>/dev/null
+  fi
+  find "${WORK_DIR}" -maxdepth 1 -type f \( -name '*.o[0-9]*' -o -name '*.e[0-9]*' \) \
+    -print 2>/dev/null
+}
+
+wait_for_pbs_logs() {
+  local -a jobids
+  local jobid stage expected_log
+  local missing
+
+  shopt -s nullglob
+  jobids=("${RUN_DIR}/.pbs/"*.jobid)
+  shopt -u nullglob
+  ((${#jobids[@]} > 0)) || return 0
+
+  # A job writes its .done/.failed marker immediately before exiting, while PBS
+  # publishes the requested output file only after the job has fully finished.
+  # Give that final spool copy time to complete before collecting diagnostics.
+  for _ in {1..30}; do
+    missing=0
+    for jobid in "${jobids[@]}"; do
+      stage="${jobid##*/}"
+      stage="${stage%.jobid}"
+      expected_log="${RUN_DIR}/logs/${stage}.pbs.log"
+      [[ -f "${expected_log}" ]] || missing=1
+    done
+    (( missing == 0 )) && return 0
+    sleep 1
+  done
+}
+
 cleanup() {
   local status=$?
+  wait_for_pbs_logs
   if [[ -n "${RESULT_DIR}" ]]; then
     mkdir -p "${RESULT_DIR}/fixture/pbs-logs"
-    find "${WORK_DIR}" -type f \( -name '*.o[0-9]*' -o -name '*.e[0-9]*' \) \
-      -exec cp -t "${RESULT_DIR}/fixture/pbs-logs" {} + 2>/dev/null || true
+    while IFS= read -r output; do
+      cp "${output}" "${RESULT_DIR}/fixture/pbs-logs/" || true
+    done < <(current_pbs_logs)
   fi
   if (( status != 0 )); then
     echo "PBS fixture test failed; collected job output follows:" >&2
     while IFS= read -r output; do
       echo "===== ${output} =====" >&2
       tail -n 200 "${output}" >&2 || true
-    done < <(find "${WORK_DIR}" -type f \( -name '*.o[0-9]*' -o -name '*.e[0-9]*' \) -print 2>/dev/null)
+    done < <(current_pbs_logs)
   fi
   # btc-node declares /home/bitcoin/.bitcoin as a VOLUME. Remove anonymous
   # volumes together with the container so self-hosted CI runs do not leak them.

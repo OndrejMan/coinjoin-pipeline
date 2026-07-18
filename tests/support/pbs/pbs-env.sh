@@ -11,7 +11,7 @@ else
   return 2
 fi
 _pbs_scripts_dir="$(cd "$(dirname "${_pbs_env_source}")" && pwd)"
-export PBS_WORKDIR_HOST="${PBS_WORKDIR_HOST:-/storage/gitlab-runner}"
+export PBS_WORKDIR_HOST="${PBS_WORKDIR_HOST:-/storage/github-runner}"
 export PBS_WORKDIR_CONTAINER="${PBS_WORKDIR_CONTAINER:-${PBS_WORKDIR_HOST}}"
 export PBS_CONTAINER_NAME="${PBS_CONTAINER_NAME:-pbs}"
 export PATH="${_pbs_scripts_dir}/pbs-bin:${PATH}"

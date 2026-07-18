@@ -15,7 +15,7 @@ GENERATED_DIRS = {
     "__pycache__",
     "coinjoin-runs",
     "emulation_logs",
-    "gitlab-test-results",
+    "github-test-results",
 }
 FORBIDDEN = (
     "../bitcoinAnalysis",

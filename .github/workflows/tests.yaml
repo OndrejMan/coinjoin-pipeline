@@ -187,7 +187,7 @@ jobs:
           CONTAINER_RUNTIME: docker
           EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-emulation-logs
           WAIT_TIMEOUT: 240s
-          EMULATION_TIMEOUT: 30m
+          EMULATION_TIMEOUT: 90m
         run: ./tests/test-kubernetes-k3d.sh
 
   pbs-apptainer-image:
@@ -231,7 +231,7 @@ jobs:
 
       - name: Run local PBS fixture analysis
         env:
-          TEST_RESULT_DIR: ${{ github.workspace }}/gitlab-test-results
+          TEST_RESULT_DIR: ${{ github.workspace }}/github-test-results
         run: ./tests/test-local-pbs-analysis.sh
 
       - name: Upload PBS fixture artifacts
@@ -239,7 +239,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pbs-fixture-results
-          path: gitlab-test-results/fixture/
+          path: github-test-results/fixture/
           retention-days: 14
 
   kubernetes-pbs-wasabi:
@@ -259,7 +259,7 @@ jobs:
 
       - name: Run Kubernetes+PBS analysis (wasabi)
         env:
-          TEST_RESULT_DIR: ${{ github.workspace }}/gitlab-test-results
+          TEST_RESULT_DIR: ${{ github.workspace }}/github-test-results
         run: ./tests/test-kubernetes-pbs-analysis.sh wasabi
 
       - name: Upload wasabi PBS artifacts
@@ -267,7 +267,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: kubernetes-pbs-wasabi-results
-          path: gitlab-test-results/wasabi/
+          path: github-test-results/wasabi/
           retention-days: 14
 
   kubernetes-pbs-joinmarket:
@@ -287,7 +287,7 @@ jobs:
 
       - name: Run Kubernetes+PBS analysis (joinmarket)
         env:
-          TEST_RESULT_DIR: ${{ github.workspace }}/gitlab-test-results
+          TEST_RESULT_DIR: ${{ github.workspace }}/github-test-results
         run: ./tests/test-kubernetes-pbs-analysis.sh joinmarket
 
       - name: Upload joinmarket PBS artifacts
@@ -295,7 +295,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: kubernetes-pbs-joinmarket-results
-          path: gitlab-test-results/joinmarket/
+          path: github-test-results/joinmarket/
           retention-days: 14
 
   kubernetes-pbs-parallel:
@@ -340,7 +340,7 @@ jobs:
           EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-parallel-pbs-logs
           PBS_TEST_STORAGE_ROOT: /storage/github-runner
           KUBERNETES_PBS_TIMEOUT: 85m
-          TEST_RESULT_DIR: ${{ github.workspace }}/gitlab-test-results
+          TEST_RESULT_DIR: ${{ github.workspace }}/github-test-results
         run: ./tests/test-parallel-pbs-analysis.sh all
 
       - name: Upload parallel PBS artifacts
@@ -348,7 +348,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: kubernetes-pbs-parallel-results
-          path: gitlab-test-results/
+          path: github-test-results/
           retention-days: 14
 
   publish-pipeline-image:

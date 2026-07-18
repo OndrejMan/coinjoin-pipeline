@@ -2,7 +2,7 @@ emulation_logs
 coinjoin-runs/
 .btc-rpc-explorer.env
 
-gitlab-test-results/
+github-test-results/
 src/coinjoin_pipeline/btc-data/
 
 __pycache__/
