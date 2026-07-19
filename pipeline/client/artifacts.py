@@ -1,14 +1,47 @@
-"""Validation and shell rendering for S3-compatible artifact transport."""
+"""Validation, shell rendering, and frontend polling for S3-compatible artifact transport."""
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
+import shutil
+import subprocess
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+AWS_SCRUB_VARIABLES = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_PROFILE",
+    "AWS_DEFAULT_PROFILE",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+)
+
+S3_POLL_INTERVAL_SECONDS = 30
+PROBE_RUNNING = "running"
+PROBE_TERMINAL = "terminal"
+PROBE_UNKNOWN = "unknown"
+
+class ArtifactTransportError(RuntimeError):
+    """Raised when S3-compatible artifact transport fails on the frontend."""
+
+
+@dataclass(frozen=True)
+class S3Access:
+    """Frontend s5cmd access parameters for one S3-compatible endpoint."""
+
+    endpoint_url: str
+    credentials_file: str
+    profile: str
 
 
 def validate_artifact_uri(uri: str) -> str:
@@ -72,3 +105,96 @@ def render_s5cmd_cp(source_expr: str, destination_expr: str) -> str:
 
 def shell_assignment(name: str, value: str) -> str:
     return f"{name}={shlex.quote(value)}"
+
+
+def scrubbed_s3_environment() -> dict[str, str]:
+    return {key: value for key, value in os.environ.items() if key not in AWS_SCRUB_VARIABLES}
+
+
+def run_s5cmd(access: S3Access, *arguments: str) -> subprocess.CompletedProcess[str]:
+    command = [
+        "s5cmd",
+        "--credentials-file",
+        access.credentials_file,
+        "--profile",
+        access.profile,
+        "--endpoint-url",
+        access.endpoint_url,
+        *arguments,
+    ]
+    try:
+        return subprocess.run(
+            command,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=scrubbed_s3_environment(),
+        )
+    except FileNotFoundError as error:
+        raise ArtifactTransportError("s5cmd is required on the frontend for S3-compatible transfers") from error
+
+
+def s3_object_exists(access: S3Access, object_uri: str) -> bool:
+    result = run_s5cmd(access, "ls", object_uri)
+    if result.returncode == 0:
+        return True
+    stderr = (result.stderr or "").strip()
+    if "no object found" in stderr.lower():
+        return False
+    raise ArtifactTransportError(f"s5cmd ls {object_uri} failed (exit {result.returncode}): {stderr}")
+
+
+def s3_access_preflight(access: S3Access, artifact_uri: str) -> None:
+    """Fail fast when s5cmd, the credentials file, or the endpoint is unusable."""
+    if shutil.which("s5cmd") is None:
+        raise ArtifactTransportError("s5cmd is required on the frontend PATH for S3-compatible full-run")
+    if not Path(access.credentials_file).is_file():
+        raise ArtifactTransportError(f"S3 credentials file not found: {access.credentials_file}")
+    result = run_s5cmd(access, "ls", f"{artifact_uri}/*")
+    if result.returncode != 0 and "no object found" not in (result.stderr or "").lower():
+        raise ArtifactTransportError(
+            f"S3 access preflight failed for {artifact_uri} "
+            f"(exit {result.returncode}): {(result.stderr or '').strip()}"
+        )
+
+
+def ensure_empty_run_prefix(access: S3Access, artifact_uri: str, run_id: str) -> None:
+    """Reject every occupied run prefix, including marker-less partial runs."""
+    run_prefix = f"{artifact_uri}/{run_id}"
+    if s3_object_exists(access, f"{run_prefix}/*"):
+        raise ArtifactTransportError(
+            f"run prefix {run_prefix}/ already contains artifacts; choose a fresh --run-id"
+        )
+
+
+def wait_for_s3_marker(
+    stage: str,
+    done_uri: str,
+    failed_uri: str,
+    access: S3Access,
+    *,
+    timeout_seconds: int,
+    poll_interval: int = S3_POLL_INTERVAL_SECONDS,
+    probe: Callable[[], str] | None = None,
+) -> None:
+    """Block until the stage uploads its S3 marker, with probe and deadline fallbacks.
+
+    ``probe`` reports remote liveness (``PROBE_RUNNING``/``PROBE_TERMINAL``/
+    ``PROBE_UNKNOWN``); after a terminal report one extra poll cycle runs so a
+    marker upload that races the probe still wins.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    terminal_seen = False
+    while True:
+        if s3_object_exists(access, failed_uri):
+            raise ArtifactTransportError(f"S3-compatible stage failed: {stage} (marker {failed_uri})")
+        if s3_object_exists(access, done_uri):
+            return
+        if time.monotonic() >= deadline:
+            raise ArtifactTransportError(f"Timed out waiting for S3 stage marker: {stage} ({done_uri})")
+        if terminal_seen:
+            raise ArtifactTransportError(f"S3-compatible stage ended without marker: {stage}")
+        if probe is not None and probe() == PROBE_TERMINAL:
+            terminal_seen = True
+        time.sleep(poll_interval)

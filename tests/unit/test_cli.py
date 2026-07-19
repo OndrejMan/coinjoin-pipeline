@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
 from pathlib import Path
@@ -63,6 +63,20 @@ class CliTests(unittest.TestCase):
         self.assertEqual(
             target,
             Path("/runs/2026-07-12_12-00_default-joinmarket/research_manifest.json"),
+        )
+
+    def test_explicit_run_id_is_used_for_host_provenance(self) -> None:
+        arguments = [
+            "full-run",
+            "--engine",
+            "joinmarket",
+            "--run-id",
+            "explicit-s3-run",
+        ]
+        self.assertEqual(run_id_for(arguments), "explicit-s3-run")
+        self.assertEqual(
+            manifest_target("full-run", arguments, Path("/runs")),
+            Path("/runs/explicit-s3-run/research_manifest.json"),
         )
 
     def test_run_id_validation_matches_emulator_rules(self) -> None:
@@ -254,6 +268,78 @@ class CliTests(unittest.TestCase):
         )
         arguments.append("--blocksciPbs")
         self.assertEqual(validate_passthrough(arguments, "pbs-from-s3"), [])
+
+    def test_s3_full_run_passthrough_validation(self) -> None:
+        complete = [
+            "full-run", "--engine", "wasabi", "--driver", "kubernetes",
+            "--artifact-backend", "s3",
+            "--artifact-uri", "s3://bucket/runs",
+            "--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz",
+            "--s3-secret-name", "coinjoin-s3",
+            "--s3-credentials-file", "/storage/user/.aws/credentials",
+            "--s3-profile", "coinjoin",
+            "--run-id", "run-1",
+            "--reuse-namespace",
+            "--analysisPbs", "--blocksciPbs",
+            "--pbs-unified-report-ncpus", "1",
+        ]
+        self.assertEqual(validate_passthrough(complete, "full-run"), [])
+
+        missing = validate_passthrough(
+            ["full-run", "--engine", "wasabi", "--driver", "kubernetes", "--artifact-backend", "s3"],
+            "full-run",
+        )
+        self.assertTrue(any("--s3-credentials-file" in error for error in missing))
+        self.assertTrue(any("both --analysisPbs and --blocksciPbs" in error for error in missing))
+        self.assertTrue(any("--reuse-namespace" in error for error in missing))
+
+        one_stage = validate_passthrough(
+            [item for item in complete if item != "--blocksciPbs"], "full-run"
+        )
+        self.assertTrue(
+            any("requires both --analysisPbs and --blocksciPbs" in error for error in one_stage)
+        )
+
+        rejected = validate_passthrough([*complete, "--parallel", "--copy-to-host"], "full-run")
+        self.assertTrue(any("--parallel" in error for error in rejected))
+        self.assertTrue(any("--copy-to-host" in error for error in rejected))
+
+    def test_s3_full_run_requires_frontend_direct_environment(self) -> None:
+        arguments = [
+            "full-run", "--engine", "wasabi", "--driver", "kubernetes",
+            "--artifact-backend", "s3",
+            "--artifact-uri", "s3://bucket/runs",
+            "--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz",
+            "--s3-secret-name", "coinjoin-s3",
+            "--s3-credentials-file", "/storage/user/.aws/credentials",
+            "--s3-profile", "coinjoin",
+            "--run-id", "run-1",
+            "--reuse-namespace",
+            "--analysisPbs", "--blocksciPbs",
+        ]
+        stderr = io.StringIO()
+        with (
+            mock.patch.dict("os.environ", {"PBS_FRONTEND_DIRECT": "0"}),
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(stderr),
+        ):
+            code = main(arguments)
+        self.assertEqual(code, 2)
+        self.assertIn("PBS_FRONTEND_DIRECT=1", stderr.getvalue())
+
+    def test_s3_full_run_requires_no_local_images(self) -> None:
+        from coinjoin_pipeline.host import required_image_components
+
+        self.assertEqual(
+            required_image_components(
+                "full-run", ["full-run", "--artifact-backend", "s3", "--analysisPbs"]
+            ),
+            set(),
+        )
+        self.assertEqual(
+            required_image_components("full-run", ["full-run", "--artifact-backend=s3"]),
+            set(),
+        )
 
     def test_environment_image_overrides_preserve_legacy_workflows(self) -> None:
         environment = {

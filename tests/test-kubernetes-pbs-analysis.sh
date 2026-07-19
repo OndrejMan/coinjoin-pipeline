@@ -31,7 +31,7 @@ docker info >/dev/null 2>&1 || {
 [[ -x "${PBS_HELPER}" ]] || { echo "FAIL: PBS helper not found: ${PBS_HELPER}" >&2; exit 2; }
 [[ -f "${PBS_ENV}" ]] || { echo "FAIL: PBS environment not found: ${PBS_ENV}" >&2; exit 2; }
 
-RUN_TOKEN="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM}"
+RUN_TOKEN="$(TZ=Europe/Prague date +%Y%m%dT%H%M%S%Z)-$$-${RANDOM}"
 RESOURCE_ID="${GITHUB_RUN_ID:-$$}"
 case "${ENGINE}" in
   wasabi) ENGINE_CLUSTER_ID="w" ;;

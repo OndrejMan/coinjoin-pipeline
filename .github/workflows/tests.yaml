@@ -69,6 +69,8 @@ jobs:
     needs: podman-wrapper
     env:
       WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
+      KUBECTL_VERSION: v1.35.6
+      K3D_VERSION: v5.9.0
       WRAPPER_PULL_POLICY: never
 
     steps:
@@ -172,14 +174,15 @@ jobs:
       - name: Install kubectl
         run: |
           mkdir -p "${RUNNER_TEMP}/bin"
-          curl -fsSL -o "${RUNNER_TEMP}/bin/kubectl" "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          curl -fsSL -o "${RUNNER_TEMP}/bin/kubectl" "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
           chmod 0755 "${RUNNER_TEMP}/bin/kubectl"
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
 
       - name: Install k3d
         run: |
           mkdir -p "${RUNNER_TEMP}/bin"
-          curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | USE_SUDO=false K3D_INSTALL_DIR="${RUNNER_TEMP}/bin" bash
+          curl -fsSL -o "${RUNNER_TEMP}/bin/k3d" "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
+          chmod 0755 "${RUNNER_TEMP}/bin/k3d"
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
 
       - name: Run k3d Kubernetes integration test
@@ -351,10 +354,64 @@ jobs:
           path: github-test-results/
           retention-days: 14
 
+  kubernetes-s3-minio:
+    runs-on: [self-hosted, x64]
+    needs: kubernetes-pbs-parallel
+    env:
+      WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
+      KUBECTL_VERSION: v1.35.6
+      K3D_VERSION: v5.9.0
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build current pipeline image
+        run: docker build -t "${WRAPPER_IMAGE}" .
+
+      - name: Install kubectl
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bin"
+          curl -fsSL -o "${RUNNER_TEMP}/bin/kubectl" "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod 0755 "${RUNNER_TEMP}/bin/kubectl"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      - name: Install k3d
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bin"
+          curl -fsSL -o "${RUNNER_TEMP}/bin/k3d" "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
+          chmod 0755 "${RUNNER_TEMP}/bin/k3d"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      - name: Run S3-compatible full-run e2e (MinIO)
+        env:
+          COINJOIN_EMULATOR_IMAGE: ghcr.io/ondrejman/coinjoin-emulator:latest
+          IMAGE_PREFIX: ghcr.io/ondrejman/
+          PBS_TEST_STORAGE_ROOT: /storage/github-runner
+          KUBERNETES_S3_TIMEOUT: 85m
+          TEST_RESULT_DIR: ${{ github.workspace }}/github-test-results
+        run: ./tests/test-kubernetes-s3-minio.sh wasabi
+
+      - name: Upload S3 e2e artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubernetes-s3-minio-results
+          path: github-test-results/
+          retention-days: 14
+
   publish-pipeline-image:
     needs:
       - kubernetes-k3d
       - kubernetes-pbs-parallel
+      - kubernetes-s3-minio
     if: >-
       ${{ success() && github.ref == 'refs/heads/main' &&
           (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}

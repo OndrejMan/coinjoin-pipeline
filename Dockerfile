@@ -30,7 +30,8 @@ COPY pipeline/delete.sh /delete.sh
 COPY pipeline/compose.yaml /compose.yaml
 COPY pipeline/client/develop.sh /app/develop.sh
 
-RUN chmod +x /analysis.sh /recreate.sh /delete.sh /app/develop.sh /app/wrapper.py
+RUN chmod -R a+rX /app/client /app/exporters /app/scenarios \
+    && chmod +x /analysis.sh /recreate.sh /delete.sh /app/develop.sh /app/wrapper.py
 
 WORKDIR /app
 ENTRYPOINT ["python3", "/app/wrapper.py"]

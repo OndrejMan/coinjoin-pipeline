@@ -45,6 +45,25 @@ def pull(runtime: str, images: Images) -> int:
     return 0
 
 
+def direct_wrapper_root() -> Path | None:
+    """Locate the source-tree or wheel-bundled frontend wrapper runtime."""
+    source_root = Path(__file__).resolve().parents[2] / "pipeline"
+    if (source_root / "client/wrapper.py").is_file():
+        return source_root
+
+    try:
+        packaged_client = files("coinjoin_pipeline._runtime.client")
+    except ModuleNotFoundError:
+        return None
+    packaged_root = Path(str(packaged_client)).parent
+    if (
+        (packaged_root / "client/wrapper.py").is_file()
+        and (packaged_root / "exporters/unified_report.py").is_file()
+    ):
+        return packaged_root
+    return None
+
+
 def usage() -> None:
     print("""usage: coinjoin-pipeline [HOST OPTIONS] ACTION [PIPELINE OPTIONS]
 
@@ -110,6 +129,15 @@ def main(argv: list[str] | None = None) -> int:
     required_images = required_image_components(action, passthrough)
     errors = validate_passthrough(passthrough, action)
     errors.extend(validate_arguments(passthrough, runs_root))
+    if (
+        action == "full-run"
+        and option_value(passthrough, "--artifact-backend") == "s3"
+        and os.environ.get("PBS_FRONTEND_DIRECT") != "1"
+    ):
+        errors.append(
+            "full-run --artifact-backend s3 runs qsub and s5cmd directly on the "
+            "frontend; set PBS_FRONTEND_DIRECT=1"
+        )
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
@@ -124,10 +152,10 @@ def main(argv: list[str] | None = None) -> int:
             if valid_run_id(candidate_run_id):
                 pipeline_run_id = candidate_run_id
                 command.environment["PIPELINE_RUN_ID"] = candidate_run_id
-        source_root = Path(__file__).resolve().parents[2]
-        local_wrapper_root = source_root / "pipeline"
-        if os.environ.get("PBS_FRONTEND_DIRECT") == "1" and (local_wrapper_root / "client/wrapper.py").is_file():
-            command.environment["PBS_FRONTEND_WRAPPER_ROOT"] = str(local_wrapper_root)
+        if os.environ.get("PBS_FRONTEND_DIRECT") == "1":
+            wrapper_root = direct_wrapper_root()
+            if wrapper_root is not None:
+                command.environment["PBS_FRONTEND_WRAPPER_ROOT"] = str(wrapper_root)
         print(f"Generated runtime command:\n{command.rendered()}")
         direct_pbs = os.environ.get("PBS_FRONTEND_DIRECT") == "1" and not required_images
         preflight = [] if direct_pbs else doctor_check(
@@ -142,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
             or (action == "coinjoin-analysis" and "--analysisPbs" in passthrough)
             or (action == "mappings" and "--mappingsPbs" in passthrough)
             or action == "pbs-from-s3"
-            or (action == "recreate" and option_value(passthrough, "--artifact-backend") == "s3")
+            or (action in {"recreate", "full-run"} and option_value(passthrough, "--artifact-backend") == "s3")
         )
         if "--dry-run" in passthrough and not stage_pbs_dry_run:
             print("[dry-run] validation passed; command was not executed")

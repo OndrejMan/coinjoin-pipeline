@@ -393,6 +393,7 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
     "tests/test-kubernetes-k3d.sh"
     "tests/test-kubernetes-pbs-analysis.sh"
     "tests/test-parallel-pbs-analysis.sh"
+    "tests/test-kubernetes-s3-minio.sh"
   )
 
   for test_script in "${tests[@]}"; do
@@ -465,6 +466,26 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
         IMAGE_PREFIX="${UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX}" \
         COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD= \
         bash "${test_script}" all
+    elif [[ "${test_script}" == "tests/test-kubernetes-s3-minio.sh" ]]; then
+      # The S3-compatible e2e imports the selected wrapper/emulator images into
+      # k3d. In local mode, analyzer images are exported as docker-archive
+      # tarballs because Apptainer cannot see host Docker tags. Supporting
+      # Wasabi infrastructure images still use the published image prefix.
+      pbs_local_image_env=()
+      if [[ "${IMAGE_MODE}" == "local" ]]; then
+        pbs_local_image_env=(
+          "PBS_BLOCKSCI_LOCAL_IMAGE=${BLOCKSCI_IMAGE}"
+          "PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE=${COINJOIN_ANALYSIS_IMAGE}"
+        )
+      fi
+      run_in_dir "${SCRIPT_DIR}" env \
+        WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
+        COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
+        BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
+        COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
+        "${pbs_local_image_env[@]}" \
+        IMAGE_PREFIX="${UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX}" \
+        bash "${test_script}" wasabi
     elif [[ "${test_script}" == "tests/test-kubernetes-k3d.sh" ]]; then
       run_in_dir "${SCRIPT_DIR}" env \
         WRAPPER_IMAGE="${WRAPPER_IMAGE}" \

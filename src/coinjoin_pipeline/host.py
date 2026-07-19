@@ -79,6 +79,15 @@ def local_images() -> Images:
     )
 
 
+def _artifact_backend(arguments: list[str]) -> str:
+    for index, item in enumerate(arguments):
+        if item == "--artifact-backend" and index + 1 < len(arguments):
+            return arguments[index + 1]
+        if item.startswith("--artifact-backend="):
+            return item.split("=", 1)[1]
+    return "shared-storage"
+
+
 def required_image_components(action: str, arguments: list[str]) -> set[str]:
     if os.environ.get("PBS_FRONTEND_DIRECT") == "1" and any(
         flag in arguments for flag in ("--analysisPbs", "--blocksciPbs", "--mappingsPbs")
@@ -93,6 +102,10 @@ def required_image_components(action: str, arguments: list[str]) -> set[str]:
     if action == "recreate":
         return {"pipeline", "emulator"}
     if action == "pbs-from-s3":
+        return set()
+    if action == "full-run" and _artifact_backend(arguments) == "s3":
+        # Emulation runs in-cluster and analysis in PBS; nothing touches the
+        # local Docker/Podman daemon.
         return set()
     if action == "clean":
         return {"pipeline"}

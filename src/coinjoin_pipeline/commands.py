@@ -113,16 +113,45 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
                 "unified-report PBS resource overrides require both --analysisPbs and --blocksciPbs"
             )
     if backend == "s3" and action == "full-run":
-        errors.append(
-            "S3-compatible full-run orchestration is not implemented yet. "
-            "Use independent recreate --artifact-backend s3 and pbs-from-s3 workflows."
-        )
+        if option_value(argv, "--driver") != "kubernetes":
+            errors.append("full-run --artifact-backend s3 requires --driver kubernetes")
+        for flag in (
+            "--run-id",
+            "--artifact-uri",
+            "--s3-endpoint-url",
+            "--s3-secret-name",
+            "--s3-credentials-file",
+            "--s3-profile",
+        ):
+            if not has_option(argv, flag):
+                errors.append(f"full-run --artifact-backend s3 requires {flag}")
+        if not has_option(argv, "--analysisPbs") or not has_option(argv, "--blocksciPbs"):
+            errors.append("full-run --artifact-backend s3 requires both --analysisPbs and --blocksciPbs")
+        if not has_option(argv, "--reuse-namespace"):
+            errors.append(
+                "Kubernetes S3-compatible mode requires --reuse-namespace because "
+                "the credentials Secret must exist before the Job is created"
+            )
+        if has_option(argv, "--mappingsPbs"):
+            errors.append("S3-compatible mappings are not implemented yet")
+        if has_option(argv, "--parallel"):
+            errors.append("full-run --artifact-backend s3 does not support --parallel")
+        if has_option(argv, "--blocksci-script") or has_option(argv, "--blocksciScript"):
+            errors.append("full-run --artifact-backend s3 does not support --blocksci-script")
+        for flag in ("--kubernetes-btc-datadir", "--pbs-bitcoin-datadir", "--copy-to-host"):
+            if has_option(argv, flag):
+                errors.append(f"Kubernetes S3-compatible mode does not support {flag}")
     if backend == "s3" and action == "recreate":
         for flag in ("--run-id", "--artifact-uri", "--s3-endpoint-url", "--s3-secret-name"):
             if not has_option(argv, flag):
                 errors.append(f"Kubernetes S3-compatible mode requires {flag}")
         if option_value(argv, "--driver") != "kubernetes":
             errors.append("--artifact-backend s3 requires --driver kubernetes")
+        if not has_option(argv, "--reuse-namespace"):
+            errors.append(
+                "Kubernetes S3-compatible mode requires --reuse-namespace because "
+                "the credentials Secret must exist before the Job is created"
+            )
         for flag in ("--kubernetes-btc-datadir", "--pbs-bitcoin-datadir", "--copy-to-host"):
             if has_option(argv, flag):
                 errors.append(f"Kubernetes S3-compatible mode does not support {flag}")

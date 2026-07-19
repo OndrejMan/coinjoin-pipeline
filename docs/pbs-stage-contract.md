@@ -13,7 +13,7 @@ side stay compatible.
 | `coinjoin-analysis` | `--analysisPbs`                       | `coinjoin_analysis_template.sh`   |
 | `coinjoin-mappings` | `--mappingsPbs`                       | `mappings_template.sh`            |
 | `unified-report`    | parallel mode after both analyzers    | `blocksci_template.sh` (report-only command) |
-| S3 analyzer variants | `pbs-from-s3`                        | `coinjoin_analysis_s3_template.sh`, `blocksci_s3_template.sh` |
+| S3 analyzer variants | `pbs-from-s3`, `full-run --artifact-backend s3` | `coinjoin_analysis_s3_template.sh`, `blocksci_s3_template.sh` |
 | S3 `unified-report` | both S3 analyzer flags, after both jobs | `unified_report_s3_template.sh` |
 
 ## Marker files
@@ -60,6 +60,46 @@ Robustness rules:
   caching can briefly show a finished (`F`) job before its `done` marker is
   visible; the frontend therefore waits one extra poll cycle after seeing a
   terminal state before declaring "ended without marker".
+
+## S3 marker wait contract (`wait_for_s3_marker`)
+
+`full-run --artifact-backend s3` is the only frontend-side consumer of the
+markers uploaded to the bucket. It polls these exact keys every 30 s with
+`s5cmd ls` (credentials file + profile + endpoint from the CLI, AWS_* env vars
+scrubbed first):
+
+- `<artifact-uri>/<run-id>/.k8s/upload.done` | `.k8s/upload.failed`
+  — written by the Kubernetes uploader container.
+- `<artifact-uri>/<run-id>/.pbs/coinjoin-analysis.done` | `.failed`
+- `<artifact-uri>/<run-id>/.pbs/blocksci.done` | `.failed`
+- `<artifact-uri>/<run-id>/.pbs/unified-report.done` | `.failed`
+  — uploaded by the S3 PBS job traps. A full run returns successfully only
+  after the report marker is present.
+
+Semantics mirror `wait_for_pbs_marker`: `failed` raises, `done` returns, the
+deadline raises (emulation: `--emulation-timeout`, default 21600 s; PBS
+stages: walltime + one hour). A liveness *probe* replaces the local qstat
+fallback — `qstat -x -f` for PBS stages, `kubectl get job -o json` for the
+emulation Job — and a terminal probe report without a marker fails the stage
+after one extra grace cycle (marker uploads race job termination). Probe
+errors are inconclusive and polling continues.
+
+Extra rules for the S3 chain:
+
+- Before submitting anything, the orchestrator refuses run prefixes that
+  contain any object. This prevents stale partial artifacts as well as stale
+  markers from being merged into a reused `--run-id`.
+- Full S3 runs require both analyzer stages and an existing namespace selected
+  with `--reuse-namespace`; the S3 credentials Secret must predate the Job.
+- S3 job scripts are submitted to `qsub` via **stdin**
+  (`submit_pbs_text`) — there is no shared run directory to hold a script
+  file, and no `.jobid` file is persisted; job ids live in orchestrator
+  memory and are printed at submission.
+- When either analyzer wait fails, the orchestrator `qdel`s the dependent
+  unified-report job so it does not stay held forever.
+- When the emulation wait fails, PBS is never submitted; `kubectl describe`
+  and container logs are printed and the Kubernetes resources stay in place
+  for inspection.
 
 ## Requirements checked before submission
 
