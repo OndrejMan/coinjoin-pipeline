@@ -100,6 +100,18 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
                 errors.append(f"pbs-from-s3 requires {flag}")
         if not has_option(argv, "--analysisPbs") and not has_option(argv, "--blocksciPbs"):
             errors.append("pbs-from-s3 requires --analysisPbs or --blocksciPbs")
+        report_resource_flags = (
+            "--pbs-unified-report-ncpus",
+            "--pbs-unified-report-mem",
+            "--pbs-unified-report-scratch",
+            "--pbs-unified-report-walltime",
+        )
+        if any(has_option(argv, flag) for flag in report_resource_flags) and not (
+            has_option(argv, "--analysisPbs") and has_option(argv, "--blocksciPbs")
+        ):
+            errors.append(
+                "unified-report PBS resource overrides require both --analysisPbs and --blocksciPbs"
+            )
     if backend == "s3" and action == "full-run":
         errors.append(
             "S3-compatible full-run orchestration is not implemented yet. "

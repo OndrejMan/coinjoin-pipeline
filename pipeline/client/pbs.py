@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 from client.artifacts import (
@@ -41,6 +42,13 @@ DEFAULT_COINJOIN_ANALYSIS_NCPUS = 4
 DEFAULT_COINJOIN_ANALYSIS_MEM = "16gb"
 DEFAULT_COINJOIN_ANALYSIS_SCRATCH = "50gb"
 DEFAULT_COINJOIN_ANALYSIS_WALLTIME = "04:00:00"
+
+DEFAULT_UNIFIED_REPORT_NCPUS = 2
+DEFAULT_UNIFIED_REPORT_MEM = "8gb"
+# The report currently downloads the complete S3 run bundle, so keep storage
+# and walltime conservative until that download is narrowed to required inputs.
+DEFAULT_UNIFIED_REPORT_SCRATCH = "100gb"
+DEFAULT_UNIFIED_REPORT_WALLTIME = "24:00:00"
 
 DEFAULT_BLOCKSCI_IMAGE = "docker://ghcr.io/ondrejman/blocksci-complete:latest"
 DEFAULT_COINJOIN_ANALYSIS_IMAGE = "docker://ghcr.io/ondrejman/coinjoin-analysis:latest"
@@ -260,11 +268,21 @@ def render_mappings_pbs(
     )
 
 
-def submit_pbs(script_path: Path, dependency_job_id: str | None = None) -> str:
+def submit_pbs(
+    script_path: Path,
+    dependency_job_id: str | Sequence[str] | None = None,
+) -> str:
     """Submit a PBS script via ``qsub`` and return the job ID."""
     command = ["qsub"]
     if dependency_job_id:
-        command.extend(["-W", f"depend=afterok:{dependency_job_id}"])
+        dependency_job_ids = (
+            (dependency_job_id,)
+            if isinstance(dependency_job_id, str)
+            else tuple(dependency_job_id)
+        )
+        if any(not job_id for job_id in dependency_job_ids):
+            raise PBSError("PBS dependency job IDs must not be empty")
+        command.extend(["-W", f"depend=afterok:{':'.join(dependency_job_ids)}"])
     command.append(str(script_path))
     result = subprocess.run(
         command,
@@ -405,6 +423,7 @@ def render_blocksci_s3_pbs(
     mem: str = DEFAULT_BLOCKSCI_MEM,
     scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
     walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
+    include_report: bool = True,
 ) -> str:
     require_safe_image(image)
     require_safe_pbs_resources(ncpus, mem, scratch, walltime)
@@ -420,9 +439,33 @@ def render_blocksci_s3_pbs(
         walltime=walltime,
         s5cmd_check=render_s5cmd_check(),
         download_run=render_s5cmd_sync('"$ARTIFACT_URI/$RUN_ID/*"', '"$RUN_WORK/"'),
+        coinjoin_analysis_check=(
+            'test -f "$RUN_WORK/coinjoin-analysis_data/coinjoin_tx_info.json" || {\n'
+            '  echo "BlockSci S3-compatible reporting requires '
+            'coinjoin-analysis_data/coinjoin_tx_info.json" >&2\n'
+            "  exit 1\n"
+            "}"
+            if include_report
+            else ""
+        ),
+        report_output_check=(
+            'REPORT_DIR="$RUN_WORK/coinjoinPipeline_data"\n'
+            'test -f "$REPORT_DIR/unified_report.json" || {\n'
+            '  echo "BlockSci S3-compatible reporting did not produce '
+            'coinjoinPipeline_data/unified_report.json" >&2\n'
+            "  exit 1\n"
+            "}"
+            if include_report
+            else ""
+        ),
         upload_blocksci=render_s5cmd_sync('"$RUN_WORK/blocksci_data/"', '"$ARTIFACT_URI/$RUN_ID/blocksci_data/"'),
-        upload_report=render_s5cmd_sync(
-            '"$RUN_WORK/coinjoinPipeline_data/"', '"$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"'
+        upload_report=(
+            render_s5cmd_sync(
+                '"$REPORT_DIR/"',
+                '"$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"',
+            )
+            if include_report
+            else ""
         ),
         upload_logs=render_s5cmd_sync('"$RUN_WORK/logs/"', '"$ARTIFACT_URI/$RUN_ID/logs/"'),
         upload_failed=render_s5cmd_cp('"$FAILED_MARKER"', '"$ARTIFACT_URI/$RUN_ID/.pbs/blocksci.failed"'),
@@ -430,11 +473,58 @@ def render_blocksci_s3_pbs(
     )
 
 
+def render_unified_report_s3_pbs(
+    artifact_uri: str,
+    run_id: str,
+    endpoint_url: str,
+    credentials_file: str,
+    profile: str,
+    image: str,
+    command: str,
+    *,
+    ncpus: int = DEFAULT_UNIFIED_REPORT_NCPUS,
+    mem: str = DEFAULT_UNIFIED_REPORT_MEM,
+    scratch: str = DEFAULT_UNIFIED_REPORT_SCRATCH,
+    walltime: str = DEFAULT_UNIFIED_REPORT_WALLTIME,
+) -> str:
+    """Render the S3 report-only job that joins both analyzer outputs."""
+    require_safe_image(image)
+    require_safe_pbs_resources(ncpus, mem, scratch, walltime)
+    values = _s3_values(artifact_uri, run_id, endpoint_url, credentials_file, profile)
+    template = (Path(__file__).parent / "unified_report_s3_template.sh").read_text(
+        encoding="utf-8"
+    )
+    return template.format(
+        **values,
+        image=shell_assignment("IMAGE", image).split("=", 1)[1],
+        command=command,
+        ncpus=ncpus,
+        mem=mem,
+        scratch=scratch,
+        walltime=walltime,
+        s5cmd_check=render_s5cmd_check(),
+        download_run=render_s5cmd_sync('"$ARTIFACT_URI/$RUN_ID/*"', '"$RUN_WORK/"'),
+        upload_report=render_s5cmd_sync(
+            '"$REPORT_DIR/"',
+            '"$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"',
+        ),
+        upload_logs=render_s5cmd_sync(
+            '"$RUN_WORK/logs/"', '"$ARTIFACT_URI/$RUN_ID/logs/"'
+        ),
+        upload_failed=render_s5cmd_cp(
+            '"$FAILED_MARKER"', '"$ARTIFACT_URI/$RUN_ID/.pbs/unified-report.failed"'
+        ),
+        upload_done=render_s5cmd_cp(
+            '"$DONE_MARKER"', '"$ARTIFACT_URI/$RUN_ID/.pbs/unified-report.done"'
+        ),
+    )
+
+
 def _submit_s3_script(
     script: str,
     stage: str,
     dry_run: bool,
-    dependency_job_id: str | None = None,
+    dependency_job_id: str | Sequence[str] | None = None,
 ) -> str | None:
     if dry_run:
         print(f"[dry-run] PBS S3-compatible script for {stage}:\n{script}")
@@ -497,6 +587,7 @@ def submit_blocksci_s3_pbs(
     walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
     dry_run: bool = False,
     dependency_job_id: str | None = None,
+    include_report: bool = True,
 ) -> str | None:
     script = render_blocksci_s3_pbs(
         artifact_uri,
@@ -510,8 +601,46 @@ def submit_blocksci_s3_pbs(
         mem=mem,
         scratch=scratch,
         walltime=walltime,
+        include_report=include_report,
     )
     return _submit_s3_script(script, "blocksci", dry_run, dependency_job_id)
+
+
+def submit_unified_report_s3_pbs(
+    artifact_uri: str,
+    run_id: str,
+    endpoint_url: str,
+    credentials_file: str,
+    profile: str,
+    image: str,
+    command: str,
+    *,
+    ncpus: int = DEFAULT_UNIFIED_REPORT_NCPUS,
+    mem: str = DEFAULT_UNIFIED_REPORT_MEM,
+    scratch: str = DEFAULT_UNIFIED_REPORT_SCRATCH,
+    walltime: str = DEFAULT_UNIFIED_REPORT_WALLTIME,
+    dry_run: bool = False,
+    dependency_job_ids: Sequence[str] = (),
+) -> str | None:
+    script = render_unified_report_s3_pbs(
+        artifact_uri,
+        run_id,
+        endpoint_url,
+        credentials_file,
+        profile,
+        image,
+        command,
+        ncpus=ncpus,
+        mem=mem,
+        scratch=scratch,
+        walltime=walltime,
+    )
+    return _submit_s3_script(
+        script,
+        "unified-report",
+        dry_run,
+        dependency_job_ids,
+    )
 
 
 def wait_for_pbs_marker(

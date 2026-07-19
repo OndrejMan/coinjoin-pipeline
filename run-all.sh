@@ -6,6 +6,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 LOCAL_TAG="${LOCAL_TAG:-local}"
 LOCAL_WRAPPER_IMAGE="${LOCAL_WRAPPER_IMAGE:-coinjoin-pipeline:${LOCAL_TAG}}"
+LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE:-blocksci-cj:${LOCAL_TAG}}"
 LOCAL_BLOCKSCI_IMAGE="${LOCAL_BLOCKSCI_IMAGE:-blocksci-complete:${LOCAL_TAG}}"
 LOCAL_COINJOIN_EMULATOR_IMAGE="${LOCAL_COINJOIN_EMULATOR_IMAGE:-coinjoin-emulator:${LOCAL_TAG}}"
 LOCAL_COINJOIN_ANALYSIS_IMAGE="${LOCAL_COINJOIN_ANALYSIS_IMAGE:-coinjoin-analysis:${LOCAL_TAG}}"
@@ -45,6 +46,7 @@ Environment overrides:
     COINJOIN_EMULATOR_IMAGE,
     COINJOIN_ANALYSIS_IMAGE
   LOCAL_WRAPPER_IMAGE, LOCAL_BLOCKSCI_IMAGE,
+    LOCAL_BLOCKSCI_BASE_IMAGE,
     LOCAL_COINJOIN_EMULATOR_IMAGE,
     LOCAL_COINJOIN_ANALYSIS_IMAGE           Local-mode defaults.
   UPSTREAM_WRAPPER_IMAGE, UPSTREAM_BLOCKSCI_IMAGE,
@@ -292,6 +294,13 @@ pull_image() {
   run_step docker pull "${image}"
 }
 
+verify_blocksci_image() {
+  local image="$1"
+  echo "Verifying BlockSci runtime in ${image}..."
+  run_step docker run --rm --entrypoint /bin/bash "${image}" -lc \
+    'command -v blocksci_parser >/dev/null && python3 -c "import blocksci"'
+}
+
 if [[ "${RUN_SCENARIOS}" == "1" ]]; then
   require_command python3
 fi
@@ -311,8 +320,17 @@ fi
 trap handle_interrupt INT TERM
 
 if [[ "${BUILD_IMAGES}" == "1" ]]; then
-  echo "Building local BlockSci image ${BLOCKSCI_IMAGE}..."
-  run_step docker build --build-arg NTHREADS=10 -t "${BLOCKSCI_IMAGE}" "${REPO_ROOT}/blocksci"
+  echo "Building local BlockSci base image ${LOCAL_BLOCKSCI_BASE_IMAGE}..."
+  run_step docker build -t "${LOCAL_BLOCKSCI_BASE_IMAGE}" \
+    -f "${REPO_ROOT}/blocksci/Dockerfile" "${REPO_ROOT}/blocksci"
+
+  echo "Building local BlockSci complete image ${BLOCKSCI_IMAGE}..."
+  run_step docker build \
+    --build-arg "BLOCKSCI_BASE_IMAGE=${LOCAL_BLOCKSCI_BASE_IMAGE}" \
+    --build-arg NTHREADS=10 \
+    -t "${BLOCKSCI_IMAGE}" \
+    -f "${REPO_ROOT}/blocksci/Dockerfile_complete" \
+    "${REPO_ROOT}/blocksci"
 
   echo "Building local CoinJoin emulator image ${COINJOIN_EMULATOR_IMAGE}..."
   run_step docker build -t "${COINJOIN_EMULATOR_IMAGE}" "${REPO_ROOT}/coinjoin-emulator"
@@ -322,6 +340,10 @@ if [[ "${BUILD_IMAGES}" == "1" ]]; then
 
   echo "Building local coinjoin-analysis image ${COINJOIN_ANALYSIS_IMAGE}..."
   run_step docker build -t "${COINJOIN_ANALYSIS_IMAGE}" -f "${REPO_ROOT}/coinjoin-analysis/docker/analysis.Dockerfile" "${REPO_ROOT}/coinjoin-analysis"
+fi
+
+if [[ "${IMAGE_MODE}" == "local" ]]; then
+  verify_blocksci_image "${BLOCKSCI_IMAGE}"
 fi
 
 if [[ "${PULL_IMAGES}" == "1" ]]; then
@@ -384,6 +406,7 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
       run_in_dir "${SCRIPT_DIR}" env \
         EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
         LOCAL_WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
+        LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE}" \
         LOCAL_BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
         LOCAL_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         LOCAL_COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
@@ -393,6 +416,7 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
         UPSTREAM_COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
         COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD_VALUE}" \
         POST_WRAPPER_SHELL=0 \
+        LOCAL_IMAGES_PREBUILT=1 \
         RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
         bash "${test_script}" "${CHILD_IMAGE_MODE}"
     elif [[ "${test_script}" == "tests/test-kubernetes-pbs-analysis.sh" ]]; then
@@ -456,6 +480,7 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
         EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
         LOCAL_TAG="${LOCAL_TAG}" \
         LOCAL_WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
+        LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE}" \
         LOCAL_BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
         LOCAL_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         LOCAL_COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
@@ -464,6 +489,7 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
         COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
         POST_WRAPPER_SHELL=0 \
+        LOCAL_IMAGES_PREBUILT=1 \
         RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
         bash "${test_script}" "${CHILD_IMAGE_MODE}"
     elif [[ "${test_script}" == "tests/test-runIt-parallel-local-docker.sh" ]]; then
@@ -471,6 +497,7 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
         EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
         LOCAL_TAG="${LOCAL_TAG}" \
         LOCAL_WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
+        LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE}" \
         LOCAL_BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
         LOCAL_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         LOCAL_COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
@@ -479,6 +506,7 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
         COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
         POST_WRAPPER_SHELL=0 \
+        LOCAL_IMAGES_PREBUILT=1 \
         RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
         bash "${test_script}" "${CHILD_IMAGE_MODE}"
     else

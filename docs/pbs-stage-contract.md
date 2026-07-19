@@ -13,7 +13,8 @@ side stay compatible.
 | `coinjoin-analysis` | `--analysisPbs`                       | `coinjoin_analysis_template.sh`   |
 | `coinjoin-mappings` | `--mappingsPbs`                       | `mappings_template.sh`            |
 | `unified-report`    | parallel mode after both analyzers    | `blocksci_template.sh` (report-only command) |
-| S3 variants         | `pbs-from-s3`                         | `*_s3_template.sh`                |
+| S3 analyzer variants | `pbs-from-s3`                        | `coinjoin_analysis_s3_template.sh`, `blocksci_s3_template.sh` |
+| S3 `unified-report` | both S3 analyzer flags, after both jobs | `unified_report_s3_template.sh` |
 
 ## Marker files
 
@@ -27,6 +28,16 @@ All coordination state lives in the run directory under `.pbs/`:
 The job script removes stale `done`/`failed` markers at startup, so a rerun of
 the same stage in the same run directory starts clean. S3 jobs upload the
 markers to `<artifact-uri>/<run-id>/.pbs/` instead of writing them locally.
+
+For `pbs-from-s3 --analysisPbs --blocksciPbs`, the analyzer jobs have no
+dependency on each other. The report-only job uses
+`afterok:<coinjoin-analysis-job>:<blocksci-job>` and therefore runs only after
+both analyzers have uploaded their S3 outputs successfully. A blocksci-only S3
+submission keeps the combined parser-and-report behavior for compatibility.
+
+The S3 report-only job has independent defaults: 2 CPUs, 8 GB RAM, 100 GB
+scratch, and a 24-hour walltime. Report-specific `--pbs-unified-report-*`
+options take precedence over the shared `--pbs-*` resource options.
 
 ## Frontend waiting (`wait_for_pbs_marker`)
 

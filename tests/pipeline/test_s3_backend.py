@@ -4,17 +4,23 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pipeline"))
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT / "pipeline"))
 
 from client.kubernetes import render_s3_emulation_resources  # noqa: E402
 from client.pbs import (  # noqa: E402
+    blocksci_export_pbs_command,
     render_blocksci_s3_pbs,
     render_coinjoin_analysis_s3_pbs,
+    render_unified_report_s3_pbs,
     submit_blocksci_s3_pbs,
     submit_coinjoin_analysis_s3_pbs,
+    submit_unified_report_s3_pbs,
 )
+from client.wrapper import run_pbs_from_s3  # noqa: E402
 
 COMMON = dict(
     artifact_uri="s3://bucket/runs",
@@ -43,6 +49,26 @@ def render_kubernetes_manifest(*, reuse_namespace: bool = False) -> dict:
     )
 
 
+def s3_pbs_args(*, analysis: bool = True, blocksci: bool = True) -> SimpleNamespace:
+    return SimpleNamespace(
+        artifact_uri=COMMON["artifact_uri"],
+        run_id=COMMON["run_id"],
+        s3_endpoint_url=COMMON["endpoint_url"],
+        s3_credentials_file=COMMON["credentials_file"],
+        s3_profile=COMMON["profile"],
+        dry_run=False,
+        analysisPbs=analysis,
+        blocksciPbs=blocksci,
+        coinjoin_type="wasabi2",
+        min_input_count=2,
+        joinmarket_detector="definite",
+        joinmarket_min_base_fee=5000,
+        joinmarket_percentage_fee=0.00004,
+        joinmarket_max_depth=200000,
+        test_values=True,
+    )
+
+
 def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
     coinjoin = render_coinjoin_analysis_s3_pbs(
         **COMMON, image="docker://coinjoin", command="analyze"
@@ -50,7 +76,10 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
     blocksci = render_blocksci_s3_pbs(
         **COMMON, image="docker://blocksci", command="analyze"
     )
-    for script in (coinjoin, blocksci):
+    report = render_unified_report_s3_pbs(
+        **COMMON, image="docker://blocksci", command="report"
+    )
+    for script in (coinjoin, blocksci, report):
         assert "$SCRATCHDIR/coinjoin-run/$RUN_ID" in script
         assert "s5cmd --credentials-file" in script
         assert '--profile "$S3_PROFILE"' in script
@@ -58,6 +87,7 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
         assert "/storage:/storage" not in script
         assert ".failed" in script and ".done" in script
         assert "aws s3" not in script and "s3cmd" not in script
+        subprocess.run(["bash", "-n"], input=script, text=True, check=True)
     assert '"$CONTAINER_WORK_ROOT:/runs/emulation/selected:rw"' in coinjoin
     assert (
         '"$RUN_WORK/coinjoin-analysis_data:/runs/emulation/selected/$RUN_ID:rw"'
@@ -74,6 +104,40 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
     assert '"$BITCOIN_DATADIR:/mnt/data:ro"' in blocksci
     assert "requires a Bitcoin datadir containing regtest/blocks" in blocksci
     assert "requires coinjoin-analysis_data/coinjoin_tx_info.json" in blocksci
+    assert "Unified S3 report requires blocksci_data/config.json" in report
+    assert "Unified S3 report requires coinjoin-analysis_data/coinjoin_tx_info.json" in report
+    assert "#PBS -l select=1:ncpus=8:mem=64gb:scratch_local=100gb" in blocksci
+    assert "#PBS -l select=1:ncpus=2:mem=8gb:scratch_local=100gb" in report
+    for script in (blocksci, report):
+        assert 'REPORT_DIR="$RUN_WORK/coinjoinPipeline_data"' in script
+        assert 'sync "$REPORT_DIR/" "$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"' in script
+        assert "blocksciEmulatorAnalysis_data" not in script
+    assert "/mnt/data" not in report
+
+
+def test_wrapper_images_package_unified_report_s3_template() -> None:
+    for dockerfile in (
+        PROJECT_ROOT / "Dockerfile",
+        PROJECT_ROOT / "pipeline" / "client" / "Dockerfile",
+    ):
+        assert "unified_report_s3_template.sh" in dockerfile.read_text(
+            encoding="utf-8"
+        )
+
+
+def test_blocksci_s3_parse_only_does_not_require_or_upload_report() -> None:
+    blocksci = render_blocksci_s3_pbs(
+        **COMMON,
+        image="docker://blocksci",
+        command="parse",
+        include_report=False,
+    )
+
+    assert "requires coinjoin-analysis_data/coinjoin_tx_info.json" not in blocksci
+    assert "coinjoinPipeline_data/" not in blocksci
+    assert "blocksciEmulatorAnalysis_data/" not in blocksci
+    assert "REPORT_DIR=" not in blocksci
+    assert "blocksci_data/" in blocksci
 
 
 def test_frontend_submit_does_not_invoke_s5cmd() -> None:
@@ -107,6 +171,119 @@ def test_blocksci_submission_forwards_analysis_dependency() -> None:
             == "blocksci.server"
         )
     assert qsub.call_args.args[1] == "analysis.server"
+
+
+def test_unified_report_submission_forwards_both_dependencies() -> None:
+    with (
+        mock.patch("client.pbs.require_qsub"),
+        mock.patch("client.pbs.submit_pbs", return_value="report.server") as qsub,
+    ):
+        assert (
+            submit_unified_report_s3_pbs(
+                **COMMON,
+                image="docker://blocksci",
+                command="report",
+                dependency_job_ids=("analysis.server", "blocksci.server"),
+            )
+            == "report.server"
+        )
+    assert qsub.call_args.args[1] == ("analysis.server", "blocksci.server")
+
+
+def test_pbs_from_s3_submits_parallel_analyzers_then_dependent_report() -> None:
+    args = s3_pbs_args()
+    with (
+        mock.patch(
+            "client.wrapper.submit_coinjoin_analysis_s3_pbs",
+            return_value="analysis.server",
+        ) as analysis,
+        mock.patch(
+            "client.wrapper.submit_blocksci_s3_pbs",
+            return_value="blocksci.server",
+        ) as blocksci,
+        mock.patch(
+            "client.wrapper.submit_unified_report_s3_pbs",
+            return_value="report.server",
+        ) as report,
+    ):
+        run_pbs_from_s3(args)
+
+    analysis.assert_called_once()
+    blocksci.assert_called_once()
+    report.assert_called_once()
+    assert blocksci.call_args.kwargs["include_report"] is False
+    assert "unified_report.py" not in blocksci.call_args.kwargs["command"]
+    assert report.call_args.kwargs["dependency_job_ids"] == (
+        "analysis.server",
+        "blocksci.server",
+    )
+    assert report.call_args.kwargs["ncpus"] == 2
+    assert report.call_args.kwargs["mem"] == "8gb"
+    assert report.call_args.kwargs["scratch"] == "100gb"
+    assert report.call_args.kwargs["walltime"] == "24:00:00"
+    assert report.call_args.kwargs["command"] == blocksci_export_pbs_command(
+        run_id="run-1",
+        coinjoin_type="wasabi2",
+        min_input_count=2,
+        joinmarket_detector="definite",
+        joinmarket_min_base_fee=5000,
+        joinmarket_percentage_fee=0.00004,
+        joinmarket_max_depth=200000,
+        test_values=True,
+    )
+
+
+def test_pbs_from_s3_report_specific_resources_override_shared_resources() -> None:
+    args = s3_pbs_args()
+    args.pbs_ncpus = 6
+    args.pbs_mem = "24gb"
+    args.pbs_scratch = "120gb"
+    args.pbs_walltime = "12:00:00"
+    args.pbs_unified_report_ncpus = 1
+    args.pbs_unified_report_mem = "4gb"
+    args.pbs_unified_report_scratch = "20gb"
+    args.pbs_unified_report_walltime = "01:00:00"
+    with (
+        mock.patch(
+            "client.wrapper.submit_coinjoin_analysis_s3_pbs",
+            return_value="analysis.server",
+        ) as analysis,
+        mock.patch(
+            "client.wrapper.submit_blocksci_s3_pbs",
+            return_value="blocksci.server",
+        ) as blocksci,
+        mock.patch(
+            "client.wrapper.submit_unified_report_s3_pbs",
+            return_value="report.server",
+        ) as report,
+    ):
+        run_pbs_from_s3(args)
+
+    assert analysis.call_args.kwargs["ncpus"] == 6
+    assert analysis.call_args.kwargs["mem"] == "24gb"
+    assert blocksci.call_args.kwargs["ncpus"] == 6
+    assert blocksci.call_args.kwargs["mem"] == "24gb"
+    assert report.call_args.kwargs["ncpus"] == 1
+    assert report.call_args.kwargs["mem"] == "4gb"
+    assert report.call_args.kwargs["scratch"] == "20gb"
+    assert report.call_args.kwargs["walltime"] == "01:00:00"
+
+
+def test_pbs_from_s3_blocksci_only_keeps_combined_report() -> None:
+    args = s3_pbs_args(analysis=False)
+    with (
+        mock.patch(
+            "client.wrapper.submit_blocksci_s3_pbs",
+            return_value="blocksci.server",
+        ) as blocksci,
+        mock.patch("client.wrapper.submit_unified_report_s3_pbs") as report,
+    ):
+        run_pbs_from_s3(args)
+
+    blocksci.assert_called_once()
+    report.assert_not_called()
+    assert blocksci.call_args.kwargs["include_report"] is True
+    assert "unified_report.py" in blocksci.call_args.kwargs["command"]
 
 
 def test_rendered_pbs_script_calls_fake_s5cmd_only_on_compute_path() -> None:

@@ -18,7 +18,7 @@ COPY pipeline/client/runtime.py /app/client/runtime.py
 COPY pipeline/client/pbs.py /app/client/pbs.py
 COPY pipeline/client/artifacts.py /app/client/artifacts.py
 COPY pipeline/client/blocksci_template.sh pipeline/client/coinjoin_analysis_template.sh pipeline/client/mappings_template.sh /app/client/
-COPY pipeline/client/blocksci_s3_template.sh pipeline/client/coinjoin_analysis_s3_template.sh /app/client/
+COPY pipeline/client/blocksci_s3_template.sh pipeline/client/coinjoin_analysis_s3_template.sh pipeline/client/unified_report_s3_template.sh /app/client/
 COPY pipeline/client/research.py /app/client/research.py
 COPY pipeline/client/run_catalog.py /app/client/run_catalog.py
 COPY pipeline/client/scenarios.py /app/client/scenarios.py

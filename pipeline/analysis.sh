@@ -39,3 +39,17 @@ fi
 
 "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p blocksci-emulator --profile analysis rm -sf blocksci coinjoin_analysis
 "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p blocksci-emulator --profile analysis up --build --force-recreate
+
+BLOCKSCI_CONTAINER_ID="$("${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p blocksci-emulator --profile analysis ps -a -q blocksci)"
+if [[ -z "${BLOCKSCI_CONTAINER_ID}" ]]; then
+	echo "ERROR: BlockSci analysis container was not created." >&2
+	exit 1
+fi
+
+BLOCKSCI_EXIT_CODE="$("${CONTAINER_RUNTIME}" inspect --format '{{.State.ExitCode}}' "${BLOCKSCI_CONTAINER_ID}")"
+if [[ ! "${BLOCKSCI_EXIT_CODE}" =~ ^[0-9]+$ || "${BLOCKSCI_EXIT_CODE}" -gt 255 ]]; then
+	echo "ERROR: invalid BlockSci container exit code: ${BLOCKSCI_EXIT_CODE:-<empty>}" >&2
+	exit 1
+fi
+
+exit "${BLOCKSCI_EXIT_CODE}"

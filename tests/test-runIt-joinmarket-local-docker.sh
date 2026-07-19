@@ -36,6 +36,7 @@ UPSTREAM_BLOCKSCI_IMAGE="${UPSTREAM_BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-c
 UPSTREAM_EMULATOR_IMAGE="${UPSTREAM_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
 UPSTREAM_COINJOIN_ANALYSIS_IMAGE="${UPSTREAM_COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}"
 LOCAL_WRAPPER_IMAGE="${LOCAL_WRAPPER_IMAGE:-coinjoin-pipeline:joinmarket-local}"
+LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE:-blocksci-cj:joinmarket-local}"
 LOCAL_BLOCKSCI_IMAGE="${LOCAL_BLOCKSCI_IMAGE:-blocksci-complete:joinmarket-local}"
 LOCAL_EMULATOR_IMAGE="${LOCAL_EMULATOR_IMAGE:-coinjoin-emulator:joinmarket-local}"
 LOCAL_COINJOIN_ANALYSIS_IMAGE="${LOCAL_COINJOIN_ANALYSIS_IMAGE:-coinjoin-analysis:joinmarket-local}"
@@ -43,6 +44,7 @@ WRAPPER_SOURCE_DIR="${WRAPPER_SOURCE_DIR:-${PROJECT_DIR}}"
 BLOCKSCI_SOURCE_DIR="${BLOCKSCI_SOURCE_DIR:-${REPO_ROOT}/blocksci}"
 EMULATOR_SOURCE_DIR="${EMULATOR_SOURCE_DIR:-${REPO_ROOT}/coinjoin-emulator}"
 COINJOIN_ANALYSIS_SOURCE_DIR="${COINJOIN_ANALYSIS_SOURCE_DIR:-${REPO_ROOT}/coinjoin-analysis}"
+LOCAL_IMAGES_PREBUILT="${LOCAL_IMAGES_PREBUILT:-0}"
 
 cleanup() {
   if [[ -n "${RUN_PID}" ]] && kill -0 "${RUN_PID}" >/dev/null 2>&1; then
@@ -72,9 +74,16 @@ fi
 mkdir -p "${LOGS_DIR}"
 list_run_dirs >"${BEFORE_FILE}"
 
-if [[ "${BUILD_LOCAL_IMAGES}" != "0" ]]; then
-  echo "Building local BlockSci image ${LOCAL_BLOCKSCI_IMAGE} from ${BLOCKSCI_SOURCE_DIR}..."
-  docker build -t "${LOCAL_BLOCKSCI_IMAGE}" "${BLOCKSCI_SOURCE_DIR}"
+if [[ "${BUILD_LOCAL_IMAGES}" != "0" && "${LOCAL_IMAGES_PREBUILT}" != "1" ]]; then
+  echo "Building local BlockSci base image ${LOCAL_BLOCKSCI_BASE_IMAGE} from ${BLOCKSCI_SOURCE_DIR}..."
+  docker build -t "${LOCAL_BLOCKSCI_BASE_IMAGE}" -f "${BLOCKSCI_SOURCE_DIR}/Dockerfile" "${BLOCKSCI_SOURCE_DIR}"
+
+  echo "Building local BlockSci complete image ${LOCAL_BLOCKSCI_IMAGE} from ${BLOCKSCI_SOURCE_DIR}..."
+  docker build \
+    --build-arg "BLOCKSCI_BASE_IMAGE=${LOCAL_BLOCKSCI_BASE_IMAGE}" \
+    -t "${LOCAL_BLOCKSCI_IMAGE}" \
+    -f "${BLOCKSCI_SOURCE_DIR}/Dockerfile_complete" \
+    "${BLOCKSCI_SOURCE_DIR}"
 
   echo "Building local JoinMarket emulator image ${LOCAL_EMULATOR_IMAGE} from ${EMULATOR_SOURCE_DIR}..."
   docker build -t "${LOCAL_EMULATOR_IMAGE}" "${EMULATOR_SOURCE_DIR}"
@@ -105,6 +114,12 @@ else
   COINJOIN_EMULATOR_PULL_POLICY="${COINJOIN_EMULATOR_PULL_POLICY:-always}"
   COINJOIN_ANALYSIS_PULL_POLICY="${COINJOIN_ANALYSIS_PULL_POLICY:-always}"
   COINJOIN_EMULATOR_IMAGE_PREFIX="${COINJOIN_EMULATOR_IMAGE_PREFIX:-ghcr.io/ondrejman/}"
+fi
+
+if [[ "${IMAGE_MODE}" == "local" ]]; then
+  echo "Verifying BlockSci runtime in ${BLOCKSCI_IMAGE}..."
+  docker run --rm --entrypoint /bin/bash "${BLOCKSCI_IMAGE}" -lc \
+    'command -v blocksci_parser >/dev/null && python3 -c "import blocksci"'
 fi
 
 echo "Running real JoinMarket Docker workflow in ${IMAGE_MODE} image mode with logs in ${LOGS_DIR}..."

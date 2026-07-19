@@ -259,6 +259,26 @@ class PBSSubmissionTest(unittest.TestCase):
             ],
         )
 
+    def test_submit_pbs_supports_multiple_afterok_dependencies(self):
+        with mock.patch("client.pbs.subprocess.run") as run_mock:
+            run_mock.return_value = subprocess.CompletedProcess(
+                [], 0, stdout="report-job.meta\n", stderr=""
+            )
+            job_id = submit_pbs(
+                Path("/tmp/report.pbs"),
+                ("analysis-job.meta", "blocksci-job.meta"),
+            )
+        self.assertEqual(job_id, "report-job.meta")
+        self.assertEqual(
+            run_mock.call_args.args[0],
+            [
+                "qsub",
+                "-W",
+                "depend=afterok:analysis-job.meta:blocksci-job.meta",
+                "/tmp/report.pbs",
+            ],
+        )
+
     def test_submit_blocksci_pbs_writes_script_and_calls_qsub(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir) / "run-a"

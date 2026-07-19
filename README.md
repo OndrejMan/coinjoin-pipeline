@@ -161,9 +161,21 @@ PBS_FRONTEND_DIRECT=1 coinjoin-pipeline pbs-from-s3 \
 image used by the Kubernetes uploader. S3-compatible `full-run`, mappings, and
 frontend marker polling are deferred.
 
-When both PBS stages are selected, BlockSci is submitted with an `afterok`
-dependency on coinjoin-analysis. `--blocksciPbs` by itself requires the remote
-run to already contain `coinjoin-analysis_data/coinjoin_tx_info.json`.
+When both PBS stages are selected, coinjoin-analysis and BlockSci parsing run
+independently. A report-only PBS job is submitted with an `afterok` dependency
+on both analyzer job IDs and uploads `coinjoinPipeline_data`. `--blocksciPbs`
+by itself retains the combined BlockSci-plus-report behavior and requires the
+remote run to already contain
+`coinjoin-analysis_data/coinjoin_tx_info.json`.
+Both S3 report paths require and upload the canonical
+`coinjoinPipeline_data` output.
+
+The report-only job defaults to 2 CPUs and 8 GB RAM. It keeps the conservative
+100 GB scratch and 24-hour walltime because it currently downloads the full S3
+run bundle. Use `--pbs-unified-report-ncpus`,
+`--pbs-unified-report-mem`, `--pbs-unified-report-scratch`, and
+`--pbs-unified-report-walltime` to override only that job; the shared
+`--pbs-*` resource options remain the fallback.
 
 ## Security
 

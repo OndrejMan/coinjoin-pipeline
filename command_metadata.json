@@ -2270,6 +2270,54 @@
           "required": false,
           "takes_value": true
         },
+        "--pbs-unified-report-mem": {
+          "aliases": [
+            "--pbs-unified-report-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-unified-report-mem",
+          "help": "Memory for the unified-report PBS job (default: 8gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-unified-report-ncpus": {
+          "aliases": [
+            "--pbs-unified-report-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-unified-report-ncpus",
+          "help": "CPU count for the unified-report PBS job (default: 2; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-unified-report-scratch": {
+          "aliases": [
+            "--pbs-unified-report-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-unified-report-scratch",
+          "help": "Scratch storage for the unified-report PBS job (default: 100gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-unified-report-walltime": {
+          "aliases": [
+            "--pbs-unified-report-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-unified-report-walltime",
+          "help": "Walltime for the unified-report PBS job (default: 24:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
         "--pbs-walltime": {
           "aliases": [
             "--pbs-walltime"

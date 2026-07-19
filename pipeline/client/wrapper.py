@@ -112,6 +112,10 @@ try:
         DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
         DEFAULT_MAPPINGS_ENUMERATOR_IMAGE,
         DEFAULT_SAKE_IMAGE,
+        DEFAULT_UNIFIED_REPORT_MEM,
+        DEFAULT_UNIFIED_REPORT_NCPUS,
+        DEFAULT_UNIFIED_REPORT_SCRATCH,
+        DEFAULT_UNIFIED_REPORT_WALLTIME,
         PBSError,
         blocksci_export_pbs_command,
         blocksci_pbs_command,
@@ -122,6 +126,7 @@ try:
         submit_coinjoin_analysis_pbs,
         submit_coinjoin_analysis_s3_pbs,
         submit_mappings_pbs,
+        submit_unified_report_s3_pbs,
         wait_for_pbs_marker,
         walltime_to_seconds,
     )
@@ -143,6 +148,10 @@ except ImportError:
         DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
         DEFAULT_MAPPINGS_ENUMERATOR_IMAGE,
         DEFAULT_SAKE_IMAGE,
+        DEFAULT_UNIFIED_REPORT_MEM,
+        DEFAULT_UNIFIED_REPORT_NCPUS,
+        DEFAULT_UNIFIED_REPORT_SCRATCH,
+        DEFAULT_UNIFIED_REPORT_WALLTIME,
         PBSError,
         blocksci_export_pbs_command,
         blocksci_pbs_command,
@@ -153,6 +162,7 @@ except ImportError:
         submit_coinjoin_analysis_pbs,
         submit_coinjoin_analysis_s3_pbs,
         submit_mappings_pbs,
+        submit_unified_report_s3_pbs,
         wait_for_pbs_marker,
         walltime_to_seconds,
     )
@@ -1419,6 +1429,43 @@ def add_pbs_arguments(arg_parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_unified_report_pbs_arguments(arg_parser: argparse.ArgumentParser) -> None:
+    """Add resource overrides for the S3 report-only PBS job."""
+    arg_parser.add_argument(
+        "--pbs-unified-report-ncpus",
+        type=int,
+        default=None,
+        help=(
+            "CPU count for the unified-report PBS job "
+            f"(default: {DEFAULT_UNIFIED_REPORT_NCPUS}; overrides --pbs-ncpus)."
+        ),
+    )
+    arg_parser.add_argument(
+        "--pbs-unified-report-mem",
+        default=None,
+        help=(
+            "Memory for the unified-report PBS job "
+            f"(default: {DEFAULT_UNIFIED_REPORT_MEM}; overrides --pbs-mem)."
+        ),
+    )
+    arg_parser.add_argument(
+        "--pbs-unified-report-scratch",
+        default=None,
+        help=(
+            "Scratch storage for the unified-report PBS job "
+            f"(default: {DEFAULT_UNIFIED_REPORT_SCRATCH}; overrides --pbs-scratch)."
+        ),
+    )
+    arg_parser.add_argument(
+        "--pbs-unified-report-walltime",
+        default=None,
+        help=(
+            "Walltime for the unified-report PBS job "
+            f"(default: {DEFAULT_UNIFIED_REPORT_WALLTIME}; overrides --pbs-walltime)."
+        ),
+    )
+
+
 def truthy_env(name: str) -> bool:
     return os.environ.get(name, "").lower() not in ("", "0", "false", "no")
 
@@ -1438,6 +1485,18 @@ PBSResource = TypeVar("PBSResource", int, str)
 def resolve_pbs_resource(args: argparse.Namespace, name: str, default: PBSResource) -> PBSResource:
     value = getattr(args, name, None)
     return default if value is None else cast(PBSResource, value)
+
+
+def resolve_unified_report_pbs_resource(
+    args: argparse.Namespace,
+    name: str,
+    default: PBSResource,
+) -> PBSResource:
+    """Resolve a report-specific override before the shared PBS override."""
+    report_value = getattr(args, f"pbs_unified_report_{name}", None)
+    if report_value is not None:
+        return cast(PBSResource, report_value)
+    return resolve_pbs_resource(args, f"pbs_{name}", default)
 
 
 def pbs_wait_timeout(walltime: str) -> int:
@@ -1736,6 +1795,18 @@ def validate_artifact_arguments(parser: argparse.ArgumentParser, args: argparse.
                 parser.error(f"pbs-from-s3 requires {flag}")
         if not args.analysisPbs and not args.blocksciPbs:
             parser.error("pbs-from-s3 requires --analysisPbs or --blocksciPbs")
+        report_resource_options = (
+            "pbs_unified_report_ncpus",
+            "pbs_unified_report_mem",
+            "pbs_unified_report_scratch",
+            "pbs_unified_report_walltime",
+        )
+        if any(getattr(args, option, None) is not None for option in report_resource_options) and not (
+            args.analysisPbs and args.blocksciPbs
+        ):
+            parser.error(
+                "unified-report PBS resource overrides require both --analysisPbs and --blocksciPbs"
+            )
         if args.mappingsPbs:
             parser.error("S3-compatible mappings are not implemented yet")
     elif backend == "s3":
@@ -1821,6 +1892,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> None:
         profile=args.s3_profile,
         dry_run=args.dry_run,
     )
+    parallel_report = args.analysisPbs and args.blocksciPbs
     analysis_job_id = None
     if args.analysisPbs:
         analysis_job_id = submit_coinjoin_analysis_s3_pbs(
@@ -1832,8 +1904,9 @@ def run_pbs_from_s3(args: argparse.Namespace) -> None:
             scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH),
             walltime=resolve_pbs_resource(args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME),
         )
+    blocksci_job_id = None
     if args.blocksciPbs:
-        submit_blocksci_s3_pbs(
+        blocksci_job_id = submit_blocksci_s3_pbs(
             **common,
             image=resolve_pbs_image(args, DEFAULT_PBS_BLOCKSCI_IMAGE, "pbs_blocksci_image"),
             command=blocksci_pbs_command(
@@ -1845,12 +1918,46 @@ def run_pbs_from_s3(args: argparse.Namespace) -> None:
                 args.joinmarket_percentage_fee,
                 args.joinmarket_max_depth,
                 args.test_values,
+                include_report=not parallel_report,
             ),
             ncpus=resolve_pbs_resource(args, "pbs_ncpus", DEFAULT_BLOCKSCI_NCPUS),
             mem=resolve_pbs_resource(args, "pbs_mem", DEFAULT_BLOCKSCI_MEM),
             scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_BLOCKSCI_SCRATCH),
             walltime=resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME),
-            dependency_job_id=analysis_job_id,
+            include_report=not parallel_report,
+        )
+    if parallel_report:
+        dependency_job_ids = tuple(
+            job_id for job_id in (analysis_job_id, blocksci_job_id) if job_id is not None
+        )
+        if not args.dry_run and len(dependency_job_ids) != 2:
+            raise PBSError("Could not obtain both analyzer job IDs for the unified report dependency")
+        submit_unified_report_s3_pbs(
+            **common,
+            image=resolve_pbs_image(args, DEFAULT_PBS_BLOCKSCI_IMAGE, "pbs_blocksci_image"),
+            command=blocksci_export_pbs_command(
+                args.run_id,
+                args.coinjoin_type,
+                args.min_input_count,
+                args.joinmarket_detector,
+                args.joinmarket_min_base_fee,
+                args.joinmarket_percentage_fee,
+                args.joinmarket_max_depth,
+                args.test_values,
+            ),
+            ncpus=resolve_unified_report_pbs_resource(
+                args, "ncpus", DEFAULT_UNIFIED_REPORT_NCPUS
+            ),
+            mem=resolve_unified_report_pbs_resource(
+                args, "mem", DEFAULT_UNIFIED_REPORT_MEM
+            ),
+            scratch=resolve_unified_report_pbs_resource(
+                args, "scratch", DEFAULT_UNIFIED_REPORT_SCRATCH
+            ),
+            walltime=resolve_unified_report_pbs_resource(
+                args, "walltime", DEFAULT_UNIFIED_REPORT_WALLTIME
+            ),
+            dependency_job_ids=dependency_job_ids,
         )
 
 
@@ -1972,6 +2079,7 @@ def build_parser() -> argparse.ArgumentParser:
     s3_pbs_parser.add_argument("--test-values", action="store_true")
     add_joinmarket_detector_arguments(s3_pbs_parser)
     add_pbs_arguments(s3_pbs_parser)
+    add_unified_report_pbs_arguments(s3_pbs_parser)
 
     full_parser = subparsers.add_parser("full-run", help="Run delete.sh, then recreate.sh, then analysis.sh.")
     add_runtime_argument(full_parser)

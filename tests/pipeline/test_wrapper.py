@@ -52,7 +52,7 @@ def _kubectl_cmd(*parts: str) -> list[str]:
 
 
 class WrapperExportTest(unittest.TestCase):
-    def test_pbs_from_s3_orders_blocksci_after_coinjoin_analysis(self):
+    def test_pbs_from_s3_submits_parallel_analyzers_then_report(self):
         args = Namespace(
             artifact_uri="s3://bucket/runs",
             run_id="run-1",
@@ -82,10 +82,20 @@ class WrapperExportTest(unittest.TestCase):
                 "client.wrapper.submit_coinjoin_analysis_s3_pbs",
                 return_value="analysis.job",
             ),
-            mock.patch("client.wrapper.submit_blocksci_s3_pbs") as blocksci,
+            mock.patch(
+                "client.wrapper.submit_blocksci_s3_pbs",
+                return_value="blocksci.job",
+            ) as blocksci,
+            mock.patch("client.wrapper.submit_unified_report_s3_pbs") as report,
         ):
             run_pbs_from_s3(args)
-        self.assertEqual(blocksci.call_args.kwargs["dependency_job_id"], "analysis.job")
+        self.assertNotIn("dependency_job_id", blocksci.call_args.kwargs)
+        self.assertEqual(
+            report.call_args.kwargs["dependency_job_ids"],
+            ("analysis.job", "blocksci.job"),
+        )
+        self.assertEqual(report.call_args.kwargs["ncpus"], 2)
+        self.assertEqual(report.call_args.kwargs["mem"], "8gb")
 
     def test_stage_blocksci_script_preserves_script_in_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:

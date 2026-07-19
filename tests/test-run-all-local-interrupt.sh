@@ -15,7 +15,7 @@ FAKE_BIN="${TMP_DIR}/bin"
 RUN_LOG="${TMP_DIR}/run-all.log"
 CHILD_STARTED="${TMP_DIR}/child.started"
 CHILD_INTERRUPTED="${TMP_DIR}/child.interrupted"
-mkdir -p "${ISOLATED_PROJECT}/tests" "${FAKE_BIN}" "${TMP_DIR}/repo"
+mkdir -p "${ISOLATED_PROJECT}/tests/pipeline" "${FAKE_BIN}" "${TMP_DIR}/repo"
 
 cp "${PROJECT_DIR}/run-all-local.sh" "${ISOLATED_PROJECT}/run-all-local.sh"
 cp "${PROJECT_DIR}/run-all.sh" "${ISOLATED_PROJECT}/run-all.sh"
@@ -43,6 +43,8 @@ chmod +x "${ISOLATED_PROJECT}/tests/test-runIt-overactive-local.sh"
 
 for test_script in \
   test-command-builder-contract.sh \
+  pipeline/test_recreate_exit_status.sh \
+  pipeline/test_recreate_interrupt_cleanup.sh \
   test-podman-no-host-docker.sh \
   test-runIt-overactive-local-docker.sh \
   test-runIt-joinmarket-local-docker.sh \

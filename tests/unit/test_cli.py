@@ -227,6 +227,34 @@ class CliTests(unittest.TestCase):
             )
         )
 
+    def test_unified_report_resource_overrides_require_both_s3_analyzers(self) -> None:
+        arguments = [
+            "pbs-from-s3",
+            "--run-id",
+            "run-1",
+            "--artifact-uri",
+            "s3://bucket/runs",
+            "--s3-endpoint-url",
+            "https://s3.example.invalid",
+            "--s3-credentials-file",
+            "/storage/user/.aws/credentials",
+            "--s3-profile",
+            "coinjoin",
+            "--engine",
+            "wasabi",
+            "--analysisPbs",
+            "--pbs-unified-report-ncpus",
+            "1",
+        ]
+        self.assertTrue(
+            any(
+                "require both --analysisPbs and --blocksciPbs" in error
+                for error in validate_passthrough(arguments, "pbs-from-s3")
+            )
+        )
+        arguments.append("--blocksciPbs")
+        self.assertEqual(validate_passthrough(arguments, "pbs-from-s3"), [])
+
     def test_environment_image_overrides_preserve_legacy_workflows(self) -> None:
         environment = {
             "WRAPPER_IMAGE": "wrapper:test",

@@ -17,7 +17,7 @@ COPY client/runtime.py /app/client/runtime.py
 COPY client/pbs.py /app/client/pbs.py
 COPY client/artifacts.py /app/client/artifacts.py
 COPY client/blocksci_template.sh client/coinjoin_analysis_template.sh client/mappings_template.sh /app/client/
-COPY client/blocksci_s3_template.sh client/coinjoin_analysis_s3_template.sh /app/client/
+COPY client/blocksci_s3_template.sh client/coinjoin_analysis_s3_template.sh client/unified_report_s3_template.sh /app/client/
 COPY client/research.py /app/client/research.py
 COPY client/run_catalog.py /app/client/run_catalog.py
 COPY client/scenarios.py /app/client/scenarios.py

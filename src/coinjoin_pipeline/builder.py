@@ -60,6 +60,8 @@ PBS_FLAGS = {
     "--analysisPbs", "--blocksciPbs", "--mappingsPbs", "--pbs-ncpus", "--pbs-mem", "--pbs-scratch",
     "--pbs-walltime", "--pbs-image", "--pbs-blocksci-image",
     "--pbs-coinjoin-analysis-image", "--pbs-bitcoin-datadir",
+    "--pbs-unified-report-ncpus", "--pbs-unified-report-mem",
+    "--pbs-unified-report-scratch", "--pbs-unified-report-walltime",
     "--pbs-mappings-enumerator-image", "--pbs-sake-image",
     "--mapping-mining-fee-rate", "--mapping-coordination-fee-rate",
     "--mapping-max-decomposition-fee", "--mapping-mode", "--mapping-timeout",
@@ -71,12 +73,16 @@ PBS_FLAGS = {
 PBS_BLOCKSCI_ONLY = {"--blocksciPbs", "--pbs-blocksci-image", "--pbs-bitcoin-datadir"}
 # Flags that only affect the coinjoin-analysis PBS stage (--analysisPbs).
 PBS_ANALYSIS_ONLY = {"--analysisPbs", "--pbs-coinjoin-analysis-image"}
+PBS_REPORT_ONLY = {
+    "--pbs-unified-report-ncpus", "--pbs-unified-report-mem",
+    "--pbs-unified-report-scratch", "--pbs-unified-report-walltime",
+}
 PBS_MAPPINGS_ONLY = {"--mappingsPbs", "--pbs-mappings-enumerator-image", "--pbs-sake-image",
                      "--mapping-mining-fee-rate", "--mapping-coordination-fee-rate",
                      "--mapping-max-decomposition-fee", "--mapping-mode", "--mapping-timeout",
                      "--mapping-retry-timeout", "--sake-seed"}
 # Flags meaningful for either PBS stage (resources and the shared image override).
-PBS_SHARED = PBS_FLAGS - PBS_BLOCKSCI_ONLY - PBS_ANALYSIS_ONLY - PBS_MAPPINGS_ONLY
+PBS_SHARED = PBS_FLAGS - PBS_BLOCKSCI_ONLY - PBS_ANALYSIS_ONLY - PBS_REPORT_ONLY - PBS_MAPPINGS_ONLY
 SEMANTICALLY_DISABLED_FLAGS = {
     "analyze": {"--analysisPbs", "--pbs-coinjoin-analysis-image"},
     "coinjoin-analysis": PBS_BLOCKSCI_ONLY,
@@ -263,6 +269,9 @@ def validate_command(command: Command) -> Validation:
         result.errors.append("--pbs-blocksci-image requires --blocksciPbs.")
     if has_option(command, "--pbs-coinjoin-analysis-image") and not analysis_pbs:
         result.errors.append("--pbs-coinjoin-analysis-image requires --analysisPbs.")
+    for flag in sorted(PBS_REPORT_ONLY):
+        if has_option(command, flag) and not (analysis_pbs and blocksci_pbs):
+            result.errors.append(f"{flag} requires both --analysisPbs and --blocksciPbs.")
     for flag in sorted(PBS_MAPPINGS_ONLY - {"--mappingsPbs"}):
         if has_option(command, flag) and not mappings_pbs:
             result.errors.append(f"{flag} requires --mappingsPbs.")
