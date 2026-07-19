@@ -35,6 +35,10 @@ includes a prominent production-threshold warning.
 Independent emulator labels, raw detector metrics,
 and provenance rules are defined in
 [Analysis semantics](docs/analysis-semantics.md).
+When verified emulator labels are available, unified report schema 1.7
+evaluates both BlockSci and the filtered, normalized `coinjoin-analysis`
+baseline against the same exported transaction universe while preserving the
+legacy BlockSci confusion-matrix field.
 
 Outputs default to `./coinjoin-runs`; override this with `--runs-root`. Images
 default to the explicit `latest` tag. Use `--version TAG` to apply one coordinated
@@ -129,11 +133,57 @@ kubectl create secret generic coinjoin-s3-credentials \
   --from-literal=S3_DEFAULT_REGION='us-east-1'
 ```
 
+### Single-command full run
+
+`full-run --artifact-backend s3` orchestrates the whole chain from a
+MetaCentrum frontend and waits for every stage: it submits the Kubernetes
+emulation Job, polls the bucket for `.k8s/upload.done`, submits both PBS
+analyzers in parallel followed by a report job dependent on both, and polls
+all three `.pbs/*.done` markers until the results land in the bucket.
+Requirements: kubeconfig + `qsub` + `s5cmd` on
+the frontend, `PBS_FRONTEND_DIRECT=1`, and a pre-created namespace with the
+Secret (`--reuse-namespace` is required). Run it inside `screen`/`tmux` —
+the process blocks for the whole emulation and analysis.
+
+```bash
+PBS_FRONTEND_DIRECT=1 coinjoin-pipeline full-run \
+  --engine wasabi \
+  --driver kubernetes \
+  --namespace man5-ns --reuse-namespace \
+  --artifact-backend s3 \
+  --artifact-uri s3://coinjoin-thesis/runs \
+  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
+  --s3-secret-name coinjoin-s3-credentials \
+  --s3-credentials-file /storage/brno2/home/xman/.aws/credentials \
+  --s3-profile coinjoin \
+  --run-id wasabi-test-001 \
+  --test-values \
+  --analysisPbs \
+  --blocksciPbs \
+  --emulation-timeout 21600
+```
+
+The orchestrator refuses a `--run-id` whose bucket prefix contains any object,
+cancels the dependent report job if either analyzer fails, and prints `kubectl`
+diagnostics if the emulation fails. A still-running sibling analyzer job is
+deliberately left in place on failure — its results upload to the bucket
+independently and remain usable; cancel it with `qdel` if they are not needed. `--parallel`,
+`--blocksci-script`, and `--mappingsPbs` are not supported in S3 mode. The
+`.pipeline.lock` in the runs root is held for the whole duration — one S3
+full-run at a time per frontend. The end-to-end test for this path is
+`tests/test-kubernetes-s3-minio.sh` (k3d + local PBS rig + MinIO).
+
+### Decomposed two-command workflow
+
+The same chain can run as two independent commands — emulation from any
+machine with a kubeconfig, analysis later from the frontend.
+
 Submit Kubernetes emulation and upload:
 
 ```bash
 coinjoin-pipeline recreate \
   --driver kubernetes \
+  --namespace man5-ns --reuse-namespace \
   --artifact-backend s3 \
   --artifact-uri s3://coinjoin-thesis/runs \
   --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
@@ -158,17 +208,22 @@ PBS_FRONTEND_DIRECT=1 coinjoin-pipeline pbs-from-s3 \
 ```
 
 `s5cmd` must be available on PBS compute nodes and is included in the pipeline
-image used by the Kubernetes uploader. S3-compatible `full-run`, mappings, and
-frontend marker polling are deferred.
+image used by the Kubernetes uploader; the single-command full run additionally
+needs it on the frontend PATH for marker polling. S3-compatible mappings are
+still deferred. In the two-command workflow nothing waits — monitor the jobs
+with `qstat` and check markers in the bucket yourself.
 
 When both PBS stages are selected, coinjoin-analysis and BlockSci parsing run
 independently. A report-only PBS job is submitted with an `afterok` dependency
-on both analyzer job IDs and uploads `coinjoinPipeline_data`. `--blocksciPbs`
-by itself retains the combined BlockSci-plus-report behavior and requires the
-remote run to already contain
-`coinjoin-analysis_data/coinjoin_tx_info.json`.
-Both S3 report paths require and upload the canonical
-`coinjoinPipeline_data` output.
+on both analyzer job IDs and uploads `coinjoinPipeline_data`. The single-command
+`full-run` waits for the emulation upload, both analyzer jobs, and that final
+report job before returning. The decomposed `pbs-from-s3` command submits the
+same three-job analysis graph without waiting.
+
+`--blocksciPbs` by itself remains available only to `pbs-from-s3`; it retains
+the combined BlockSci-plus-report behavior and requires the remote run to
+already contain `coinjoin-analysis_data/coinjoin_tx_info.json`. Both S3 report
+paths require and upload the canonical `coinjoinPipeline_data` output.
 
 The report-only job defaults to 2 CPUs and 8 GB RAM. It keeps the conservative
 100 GB scratch and 24-hour walltime because it currently downloads the full S3

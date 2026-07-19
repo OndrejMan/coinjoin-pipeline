@@ -194,6 +194,7 @@ if [[ "${PBS_FRONTEND_DIRECT:-0}" == 1 && ( "${HAS_ANALYSIS_PBS}" == true || "${
     cp -a "${SCRIPT_DIR}/tests/support/pbs-runtime/." "${DIRECT_WRAPPER_ROOT}/client/"
   fi
   export HOST_CLIENT_DIR="${DIRECT_WRAPPER_ROOT}/client"
+  export PYTHONPATH="${DIRECT_WRAPPER_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
   export SCENARIOS_DIR="${SCRIPT_DIR}/scenarios"
   export NOTEBOOKS_DIR
   export EMULATION_LOGS_DIR

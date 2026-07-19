@@ -8,21 +8,95 @@ from unittest import mock
 PROJECT_ROOT = Path(__file__).resolve().parents[2] / "pipeline"
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from client.artifacts import PROBE_RUNNING, PROBE_TERMINAL, PROBE_UNKNOWN  # noqa: E402
 from client.pbs import (  # noqa: E402
     PBSError,
+    _qstat_job_state,
     blocksci_export_pbs_command,
     blocksci_pbs_command,
     coinjoin_analysis_pbs_command,
+    pbs_job_probe,
     render_blocksci_pbs,
     render_coinjoin_analysis_pbs,
     render_mappings_pbs,
     require_qsub,
     require_storage_path,
     submit_pbs,
+    submit_pbs_text,
     submit_blocksci_pbs,
     submit_coinjoin_analysis_pbs,
     wait_for_pbs_marker,
 )
+
+
+class PBSJobProbeTest(unittest.TestCase):
+    def _probe_state(self, qstat_state):
+        with mock.patch("client.pbs._qstat_job_state", return_value=qstat_state):
+            return pbs_job_probe("7.server")()
+
+    def test_terminal_states_map_to_terminal(self):
+        for state in ("C", "F", "MISSING"):
+            self.assertEqual(self._probe_state(state), PROBE_TERMINAL)
+
+    def test_active_states_map_to_running(self):
+        for state in ("Q", "R", "H"):
+            self.assertEqual(self._probe_state(state), PROBE_RUNNING)
+
+    def test_inconclusive_qstat_maps_to_unknown(self):
+        self.assertEqual(self._probe_state(None), PROBE_UNKNOWN)
+
+    def test_unexpected_state_raises(self):
+        with self.assertRaises(PBSError):
+            self._probe_state("Z")
+
+    def test_qstat_falls_back_when_job_history_is_disabled(self):
+        history_disabled = subprocess.CompletedProcess(
+            ["qstat", "-x", "-f", "7.server"],
+            1,
+            stdout="",
+            stderr="qstat: PBS is not configured to maintain job history",
+        )
+        missing = subprocess.CompletedProcess(
+            ["qstat", "-f", "7.server"],
+            153,
+            stdout="",
+            stderr="qstat: Unknown Job Id 7.server",
+        )
+        with (
+            mock.patch("client.pbs.shutil.which", return_value="/usr/bin/qstat"),
+            mock.patch("client.pbs.subprocess.run", side_effect=[history_disabled, missing]) as run,
+        ):
+            self.assertEqual(_qstat_job_state("7.server"), "MISSING")
+        self.assertEqual(run.call_args_list[1].args[0], ["qstat", "-f", "7.server"])
+
+
+class PBSStdinSubmissionTest(unittest.TestCase):
+    def test_submit_pbs_text_pipes_script_and_dependency(self):
+        with mock.patch("client.pbs.subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout="9.server\n", stderr="")
+            job_id = submit_pbs_text("#PBS -N stage\ntrue\n", "8.server")
+        self.assertEqual(job_id, "9.server")
+        self.assertEqual(run.call_args.args[0], ["qsub", "-W", "depend=afterok:8.server"])
+        self.assertEqual(run.call_args.kwargs["input"], "#PBS -N stage\ntrue\n")
+
+    def test_submit_pbs_text_supports_multiple_dependencies(self):
+        with mock.patch("client.pbs.subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout="10.server\n", stderr="")
+            job_id = submit_pbs_text(
+                "#PBS -N report\ntrue\n",
+                ("8.server", "9.server"),
+            )
+        self.assertEqual(job_id, "10.server")
+        self.assertEqual(
+            run.call_args.args[0],
+            ["qsub", "-W", "depend=afterok:8.server:9.server"],
+        )
+
+    def test_submit_pbs_text_raises_on_qsub_failure(self):
+        with mock.patch("client.pbs.subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=1, stdout="", stderr="bad queue")
+            with self.assertRaises(PBSError):
+                submit_pbs_text("#PBS -N stage\ntrue\n")
 
 
 class PBSTemplateTest(unittest.TestCase):

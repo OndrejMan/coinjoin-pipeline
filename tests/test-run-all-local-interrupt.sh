@@ -51,7 +51,8 @@ for test_script in \
   test-runIt-parallel-local-docker.sh \
   test-kubernetes-k3d.sh \
   test-kubernetes-pbs-analysis.sh \
-  test-parallel-pbs-analysis.sh
+  test-parallel-pbs-analysis.sh \
+  test-kubernetes-s3-minio.sh
 do
   cat >"${ISOLATED_PROJECT}/tests/${test_script}" <<'EOF'
 #!/usr/bin/env bash

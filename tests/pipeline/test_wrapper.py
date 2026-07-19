@@ -37,6 +37,7 @@ from client.wrapper import (
     run_coinjoin_analysis,
     run_command,
     run_dirs,
+    run_full_run_s3,
     run_kubernetes_emulation,
     run_parallel_analysis,
     run_pbs_from_s3,
@@ -47,8 +48,139 @@ from client.wrapper import (
 )
 
 
+from client.artifacts import ArtifactTransportError
+
+
 def _kubectl_cmd(*parts: str) -> list[str]:
     return ["kubectl", "--kubeconfig", "/kube/config", *parts]
+
+
+def _full_run_s3_args(**overrides) -> Namespace:
+    values = dict(
+        artifact_uri="s3://bucket/runs",
+        run_id="run-1",
+        s3_endpoint_url="https://s3.cl4.du.cesnet.cz",
+        s3_credentials_file="/storage/user/.aws/credentials",
+        s3_profile="coinjoin",
+        s3_secret_name="coinjoin-s3",
+        kubeconfig=None,
+        namespace="coinjoin-ns",
+        reuse_namespace=True,
+        dry_run=False,
+        emulation_timeout=3600,
+        analysisPbs=True,
+        blocksciPbs=True,
+        pbs_walltime=None,
+    )
+    values.update(overrides)
+    return Namespace(**values)
+
+
+class FullRunS3OrchestrationTest(unittest.TestCase):
+    def _patches(self):
+        return {
+            name: mock.patch(f"client.wrapper.{name}")
+            for name in (
+                "require_qsub",
+                "s3_access_preflight",
+                "ensure_empty_run_prefix",
+                "kubernetes_s3_auth_preflight",
+                "run_kubernetes_s3_emulation",
+                "run_pbs_from_s3",
+                "wait_for_s3_marker",
+                "pbs_job_probe",
+                "kubernetes_job_probe",
+                "qdel_pbs_job",
+                "collect_s3_emulation_diagnostics",
+            )
+        }
+
+    def test_full_run_s3_waits_between_stages_in_order(self):
+        patches = self._patches()
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        self.addCleanup(mock.patch.stopall)
+        mocks["run_pbs_from_s3"].return_value = (
+            "analysis.job",
+            "blocksci.job",
+            "report.job",
+        )
+        calls: list[str] = []
+        mocks["run_kubernetes_s3_emulation"].side_effect = lambda *a, **k: calls.append("emulate")
+        mocks["run_pbs_from_s3"].side_effect = lambda *a, **k: (
+            calls.append("submit-pbs"),
+            ("analysis.job", "blocksci.job", "report.job"),
+        )[1]
+        mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(f"wait:{stage}")
+
+        run_full_run_s3(_full_run_s3_args())
+
+        self.assertEqual(
+            calls,
+            [
+                "emulate",
+                "wait:kubernetes-emulation",
+                "submit-pbs",
+                "wait:coinjoin-analysis",
+                "wait:blocksci",
+                "wait:unified-report",
+            ],
+        )
+        mocks["qdel_pbs_job"].assert_not_called()
+
+    def test_full_run_s3_emulation_failure_skips_pbs_and_collects_diagnostics(self):
+        patches = self._patches()
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        self.addCleanup(mock.patch.stopall)
+        mocks["wait_for_s3_marker"].side_effect = ArtifactTransportError("emulation failed")
+        mocks["collect_s3_emulation_diagnostics"].return_value = "diagnostics"
+
+        with self.assertRaises(ArtifactTransportError):
+            run_full_run_s3(_full_run_s3_args())
+
+        mocks["run_pbs_from_s3"].assert_not_called()
+        mocks["collect_s3_emulation_diagnostics"].assert_called_once()
+
+    def test_full_run_s3_analysis_failure_cancels_dependent_report_job(self):
+        patches = self._patches()
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        self.addCleanup(mock.patch.stopall)
+        mocks["run_pbs_from_s3"].return_value = (
+            "analysis.job",
+            "blocksci.job",
+            "report.job",
+        )
+
+        def wait(stage, *arguments, **keywords):
+            if stage == "coinjoin-analysis":
+                raise ArtifactTransportError("analysis failed")
+
+        mocks["wait_for_s3_marker"].side_effect = wait
+
+        with self.assertRaises(ArtifactTransportError):
+            run_full_run_s3(_full_run_s3_args())
+
+        mocks["qdel_pbs_job"].assert_called_once_with("report.job")
+
+    def test_full_run_s3_blocksci_failure_cancels_dependent_report_job(self):
+        patches = self._patches()
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        self.addCleanup(mock.patch.stopall)
+        mocks["run_pbs_from_s3"].return_value = (
+            "analysis.job",
+            "blocksci.job",
+            "report.job",
+        )
+
+        def wait(stage, *arguments, **keywords):
+            if stage == "blocksci":
+                raise ArtifactTransportError("blocksci failed")
+
+        mocks["wait_for_s3_marker"].side_effect = wait
+
+        with self.assertRaises(ArtifactTransportError):
+            run_full_run_s3(_full_run_s3_args())
+
+        mocks["qdel_pbs_job"].assert_called_once_with("report.job")
 
 
 class WrapperExportTest(unittest.TestCase):
@@ -86,9 +218,13 @@ class WrapperExportTest(unittest.TestCase):
                 "client.wrapper.submit_blocksci_s3_pbs",
                 return_value="blocksci.job",
             ) as blocksci,
-            mock.patch("client.wrapper.submit_unified_report_s3_pbs") as report,
+            mock.patch(
+                "client.wrapper.submit_unified_report_s3_pbs",
+                return_value="report.job",
+            ) as report,
         ):
-            run_pbs_from_s3(args)
+            job_ids = run_pbs_from_s3(args)
+        self.assertEqual(job_ids, ("analysis.job", "blocksci.job", "report.job"))
         self.assertNotIn("dependency_job_id", blocksci.call_args.kwargs)
         self.assertEqual(
             report.call_args.kwargs["dependency_job_ids"],
@@ -442,14 +578,105 @@ class WrapperExportTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("requires --artifact-uri", result.stderr)
 
-    def test_full_run_s3_reports_deferred_orchestration(self):
+    def test_full_run_s3_requires_kubernetes_driver(self):
         result = subprocess.run(
             [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"),
              "full-run", "--engine", "wasabi", "--artifact-backend", "s3", "--dry-run"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
         self.assertEqual(result.returncode, 2)
-        self.assertIn("S3-compatible full-run orchestration is not implemented yet", result.stderr)
+        self.assertIn("full-run --artifact-backend s3 requires --driver kubernetes", result.stderr)
+
+    def test_full_run_s3_requires_transport_and_stage_options(self):
+        result = subprocess.run(
+            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"),
+             "full-run", "--engine", "wasabi", "--driver", "kubernetes",
+             "--artifact-backend", "s3", "--dry-run"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("full-run --artifact-backend s3 requires --artifact-uri", result.stderr)
+
+    def _full_run_s3_argv(self, *extra: str) -> list[str]:
+        return [
+            sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"),
+            "full-run", "--engine", "wasabi", "--driver", "kubernetes",
+            "--artifact-backend", "s3",
+            "--artifact-uri", "s3://bucket/runs",
+            "--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz",
+            "--s3-secret-name", "coinjoin-s3",
+            "--s3-credentials-file", "/storage/user/.aws/credentials",
+            "--s3-profile", "coinjoin",
+            "--run-id", "run-1",
+            "--reuse-namespace",
+            "--analysisPbs", "--blocksciPbs",
+            *extra,
+        ]
+
+    def test_full_run_s3_rejects_parallel(self):
+        result = subprocess.run(
+            self._full_run_s3_argv("--parallel", "--dry-run"),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("does not support --parallel", result.stderr)
+
+    def test_full_run_s3_rejects_shared_storage_flags(self):
+        result = subprocess.run(
+            self._full_run_s3_argv("--copy-to-host", "--dry-run"),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("does not support", result.stderr)
+
+    def test_full_run_s3_requires_both_analysis_stages(self):
+        arguments = self._full_run_s3_argv("--dry-run")
+        arguments.remove("--blocksciPbs")
+        result = subprocess.run(
+            arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("requires both --analysisPbs and --blocksciPbs", result.stderr)
+
+    def test_full_run_s3_requires_precreated_namespace(self):
+        arguments = self._full_run_s3_argv("--dry-run")
+        arguments.remove("--reuse-namespace")
+        result = subprocess.run(
+            arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("requires --reuse-namespace", result.stderr)
+
+    def test_full_run_s3_dry_run_renders_all_stages(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scenarios_dir = Path(tmpdir) / "scenarios"
+            scenarios_dir.mkdir()
+            (scenarios_dir / "scenario.json").write_text("{}\n", encoding="utf-8")
+            env = dict(os.environ)
+            env["SCENARIOS_DIR"] = str(scenarios_dir)
+            env["EMULATION_LOGS_DIR"] = str(Path(tmpdir) / "emulation_logs")
+            result = subprocess.run(
+                self._full_run_s3_argv(
+                    "--scenario", "scenario.json",
+                    "--pbs-unified-report-ncpus", "1",
+                    "--pbs-unified-report-mem", "2gb",
+                    "--pbs-unified-report-scratch", "3gb",
+                    "--pbs-unified-report-walltime", "00:15:00",
+                    "--dry-run",
+                ),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Kubernetes S3-compatible resources", result.stdout)
+        self.assertIn("PBS S3-compatible script for coinjoin-analysis", result.stdout)
+        self.assertIn("PBS S3-compatible script for blocksci", result.stdout)
+        self.assertIn("PBS S3-compatible script for unified-report", result.stdout)
+        self.assertIn("#PBS -l select=1:ncpus=1:mem=2gb:scratch_local=3gb", result.stdout)
+        self.assertIn("#PBS -l walltime=00:15:00", result.stdout)
+        self.assertIn("Would wait for s3://bucket/runs/run-1/.k8s/upload.done", result.stdout)
+        self.assertIn("Would wait for s3://bucket/runs/run-1/.pbs/coinjoin-analysis.done", result.stdout)
+        self.assertIn("Would wait for s3://bucket/runs/run-1/.pbs/blocksci.done", result.stdout)
+        self.assertIn("Would wait for s3://bucket/runs/run-1/.pbs/unified-report.done", result.stdout)
 
     def test_kubernetes_s3_rejects_shared_storage_flags(self):
         result = subprocess.run(
@@ -457,6 +684,7 @@ class WrapperExportTest(unittest.TestCase):
              "--engine", "wasabi", "--driver", "kubernetes", "--artifact-backend", "s3",
              "--artifact-uri", "s3://bucket/runs", "--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz",
              "--s3-secret-name", "coinjoin-s3", "--run-id", "run-1",
+             "--reuse-namespace",
              "--copy-to-host", "--dry-run"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )

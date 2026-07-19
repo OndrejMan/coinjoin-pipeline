@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Reproducible CoinJoin emulation and analysis pipeline"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = "MIT"
 dependencies = []
 
 [project.optional-dependencies]
@@ -26,10 +26,17 @@ coinjoin-pipeline-image = "coinjoin_pipeline.pipeline_image:main"
 lint = "coinjoin_pipeline.lint:main"
 
 [tool.setuptools]
-package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
+packages = [
+  "coinjoin_pipeline",
+  "coinjoin_pipeline.metadata",
+  "coinjoin_pipeline.resources",
+  "coinjoin_pipeline.resources.container",
+  "coinjoin_pipeline.resources.scenarios",
+  "coinjoin_pipeline._runtime",
+  "coinjoin_pipeline._runtime.client",
+  "coinjoin_pipeline._runtime.exporters",
+]
+package-dir = {coinjoin_pipeline = "src/coinjoin_pipeline", "coinjoin_pipeline._runtime" = "src/coinjoin_pipeline/_runtime", "coinjoin_pipeline._runtime.client" = "pipeline/client", "coinjoin_pipeline._runtime.exporters" = "pipeline/exporters"}
 
 [tool.setuptools.package-data]
 coinjoin_pipeline = [
@@ -37,6 +44,7 @@ coinjoin_pipeline = [
   "resources/container/*.sh",
   "resources/scenarios/*.json",
 ]
+"coinjoin_pipeline._runtime.client" = ["*.sh", "*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/pipeline"]

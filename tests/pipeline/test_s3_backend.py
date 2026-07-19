@@ -143,7 +143,7 @@ def test_blocksci_s3_parse_only_does_not_require_or_upload_report() -> None:
 def test_frontend_submit_does_not_invoke_s5cmd() -> None:
     with (
         mock.patch("client.pbs.require_qsub"),
-        mock.patch("client.pbs.submit_pbs", return_value="42.server") as qsub,
+        mock.patch("client.pbs.submit_pbs_text", return_value="42.server") as qsub,
         mock.patch("subprocess.run") as run,
     ):
         assert (
@@ -159,7 +159,7 @@ def test_frontend_submit_does_not_invoke_s5cmd() -> None:
 def test_blocksci_submission_forwards_analysis_dependency() -> None:
     with (
         mock.patch("client.pbs.require_qsub"),
-        mock.patch("client.pbs.submit_pbs", return_value="blocksci.server") as qsub,
+        mock.patch("client.pbs.submit_pbs_text", return_value="blocksci.server") as qsub,
     ):
         assert (
             submit_blocksci_s3_pbs(
@@ -176,7 +176,7 @@ def test_blocksci_submission_forwards_analysis_dependency() -> None:
 def test_unified_report_submission_forwards_both_dependencies() -> None:
     with (
         mock.patch("client.pbs.require_qsub"),
-        mock.patch("client.pbs.submit_pbs", return_value="report.server") as qsub,
+        mock.patch("client.pbs.submit_pbs_text", return_value="report.server") as qsub,
     ):
         assert (
             submit_unified_report_s3_pbs(
@@ -286,6 +286,26 @@ def test_pbs_from_s3_blocksci_only_keeps_combined_report() -> None:
     assert "unified_report.py" in blocksci.call_args.kwargs["command"]
 
 
+def test_s3_submission_pipes_script_to_qsub_stdin() -> None:
+    with (
+        mock.patch("client.pbs.require_qsub"),
+        mock.patch("client.pbs.subprocess.run") as run,
+    ):
+        run.return_value = mock.Mock(returncode=0, stdout="7.server\n", stderr="")
+        job_id = submit_blocksci_s3_pbs(
+            **COMMON,
+            image="docker://blocksci",
+            command="analyze",
+            dependency_job_id="analysis.server",
+        )
+    assert job_id == "7.server"
+    argv = run.call_args.args[0]
+    assert argv[0] == "qsub"
+    assert ["-W", "depend=afterok:analysis.server"] == argv[1:3]
+    assert len(argv) == 3  # no script path argument; the script travels via stdin
+    assert "#PBS" in run.call_args.kwargs["input"]
+
+
 def test_rendered_pbs_script_calls_fake_s5cmd_only_on_compute_path() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -357,6 +377,14 @@ def test_kubernetes_manifest_has_controller_uploader_secret_and_rbac() -> None:
     assert all(item["metadata"]["namespace"] == "coinjoin" for item in rbac)
     role_binding = next(item for item in rbac if item["kind"] == "RoleBinding")
     assert role_binding["roleRef"]["kind"] == "Role"
+    role = next(item for item in rbac if item["kind"] == "Role")
+    permissions = {
+        resource: set(rule["verbs"])
+        for rule in role["rules"]
+        for resource in rule["resources"]
+    }
+    assert permissions["pods/status"] == {"get"}
+    assert {"get", "list", "watch"}.issubset(permissions["events"])
 
     job = next(item for item in manifest["items"] if item["kind"] == "Job")
     assert job["spec"]["ttlSecondsAfterFinished"] == 3600
@@ -372,6 +400,19 @@ def test_kubernetes_manifest_has_controller_uploader_secret_and_rbac() -> None:
     volumes = {volume["name"]: volume for volume in spec["volumes"]}
     assert volumes["artifacts"]["emptyDir"] == {}
     assert volumes["credentials"]["emptyDir"] == {"medium": "Memory"}
+
+    init_containers = {container["name"]: container for container in spec["initContainers"]}
+    assert set(init_containers) == {"prefix-preflight"}
+    prefix_preflight = init_containers["prefix-preflight"]
+    assert "already contains artifacts" in prefix_preflight["command"][-1]
+    assert "no object found" in prefix_preflight["command"][-1]
+    subprocess.run(
+        ["bash", "-n"], input=prefix_preflight["command"][-1], text=True, check=True
+    )
+    assert prefix_preflight["resources"] == {
+        "requests": {"cpu": "100m", "memory": "128Mi"},
+        "limits": {"cpu": "500m", "memory": "512Mi"},
+    }
 
     containers = {container["name"]: container for container in spec["containers"]}
     assert set(containers) == {"controller", "uploader"}

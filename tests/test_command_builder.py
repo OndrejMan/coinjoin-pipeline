@@ -134,6 +134,81 @@ class CommandBuilderTests(unittest.TestCase):
         self.assertTrue(any("does not support: --all-runs" in error for error in validation.errors))
         self.assertTrue(any("to be identical" in error for error in validation.errors))
 
+    def test_validation_accepts_complete_s3_full_run(self) -> None:
+        command = MODULE.Command(
+            action="full-run",
+            options=[
+                ("--engine", "wasabi"),
+                ("--driver", "kubernetes"),
+                ("--artifact-backend", "s3"),
+                ("--artifact-uri", "s3://bucket/runs"),
+                ("--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz"),
+                ("--s3-secret-name", "coinjoin-s3"),
+                ("--s3-credentials-file", "/storage/user/.aws/credentials"),
+                ("--s3-profile", "coinjoin"),
+                ("--run-id", "run-1"),
+                ("--reuse-namespace", None),
+                ("--analysisPbs", None),
+                ("--blocksciPbs", None),
+            ],
+        )
+        self.assertEqual(MODULE.validate_command(command).errors, [])
+
+    def test_validation_requires_s3_full_run_transport_and_stages(self) -> None:
+        command = MODULE.Command(
+            action="full-run",
+            options=[
+                ("--engine", "wasabi"),
+                ("--driver", "kubernetes"),
+                ("--artifact-backend", "s3"),
+            ],
+        )
+        errors = MODULE.validate_command(command).errors
+        self.assertTrue(any("--s3-credentials-file" in error for error in errors))
+        self.assertTrue(any("--s3-secret-name" in error for error in errors))
+        self.assertTrue(any("both --analysisPbs and --blocksciPbs" in error for error in errors))
+        self.assertTrue(any("--reuse-namespace" in error for error in errors))
+
+    def test_validation_rejects_s3_full_run_parallel_and_shared_storage_flags(self) -> None:
+        command = MODULE.Command(
+            action="full-run",
+            options=[
+                ("--engine", "wasabi"),
+                ("--driver", "kubernetes"),
+                ("--artifact-backend", "s3"),
+                ("--artifact-uri", "s3://bucket/runs"),
+                ("--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz"),
+                ("--s3-secret-name", "coinjoin-s3"),
+                ("--s3-credentials-file", "/storage/user/.aws/credentials"),
+                ("--s3-profile", "coinjoin"),
+                ("--run-id", "run-1"),
+                ("--reuse-namespace", None),
+                ("--analysisPbs", None),
+                ("--blocksciPbs", None),
+                ("--parallel", None),
+                ("--copy-to-host", None),
+            ],
+        )
+        errors = MODULE.validate_command(command).errors
+        self.assertTrue(any("--parallel" in error for error in errors))
+        self.assertTrue(any("--copy-to-host" in error for error in errors))
+
+    def test_validation_requires_existing_namespace_for_s3_recreate(self) -> None:
+        command = MODULE.Command(
+            action="recreate",
+            options=[
+                ("--engine", "wasabi"),
+                ("--driver", "kubernetes"),
+                ("--artifact-backend", "s3"),
+                ("--artifact-uri", "s3://bucket/runs"),
+                ("--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz"),
+                ("--s3-secret-name", "coinjoin-s3"),
+                ("--run-id", "run-1"),
+            ],
+        )
+        errors = MODULE.validate_command(command).errors
+        self.assertTrue(any("--reuse-namespace" in error for error in errors))
+
     def test_validation_requires_external_inputs_unless_resuming(self) -> None:
         command = MODULE.Command(action="external analyze", options=[("--run-id", "mainnet")])
         validation = MODULE.validate_command(command)

@@ -19,11 +19,16 @@ if __package__ in (None, ""):
 # Explicit self-aliases preserve wrapper's historical re-export surface.
 # pylint: disable=useless-import-alias,unused-import
 from client.artifacts import (
+    ArtifactTransportError,
+    S3Access,
+    ensure_empty_run_prefix,
+    s3_access_preflight,
     validate_artifact_uri,
     validate_credentials_file,
     validate_run_id,
     validate_s3_endpoint_url,
     validate_s3_profile,
+    wait_for_s3_marker,
 )
 from client.cli_options import (
     DEFAULT_COINJOIN_TYPE,
@@ -34,8 +39,12 @@ from client.cli_options import (
 )
 from client.kubernetes import (
     apply_s3_emulation_resources,
+    collect_s3_emulation_diagnostics,
     kubernetes_auth_preflight,
+    kubernetes_job_probe,
+    kubernetes_s3_auth_preflight,
     render_s3_emulation_resources,
+    s3_emulation_job_name,
 )
 from client.kubernetes import (
     kubectl_auth_can_i as kubectl_auth_can_i,
@@ -120,7 +129,10 @@ try:
         blocksci_export_pbs_command,
         blocksci_pbs_command,
         coinjoin_analysis_pbs_command,
+        pbs_job_probe,
+        qdel_pbs_job,
         qdel_pbs_stage,
+        require_qsub,
         submit_blocksci_pbs,
         submit_blocksci_s3_pbs,
         submit_coinjoin_analysis_pbs,
@@ -156,7 +168,10 @@ except ImportError:
         blocksci_export_pbs_command,
         blocksci_pbs_command,
         coinjoin_analysis_pbs_command,
+        pbs_job_probe,
+        qdel_pbs_job,
         qdel_pbs_stage,
+        require_qsub,
         submit_blocksci_pbs,
         submit_blocksci_s3_pbs,
         submit_coinjoin_analysis_pbs,
@@ -1811,20 +1826,50 @@ def validate_artifact_arguments(parser: argparse.ArgumentParser, args: argparse.
             parser.error("S3-compatible mappings are not implemented yet")
     elif backend == "s3":
         if args.action == "full-run":
-            parser.error(
-                "S3-compatible full-run orchestration is not implemented yet. "
-                "Use independent recreate --artifact-backend s3 and pbs-from-s3 workflows."
-            )
-        if args.action != "recreate" or getattr(args, "driver", None) != "kubernetes":
-            parser.error("--artifact-backend s3 is supported only by recreate --driver kubernetes")
-        for attribute, flag in (
-            ("artifact_uri", "--artifact-uri"),
-            ("s3_endpoint_url", "--s3-endpoint-url"),
-            ("run_id", "--run-id"),
-            ("s3_secret_name", "--s3-secret-name"),
-        ):
-            if not getattr(args, attribute, None):
-                parser.error(f"Kubernetes S3-compatible mode requires {flag}")
+            if getattr(args, "driver", None) != "kubernetes":
+                parser.error("full-run --artifact-backend s3 requires --driver kubernetes")
+            for attribute, flag in (
+                ("artifact_uri", "--artifact-uri"),
+                ("s3_endpoint_url", "--s3-endpoint-url"),
+                ("run_id", "--run-id"),
+                ("s3_secret_name", "--s3-secret-name"),
+                ("s3_credentials_file", "--s3-credentials-file"),
+                ("s3_profile", "--s3-profile"),
+            ):
+                if not getattr(args, attribute, None):
+                    parser.error(f"full-run --artifact-backend s3 requires {flag}")
+            if not args.analysisPbs or not args.blocksciPbs:
+                parser.error("full-run --artifact-backend s3 requires both --analysisPbs and --blocksciPbs")
+            if not getattr(args, "reuse_namespace", False):
+                parser.error(
+                    "Kubernetes S3-compatible mode requires --reuse-namespace because "
+                    "the credentials Secret must exist before the Job is created"
+                )
+            if args.mappingsPbs:
+                parser.error("S3-compatible mappings are not implemented yet")
+            if getattr(args, "parallel", False):
+                parser.error(
+                    "full-run --artifact-backend s3 does not support --parallel "
+                    "because its analyzer jobs already run in parallel"
+                )
+            if getattr(args, "blocksci_script", None):
+                parser.error("full-run --artifact-backend s3 does not support --blocksci-script")
+        elif args.action != "recreate" or getattr(args, "driver", None) != "kubernetes":
+            parser.error("--artifact-backend s3 is supported only by full-run and recreate with --driver kubernetes")
+        else:
+            for attribute, flag in (
+                ("artifact_uri", "--artifact-uri"),
+                ("s3_endpoint_url", "--s3-endpoint-url"),
+                ("run_id", "--run-id"),
+                ("s3_secret_name", "--s3-secret-name"),
+            ):
+                if not getattr(args, attribute, None):
+                    parser.error(f"Kubernetes S3-compatible mode requires {flag}")
+            if not getattr(args, "reuse_namespace", False):
+                parser.error(
+                    "Kubernetes S3-compatible mode requires --reuse-namespace because "
+                    "the credentials Secret must exist before the Job is created"
+                )
         if (
             getattr(args, "kubernetes_btc_datadir", None)
             or getattr(args, "pbs_bitcoin_datadir", None)
@@ -1883,7 +1928,9 @@ def run_kubernetes_s3_emulation(args: argparse.Namespace) -> None:
     print(f"[kubernetes] Submitted S3-compatible emulation job for run {args.run_id}")
 
 
-def run_pbs_from_s3(args: argparse.Namespace) -> None:
+def run_pbs_from_s3(
+    args: argparse.Namespace,
+) -> tuple[str | None, str | None, str | None]:
     common = dict(
         artifact_uri=args.artifact_uri,
         run_id=args.run_id,
@@ -1894,6 +1941,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> None:
     )
     parallel_report = args.analysisPbs and args.blocksciPbs
     analysis_job_id = None
+    blocksci_job_id = None
     if args.analysisPbs:
         analysis_job_id = submit_coinjoin_analysis_s3_pbs(
             **common,
@@ -1904,7 +1952,6 @@ def run_pbs_from_s3(args: argparse.Namespace) -> None:
             scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH),
             walltime=resolve_pbs_resource(args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME),
         )
-    blocksci_job_id = None
     if args.blocksciPbs:
         blocksci_job_id = submit_blocksci_s3_pbs(
             **common,
@@ -1926,13 +1973,14 @@ def run_pbs_from_s3(args: argparse.Namespace) -> None:
             walltime=resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME),
             include_report=not parallel_report,
         )
+    report_job_id = None
     if parallel_report:
         dependency_job_ids = tuple(
             job_id for job_id in (analysis_job_id, blocksci_job_id) if job_id is not None
         )
         if not args.dry_run and len(dependency_job_ids) != 2:
             raise PBSError("Could not obtain both analyzer job IDs for the unified report dependency")
-        submit_unified_report_s3_pbs(
+        report_job_id = submit_unified_report_s3_pbs(
             **common,
             image=resolve_pbs_image(args, DEFAULT_PBS_BLOCKSCI_IMAGE, "pbs_blocksci_image"),
             command=blocksci_export_pbs_command(
@@ -1959,6 +2007,126 @@ def run_pbs_from_s3(args: argparse.Namespace) -> None:
             ),
             dependency_job_ids=dependency_job_ids,
         )
+    return analysis_job_id, blocksci_job_id, report_job_id
+
+
+def run_full_run_s3(args: argparse.Namespace) -> None:
+    """Orchestrate the full S3-compatible chain and wait for every stage.
+
+    Kubernetes emulation uploads artifacts and the `.k8s/upload.done` marker,
+    PBS stages download from the bucket and upload `.pbs/<stage>.done|failed`;
+    this function is the only frontend-side consumer of those markers.
+    """
+    access = S3Access(
+        endpoint_url=args.s3_endpoint_url,
+        credentials_file=args.s3_credentials_file,
+        profile=args.s3_profile,
+    )
+    run_prefix = f"{args.artifact_uri}/{args.run_id}"
+    kubeconfig_path = Path(args.kubeconfig).expanduser().resolve() if args.kubeconfig else Path.home() / ".kube/config"
+    job_name = s3_emulation_job_name(args.run_id)
+
+    if args.dry_run:
+        run_kubernetes_s3_emulation(args)
+        print(f"[dry-run] Would wait for {run_prefix}/.k8s/upload.done (timeout {args.emulation_timeout}s)")
+        run_pbs_from_s3(args)
+        if args.analysisPbs:
+            print(f"[dry-run] Would wait for {run_prefix}/.pbs/coinjoin-analysis.done")
+        if args.blocksciPbs:
+            print(f"[dry-run] Would wait for {run_prefix}/.pbs/blocksci.done")
+        if args.analysisPbs and args.blocksciPbs:
+            print(f"[dry-run] Would wait for {run_prefix}/.pbs/unified-report.done")
+        return
+
+    require_qsub()
+    s3_access_preflight(access, args.artifact_uri)
+    ensure_empty_run_prefix(access, args.artifact_uri, args.run_id)
+    kubernetes_s3_auth_preflight(kubeconfig_path, args.namespace, args.reuse_namespace, args.s3_secret_name)
+
+    run_kubernetes_s3_emulation(args)
+    print(f"[full-run] Waiting for emulation upload marker {run_prefix}/.k8s/upload.done")
+    try:
+        wait_for_s3_marker(
+            "kubernetes-emulation",
+            f"{run_prefix}/.k8s/upload.done",
+            f"{run_prefix}/.k8s/upload.failed",
+            access,
+            timeout_seconds=args.emulation_timeout,
+            probe=kubernetes_job_probe(kubeconfig_path, args.namespace, job_name),
+        )
+    except ArtifactTransportError:
+        print(collect_s3_emulation_diagnostics(kubeconfig_path, args.namespace, job_name), file=sys.stderr)
+        print(
+            f"[full-run] Emulation resources left in place for inspection; clean up with: "
+            f"kubectl --kubeconfig {kubeconfig_path} --namespace {args.namespace} delete job {job_name}",
+            file=sys.stderr,
+        )
+        raise
+
+    analysis_job_id, blocksci_job_id, report_job_id = run_pbs_from_s3(args)
+    analysis_walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME)
+    blocksci_walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME)
+    report_walltime = resolve_unified_report_pbs_resource(
+        args, "walltime", DEFAULT_UNIFIED_REPORT_WALLTIME
+    )
+    if analysis_job_id:
+        print(f"[full-run] Waiting for coinjoin-analysis marker (PBS job {analysis_job_id})")
+        try:
+            wait_for_s3_marker(
+                "coinjoin-analysis",
+                f"{run_prefix}/.pbs/coinjoin-analysis.done",
+                f"{run_prefix}/.pbs/coinjoin-analysis.failed",
+                access,
+                timeout_seconds=pbs_wait_timeout(analysis_walltime),
+                probe=pbs_job_probe(analysis_job_id),
+            )
+        except (ArtifactTransportError, PBSError):
+            if report_job_id:
+                print(
+                    f"[full-run] Cancelling dependent unified-report PBS job {report_job_id}",
+                    file=sys.stderr,
+                )
+                qdel_pbs_job(report_job_id)
+            if blocksci_job_id:
+                print(
+                    f"[full-run] BlockSci PBS job {blocksci_job_id} is left running; "
+                    f"its results still upload to the bucket (cancel with: qdel {blocksci_job_id})",
+                    file=sys.stderr,
+                )
+            raise
+    if blocksci_job_id:
+        print(f"[full-run] Waiting for blocksci marker (PBS job {blocksci_job_id})")
+        try:
+            wait_for_s3_marker(
+                "blocksci",
+                f"{run_prefix}/.pbs/blocksci.done",
+                f"{run_prefix}/.pbs/blocksci.failed",
+                access,
+                timeout_seconds=pbs_wait_timeout(blocksci_walltime),
+                probe=pbs_job_probe(blocksci_job_id),
+            )
+        except (ArtifactTransportError, PBSError):
+            if report_job_id:
+                print(
+                    f"[full-run] Cancelling dependent unified-report PBS job {report_job_id}",
+                    file=sys.stderr,
+                )
+                qdel_pbs_job(report_job_id)
+            raise
+    if report_job_id:
+        print(f"[full-run] Waiting for unified-report marker (PBS job {report_job_id})")
+        wait_for_s3_marker(
+            "unified-report",
+            f"{run_prefix}/.pbs/unified-report.done",
+            f"{run_prefix}/.pbs/unified-report.failed",
+            access,
+            timeout_seconds=pbs_wait_timeout(report_walltime),
+            probe=pbs_job_probe(report_job_id),
+        )
+    print(
+        f"[full-run] Completed; results under {run_prefix}/ "
+        "(coinjoin-analysis_data/, blocksci_data/, coinjoinPipeline_data/, logs/)"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2099,12 +2267,19 @@ def build_parser() -> argparse.ArgumentParser:
     add_blocksci_script_argument(full_parser)
     add_kubernetes_arguments(full_parser)
     add_pbs_arguments(full_parser)
+    add_unified_report_pbs_arguments(full_parser)
     add_artifact_arguments(full_parser, pbs_credentials=True, kubernetes_secret=True)
     full_parser.add_argument(
         "--parallel",
         action="store_true",
         default=False,
         help="Run BlockSci and coinjoin-analysis concurrently after emulation.",
+    )
+    full_parser.add_argument(
+        "--emulation-timeout",
+        type=positive_int,
+        default=21600,
+        help="Seconds to wait for the Kubernetes S3-compatible emulation upload marker (S3 backend only).",
     )
 
     return parser
@@ -2158,7 +2333,10 @@ def main() -> None:
         or (args.action in ("coinjoin-analysis", "coinjoin") and getattr(args, "analysisPbs", False))
         or (args.action == "mappings" and getattr(args, "mappingsPbs", False))
         or args.action == "pbs-from-s3"
-        or (args.action == "recreate" and getattr(args, "artifact_backend", "shared-storage") == "s3")
+        or (
+            args.action in ("recreate", "full-run")
+            and getattr(args, "artifact_backend", "shared-storage") == "s3"
+        )
     )
     if args.dry_run:
         print(f"[dry-run] action: {args.action}")
@@ -2168,6 +2346,8 @@ def main() -> None:
         if use_pbs_dry_run:
             if args.action == "recreate":
                 print("[dry-run] Kubernetes resources will be rendered but not applied with kubectl.")
+            elif args.action == "full-run":
+                print("[dry-run] Kubernetes resources and PBS job scripts will be rendered but not submitted.")
             else:
                 print("[dry-run] PBS job script will be rendered but not submitted with qsub.")
         else:
@@ -2352,7 +2532,14 @@ def main() -> None:
             args.joinmarket_max_depth,
         )
         emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
-        if use_kubernetes:
+        if getattr(args, "artifact_backend", "shared-storage") == "s3":
+            # S3 full-run: k8s emulation → S3 markers → PBS analysis chain, all in the bucket
+            try:
+                run_full_run_s3(args)
+            except (PBSError, RuntimeError) as error:
+                print(f"[ERROR] {error}", file=sys.stderr)
+                sys.exit(2)
+        elif use_kubernetes:
             # Kubernetes full-run: clean → k8s emulation → local analysis
             with captured_pipeline_stage(logs_root, "Clean containers and volumes", logs_root / "_maintenance"):
                 run_script(DELETE_SCRIPT)

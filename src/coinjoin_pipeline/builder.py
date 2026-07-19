@@ -257,10 +257,54 @@ def validate_command(command: Command) -> Validation:
         result.errors.append("--mappingsPbs requires --engine wasabi.")
     if mappings_pbs and (option_value(command, "--coinjoin-type") or "wasabi2") != "wasabi2":
         result.errors.append("--mappingsPbs requires --coinjoin-type wasabi2.")
-    if blocksci_pbs and not has_option(command, "--pbs-bitcoin-datadir"):
+    backend = option_value(command, "--artifact-backend") or "shared-storage"
+    if blocksci_pbs and backend != "s3" and not has_option(command, "--pbs-bitcoin-datadir"):
         result.errors.append("--blocksciPbs requires --pbs-bitcoin-datadir.")
     if has_option(command, "--pbs-bitcoin-datadir") and not blocksci_pbs:
         result.errors.append("--pbs-bitcoin-datadir requires --blocksciPbs.")
+    if backend == "s3" and action == "full-run":
+        if driver != "kubernetes":
+            result.errors.append("full-run --artifact-backend s3 requires --driver kubernetes.")
+        for flag in (
+            "--run-id",
+            "--artifact-uri",
+            "--s3-endpoint-url",
+            "--s3-secret-name",
+            "--s3-credentials-file",
+            "--s3-profile",
+        ):
+            if not has_option(command, flag):
+                result.errors.append(f"full-run --artifact-backend s3 requires {flag}.")
+        if not analysis_pbs or not blocksci_pbs:
+            result.errors.append("full-run --artifact-backend s3 requires both --analysisPbs and --blocksciPbs.")
+        if not has_option(command, "--reuse-namespace"):
+            result.errors.append(
+                "Kubernetes S3-compatible mode requires --reuse-namespace because "
+                "the credentials Secret must exist before the Job is created."
+            )
+        if mappings_pbs:
+            result.errors.append("S3-compatible mappings are not implemented yet.")
+        if has_option(command, "--parallel"):
+            result.errors.append("full-run --artifact-backend s3 does not support --parallel.")
+        if has_option(command, "--blocksci-script"):
+            result.errors.append("full-run --artifact-backend s3 does not support --blocksci-script.")
+        for flag in ("--kubernetes-btc-datadir", "--pbs-bitcoin-datadir", "--copy-to-host"):
+            if has_option(command, flag):
+                result.errors.append(f"Kubernetes S3-compatible mode does not support {flag}.")
+    if backend == "s3" and action == "recreate":
+        if driver != "kubernetes":
+            result.errors.append("--artifact-backend s3 requires --driver kubernetes.")
+        for flag in ("--run-id", "--artifact-uri", "--s3-endpoint-url", "--s3-secret-name"):
+            if not has_option(command, flag):
+                result.errors.append(f"Kubernetes S3-compatible mode requires {flag}.")
+        if not has_option(command, "--reuse-namespace"):
+            result.errors.append(
+                "Kubernetes S3-compatible mode requires --reuse-namespace because "
+                "the credentials Secret must exist before the Job is created."
+            )
+        for flag in ("--kubernetes-btc-datadir", "--pbs-bitcoin-datadir", "--copy-to-host"):
+            if has_option(command, flag):
+                result.errors.append(f"Kubernetes S3-compatible mode does not support {flag}.")
     # Shared PBS resources (ncpus/mem/scratch/walltime/shared image) require at
     # least one PBS stage. Stage-specific images require their own stage flag.
     if not (analysis_pbs or blocksci_pbs or mappings_pbs) and any(has_option(command, flag) for flag in PBS_SHARED):

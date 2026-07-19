@@ -16,12 +16,14 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
-import tempfile
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from client.artifacts import (
+    PROBE_RUNNING,
+    PROBE_TERMINAL,
+    PROBE_UNKNOWN,
     render_s5cmd_check,
     render_s5cmd_cp,
     render_s5cmd_sync,
@@ -296,6 +298,38 @@ def submit_pbs(
     return result.stdout.strip()
 
 
+def submit_pbs_text(
+    script: str,
+    dependency_job_id: str | Sequence[str] | None = None,
+) -> str:
+    """Submit a PBS script to ``qsub`` via stdin and return the job ID.
+
+    Stdin submission avoids needing a script path visible to the PBS server,
+    which the S3-compatible stages lack (no shared run directory).
+    """
+    command = ["qsub"]
+    if dependency_job_id:
+        dependency_job_ids = (
+            (dependency_job_id,)
+            if isinstance(dependency_job_id, str)
+            else tuple(dependency_job_id)
+        )
+        if any(not job_id for job_id in dependency_job_ids):
+            raise PBSError("PBS dependency job IDs must not be empty")
+        command.extend(["-W", f"depend=afterok:{':'.join(dependency_job_ids)}"])
+    result = subprocess.run(
+        command,
+        check=False,
+        text=True,
+        input=script,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        raise PBSError(f"qsub failed (exit {result.returncode}): {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
 def persist_pbs_job_id(run_dir: Path, stage: str, job_id: str) -> None:
     marker_dir = run_dir / ".pbs"
     marker_dir.mkdir(parents=True, exist_ok=True)
@@ -327,7 +361,21 @@ def _qstat_job_state(job_id: str) -> str | None:
         stderr = result.stderr.lower()
         if "unknown job" in stderr or "job has finished" in stderr:
             return "MISSING"
-        return None
+        # Some OpenPBS installations disable job history, making ``qstat -x``
+        # unusable. A plain query still reports active jobs and returns an
+        # explicit unknown-job error once a non-historic job has disappeared.
+        result = subprocess.run(
+            ["qstat", "-f", job_id],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.lower()
+            if "unknown job" in stderr or "job has finished" in stderr:
+                return "MISSING"
+            return None
     for line in result.stdout.splitlines():
         line = line.strip()
         if line.startswith("job_state ="):
@@ -348,6 +396,22 @@ def qdel_pbs_job(job_id: str) -> None:
     )
     if result.returncode != 0:
         print(f"[pbs] qdel {job_id} failed (exit {result.returncode}): {result.stderr.strip()}")
+
+
+def pbs_job_probe(job_id: str) -> Callable[[], str]:
+    """Build a qstat-backed liveness probe for ``wait_for_s3_marker``."""
+
+    def probe() -> str:
+        state = _qstat_job_state(job_id)
+        if state in PBS_TERMINAL_STATES or state == "MISSING":
+            return PROBE_TERMINAL
+        if state is None:
+            return PROBE_UNKNOWN
+        if state in PBS_ACTIVE_STATES:
+            return PROBE_RUNNING
+        raise PBSError(f"PBS job has unexpected qstat state: {job_id} (state {state})")
+
+    return probe
 
 
 def qdel_pbs_stage(run_dir: Path, stage: str) -> None:
@@ -530,13 +594,7 @@ def _submit_s3_script(
         print(f"[dry-run] PBS S3-compatible script for {stage}:\n{script}")
         return None
     require_qsub()
-    with tempfile.TemporaryDirectory(prefix="coinjoin-pbs-") as directory:
-        path = Path(directory)
-        path.chmod(0o700)
-        script_path = path / f"{stage}.pbs"
-        script_path.write_text(script, encoding="utf-8")
-        script_path.chmod(0o700)
-        job_id = submit_pbs(script_path, dependency_job_id)
+    job_id = submit_pbs_text(script, dependency_job_id)
     print(f"[pbs] Submitted {stage} S3-compatible PBS job: {job_id}")
     return job_id
 

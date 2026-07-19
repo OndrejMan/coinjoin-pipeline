@@ -55,6 +55,7 @@ configure_server() {
       qmgr -c "set queue workq enabled=true"
       qmgr -c "set queue workq started=true"
       qmgr -c "set server default_queue=workq"
+      qmgr -c "set server job_history_enable=true"
       qmgr -c "create hook local_scratch" 2>/dev/null || true
       qmgr -c "set hook local_scratch enabled=true,event=\"execjob_launch,execjob_end\""
       qmgr -c "import hook local_scratch application/x-python default /opt/local-pbs/local_scratch_hook.py"

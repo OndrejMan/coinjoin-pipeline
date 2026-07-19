@@ -21,6 +21,10 @@ def valid_run_id(run_id: str) -> bool:
 
 
 def run_id_for(arguments: list[str]) -> str:
+    explicit_run_id = option_value(arguments, "--run-id")
+    if explicit_run_id:
+        return explicit_run_id
+
     timezone = option_value(arguments, "--run-timezone") or "Europe/Prague"
     scenario_arg = option_value(arguments, "--scenario")
     engine = option_value(arguments, "--engine") or "wasabi"
