@@ -114,10 +114,13 @@ only deliberate shell fragments in the templates.
 ## Run catalog report statuses
 
 `runs list` (`pipeline/client/run_catalog.py::report_status`) classifies each
-run's `unified_report/unified_report.json` into one of:
+run's `coinjoinPipeline_data/unified_report.json` into one of:
 
 - `missing` — no report file exists; the export stage has not run.
 - `invalid` — the report file exists but cannot be parsed as JSON.
+- `stale` — the report exists but an upstream artifact (emulator data,
+  baseline, BlockSci config, or mappings) is newer, so it describes a previous
+  analyzer run; re-export to refresh it.
 - `baseline_agreement_only` — external mode; the report compares BlockSci with
   `coinjoin-analysis` only and intentionally has no ground-truth metrics.
 - `emulator_labels_unavailable` — emulator mode, but independent producer
@@ -128,7 +131,8 @@ run's `unified_report/unified_report.json` into one of:
   `emulator_data.label_provenance.unavailable_reason`.
 - `diagnostics_missing` — the report predates or omits
   `integration_diagnostics`.
-- `diagnostics_not_ok` — integration diagnostics ran and found a problem.
+- `diagnostics_not_ok` — integration diagnostics ran and found a problem, or
+  reported a status other than the explicit `ok` (the check fails closed).
 - `complete` — emulator ground truth was available and diagnostics passed.
 
 Runs made with an emulator image that predates the producer-label manifest

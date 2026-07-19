@@ -563,6 +563,31 @@ class PBSMarkerWaitTest(unittest.TestCase):
                 wait_for_pbs_marker(run_dir, "blocksci", poll_interval=0)
             self.assertGreaterEqual(call_count[0], 2)
 
+    def test_wait_for_pbs_marker_extends_deadline_while_queued(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run-a"
+            run_dir.mkdir()
+            done = run_dir / ".pbs" / "blocksci.done"
+            done.parent.mkdir(parents=True)
+            call_count = [0]
+
+            def fake_sleep(_seconds):
+                # A job stuck in the queue (state Q) past the deadline must not
+                # be failed; the marker only appears after several extensions.
+                call_count[0] += 1
+                if call_count[0] == 3:
+                    done.write_text("", encoding="utf-8")
+
+            with (
+                mock.patch("client.pbs._qstat_job_state", return_value="Q"),
+                mock.patch("client.pbs.time.sleep", side_effect=fake_sleep),
+            ):
+                wait_for_pbs_marker(
+                    run_dir, "blocksci", poll_interval=0,
+                    job_id="7.server", timeout_seconds=0,
+                )
+            self.assertGreaterEqual(call_count[0], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

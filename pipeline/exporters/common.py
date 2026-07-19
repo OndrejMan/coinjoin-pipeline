@@ -124,28 +124,34 @@ def parse_run_started_at(run_id: str) -> str | None:
         return None
 
 
-def coerce_sats(value: JsonValue) -> int | None:
+def coerce_sats(value: JsonValue, *, unit: str = "sats") -> int | None:
+    """Convert an amount to integer satoshis.
+
+    ``unit`` declares how the source encodes the amount — never inferred from the
+    value, because ``1.0`` and ``1.5`` would otherwise land 10^8 apart. In
+    ``"sats"`` mode a fractional amount is rejected (sats are indivisible);
+    ``"btc"`` mode multiplies by 10^8.
+    """
+    if unit not in ("sats", "btc"):
+        raise ValueError(f"coerce_sats unit must be 'sats' or 'btc', got {unit!r}")
     if value is None:
         return None
     if isinstance(value, bool):
         return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        if value.is_integer():
-            return int(value)
-        return int(round(value * SATS_IN_BTC))
-    if isinstance(value, str):
+    if isinstance(value, (int, float)):
+        number = float(value)
+    elif isinstance(value, str):
         stripped = value.strip()
         if not stripped:
             return None
-        if "." in stripped:
-            parsed = float(stripped)
-            if parsed.is_integer():
-                return int(parsed)
-            return int(round(parsed * SATS_IN_BTC))
-        return int(stripped)
-    return int(str(value))
+        number = float(stripped)
+    else:
+        number = float(str(value))
+    if unit == "btc":
+        return int(round(number * SATS_IN_BTC))
+    if not number.is_integer():
+        raise ValueError(f"non-integer satoshi amount: {value!r}")
+    return int(number)
 
 
 def to_json_text(value: JsonValue) -> str | None:

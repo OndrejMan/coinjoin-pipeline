@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -721,8 +722,19 @@ def wait_for_pbs_marker(
             raise PBSError(f"PBS stage failed: {stage}")
         if done.exists():
             return
+        # Not polled during the grace cycle: the terminal state already landed.
+        state = _qstat_job_state(job_id) if job_id and terminal_state_seen is None else None
         if deadline is not None and time.monotonic() >= deadline:
-            raise PBSError(f"Timed out waiting for PBS stage marker: {stage}")
+            if state not in PBS_ACTIVE_STATES:
+                raise PBSError(f"Timed out waiting for PBS stage marker: {stage}")
+            # The job is verifiably alive (queued or running); shared-cluster
+            # queue time must not be counted against the walltime budget.
+            deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
+            print(
+                f"[WARN] {stage} exceeded its wait budget but job {job_id} is still "
+                f"in state {state}; extending the deadline.",
+                file=sys.stderr,
+            )
         if terminal_state_seen is not None:
             # The compute node writes the marker over shared storage, which can
             # lag behind qstat; one extra poll cycle already passed without it.
@@ -730,7 +742,6 @@ def wait_for_pbs_marker(
                 f"PBS stage ended without marker: {stage} (job {job_id}, state {terminal_state_seen})"
             )
         if job_id:
-            state = _qstat_job_state(job_id)
             if state in PBS_TERMINAL_STATES or state == "MISSING":
                 terminal_state_seen = state
             elif state is not None and state not in PBS_ACTIVE_STATES:

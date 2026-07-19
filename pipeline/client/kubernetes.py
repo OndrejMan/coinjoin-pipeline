@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shlex
 import subprocess
@@ -121,8 +122,16 @@ def kubernetes_s3_auth_preflight(
 
 
 def s3_emulation_job_name(run_id: str) -> str:
-    name = f"coinjoin-s3-{run_id}".lower().replace("_", "-").replace(".", "-")
-    return name[:63].rstrip("-")
+    """Derive a DNS-safe Job name that stays unique per run id.
+
+    Lowercasing, separator folding, and truncation are all lossy, so distinct run
+    ids (``test_1``/``test.1``/``Test-1``) would otherwise share a Job object and
+    watch each other's status. The suffix restores uniqueness.
+    """
+    digest = hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:8]
+    slug = f"coinjoin-s3-{run_id}".lower().replace("_", "-").replace(".", "-")
+    slug = slug[: 63 - len(digest) - 1].rstrip("-")
+    return f"{slug}-{digest}"
 
 
 def kubernetes_job_probe(kubeconfig_path: Path, namespace: str, job_name: str) -> Callable[[], str]:

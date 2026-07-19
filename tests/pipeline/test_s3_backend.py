@@ -10,7 +10,10 @@ from unittest import mock
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "pipeline"))
 
-from client.kubernetes import render_s3_emulation_resources  # noqa: E402
+from client.kubernetes import (  # noqa: E402
+    render_s3_emulation_resources,
+    s3_emulation_job_name,
+)
 from client.pbs import (  # noqa: E402
     blocksci_export_pbs_command,
     render_blocksci_s3_pbs,
@@ -123,6 +126,15 @@ def test_wrapper_images_package_unified_report_s3_template() -> None:
         assert "unified_report_s3_template.sh" in dockerfile.read_text(
             encoding="utf-8"
         )
+
+
+def test_s3_emulation_job_name_is_unique_and_dns_safe() -> None:
+    names = {s3_emulation_job_name(run_id) for run_id in ("test_1", "test.1", "Test-1")}
+    assert len(names) == 3
+    long_name = s3_emulation_job_name("x" * 80)
+    assert len(long_name) <= 63
+    assert not long_name.endswith("-")
+    assert long_name == long_name.lower()
 
 
 def test_blocksci_s3_parse_only_does_not_require_or_upload_report() -> None:

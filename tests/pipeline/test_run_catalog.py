@@ -63,6 +63,34 @@ class RunCatalogTests(unittest.TestCase):
             )
             self.assertEqual(report_status(run_dir), "emulator_labels_unavailable")
 
+    def test_report_status_fails_closed_on_unknown_diagnostics_status(self):
+        with tempfile.TemporaryDirectory() as temp:
+            run_dir = Path(temp)
+            report_dir = run_dir / "coinjoinPipeline_data"
+            report_dir.mkdir()
+            (report_dir / "unified_report.json").write_text(
+                json.dumps({"integration_diagnostics": {"status": "unavailable"}})
+            )
+            self.assertEqual(report_status(run_dir), "diagnostics_not_ok")
+
+    def test_report_status_flags_report_older_than_upstream_artifact(self):
+        with tempfile.TemporaryDirectory() as temp:
+            run_dir = Path(temp)
+            report_dir = run_dir / "coinjoinPipeline_data"
+            report_dir.mkdir()
+            report = report_dir / "unified_report.json"
+            report.write_text(json.dumps({"integration_diagnostics": {"status": "ok"}}))
+            import os
+
+            os.utime(report, (1000, 1000))
+            baseline = run_dir / BASELINE_FILE
+            baseline.parent.mkdir(parents=True)
+            baseline.write_text("{}")
+            os.utime(baseline, (2000, 2000))
+
+            self.assertEqual(report_status(run_dir), "stale")
+            self.assertFalse(stage_state(run_dir)["report"])
+
     def test_external_manifest_fingerprints_baseline_without_copying_datadir(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

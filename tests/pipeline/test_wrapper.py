@@ -27,7 +27,9 @@ from client.wrapper import (
     container_command,
     container_run_pull_args,
     container_runtime,
+    container_scenario_path,
     export_command,
+    host_scenario_path,
     export_preflight_error,
     kubernetes_auth_preflight,
     kubernetes_emulator_command,
@@ -36,6 +38,7 @@ from client.wrapper import (
     run_blocksci_docker_stage,
     run_coinjoin_analysis,
     run_command,
+    run_dir_under_root,
     run_dirs,
     run_full_run_s3,
     run_kubernetes_emulation,
@@ -1421,6 +1424,58 @@ class WrapperExportTest(unittest.TestCase):
             self.assertEqual(
                 container_run_pull_args("ghcr.io/ondrejman/coinjoin-emulator:latest", "COINJOIN_EMULATOR_PULL_POLICY"),
                 ["--pull=never"],
+            )
+
+
+class RunDirResolutionTests(unittest.TestCase):
+    def test_typoed_run_dir_is_rejected_without_creating_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runs_root = Path(tmp)
+            with self.assertRaises(SystemExit):
+                run_dir_under_root("does-not-exist", runs_root)
+            self.assertFalse((runs_root / "does-not-exist").exists())
+
+    def test_absolute_run_dir_outside_runs_root_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runs_root = root / "runs"
+            runs_root.mkdir()
+            outside = root / "archive" / "2026-07-09_08-14_default"
+            outside.mkdir(parents=True)
+            with self.assertRaises(SystemExit):
+                run_dir_under_root(str(outside), runs_root)
+
+    def test_valid_run_dir_resolves_under_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runs_root = Path(tmp)
+            (runs_root / "2026-07-09_08-14_default").mkdir()
+            resolved = run_dir_under_root("2026-07-09_08-14_default", runs_root)
+            self.assertEqual(resolved.parent, runs_root)
+            self.assertEqual(resolved.name, "2026-07-09_08-14_default")
+
+
+class ScenarioPathTests(unittest.TestCase):
+    def test_scenario_outside_scenarios_dir_is_a_hard_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scenarios_dir = root / "scenarios"
+            scenarios_dir.mkdir()
+            outside = root / "experiments" / "wasabi-40.json"
+            outside.parent.mkdir(parents=True)
+            outside.write_text("{}", encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                container_scenario_path(str(outside), scenarios_dir)
+
+    def test_nested_scenario_round_trips_without_flattening(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            scenarios_dir = Path(tmp) / "scenarios"
+            (scenarios_dir / "sub").mkdir(parents=True)
+            (scenarios_dir / "sub" / "x.json").write_text("{}", encoding="utf-8")
+            container = container_scenario_path("scenarios/sub/x.json", scenarios_dir)
+            self.assertEqual(container, "/mnt/scenarios/sub/x.json")
+            self.assertEqual(
+                host_scenario_path(container, scenarios_dir),
+                scenarios_dir / "sub" / "x.json",
             )
 
 

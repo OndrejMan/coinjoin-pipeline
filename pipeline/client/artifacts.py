@@ -7,6 +7,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -191,10 +192,23 @@ def wait_for_s3_marker(
             raise ArtifactTransportError(f"S3-compatible stage failed: {stage} (marker {failed_uri})")
         if s3_object_exists(access, done_uri):
             return
+        # Not probed during the grace cycle: the terminal report already landed.
+        probe_state = probe() if probe is not None and not terminal_seen else None
         if time.monotonic() >= deadline:
-            raise ArtifactTransportError(f"Timed out waiting for S3 stage marker: {stage} ({done_uri})")
+            if probe_state != PROBE_RUNNING:
+                raise ArtifactTransportError(
+                    f"Timed out waiting for S3 stage marker: {stage} ({done_uri})"
+                )
+            # The job is verifiably alive (queued or running); shared-cluster
+            # queue time must not be counted against the walltime budget.
+            deadline = time.monotonic() + timeout_seconds
+            print(
+                f"[WARN] {stage} exceeded its {timeout_seconds}s wait budget but the job is "
+                f"still alive; extending the deadline.",
+                file=sys.stderr,
+            )
         if terminal_seen:
             raise ArtifactTransportError(f"S3-compatible stage ended without marker: {stage}")
-        if probe is not None and probe() == PROBE_TERMINAL:
+        if probe_state == PROBE_TERMINAL:
             terminal_seen = True
         time.sleep(poll_interval)

@@ -144,6 +144,23 @@ def test_wait_for_s3_marker_raises_after_terminal_probe_grace_cycle() -> None:
     assert probe_calls == ["probe"]  # one grace cycle after the terminal report
 
 
+def test_wait_for_s3_marker_extends_deadline_while_job_alive() -> None:
+    # Deadline already blown (timeout=0), but a live job must not fail: the
+    # loop extends and succeeds once the marker lands.
+    outcomes = iter([False, False, True])
+
+    def exists(access, uri) -> bool:
+        return uri.endswith(".done") and next(outcomes)
+
+    _wait(
+        "s3://b/r/.done",
+        "s3://b/r/.failed",
+        exists,
+        probe=lambda: PROBE_RUNNING,
+        timeout=0,
+    )
+
+
 def test_wait_for_s3_marker_keeps_polling_on_unknown_probe() -> None:
     reports = iter([PROBE_UNKNOWN, PROBE_RUNNING, PROBE_TERMINAL])
     outcomes = iter([False, False, False, False, False, False, False, True])

@@ -260,10 +260,12 @@ def normalize_emulator_io_record(
     address: str | None,
     wallet_mapping: dict[str, str],
     extra: JsonObject | None = None,
+    *,
+    value_unit: str = "sats",
 ) -> JsonObject:
     record = {
         "index": str(index),
-        "value": coerce_sats(value),
+        "value": coerce_sats(value, unit=value_unit),
         "address": address,
         "wallet_name": wallet_mapping.get(address) if address else None,
         "label_source": "wallet_ownership" if address and address in wallet_mapping else "unknown",
@@ -365,7 +367,8 @@ def build_emulator_data(
                     address = output_address(output)
                     output_index[(txid, str(output_n))] = {
                         "address": address,
-                        "value": coerce_sats(output.get("value")),
+                        # Bitcoin Core block JSON encodes vout amounts in BTC.
+                        "value": coerce_sats(output.get("value"), unit="btc"),
                     }
 
                 if is_coinbase_tx(tx):
@@ -407,6 +410,9 @@ def build_emulator_data(
                             output.get("value"),
                             output_address(output),
                             wallet_mapping,
+                            # Raw block vout amounts are BTC; prevout inputs above
+                            # already come through output_index as integer sats.
+                            value_unit="btc",
                         )
                     )
 

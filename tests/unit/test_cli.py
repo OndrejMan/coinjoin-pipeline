@@ -105,6 +105,29 @@ class CliTests(unittest.TestCase):
         )
         self.assertIn("docker://ghcr.io/ondrejman/coinjoin-mappings-sake:v1", args)
 
+    def test_explicit_equals_form_image_is_not_overridden_by_default(self) -> None:
+        args = add_effective_image_arguments(
+            "analyze",
+            ["analyze", "--run-dir", "X", "--blocksciPbs",
+             "--pbs-blocksci-image=docker://my-custom-blocksci:tag"],
+            resolve_images("v1", {}),
+        )
+        self.assertEqual(args.count("--pbs-blocksci-image"), 0)
+        self.assertNotIn("docker://ghcr.io/ondrejman/blocksci-complete:v1", args)
+
+    def test_action_from_ignores_option_values(self) -> None:
+        self.assertEqual(action_from(["--run-dir", "myrun", "analyze"]), "analyze")
+        # A value that happens to equal a research prefix must not pair up.
+        self.assertEqual(action_from(["--scenario", "runs", "full-run"]), "full-run")
+
+    def test_pbs_flag_error_lists_pbs_from_s3(self) -> None:
+        errors = validate_passthrough(
+            ["export", "--run-dir", "X", "--analysisPbs"], "export"
+        )
+        message = next(error for error in errors if "--analysisPbs is supported" in error)
+        self.assertIn("pbs-from-s3", message)
+        self.assertNotIn("coinjoin,", message)
+
     def test_test_values_are_explicit_opt_in(self) -> None:
         for enabled in (False, True):
             arguments = ["full-run", "--engine", "wasabi", "--dry-run"]

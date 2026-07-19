@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 
+from .commands import has_option
 from .images import IMAGE_NAMES, Images
 
 
@@ -122,7 +123,7 @@ def required_image_components(action: str, arguments: list[str]) -> set[str]:
 def add_effective_image_arguments(action: str, arguments: list[str], images: Images) -> list[str]:
     """Prevent wrapper defaults from silently reintroducing mutable latest tags."""
     result = list(arguments)
-    if action == "external analyze" and "--blocksci-image" not in result:
+    if action == "external analyze" and not has_option(result, "--blocksci-image"):
         result.extend(("--blocksci-image", images.blocksci))
     pbs_images = (
         ("--blocksciPbs", "--pbs-blocksci-image", f"docker://{images.blocksci}"),
@@ -131,6 +132,6 @@ def add_effective_image_arguments(action: str, arguments: list[str], images: Ima
         ("--mappingsPbs", "--pbs-sake-image", f"docker://{images.sake}"),
     )
     for enabling_flag, image_flag, value in pbs_images:
-        if enabling_flag in result and image_flag not in result:
+        if has_option(result, enabling_flag) and not has_option(result, image_flag):
             result.extend((image_flag, value))
     return result

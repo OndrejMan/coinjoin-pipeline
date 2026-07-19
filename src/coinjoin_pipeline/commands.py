@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import json
 from importlib.resources import files
 from pathlib import Path
@@ -18,6 +19,14 @@ MUTATING_ACTIONS = {
     "pbs-from-s3",
 }
 RESEARCH_PREFIXES = {"runs", "scenarios", "external"}
+# Alias -> canonical action. Aliases are accepted but never named in error text.
+ACTION_ALIASES = {"coinjoin": "coinjoin-analysis"}
+# Actions each PBS offload flag may accompany; also the source of the error text.
+PBS_STAGE_ACTIONS = {
+    "--analysisPbs": ("full-run", "coinjoin-analysis", "coinjoin", "pbs-from-s3"),
+    "--blocksciPbs": ("full-run", "analyze", "pbs-from-s3"),
+    "--mappingsPbs": ("full-run", "mappings"),
+}
 
 
 def metadata() -> dict[str, Any]:
@@ -29,12 +38,37 @@ def known_actions() -> set[str]:
     return set(metadata()["commands"])
 
 
+@lru_cache(maxsize=1)
+def value_taking_aliases() -> frozenset[str]:
+    """Every option alias that consumes the following argv token."""
+    aliases: set[str] = set()
+    for command in metadata()["commands"].values():
+        for option in command["options"].values():
+            if option["takes_value"]:
+                aliases.update(option["aliases"])
+    return frozenset(aliases)
+
+
 def action_from(argv: list[str]) -> str:
-    words = [item for item in argv if not item.startswith("-")]
+    # Option *values* must not be mistaken for the action word, so skip the
+    # token after any value-taking flag (mirrors the wrapper's normalize_argv).
+    value_aliases = value_taking_aliases()
+    words: list[str] = []
+    skip_next = False
+    for item in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if item in value_aliases:
+            skip_next = True
+            continue
+        if item.startswith("-"):
+            continue
+        words.append(item)
     if len(words) >= 2 and f"{words[0]} {words[1]}" in known_actions():
         return f"{words[0]} {words[1]}"
-    if words and words[0] == "coinjoin":
-        return "coinjoin-analysis"
+    if words and words[0] in ACTION_ALIASES:
+        return ACTION_ALIASES[words[0]]
     if words and words[0] in known_actions():
         return words[0]
     return "full-run"
@@ -87,12 +121,10 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
         for flag in ("--kubeconfig", "--namespace", "--reuse-namespace", "--copy-to-host"):
             if has_option(argv, flag):
                 errors.append(f"{flag} requires --driver kubernetes")
-    if has_option(argv, "--analysisPbs") and action not in {"full-run", "coinjoin-analysis", "coinjoin", "pbs-from-s3"}:
-        errors.append("--analysisPbs is supported only by full-run and coinjoin-analysis")
-    if has_option(argv, "--blocksciPbs") and action not in {"full-run", "analyze", "pbs-from-s3"}:
-        errors.append("--blocksciPbs is supported only by full-run and analyze")
-    if has_option(argv, "--mappingsPbs") and action not in {"full-run", "mappings"}:
-        errors.append("--mappingsPbs is supported only by full-run and mappings")
+    for flag, permitted in PBS_STAGE_ACTIONS.items():
+        if has_option(argv, flag) and action not in permitted:
+            supported = ", ".join(name for name in permitted if name not in ACTION_ALIASES)
+            errors.append(f"{flag} is supported only by {supported}")
     backend = option_value(argv, "--artifact-backend") or "shared-storage"
     if action == "pbs-from-s3":
         for flag in ("--run-id", "--artifact-uri", "--s3-endpoint-url", "--s3-credentials-file", "--s3-profile", "--engine"):

@@ -52,14 +52,38 @@ def is_run_dir(path: Path) -> bool:
 
 def stage_state(run_dir: Path) -> dict[str, bool]:
     report_dir = run_dir / REPORT_DIR
+    # A stale report is not counted as a present stage: it describes prior outputs.
+    report_present = (report_dir / "unified_report.json").is_file() and not report_is_stale(run_dir)
     return {
         "emulation": (run_dir / "coinjoin_emulator_data").is_dir(),
         "baseline": (run_dir / BASELINE_FILE).is_file(),
         "blocksci": (run_dir / "blocksci_data/config.json").is_file(),
-        "report": (report_dir / "unified_report.json").is_file(),
+        "report": report_present,
         "markdown": (report_dir / "unified_report.md").is_file(),
         "mappings": (run_dir / "coinjoin-mappings_data" / "coinjoin_mappings.json").is_file(),
     }
+
+
+# Upstream artifacts the unified report is derived from. If any is newer than the
+# report, the report describes a previous analyzer run.
+REPORT_INPUT_PATHS = (
+    "coinjoin_emulator_data",
+    BASELINE_FILE,
+    "blocksci_data/config.json",
+    "coinjoin-mappings_data/coinjoin_mappings.json",
+)
+
+
+def report_is_stale(run_dir: Path) -> bool:
+    report_path = run_dir / REPORT_DIR / "unified_report.json"
+    if not report_path.is_file():
+        return False
+    report_mtime = report_path.stat().st_mtime
+    for relative in REPORT_INPUT_PATHS:
+        artifact = run_dir / relative
+        if artifact.exists() and artifact.stat().st_mtime > report_mtime:
+            return True
+    return False
 
 
 def report_status(run_dir: Path) -> str:
@@ -70,6 +94,8 @@ def report_status(run_dir: Path) -> str:
         report = load_json(report_path)
     except (OSError, ValueError, json.JSONDecodeError):
         return "invalid"
+    if report_is_stale(run_dir):
+        return "stale"
     if report.get("evaluation_scope") == "baseline_agreement_only":
         return "baseline_agreement_only"
     if report.get("evaluation_scope") == "emulator_labels_unavailable":
@@ -77,7 +103,9 @@ def report_status(run_dir: Path) -> str:
     diagnostics = report.get("integration_diagnostics")
     if not isinstance(diagnostics, dict):
         return "diagnostics_missing"
-    if isinstance(diagnostics, dict) and diagnostics.get("status") == "not_ok":
+    # Fail closed: only an explicit "ok" is complete, so a renamed or new status
+    # value from a future exporter reads as a problem, not as passing.
+    if diagnostics.get("status") != "ok":
         return "diagnostics_not_ok"
     return "complete"
 

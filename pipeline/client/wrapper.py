@@ -270,6 +270,7 @@ DEFAULT_JOINMARKET_PERCENTAGE_FEE = 0.00004
 DEFAULT_JOINMARKET_MAX_DEPTH = 200000
 DEFAULT_BLOCKSCI_IMAGE = "ghcr.io/ondrejman/blocksci-complete:latest"
 DEFAULT_COINJOIN_ANALYSIS_IMAGE = "ghcr.io/ondrejman/coinjoin-analysis:latest"
+CONTAINER_SCENARIOS_DIR = "/mnt/scenarios"
 DEFAULT_CONTAINER_SCENARIO = "/mnt/scenarios/overactive-local.json"
 DEFAULT_JOINMARKET_CONTAINER_SCENARIO = "/mnt/scenarios/defaultJoinMarket.json"
 DEFAULT_EMULATOR_IMAGE = "ghcr.io/ondrejman/coinjoin-emulator:latest"
@@ -516,14 +517,23 @@ def container_scenario_path(scenario: str | None, scenarios_dir: Path, engine: s
     try:
         relative_path = scenario_path.relative_to(scenarios_dir.resolve())
     except ValueError:
+        # Substituting the default here would run a different experiment than the
+        # one requested while the evidence recorded the substitute as genuine.
         print(
-            f"[WARN] Scenario fallback {scenario_path} is outside {scenarios_dir}; "
-            f"using {default_container_scenario(engine)} inside the container.",
+            f"[ERROR] Scenario {scenario_path} is outside the scenarios directory "
+            f"{scenarios_dir}, so it cannot be mounted into the container. "
+            f"Copy it under {scenarios_dir} and pass it by name.",
             file=sys.stderr,
         )
-        return default_container_scenario(engine)
+        sys.exit(2)
 
-    return "/mnt/scenarios/" + str(relative_path).replace(os.sep, "/")
+    return CONTAINER_SCENARIOS_DIR + "/" + str(relative_path).replace(os.sep, "/")
+
+
+def host_scenario_path(container_scenario: str, scenarios_dir: Path) -> Path:
+    """Map a container scenario path back to its host path, preserving nesting."""
+    relative_path = container_scenario.removeprefix(CONTAINER_SCENARIOS_DIR + "/")
+    return scenarios_dir.joinpath(*relative_path.split("/"))
 
 
 def is_run_dir(path: Path) -> bool:
@@ -571,20 +581,31 @@ def detect_active_run(emulation_logs_dir: Path, before: set[Path]) -> Path | Non
     return newest_run_dir(emulation_logs_dir)
 
 
+def run_dir_under_root(run_dir_arg: str, runs_root: Path) -> Path:
+    """Resolve --run-dir to an existing run directly under the runs root.
+
+    Callers only ever keep the basename and rejoin it with the runs root, so a
+    path pointing elsewhere would silently act on a same-named run instead.
+    """
+    requested = Path(run_dir_arg).expanduser()
+    resolved = requested.resolve() if requested.is_absolute() else (runs_root / requested).resolve()
+    if resolved.parent != runs_root:
+        print(
+            f"[ERROR] --run-dir must name a run inside the runs root {runs_root}, "
+            f"but {resolved} is outside it.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if not resolved.exists():
+        print(f"[ERROR] Run directory not found: {resolved}", file=sys.stderr)
+        sys.exit(2)
+    return resolved
+
+
 def resolve_run_id(run_dir_arg: str | None, env: dict[str, str]) -> str | None:
     emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
     if run_dir_arg:
-        run_dir = Path(run_dir_arg).expanduser()
-        if not run_dir.is_absolute():
-            candidate = (emulation_logs_dir / run_dir).resolve()
-            if candidate.exists():
-                run_dir = candidate
-            else:
-                run_dir = run_dir.resolve()
-        if not run_dir.exists():
-            print(f"[ERROR] Run directory not found: {run_dir}", file=sys.stderr)
-            sys.exit(2)
-        return run_dir.name
+        return run_dir_under_root(run_dir_arg, emulation_logs_dir).name
 
     latest = newest_run_dir(emulation_logs_dir)
     if latest is None:
@@ -1902,7 +1923,7 @@ def run_kubernetes_s3_emulation(args: argparse.Namespace) -> None:
         if args.scenario
         else default_container_scenario(args.engine)
     )
-    scenario_path = scenarios_dir / Path(scenario_container).name
+    scenario_path = host_scenario_path(scenario_container, scenarios_dir)
     if not scenario_path.is_file():
         raise RuntimeError(f"Scenario file not found: {scenario_path}")
     kubeconfig_path = Path(args.kubeconfig).expanduser().resolve() if args.kubeconfig else Path.home() / ".kube/config"
@@ -2358,7 +2379,9 @@ def main() -> None:
     lock_path = logs_root / ".pipeline.lock"
     requested_run = getattr(args, "run_dir", None)
     if requested_run and args.action in ("analyze", "export", "coinjoin-analysis", "coinjoin", "mappings"):
-        lock_path = logs_root / Path(requested_run).name / ".research.lock"
+        # Validate before locking: acquire_lock creates missing parents, which
+        # would turn a typo'd run id into a junk directory that then looks valid.
+        lock_path = run_dir_under_root(requested_run, logs_root) / ".research.lock"
     if args.action != "pbs-from-s3":
         try:
             _lock = acquire_lock(lock_path)
