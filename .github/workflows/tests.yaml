@@ -155,6 +155,8 @@ jobs:
       - docker-parallel
     env:
       WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
+      KUBECTL_VERSION: v1.35.6
+      K3D_VERSION: v5.9.0
       WRAPPER_PULL_POLICY: never
 
     steps:
