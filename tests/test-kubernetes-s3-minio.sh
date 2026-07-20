@@ -224,6 +224,19 @@ k3d cluster create "${CLUSTER_NAME}" \
 echo "Importing wrapper and emulator images into ${CLUSTER_NAME}..."
 k3d image import --cluster "${CLUSTER_NAME}" \
   "${K3D_WRAPPER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"
+# k3d exits 0 even when containerd rejects the tarball (e.g. "content digest
+# ... not found" when Docker's containerd image store is enabled). Verify the
+# images actually landed on a node, otherwise the job pod would hang in
+# Init:ImagePullBackOff until the outer timeout fires ~90 min later.
+SERVER_NODE="k3d-${CLUSTER_NAME}-server-0"
+for image in "${K3D_WRAPPER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"; do
+  if ! docker exec "${SERVER_NODE}" crictl images 2>/dev/null | grep -qF "${image%:*}"; then
+    echo "FAIL: image ${image} was not imported into ${CLUSTER_NAME} (k3d import silently failed)." >&2
+    echo "      If Docker uses the containerd image store, disable it: set" >&2
+    echo "      '{\"features\":{\"containerd-snapshotter\":false}}' in /etc/docker/daemon.json and restart docker." >&2
+    exit 1
+  fi
+done
 WRAPPER_IMAGE="${K3D_WRAPPER_IMAGE}"
 COINJOIN_EMULATOR_IMAGE="${K3D_COINJOIN_EMULATOR_IMAGE}"
 k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
