@@ -17,6 +17,8 @@ S3_CONTROLLER_RESOURCE_LIMITS = {"cpu": "1", "memory": "1Gi"}
 S3_UPLOADER_RESOURCE_REQUESTS = {"cpu": "100m", "memory": "128Mi"}
 S3_UPLOADER_RESOURCE_LIMITS = {"cpu": "500m", "memory": "512Mi"}
 S3_JOB_TTL_SECONDS_AFTER_FINISHED = 3600
+CONTROLLER_LOG_TAIL_LINES = 100
+CONTROLLER_FATAL_SUMMARY_MARKERS = ("Kubernetes CPU quota exhausted",)
 
 
 def run_kubectl_preflight_command(command: list[str]) -> str:
@@ -182,7 +184,7 @@ def collect_s3_emulation_diagnostics(kubeconfig_path: Path, namespace: str, job_
     sections: list[str] = []
     for description, command in (
         ("job description", ["describe", "job", job_name]),
-        ("controller logs", ["logs", f"job/{job_name}", "-c", "controller", "--tail=100"]),
+        ("controller logs", ["logs", f"job/{job_name}", "-c", "controller", "--tail=-1"]),
         ("uploader logs", ["logs", f"job/{job_name}", "-c", "uploader", "--tail=100"]),
     ):
         full = ["kubectl", "--kubeconfig", str(kubeconfig_path), "--namespace", namespace, *command]
@@ -191,6 +193,15 @@ def collect_s3_emulation_diagnostics(kubeconfig_path: Path, namespace: str, job_
         except FileNotFoundError:
             return "kubectl unavailable; no Kubernetes diagnostics collected"
         output = (result.stdout or "").strip() or (result.stderr or "").strip() or "(no output)"
+        if description == "controller logs":
+            fatal_lines = [
+                line
+                for line in output.splitlines()
+                if any(marker in line for marker in CONTROLLER_FATAL_SUMMARY_MARKERS)
+            ]
+            if fatal_lines:
+                sections.append(f"--- controller failure summary ---\n{fatal_lines[-1]}")
+            output = "\n".join(output.splitlines()[-CONTROLLER_LOG_TAIL_LINES:])
         sections.append(f"--- {description} ---\n{output}")
     return "\n".join(sections)
 

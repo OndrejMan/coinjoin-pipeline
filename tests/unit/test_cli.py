@@ -27,6 +27,46 @@ from coinjoin_pipeline.runs import manifest_target, run_id_for, valid_run_id
 
 
 class CliTests(unittest.TestCase):
+    def test_download_report_routes_without_container_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runs_root = Path(directory)
+            with mock.patch(
+                "coinjoin_pipeline.download_report.main", return_value=0
+            ) as download_main:
+                code = main(
+                    [
+                        "--runs-root",
+                        str(runs_root),
+                        "download-report",
+                        "--run-id",
+                        "run-1",
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        download_main.assert_called_once_with(
+            ["--run-id", "run-1"], runs_root=runs_root.resolve()
+        )
+
+    def test_watch_routes_to_host_watcher_without_container_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runs_root = Path(directory)
+            with mock.patch("coinjoin_pipeline.watch.main", return_value=0) as watch_main:
+                code = main(
+                    [
+                        "--runs-root",
+                        str(runs_root),
+                        "watch",
+                        "--run-id",
+                        "run-1",
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        watch_main.assert_called_once_with(
+            ["--run-id", "run-1"], runs_root=runs_root.resolve()
+        )
+
     def test_image_version_and_override_precedence(self) -> None:
         images = resolve_images("thesis-2026-07", {"blocksci": "local/blocksci:test"})
         self.assertTrue(images.pipeline.endswith(":thesis-2026-07"))
@@ -264,7 +304,7 @@ class CliTests(unittest.TestCase):
             )
         )
 
-    def test_unified_report_resource_overrides_require_both_s3_analyzers(self) -> None:
+    def test_unified_report_resource_overrides_require_a_separate_report_job(self) -> None:
         arguments = [
             "pbs-from-s3",
             "--run-id",
@@ -285,12 +325,20 @@ class CliTests(unittest.TestCase):
         ]
         self.assertTrue(
             any(
-                "require both --analysisPbs and --blocksciPbs" in error
+                "require a separate unified-report job" in error
                 for error in validate_passthrough(arguments, "pbs-from-s3")
             )
         )
         arguments.append("--blocksciPbs")
         self.assertEqual(validate_passthrough(arguments, "pbs-from-s3"), [])
+
+        cached_blocksci_only = [
+            item for item in arguments if item != "--analysisPbs"
+        ]
+        cached_blocksci_only.extend(["--blocksci-workflow", "cached"])
+        self.assertEqual(
+            validate_passthrough(cached_blocksci_only, "pbs-from-s3"), []
+        )
 
     def test_s3_full_run_passthrough_validation(self) -> None:
         complete = [
@@ -326,6 +374,68 @@ class CliTests(unittest.TestCase):
         rejected = validate_passthrough([*complete, "--parallel", "--copy-to-host"], "full-run")
         self.assertTrue(any("--parallel" in error for error in rejected))
         self.assertTrue(any("--copy-to-host" in error for error in rejected))
+
+    def test_reusable_blocksci_task_validation(self) -> None:
+        base = [
+            "pbs-from-s3",
+            "--run-id", "run-1",
+            "--artifact-uri", "s3://bucket/runs",
+            "--s3-endpoint-url", "https://s3.example.invalid",
+            "--s3-credentials-file", "/storage/user/.aws/credentials",
+            "--s3-profile", "coinjoin",
+            "--engine", "wasabi",
+            "--blocksciPbs",
+        ]
+        self.assertEqual(
+            validate_passthrough(
+                [*base, "--blocksci-workflow", "reusable", "--blocksci-task", "parse"],
+                "pbs-from-s3",
+            ),
+            [],
+        )
+        notebook_errors = validate_passthrough(
+            [*base, "--blocksci-task", "notebook"], "pbs-from-s3"
+        )
+        self.assertTrue(any("require --blocksci-workflow" in error for error in notebook_errors))
+
+        external = [
+            *base,
+            "--blocksci-workflow", "reusable",
+            "--blocksci-task", "parse",
+            "--blocksci-external-bitcoin-datadir", "/storage/external/bitcoin",
+            "--blocksci-network", "bitcoin",
+            "--blocksci-max-block", "850000",
+        ]
+        self.assertEqual(validate_passthrough(external, "pbs-from-s3"), [])
+        missing_height = external[:-2]
+        self.assertTrue(
+            any("requires --blocksci-network and --blocksci-max-block" in error
+                for error in validate_passthrough(missing_height, "pbs-from-s3"))
+        )
+
+        update = [
+            *base[:2], "run-2", *base[3:],
+            "--blocksci-workflow", "cached",
+            "--blocksci-task", "update",
+            "--blocksci-cache-source-run-id", "run-1",
+            "--blocksci-external-bitcoin-datadir", "/storage/external/bitcoin",
+            "--blocksci-network", "bitcoin",
+            "--blocksci-max-block", "850100",
+        ]
+        self.assertEqual(validate_passthrough(update, "pbs-from-s3"), [])
+        same_run = [
+            item if item != "run-2" else "run-1"
+            for item in update
+        ]
+        self.assertTrue(
+            any("must differ" in error for error in validate_passthrough(same_run, "pbs-from-s3"))
+        )
+        source_flag_index = update.index("--blocksci-cache-source-run-id")
+        missing_source = update[:source_flag_index] + update[source_flag_index + 2:]
+        self.assertTrue(
+            any("requires --blocksci-cache-source-run-id" in error
+                for error in validate_passthrough(missing_source, "pbs-from-s3"))
+        )
 
     def test_s3_full_run_requires_frontend_direct_environment(self) -> None:
         arguments = [

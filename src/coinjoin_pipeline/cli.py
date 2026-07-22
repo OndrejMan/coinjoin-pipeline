@@ -67,7 +67,7 @@ def direct_wrapper_root() -> Path | None:
 def usage() -> None:
     print("""usage: coinjoin-pipeline [HOST OPTIONS] ACTION [PIPELINE OPTIONS]
 
-Host actions: doctor, pull, version, builder
+Host actions: doctor, pull, version, builder, watch, download-report
 Pipeline actions: full-run, recreate, clean, analyze, export,
   coinjoin-analysis, pbs-from-s3, mappings, initialize, runs ..., scenarios ..., external ...
 
@@ -111,6 +111,12 @@ def main(argv: list[str] | None = None) -> int:
         from .builder import main as builder_main
         builder_main()
         return 0
+    if top_action == "watch":
+        from .watch import main as watch_main
+        return watch_main(passthrough[1:], runs_root=runs_root)
+    if top_action == "download-report":
+        from .download_report import main as download_report_main
+        return download_report_main(passthrough[1:], runs_root=runs_root)
     if top_action in {"doctor", "pull"}:
         if top_action == "doctor":
             doctor_arguments = passthrough[1:]

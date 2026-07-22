@@ -1042,6 +1042,94 @@
           "required": false,
           "takes_value": true
         },
+        "--blocksci-cache-source-run-id": {
+          "aliases": [
+            "--blocksci-cache-source-run-id"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-cache-source-run-id",
+          "help": "Existing S3 run ID whose verified blocksci-parse_data cache is the input to --blocksci-task update. The updated cache is written to --run-id.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-external-bitcoin-datadir": {
+          "aliases": [
+            "--blocksci-external-bitcoin-datadir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-external-bitcoin-datadir",
+          "help": "Parse an external Bitcoin Core coin directory under /storage; the directory must contain blocks/.",
+          "metavar": "PATH",
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-external-blocksci-dir": {
+          "aliases": [
+            "--blocksci-external-blocksci-dir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-external-blocksci-dir",
+          "help": "Import an existing BlockSci directory under /storage containing config.json and parsed/.",
+          "metavar": "PATH",
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-max-block": {
+          "aliases": [
+            "--blocksci-max-block"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-max-block",
+          "help": "Inclusive maximum block height for external Bitcoin parsing.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-network": {
+          "aliases": [
+            "--blocksci-network"
+          ],
+          "choices": [
+            "bitcoin",
+            "bitcoin_testnet",
+            "bitcoin_regtest"
+          ],
+          "default": null,
+          "flag": "--blocksci-network",
+          "help": "BlockSci network for --blocksci-external-bitcoin-datadir.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-notebook-port": {
+          "aliases": [
+            "--blocksci-notebook-port"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-notebook-port",
+          "help": "Jupyter port on the assigned PBS node (default: 8888).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-notebooks-dir": {
+          "aliases": [
+            "--blocksci-notebooks-dir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-notebooks-dir",
+          "help": "Optional shared /storage directory mounted read-write as /mnt/notebooks; otherwise notebooks are uploaded under blocksci-notebooks_data/.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
         "--blocksci-script": {
           "aliases": [
             "--blocksci-script",
@@ -1052,6 +1140,40 @@
           "flag": "--blocksci-script",
           "help": "Run a Python script after BlockSci parsing. The script receives ACTIVE_RUN_ID, BLOCKSCI_CONFIG, and BLOCKSCI_RUN_DIR in its environment and runs with the run directory as cwd.",
           "metavar": "PATH",
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-task": {
+          "aliases": [
+            "--blocksci-task"
+          ],
+          "choices": [
+            "detect",
+            "parse",
+            "update",
+            "script",
+            "notebook"
+          ],
+          "default": "detect",
+          "flag": "--blocksci-task",
+          "help": "BlockSci work to run; parse publishes a reusable cache and update incrementally advances an external-Bitcoin cache (default: detect).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-workflow": {
+          "aliases": [
+            "--blocksci-workflow"
+          ],
+          "choices": [
+            "combined",
+            "reusable",
+            "cached"
+          ],
+          "default": "combined",
+          "flag": "--blocksci-workflow",
+          "help": "BlockSci S3 workflow: combined parses and analyzes in one PBS job; reusable publishes a cache then submits dependent work; cached reuses an already published blocksci-parse_data cache.",
+          "metavar": null,
           "required": false,
           "takes_value": true
         },
@@ -1509,7 +1631,7 @@
           "choices": [],
           "default": null,
           "flag": "--pbs-unified-report-scratch",
-          "help": "Scratch storage for the unified-report PBS job (default: 100gb; overrides --pbs-scratch).",
+          "help": "Scratch storage for the unified-report PBS job (default: 10gb; overrides --pbs-scratch).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -1521,7 +1643,7 @@
           "choices": [],
           "default": null,
           "flag": "--pbs-unified-report-walltime",
-          "help": "Walltime for the unified-report PBS job (default: 24:00:00; overrides --pbs-walltime).",
+          "help": "Walltime for the unified-report PBS job (default: 01:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -2018,6 +2140,141 @@
           "required": false,
           "takes_value": true
         },
+        "--blocksci-cache-source-run-id": {
+          "aliases": [
+            "--blocksci-cache-source-run-id"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-cache-source-run-id",
+          "help": "Existing S3 run ID whose verified blocksci-parse_data cache is the input to --blocksci-task update. The updated cache is written to --run-id.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-external-bitcoin-datadir": {
+          "aliases": [
+            "--blocksci-external-bitcoin-datadir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-external-bitcoin-datadir",
+          "help": "Parse an external Bitcoin Core coin directory under /storage; the directory must contain blocks/.",
+          "metavar": "PATH",
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-external-blocksci-dir": {
+          "aliases": [
+            "--blocksci-external-blocksci-dir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-external-blocksci-dir",
+          "help": "Import an existing BlockSci directory under /storage containing config.json and parsed/.",
+          "metavar": "PATH",
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-max-block": {
+          "aliases": [
+            "--blocksci-max-block"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-max-block",
+          "help": "Inclusive maximum block height for external Bitcoin parsing.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-network": {
+          "aliases": [
+            "--blocksci-network"
+          ],
+          "choices": [
+            "bitcoin",
+            "bitcoin_testnet",
+            "bitcoin_regtest"
+          ],
+          "default": null,
+          "flag": "--blocksci-network",
+          "help": "BlockSci network for --blocksci-external-bitcoin-datadir.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-notebook-port": {
+          "aliases": [
+            "--blocksci-notebook-port"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-notebook-port",
+          "help": "Jupyter port on the assigned PBS node (default: 8888).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-notebooks-dir": {
+          "aliases": [
+            "--blocksci-notebooks-dir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-notebooks-dir",
+          "help": "Optional shared /storage directory mounted read-write as /mnt/notebooks; otherwise notebooks are uploaded under blocksci-notebooks_data/.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-script": {
+          "aliases": [
+            "--blocksci-script",
+            "--blocksciScript"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-script",
+          "help": "Run a Python script after BlockSci parsing. The script receives ACTIVE_RUN_ID, BLOCKSCI_CONFIG, and BLOCKSCI_RUN_DIR in its environment and runs with the run directory as cwd.",
+          "metavar": "PATH",
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-task": {
+          "aliases": [
+            "--blocksci-task"
+          ],
+          "choices": [
+            "detect",
+            "parse",
+            "update",
+            "script",
+            "notebook"
+          ],
+          "default": "detect",
+          "flag": "--blocksci-task",
+          "help": "BlockSci work to run; parse publishes a reusable cache and update incrementally advances an external-Bitcoin cache (default: detect).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-workflow": {
+          "aliases": [
+            "--blocksci-workflow"
+          ],
+          "choices": [
+            "combined",
+            "reusable",
+            "cached"
+          ],
+          "default": "combined",
+          "flag": "--blocksci-workflow",
+          "help": "BlockSci S3 workflow: combined parses and analyzes in one PBS job; reusable publishes a cache then submits dependent work; cached reuses an already published blocksci-parse_data cache.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
         "--blocksciPbs": {
           "aliases": [
             "--blocksciPbs"
@@ -2361,7 +2618,7 @@
           "choices": [],
           "default": null,
           "flag": "--pbs-unified-report-scratch",
-          "help": "Scratch storage for the unified-report PBS job (default: 100gb; overrides --pbs-scratch).",
+          "help": "Scratch storage for the unified-report PBS job (default: 10gb; overrides --pbs-scratch).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -2373,7 +2630,7 @@
           "choices": [],
           "default": null,
           "flag": "--pbs-unified-report-walltime",
-          "help": "Walltime for the unified-report PBS job (default: 24:00:00; overrides --pbs-walltime).",
+          "help": "Walltime for the unified-report PBS job (default: 01:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true

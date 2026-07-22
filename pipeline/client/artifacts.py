@@ -104,6 +104,11 @@ def render_s5cmd_cp(source_expr: str, destination_expr: str) -> str:
     return f"{_prefix()} cp {source_expr} {destination_expr}"
 
 
+def render_s5cmd_rm(target_expr: str) -> str:
+    """Render deletion of one validated, explicitly constructed object key."""
+    return f"{_prefix()} rm {target_expr}"
+
+
 def shell_assignment(name: str, value: str) -> str:
     return f"{name}={shlex.quote(value)}"
 

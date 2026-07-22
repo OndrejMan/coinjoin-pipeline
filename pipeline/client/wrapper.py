@@ -9,8 +9,9 @@ import os
 import shlex
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, TypeVar, cast
+from typing import Mapping, TypedDict, TypeVar, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 if __package__ in (None, ""):
@@ -23,6 +24,7 @@ from client.artifacts import (
     S3Access,
     ensure_empty_run_prefix,
     s3_access_preflight,
+    s3_object_exists,
     validate_artifact_uri,
     validate_credentials_file,
     validate_run_id,
@@ -126,18 +128,27 @@ try:
         DEFAULT_UNIFIED_REPORT_SCRATCH,
         DEFAULT_UNIFIED_REPORT_WALLTIME,
         PBSError,
+        blocksci_analysis_pbs_command,
         blocksci_export_pbs_command,
+        blocksci_notebook_pbs_command,
+        blocksci_parse_pbs_command,
         blocksci_pbs_command,
+        blocksci_script_pbs_command,
+        blocksci_update_pbs_command,
         coinjoin_analysis_pbs_command,
         pbs_job_probe,
         qdel_pbs_job,
         qdel_pbs_stage,
         require_qsub,
+        submit_blocksci_analyze_s3_pbs,
+        submit_blocksci_parse_s3_pbs,
         submit_blocksci_pbs,
         submit_blocksci_s3_pbs,
+        submit_blocksci_update_s3_pbs,
         submit_coinjoin_analysis_pbs,
         submit_coinjoin_analysis_s3_pbs,
         submit_mappings_pbs,
+        submit_mappings_s3_pbs,
         submit_unified_report_s3_pbs,
         wait_for_pbs_marker,
         walltime_to_seconds,
@@ -165,18 +176,27 @@ except ImportError:
         DEFAULT_UNIFIED_REPORT_SCRATCH,
         DEFAULT_UNIFIED_REPORT_WALLTIME,
         PBSError,
+        blocksci_analysis_pbs_command,
         blocksci_export_pbs_command,
+        blocksci_notebook_pbs_command,
+        blocksci_parse_pbs_command,
         blocksci_pbs_command,
+        blocksci_script_pbs_command,
+        blocksci_update_pbs_command,
         coinjoin_analysis_pbs_command,
         pbs_job_probe,
         qdel_pbs_job,
         qdel_pbs_stage,
         require_qsub,
+        submit_blocksci_analyze_s3_pbs,
+        submit_blocksci_parse_s3_pbs,
         submit_blocksci_pbs,
         submit_blocksci_s3_pbs,
+        submit_blocksci_update_s3_pbs,
         submit_coinjoin_analysis_pbs,
         submit_coinjoin_analysis_s3_pbs,
         submit_mappings_pbs,
+        submit_mappings_s3_pbs,
         submit_unified_report_s3_pbs,
         wait_for_pbs_marker,
         walltime_to_seconds,
@@ -252,6 +272,15 @@ OPTIONS_WITH_VALUES = (
     "--s3-profile",
     "--s3-secret-name",
     "--run-id",
+    "--blocksci-workflow",
+    "--blocksci-task",
+    "--blocksci-notebook-port",
+    "--blocksci-notebooks-dir",
+    "--blocksci-external-bitcoin-datadir",
+    "--blocksci-external-blocksci-dir",
+    "--blocksci-network",
+    "--blocksci-max-block",
+    "--blocksci-cache-source-run-id",
 )
 OPTIONS_WITHOUT_VALUES = (
     "--test-values",
@@ -369,6 +398,17 @@ def positive_int(value: str) -> int:
         raise argparse.ArgumentTypeError("must be an integer") from error
     if parsed < 1:
         raise argparse.ArgumentTypeError("must be greater than zero")
+    return parsed
+
+
+def non_negative_int(value: str) -> int:
+    """Parse a non-negative command-line integer."""
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be an integer") from error
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be zero or greater")
     return parsed
 
 
@@ -1351,6 +1391,79 @@ def add_blocksci_script_argument(arg_parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_blocksci_reusable_arguments(arg_parser: argparse.ArgumentParser) -> None:
+    """Add the opt-in parse-once/analyze-many S3 BlockSci workflow."""
+    arg_parser.add_argument(
+        "--blocksci-workflow",
+        choices=("combined", "reusable", "cached"),
+        default="combined",
+        help=(
+            "BlockSci S3 workflow: combined parses and analyzes in one PBS job; "
+            "reusable publishes a cache then submits dependent work; cached reuses "
+            "an already published blocksci-parse_data cache."
+        ),
+    )
+    arg_parser.add_argument(
+        "--blocksci-task",
+        choices=("detect", "parse", "update", "script", "notebook"),
+        default="detect",
+        help=(
+            "BlockSci work to run; parse publishes a reusable cache and update "
+            "incrementally advances an external-Bitcoin cache (default: detect)."
+        ),
+    )
+    arg_parser.add_argument(
+        "--blocksci-cache-source-run-id",
+        default=None,
+        help=(
+            "Existing S3 run ID whose verified blocksci-parse_data cache is the "
+            "input to --blocksci-task update. The updated cache is written to --run-id."
+        ),
+    )
+    arg_parser.add_argument(
+        "--blocksci-notebook-port",
+        type=positive_int,
+        default=None,
+        help="Jupyter port on the assigned PBS node (default: 8888).",
+    )
+    arg_parser.add_argument(
+        "--blocksci-notebooks-dir",
+        default=None,
+        help=(
+            "Optional shared /storage directory mounted read-write as /mnt/notebooks; "
+            "otherwise notebooks are uploaded under blocksci-notebooks_data/."
+        ),
+    )
+    arg_parser.add_argument(
+        "--blocksci-external-bitcoin-datadir",
+        metavar="PATH",
+        help=(
+            "Parse an external Bitcoin Core coin directory under /storage; "
+            "the directory must contain blocks/."
+        ),
+    )
+    arg_parser.add_argument(
+        "--blocksci-external-blocksci-dir",
+        metavar="PATH",
+        help=(
+            "Import an existing BlockSci directory under /storage containing "
+            "config.json and parsed/."
+        ),
+    )
+    arg_parser.add_argument(
+        "--blocksci-network",
+        choices=("bitcoin", "bitcoin_testnet", "bitcoin_regtest"),
+        default=None,
+        help="BlockSci network for --blocksci-external-bitcoin-datadir.",
+    )
+    arg_parser.add_argument(
+        "--blocksci-max-block",
+        type=non_negative_int,
+        default=None,
+        help="Inclusive maximum block height for external Bitcoin parsing.",
+    )
+
+
 def add_pbs_arguments(arg_parser: argparse.ArgumentParser) -> None:
     """Add PBS-related arguments to a subparser.
 
@@ -1513,6 +1626,14 @@ def resolve_pbs_image(args: argparse.Namespace, default_image: str, stage_option
     if getattr(args, "pbs_image", None):
         return str(args.pbs_image)
     return default_image
+
+
+def resolve_unified_report_pbs_image() -> str:
+    """Use the lightweight pipeline image for JSON-only report assembly."""
+    image = os.environ.get(
+        "WRAPPER_IMAGE", "ghcr.io/ondrejman/coinjoin-pipeline:latest"
+    )
+    return image if "://" in image else f"docker://{image}"
 
 
 PBSResource = TypeVar("PBSResource", int, str)
@@ -1817,6 +1938,86 @@ def run_serial_analysis(args: argparse.Namespace, run_dir: Path, logs_root: Path
 
 def validate_artifact_arguments(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     backend = getattr(args, "artifact_backend", "shared-storage")
+    blocksci_workflow = getattr(args, "blocksci_workflow", "combined")
+    blocksci_task = getattr(args, "blocksci_task", "detect")
+    if blocksci_workflow != "combined" and not getattr(args, "blocksciPbs", False):
+        parser.error("reusable BlockSci workflows require --blocksciPbs")
+    if blocksci_task == "parse":
+        if args.action != "pbs-from-s3" or blocksci_workflow != "reusable":
+            parser.error("--blocksci-task parse requires pbs-from-s3 --blocksci-workflow reusable")
+        if getattr(args, "analysisPbs", False) or not getattr(args, "blocksciPbs", False):
+            parser.error("--blocksci-task parse requires --blocksciPbs without --analysisPbs")
+    elif blocksci_task == "update":
+        if args.action != "pbs-from-s3" or blocksci_workflow != "cached":
+            parser.error("--blocksci-task update requires pbs-from-s3 --blocksci-workflow cached")
+        if getattr(args, "analysisPbs", False) or not getattr(args, "blocksciPbs", False):
+            parser.error("--blocksci-task update requires --blocksciPbs without --analysisPbs")
+    elif blocksci_task != "detect":
+        if args.action != "pbs-from-s3":
+            parser.error("BlockSci script and notebook tasks are submitted with pbs-from-s3")
+        if blocksci_workflow == "combined":
+            parser.error("BlockSci script and notebook tasks require --blocksci-workflow reusable or cached")
+        if getattr(args, "analysisPbs", False) or not getattr(args, "blocksciPbs", False):
+            parser.error("BlockSci script and notebook tasks require --blocksciPbs without --analysisPbs")
+    if args.action == "pbs-from-s3" and blocksci_task == "script" and not getattr(args, "blocksci_script", None):
+        parser.error("--blocksci-task script requires --blocksci-script")
+    if args.action == "pbs-from-s3" and blocksci_task != "script" and getattr(args, "blocksci_script", None):
+        parser.error("--blocksci-script requires --blocksci-task script")
+    if blocksci_task != "notebook" and getattr(args, "blocksci_notebooks_dir", None):
+        parser.error("--blocksci-notebooks-dir requires --blocksci-task notebook")
+    raw_notebook_port = getattr(args, "blocksci_notebook_port", None)
+    if blocksci_task != "notebook" and raw_notebook_port is not None:
+        parser.error("--blocksci-notebook-port requires --blocksci-task notebook")
+    notebook_port = raw_notebook_port or 8888
+    if not 1024 <= notebook_port <= 65535:
+        parser.error("--blocksci-notebook-port must be between 1024 and 65535")
+    external_bitcoin = getattr(args, "blocksci_external_bitcoin_datadir", None)
+    external_index = getattr(args, "blocksci_external_blocksci_dir", None)
+    external_network = getattr(args, "blocksci_network", None)
+    external_max_block = getattr(args, "blocksci_max_block", None)
+    source_cache_run_id = getattr(args, "blocksci_cache_source_run_id", None)
+    if blocksci_task == "update":
+        if not source_cache_run_id:
+            parser.error("--blocksci-task update requires --blocksci-cache-source-run-id")
+        if not external_bitcoin:
+            parser.error("--blocksci-task update requires --blocksci-external-bitcoin-datadir")
+        if external_index:
+            parser.error("--blocksci-task update does not support --blocksci-external-blocksci-dir")
+    elif source_cache_run_id:
+        parser.error("--blocksci-cache-source-run-id requires --blocksci-task update")
+    if external_bitcoin and external_index:
+        parser.error(
+            "choose either --blocksci-external-bitcoin-datadir or "
+            "--blocksci-external-blocksci-dir, not both"
+        )
+    if external_bitcoin or external_index:
+        parse_source = (
+            args.action == "pbs-from-s3"
+            and blocksci_workflow == "reusable"
+            and blocksci_task == "parse"
+        )
+        update_source = (
+            args.action == "pbs-from-s3"
+            and blocksci_workflow == "cached"
+            and blocksci_task == "update"
+            and bool(external_bitcoin)
+            and not external_index
+        )
+        if not (parse_source or update_source):
+            parser.error(
+                "external BlockSci sources require either reusable parse or cached update"
+            )
+    if external_bitcoin:
+        if external_network is None or external_max_block is None:
+            parser.error(
+                "--blocksci-external-bitcoin-datadir requires --blocksci-network "
+                "and --blocksci-max-block"
+            )
+    elif external_network is not None or external_max_block is not None:
+        parser.error(
+            "--blocksci-network and --blocksci-max-block require "
+            "--blocksci-external-bitcoin-datadir"
+        )
     if args.action == "pbs-from-s3":
         args.artifact_backend = "s3"
         required = (
@@ -1829,24 +2030,27 @@ def validate_artifact_arguments(parser: argparse.ArgumentParser, args: argparse.
         for attribute, flag in required:
             if not getattr(args, attribute, None):
                 parser.error(f"pbs-from-s3 requires {flag}")
-        if not args.analysisPbs and not args.blocksciPbs:
-            parser.error("pbs-from-s3 requires --analysisPbs or --blocksciPbs")
+        if not args.analysisPbs and not args.blocksciPbs and not args.mappingsPbs:
+            parser.error(
+                "pbs-from-s3 requires --analysisPbs, --blocksciPbs, or --mappingsPbs"
+            )
         report_resource_options = (
             "pbs_unified_report_ncpus",
             "pbs_unified_report_mem",
             "pbs_unified_report_scratch",
             "pbs_unified_report_walltime",
         )
-        if any(getattr(args, option, None) is not None for option in report_resource_options) and not (
-            args.analysisPbs and args.blocksciPbs
-        ):
+        separate_report = args.blocksciPbs and blocksci_task == "detect" and (
+            args.analysisPbs or args.mappingsPbs or blocksci_workflow != "combined"
+        )
+        if any(getattr(args, option, None) is not None for option in report_resource_options) and not separate_report:
             parser.error(
-                "unified-report PBS resource overrides require both --analysisPbs and --blocksciPbs"
+                "unified-report PBS resource overrides require a separate unified-report job"
             )
-        if args.mappingsPbs:
-            parser.error("S3-compatible mappings are not implemented yet")
     elif backend == "s3":
         if args.action == "full-run":
+            if blocksci_workflow == "cached":
+                parser.error("full-run cannot reuse a cache before emulation; use --blocksci-workflow reusable")
             if getattr(args, "driver", None) != "kubernetes":
                 parser.error("full-run --artifact-backend s3 requires --driver kubernetes")
             for attribute, flag in (
@@ -1866,8 +2070,6 @@ def validate_artifact_arguments(parser: argparse.ArgumentParser, args: argparse.
                     "Kubernetes S3-compatible mode requires --reuse-namespace because "
                     "the credentials Secret must exist before the Job is created"
                 )
-            if args.mappingsPbs:
-                parser.error("S3-compatible mappings are not implemented yet")
             if getattr(args, "parallel", False):
                 parser.error(
                     "full-run --artifact-backend s3 does not support --parallel "
@@ -1900,6 +2102,8 @@ def validate_artifact_arguments(parser: argparse.ArgumentParser, args: argparse.
                 "Kubernetes S3-compatible mode does not support --kubernetes-btc-datadir, "
                 "--pbs-bitcoin-datadir, or --copy-to-host"
             )
+    elif blocksci_workflow != "combined" or blocksci_task != "detect":
+        parser.error("reusable BlockSci workflows are currently supported only with the S3 artifact backend")
     try:
         if getattr(args, "artifact_uri", None):
             args.artifact_uri = validate_artifact_uri(args.artifact_uri)
@@ -1907,6 +2111,12 @@ def validate_artifact_arguments(parser: argparse.ArgumentParser, args: argparse.
             args.s3_endpoint_url = validate_s3_endpoint_url(args.s3_endpoint_url)
         if getattr(args, "run_id", None):
             args.run_id = validate_run_id(args.run_id)
+        if source_cache_run_id:
+            args.blocksci_cache_source_run_id = validate_run_id(source_cache_run_id)
+            if args.blocksci_cache_source_run_id == args.run_id:
+                parser.error(
+                    "--blocksci-cache-source-run-id must differ from target --run-id"
+                )
         if getattr(args, "s3_credentials_file", None):
             args.s3_credentials_file = validate_credentials_file(args.s3_credentials_file)
         if getattr(args, "s3_profile", None):
@@ -1949,9 +2159,24 @@ def run_kubernetes_s3_emulation(args: argparse.Namespace) -> None:
     print(f"[kubernetes] Submitted S3-compatible emulation job for run {args.run_id}")
 
 
-def run_pbs_from_s3(
-    args: argparse.Namespace,
-) -> tuple[str | None, str | None, str | None]:
+@dataclass(frozen=True)
+class S3PBSJobs:
+    coinjoin_analysis: str | None = None
+    coinjoin_mappings: str | None = None
+    blocksci_parse: str | None = None
+    blocksci_update: str | None = None
+    blocksci_work: str | None = None
+    unified_report: str | None = None
+
+
+class PBSResources(TypedDict):
+    ncpus: int
+    mem: str
+    scratch: str
+    walltime: str
+
+
+def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
     common = dict(
         artifact_uri=args.artifact_uri,
         run_id=args.run_id,
@@ -1960,9 +2185,35 @@ def run_pbs_from_s3(
         profile=args.s3_profile,
         dry_run=args.dry_run,
     )
-    parallel_report = args.analysisPbs and args.blocksciPbs
+    workflow = getattr(args, "blocksci_workflow", "combined")
+    task = getattr(args, "blocksci_task", "detect")
+    if task == "update" and not args.dry_run:
+        access = S3Access(
+            endpoint_url=args.s3_endpoint_url,
+            credentials_file=args.s3_credentials_file,
+            profile=args.s3_profile,
+        )
+        source_run_id = args.blocksci_cache_source_run_id
+        s3_access_preflight(access, args.artifact_uri)
+        if not s3_object_exists(
+            access,
+            f"{args.artifact_uri}/{source_run_id}/blocksci-parse_data/manifest.json",
+        ):
+            raise ArtifactTransportError(
+                f"source BlockSci cache manifest does not exist for run {source_run_id}"
+            )
+        ensure_empty_run_prefix(access, args.artifact_uri, args.run_id)
+    mappings_pbs = getattr(args, "mappingsPbs", False)
+    separate_combined_report = (
+        args.blocksciPbs
+        and task == "detect"
+        and (args.analysisPbs or mappings_pbs)
+    )
     analysis_job_id = None
-    blocksci_job_id = None
+    mappings_job_id = None
+    blocksci_parse_job_id = None
+    blocksci_update_job_id = None
+    blocksci_work_job_id = None
     if args.analysisPbs:
         analysis_job_id = submit_coinjoin_analysis_s3_pbs(
             **common,
@@ -1973,37 +2224,171 @@ def run_pbs_from_s3(
             scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH),
             walltime=resolve_pbs_resource(args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME),
         )
-    if args.blocksciPbs:
-        blocksci_job_id = submit_blocksci_s3_pbs(
+    if mappings_pbs:
+        mappings_job_id = submit_mappings_s3_pbs(
             **common,
-            image=resolve_pbs_image(args, DEFAULT_PBS_BLOCKSCI_IMAGE, "pbs_blocksci_image"),
-            command=blocksci_pbs_command(
-                args.run_id,
-                args.coinjoin_type,
-                args.min_input_count,
-                args.joinmarket_detector,
-                args.joinmarket_min_base_fee,
-                args.joinmarket_percentage_fee,
-                args.joinmarket_max_depth,
-                args.test_values,
-                include_report=not parallel_report,
+            enumerator_image=resolve_pbs_image(
+                args,
+                DEFAULT_MAPPINGS_ENUMERATOR_IMAGE,
+                "pbs_mappings_enumerator_image",
             ),
+            sake_image=resolve_pbs_image(
+                args, DEFAULT_SAKE_IMAGE, "pbs_sake_image"
+            ),
+            mining_fee_rate=getattr(args, "mapping_mining_fee_rate", 1),
+            coordination_fee_rate=getattr(
+                args, "mapping_coordination_fee_rate", 0.003
+            ),
+            max_decomposition_fee=getattr(
+                args, "mapping_max_decomposition_fee", 6000
+            ),
+            mode=getattr(args, "mapping_mode", "numeric"),
+            timeout=getattr(args, "mapping_timeout", 60),
+            retry_timeout=getattr(args, "mapping_retry_timeout", 600),
+            sake_seed=getattr(args, "sake_seed", 20260704),
+            ncpus=resolve_pbs_resource(
+                args, "pbs_ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS
+            ),
+            mem=resolve_pbs_resource(
+                args, "pbs_mem", DEFAULT_COINJOIN_ANALYSIS_MEM
+            ),
+            scratch=resolve_pbs_resource(
+                args, "pbs_scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH
+            ),
+            walltime=resolve_pbs_resource(
+                args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
+            ),
+            dependency_job_id=analysis_job_id,
+        )
+    if args.blocksciPbs:
+        blocksci_resources: PBSResources = dict(
             ncpus=resolve_pbs_resource(args, "pbs_ncpus", DEFAULT_BLOCKSCI_NCPUS),
             mem=resolve_pbs_resource(args, "pbs_mem", DEFAULT_BLOCKSCI_MEM),
             scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_BLOCKSCI_SCRATCH),
             walltime=resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME),
-            include_report=not parallel_report,
         )
+        blocksci_image = resolve_pbs_image(
+            args, DEFAULT_PBS_BLOCKSCI_IMAGE, "pbs_blocksci_image"
+        )
+        if task == "update":
+            blocksci_update_job_id = submit_blocksci_update_s3_pbs(
+                **common,
+                source_run_id=args.blocksci_cache_source_run_id,
+                image=blocksci_image,
+                command=blocksci_update_pbs_command(args.run_id),
+                external_bitcoin_datadir=Path(args.blocksci_external_bitcoin_datadir),
+                external_network=args.blocksci_network,
+                external_max_block=args.blocksci_max_block,
+                **blocksci_resources,
+            )
+        elif workflow == "combined":
+            blocksci_work_job_id = submit_blocksci_s3_pbs(
+                **common,
+                image=blocksci_image,
+                command=blocksci_pbs_command(
+                    args.run_id,
+                    args.coinjoin_type,
+                    args.min_input_count,
+                    args.joinmarket_detector,
+                    args.joinmarket_min_base_fee,
+                    args.joinmarket_percentage_fee,
+                    args.joinmarket_max_depth,
+                    args.test_values,
+                    include_report=not separate_combined_report,
+                    export_analysis=separate_combined_report,
+                ),
+                **blocksci_resources,
+                include_report=not separate_combined_report,
+                export_analysis=separate_combined_report,
+            )
+        else:
+            if workflow == "reusable":
+                external_bitcoin = getattr(
+                    args, "blocksci_external_bitcoin_datadir", None
+                )
+                external_index = getattr(
+                    args, "blocksci_external_blocksci_dir", None
+                )
+                parse_command = blocksci_parse_pbs_command(args.run_id)
+                if external_bitcoin:
+                    parse_command = blocksci_parse_pbs_command(
+                        args.run_id,
+                        coin_type=args.blocksci_network,
+                        disk_path="/mnt/data",
+                        max_block_expression=str(args.blocksci_max_block + 1),
+                    )
+                blocksci_parse_job_id = submit_blocksci_parse_s3_pbs(
+                    **common,
+                    image=blocksci_image,
+                    command=parse_command,
+                    external_bitcoin_datadir=(
+                        Path(external_bitcoin) if external_bitcoin else None
+                    ),
+                    external_blocksci_dir=(
+                        Path(external_index) if external_index else None
+                    ),
+                    external_network=getattr(args, "blocksci_network", None),
+                    external_max_block=getattr(args, "blocksci_max_block", None),
+                    **blocksci_resources,
+                )
+            if task != "parse":
+                mode = f"blocksci-{task if task != 'detect' else 'analyze'}"
+                if task == "detect":
+                    work_command = blocksci_analysis_pbs_command(
+                        args.run_id,
+                        args.coinjoin_type,
+                        args.min_input_count,
+                        args.joinmarket_detector,
+                        args.joinmarket_min_base_fee,
+                        args.joinmarket_percentage_fee,
+                        args.joinmarket_max_depth,
+                        args.test_values,
+                    )
+                elif task == "script":
+                    work_command = blocksci_script_pbs_command(args.run_id)
+                else:
+                    work_command = blocksci_notebook_pbs_command(
+                        getattr(args, "blocksci_notebook_port", None) or 8888
+                    )
+                blocksci_work_job_id = submit_blocksci_analyze_s3_pbs(
+                    **common,
+                    image=blocksci_image,
+                    command=work_command,
+                    mode=mode,
+                    user_script=(
+                        Path(args.blocksci_script) if task == "script" else None
+                    ),
+                    notebooks_dir=(
+                        Path(args.blocksci_notebooks_dir)
+                        if task == "notebook" and getattr(args, "blocksci_notebooks_dir", None)
+                        else None
+                    ),
+                    notebook_port=getattr(args, "blocksci_notebook_port", None) or 8888,
+                    dependency_job_id=blocksci_parse_job_id,
+                    **blocksci_resources,
+                )
     report_job_id = None
-    if parallel_report:
+    needs_decoupled_report = task == "detect" and args.blocksciPbs and (
+        separate_combined_report or workflow != "combined"
+    )
+    if needs_decoupled_report:
         dependency_job_ids = tuple(
-            job_id for job_id in (analysis_job_id, blocksci_job_id) if job_id is not None
+            job_id
+            for job_id in (
+                analysis_job_id,
+                blocksci_work_job_id,
+                mappings_job_id,
+            )
+            if job_id is not None
         )
-        if not args.dry_run and len(dependency_job_ids) != 2:
-            raise PBSError("Could not obtain both analyzer job IDs for the unified report dependency")
+        expected_dependencies = (
+            int(args.analysisPbs) + int(args.blocksciPbs) + int(mappings_pbs)
+        )
+        if not args.dry_run and len(dependency_job_ids) != expected_dependencies:
+            raise PBSError("Could not obtain analyzer job IDs for the unified report dependency")
         report_job_id = submit_unified_report_s3_pbs(
             **common,
-            image=resolve_pbs_image(args, DEFAULT_PBS_BLOCKSCI_IMAGE, "pbs_blocksci_image"),
+            image=resolve_unified_report_pbs_image(),
             command=blocksci_export_pbs_command(
                 args.run_id,
                 args.coinjoin_type,
@@ -2027,8 +2412,16 @@ def run_pbs_from_s3(
                 args, "walltime", DEFAULT_UNIFIED_REPORT_WALLTIME
             ),
             dependency_job_ids=dependency_job_ids,
+            include_mappings=mappings_pbs,
         )
-    return analysis_job_id, blocksci_job_id, report_job_id
+    return S3PBSJobs(
+        coinjoin_analysis=analysis_job_id,
+        coinjoin_mappings=mappings_job_id,
+        blocksci_parse=blocksci_parse_job_id,
+        blocksci_update=blocksci_update_job_id,
+        blocksci_work=blocksci_work_job_id,
+        unified_report=report_job_id,
+    )
 
 
 def run_full_run_s3(args: argparse.Namespace) -> None:
@@ -2053,9 +2446,17 @@ def run_full_run_s3(args: argparse.Namespace) -> None:
         run_pbs_from_s3(args)
         if args.analysisPbs:
             print(f"[dry-run] Would wait for {run_prefix}/.pbs/coinjoin-analysis.done")
+        if getattr(args, "mappingsPbs", False):
+            print(f"[dry-run] Would wait for {run_prefix}/.pbs/coinjoin-mappings.done")
         if args.blocksciPbs:
-            print(f"[dry-run] Would wait for {run_prefix}/.pbs/blocksci.done")
-        if args.analysisPbs and args.blocksciPbs:
+            if getattr(args, "blocksci_workflow", "combined") == "reusable":
+                print(f"[dry-run] Would wait for {run_prefix}/.pbs/blocksci-parse.done")
+                print(f"[dry-run] Would wait for {run_prefix}/.pbs/blocksci-analyze.done")
+            else:
+                print(f"[dry-run] Would wait for {run_prefix}/.pbs/blocksci.done")
+        if args.blocksciPbs and (
+            args.analysisPbs or getattr(args, "mappingsPbs", False)
+        ):
             print(f"[dry-run] Would wait for {run_prefix}/.pbs/unified-report.done")
         return
 
@@ -2084,8 +2485,16 @@ def run_full_run_s3(args: argparse.Namespace) -> None:
         )
         raise
 
-    analysis_job_id, blocksci_job_id, report_job_id = run_pbs_from_s3(args)
+    jobs = run_pbs_from_s3(args)
+    analysis_job_id = jobs.coinjoin_analysis
+    mappings_job_id = jobs.coinjoin_mappings
+    blocksci_parse_job_id = jobs.blocksci_parse
+    blocksci_job_id = jobs.blocksci_work
+    report_job_id = jobs.unified_report
     analysis_walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME)
+    mappings_walltime = resolve_pbs_resource(
+        args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
+    )
     blocksci_walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME)
     report_walltime = resolve_unified_report_pbs_resource(
         args, "walltime", DEFAULT_UNIFIED_REPORT_WALLTIME
@@ -2102,29 +2511,78 @@ def run_full_run_s3(args: argparse.Namespace) -> None:
                 probe=pbs_job_probe(analysis_job_id),
             )
         except (ArtifactTransportError, PBSError):
+            for stage_name, job_id in (
+                ("coinjoin-mappings", mappings_job_id),
+                ("unified-report", report_job_id),
+            ):
+                if job_id:
+                    print(
+                        f"[full-run] Cancelling dependent {stage_name} PBS job {job_id}",
+                        file=sys.stderr,
+                    )
+                    qdel_pbs_job(job_id)
+            if blocksci_job_id:
+                print(
+                    f"[full-run] BlockSci work PBS job {blocksci_job_id} is left running; "
+                    f"its results still upload to the bucket (cancel with: qdel {blocksci_job_id})",
+                    file=sys.stderr,
+                )
+            raise
+    if blocksci_parse_job_id:
+        print(f"[full-run] Waiting for blocksci-parse marker (PBS job {blocksci_parse_job_id})")
+        try:
+            wait_for_s3_marker(
+                "blocksci-parse",
+                f"{run_prefix}/.pbs/blocksci-parse.done",
+                f"{run_prefix}/.pbs/blocksci-parse.failed",
+                access,
+                timeout_seconds=pbs_wait_timeout(blocksci_walltime),
+                probe=pbs_job_probe(blocksci_parse_job_id),
+            )
+        except (ArtifactTransportError, PBSError):
+            for stage_name, job_id in (
+                ("BlockSci work", blocksci_job_id),
+                ("unified-report", report_job_id),
+            ):
+                if job_id:
+                    print(
+                        f"[full-run] Cancelling dependent {stage_name} PBS job {job_id}",
+                        file=sys.stderr,
+                    )
+                    qdel_pbs_job(job_id)
+            raise
+    if blocksci_job_id:
+        blocksci_stage = "blocksci-analyze" if blocksci_parse_job_id else "blocksci"
+        print(f"[full-run] Waiting for {blocksci_stage} marker (PBS job {blocksci_job_id})")
+        try:
+            wait_for_s3_marker(
+                blocksci_stage,
+                f"{run_prefix}/.pbs/{blocksci_stage}.done",
+                f"{run_prefix}/.pbs/{blocksci_stage}.failed",
+                access,
+                timeout_seconds=pbs_wait_timeout(blocksci_walltime),
+                probe=pbs_job_probe(blocksci_job_id),
+            )
+        except (ArtifactTransportError, PBSError):
             if report_job_id:
                 print(
                     f"[full-run] Cancelling dependent unified-report PBS job {report_job_id}",
                     file=sys.stderr,
                 )
                 qdel_pbs_job(report_job_id)
-            if blocksci_job_id:
-                print(
-                    f"[full-run] BlockSci PBS job {blocksci_job_id} is left running; "
-                    f"its results still upload to the bucket (cancel with: qdel {blocksci_job_id})",
-                    file=sys.stderr,
-                )
             raise
-    if blocksci_job_id:
-        print(f"[full-run] Waiting for blocksci marker (PBS job {blocksci_job_id})")
+    if mappings_job_id:
+        print(
+            f"[full-run] Waiting for coinjoin-mappings marker (PBS job {mappings_job_id})"
+        )
         try:
             wait_for_s3_marker(
-                "blocksci",
-                f"{run_prefix}/.pbs/blocksci.done",
-                f"{run_prefix}/.pbs/blocksci.failed",
+                "coinjoin-mappings",
+                f"{run_prefix}/.pbs/coinjoin-mappings.done",
+                f"{run_prefix}/.pbs/coinjoin-mappings.failed",
                 access,
-                timeout_seconds=pbs_wait_timeout(blocksci_walltime),
-                probe=pbs_job_probe(blocksci_job_id),
+                timeout_seconds=pbs_wait_timeout(mappings_walltime),
+                probe=pbs_job_probe(mappings_job_id),
             )
         except (ArtifactTransportError, PBSError):
             if report_job_id:
@@ -2146,7 +2604,9 @@ def run_full_run_s3(args: argparse.Namespace) -> None:
         )
     print(
         f"[full-run] Completed; results under {run_prefix}/ "
-        "(coinjoin-analysis_data/, blocksci_data/, coinjoinPipeline_data/, logs/)"
+        "(coinjoin-analysis_data/, blocksci-analysis_data/, "
+        "coinjoin-mappings_data/ when requested, blocksci-parse_data/ when reusable, "
+        "coinjoinPipeline_data/, logs/)"
     )
 
 
@@ -2267,6 +2727,8 @@ def build_parser() -> argparse.ArgumentParser:
     s3_pbs_parser.add_argument("--min-input-count", type=positive_int, default=DEFAULT_MIN_INPUT_COUNT)
     s3_pbs_parser.add_argument("--test-values", action="store_true")
     add_joinmarket_detector_arguments(s3_pbs_parser)
+    add_blocksci_script_argument(s3_pbs_parser)
+    add_blocksci_reusable_arguments(s3_pbs_parser)
     add_pbs_arguments(s3_pbs_parser)
     add_unified_report_pbs_arguments(s3_pbs_parser)
 
@@ -2286,6 +2748,7 @@ def build_parser() -> argparse.ArgumentParser:
     full_parser.add_argument("--test-values", action="store_true", help="Use BlockSci test heuristic thresholds.")
     add_joinmarket_detector_arguments(full_parser)
     add_blocksci_script_argument(full_parser)
+    add_blocksci_reusable_arguments(full_parser)
     add_kubernetes_arguments(full_parser)
     add_pbs_arguments(full_parser)
     add_unified_report_pbs_arguments(full_parser)
@@ -2341,8 +2804,14 @@ def main() -> None:
             args.coinjoin_type = "joinmarket"
     if getattr(args, "mappingsPbs", False) and getattr(args, "engine", None) != "wasabi":
         parser.error("--mappingsPbs is supported only with --engine wasabi")
-    if getattr(args, "mappingsPbs", False) and args.action not in ("full-run", "mappings"):
-        parser.error("--mappingsPbs is supported only by full-run and mappings")
+    if getattr(args, "mappingsPbs", False) and args.action not in (
+        "full-run",
+        "mappings",
+        "pbs-from-s3",
+    ):
+        parser.error(
+            "--mappingsPbs is supported only by full-run, mappings, and pbs-from-s3"
+        )
     if getattr(args, "mappingsPbs", False) and getattr(args, "coinjoin_type", None) != "wasabi2":
         parser.error("--mappingsPbs requires --coinjoin-type wasabi2")
     if args.action == "mappings" and not getattr(args, "mappingsPbs", False):
@@ -2403,7 +2872,7 @@ def main() -> None:
     if args.action == "pbs-from-s3":
         try:
             run_pbs_from_s3(args)
-        except PBSError as error:
+        except (ArtifactTransportError, PBSError) as error:
             print(f"[ERROR] {error}", file=sys.stderr)
             sys.exit(2)
     elif args.action == "recreate":

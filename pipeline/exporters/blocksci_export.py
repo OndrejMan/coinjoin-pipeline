@@ -153,6 +153,27 @@ def export_blocksci_cluster_assignments(
     if not labels_by_address:
         return None, "No emulator wallet address labels are available for clustering evaluation."
 
+    return export_blocksci_cluster_assignments_for_addresses(
+        config_path,
+        labels_by_address,
+        coinjoin_type,
+        output_dir,
+        max_distance,
+    )
+
+
+def export_blocksci_cluster_assignments_for_addresses(
+    config_path: Path,
+    addresses: Iterable[str],
+    coinjoin_type: str,
+    output_dir: Path,
+    max_distance: int = DEFAULT_CLUSTER_MAX_DISTANCE,
+) -> tuple[dict[str, str] | None, str | None]:
+    """Cluster the chain and return assignments for the requested addresses."""
+    requested_addresses = sorted({str(address) for address in addresses if address})
+    if not requested_addresses:
+        return None, "No addresses were supplied for BlockSci clustering."
+
     try:
         output_dir.parent.mkdir(parents=True, exist_ok=True)
         chain = blocksci.Blockchain(str(config_path))
@@ -172,7 +193,7 @@ def export_blocksci_cluster_assignments(
 
     predicted: dict[str, str] = {}
     skipped = 0
-    for address_text in sorted(labels_by_address):
+    for address_text in requested_addresses:
         try:
             address = chain.address_from_string(address_text)
             if not address:

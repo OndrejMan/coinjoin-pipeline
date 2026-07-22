@@ -14,7 +14,13 @@ IMAGE={image}
 test -n "${{SCRATCHDIR:-}}" || {{ echo "SCRATCHDIR is not set" >&2; exit 1; }}
 RUNS_ROOT="$SCRATCHDIR/coinjoin-run"
 RUN_WORK="$SCRATCHDIR/coinjoin-run/$RUN_ID"
-mkdir -p "$RUN_WORK/.pbs" "$RUN_WORK/logs"
+mkdir -p \
+  "$RUN_WORK/.pbs" \
+  "$RUN_WORK/.pipeline/exporters" \
+  "$RUN_WORK/coinjoin_emulator_data" \
+  "$RUN_WORK/coinjoin-analysis_data" \
+  "$RUN_WORK/blocksci-analysis_data" \
+  "$RUN_WORK/coinjoin-mappings_data"
 FAILED_MARKER="$RUN_WORK/.pbs/unified-report.failed"
 DONE_MARKER="$RUN_WORK/.pbs/unified-report.done"
 on_exit() {{
@@ -34,19 +40,21 @@ trap 'exit 143' TERM
 test -r "$S3_CREDENTIALS_FILE" || {{ echo "S3 credentials file is not readable: $S3_CREDENTIALS_FILE" >&2; exit 1; }}
 {s5cmd_check}
 export TMPDIR="$SCRATCHDIR" SINGULARITY_CACHEDIR="$SCRATCHDIR" SINGULARITY_TMPDIR="$SCRATCHDIR" SINGULARITY_LOCALCACHEDIR="$SCRATCHDIR"
-{download_run}
-test -f "$RUN_WORK/blocksci_data/config.json" || {{
-  echo "Unified S3 report requires blocksci_data/config.json" >&2
+echo "[unified-report] downloading lightweight report inputs"
+{download_inputs}
+test -f "$RUN_WORK/blocksci-analysis_data/blocksci_analysis.json" || {{
+  echo "Unified S3 report requires blocksci-analysis_data/blocksci_analysis.json" >&2
   exit 1
 }}
 test -f "$RUN_WORK/coinjoin-analysis_data/coinjoin_tx_info.json" || {{
   echo "Unified S3 report requires coinjoin-analysis_data/coinjoin_tx_info.json" >&2
   exit 1
 }}
-test -d "$RUN_WORK/.pipeline/exporters" || {{
-  echo "Unified S3 report requires .pipeline/exporters" >&2
+test -f "$RUN_WORK/.pipeline/exporters/unified_report.py" || {{
+  echo "Unified S3 report requires .pipeline/exporters/unified_report.py" >&2
   exit 1
 }}
+echo "[unified-report] assembling JSON and Markdown from precomputed analyzer outputs"
 singularity exec \
   --bind "$RUNS_ROOT:/runs/emulation/logs:rw" \
   --bind "$RUN_WORK/.pipeline/exporters:/mnt/exporters:ro" \
@@ -58,4 +66,4 @@ test -f "$REPORT_DIR/unified_report.json" || {{
   exit 1
 }}
 {upload_report}
-{upload_logs}
+echo "[unified-report] report upload complete"

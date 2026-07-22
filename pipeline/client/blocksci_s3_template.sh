@@ -54,6 +54,8 @@ singularity exec \
   --env PBS_RUN_ID="$RUN_ID" --env PBS_EXPORTED_MAX_BLOCK="$EXPORTED_MAX_BLOCK" "$IMAGE" \
   bash -c 'cd "/runs/emulation/logs/$PBS_RUN_ID" && EXPORTED_MAX_BLOCK="$PBS_EXPORTED_MAX_BLOCK" && {command}'
 {report_output_check}
+{analysis_output_check}
 {upload_blocksci}
+{upload_analysis}
 {upload_report}
 {upload_logs}

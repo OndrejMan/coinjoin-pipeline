@@ -19,6 +19,7 @@ from client.wrapper import (
     COINJOIN_ANALYSIS_TARGET_PATH_ENV,
     DEFAULT_RUN_TIMEZONE,
     RUNS_ROOT_CONTAINER,
+    S3PBSJobs,
     blocksci_output_exists,
     build_parser,
     captured_pipeline_stage,
@@ -73,6 +74,7 @@ def _full_run_s3_args(**overrides) -> Namespace:
         emulation_timeout=3600,
         analysisPbs=True,
         blocksciPbs=True,
+        mappingsPbs=False,
         pbs_walltime=None,
     )
     values.update(overrides)
@@ -102,16 +104,20 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}
         self.addCleanup(mock.patch.stopall)
-        mocks["run_pbs_from_s3"].return_value = (
-            "analysis.job",
-            "blocksci.job",
-            "report.job",
+        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
+            coinjoin_analysis="analysis.job",
+            blocksci_work="blocksci.job",
+            unified_report="report.job",
         )
         calls: list[str] = []
         mocks["run_kubernetes_s3_emulation"].side_effect = lambda *a, **k: calls.append("emulate")
         mocks["run_pbs_from_s3"].side_effect = lambda *a, **k: (
             calls.append("submit-pbs"),
-            ("analysis.job", "blocksci.job", "report.job"),
+            S3PBSJobs(
+                coinjoin_analysis="analysis.job",
+                blocksci_work="blocksci.job",
+                unified_report="report.job",
+            ),
         )[1]
         mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(f"wait:{stage}")
 
@@ -143,14 +149,42 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         mocks["run_pbs_from_s3"].assert_not_called()
         mocks["collect_s3_emulation_diagnostics"].assert_called_once()
 
+    def test_full_run_s3_waits_for_mappings_before_report(self):
+        patches = self._patches()
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        self.addCleanup(mock.patch.stopall)
+        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
+            coinjoin_analysis="analysis.job",
+            coinjoin_mappings="mappings.job",
+            blocksci_work="blocksci.job",
+            unified_report="report.job",
+        )
+        calls: list[str] = []
+        mocks["wait_for_s3_marker"].side_effect = (
+            lambda stage, *a, **k: calls.append(stage)
+        )
+
+        run_full_run_s3(_full_run_s3_args(mappingsPbs=True))
+
+        self.assertEqual(
+            calls,
+            [
+                "kubernetes-emulation",
+                "coinjoin-analysis",
+                "blocksci",
+                "coinjoin-mappings",
+                "unified-report",
+            ],
+        )
+
     def test_full_run_s3_analysis_failure_cancels_dependent_report_job(self):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}
         self.addCleanup(mock.patch.stopall)
-        mocks["run_pbs_from_s3"].return_value = (
-            "analysis.job",
-            "blocksci.job",
-            "report.job",
+        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
+            coinjoin_analysis="analysis.job",
+            blocksci_work="blocksci.job",
+            unified_report="report.job",
         )
 
         def wait(stage, *arguments, **keywords):
@@ -164,14 +198,39 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
 
         mocks["qdel_pbs_job"].assert_called_once_with("report.job")
 
+    def test_full_run_s3_analysis_failure_cancels_mappings_and_report(self):
+        patches = self._patches()
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        self.addCleanup(mock.patch.stopall)
+        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
+            coinjoin_analysis="analysis.job",
+            coinjoin_mappings="mappings.job",
+            blocksci_work="blocksci.job",
+            unified_report="report.job",
+        )
+
+        def wait(stage, *arguments, **keywords):
+            if stage == "coinjoin-analysis":
+                raise ArtifactTransportError("analysis failed")
+
+        mocks["wait_for_s3_marker"].side_effect = wait
+
+        with self.assertRaises(ArtifactTransportError):
+            run_full_run_s3(_full_run_s3_args(mappingsPbs=True))
+
+        self.assertEqual(
+            mocks["qdel_pbs_job"].call_args_list,
+            [mock.call("mappings.job"), mock.call("report.job")],
+        )
+
     def test_full_run_s3_blocksci_failure_cancels_dependent_report_job(self):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}
         self.addCleanup(mock.patch.stopall)
-        mocks["run_pbs_from_s3"].return_value = (
-            "analysis.job",
-            "blocksci.job",
-            "report.job",
+        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
+            coinjoin_analysis="analysis.job",
+            blocksci_work="blocksci.job",
+            unified_report="report.job",
         )
 
         def wait(stage, *arguments, **keywords):
@@ -182,6 +241,28 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
 
         with self.assertRaises(ArtifactTransportError):
             run_full_run_s3(_full_run_s3_args())
+
+        mocks["qdel_pbs_job"].assert_called_once_with("report.job")
+
+    def test_full_run_s3_mappings_failure_cancels_dependent_report_job(self):
+        patches = self._patches()
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        self.addCleanup(mock.patch.stopall)
+        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
+            coinjoin_analysis="analysis.job",
+            coinjoin_mappings="mappings.job",
+            blocksci_work="blocksci.job",
+            unified_report="report.job",
+        )
+
+        def wait(stage, *arguments, **keywords):
+            if stage == "coinjoin-mappings":
+                raise ArtifactTransportError("mappings failed")
+
+        mocks["wait_for_s3_marker"].side_effect = wait
+
+        with self.assertRaises(ArtifactTransportError):
+            run_full_run_s3(_full_run_s3_args(mappingsPbs=True))
 
         mocks["qdel_pbs_job"].assert_called_once_with("report.job")
 
@@ -227,7 +308,14 @@ class WrapperExportTest(unittest.TestCase):
             ) as report,
         ):
             job_ids = run_pbs_from_s3(args)
-        self.assertEqual(job_ids, ("analysis.job", "blocksci.job", "report.job"))
+        self.assertEqual(
+            job_ids,
+            S3PBSJobs(
+                coinjoin_analysis="analysis.job",
+                blocksci_work="blocksci.job",
+                unified_report="report.job",
+            ),
+        )
         self.assertNotIn("dependency_job_id", blocksci.call_args.kwargs)
         self.assertEqual(
             report.call_args.kwargs["dependency_job_ids"],
@@ -541,7 +629,7 @@ class WrapperExportTest(unittest.TestCase):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
         self.assertEqual(result.returncode, 2)
-        self.assertIn("supported only by full-run and mappings", result.stderr)
+        self.assertIn("pbs-from-s3", result.stderr)
 
     def test_mappings_pbs_requires_wasabi2_coinjoin_type(self):
         result = subprocess.run(
@@ -661,6 +749,7 @@ class WrapperExportTest(unittest.TestCase):
             result = subprocess.run(
                 self._full_run_s3_argv(
                     "--scenario", "scenario.json",
+                    "--mappingsPbs",
                     "--pbs-unified-report-ncpus", "1",
                     "--pbs-unified-report-mem", "2gb",
                     "--pbs-unified-report-scratch", "3gb",
@@ -673,12 +762,14 @@ class WrapperExportTest(unittest.TestCase):
         self.assertIn("Kubernetes S3-compatible resources", result.stdout)
         self.assertIn("PBS S3-compatible script for coinjoin-analysis", result.stdout)
         self.assertIn("PBS S3-compatible script for blocksci", result.stdout)
+        self.assertIn("PBS S3-compatible script for coinjoin-mappings", result.stdout)
         self.assertIn("PBS S3-compatible script for unified-report", result.stdout)
         self.assertIn("#PBS -l select=1:ncpus=1:mem=2gb:scratch_local=3gb", result.stdout)
         self.assertIn("#PBS -l walltime=00:15:00", result.stdout)
         self.assertIn("Would wait for s3://bucket/runs/run-1/.k8s/upload.done", result.stdout)
         self.assertIn("Would wait for s3://bucket/runs/run-1/.pbs/coinjoin-analysis.done", result.stdout)
         self.assertIn("Would wait for s3://bucket/runs/run-1/.pbs/blocksci.done", result.stdout)
+        self.assertIn("Would wait for s3://bucket/runs/run-1/.pbs/coinjoin-mappings.done", result.stdout)
         self.assertIn("Would wait for s3://bucket/runs/run-1/.pbs/unified-report.done", result.stdout)
 
     def test_kubernetes_s3_rejects_shared_storage_flags(self):

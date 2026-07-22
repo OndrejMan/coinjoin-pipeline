@@ -15,15 +15,27 @@ from client.kubernetes import (  # noqa: E402
     s3_emulation_job_name,
 )
 from client.pbs import (  # noqa: E402
+    blocksci_analysis_pbs_command,
     blocksci_export_pbs_command,
+    blocksci_parse_pbs_command,
+    blocksci_update_pbs_command,
+    render_blocksci_analyze_s3_pbs,
+    render_blocksci_parse_s3_pbs,
+    render_blocksci_update_s3_pbs,
     render_blocksci_s3_pbs,
     render_coinjoin_analysis_s3_pbs,
+    render_mappings_s3_pbs,
     render_unified_report_s3_pbs,
     submit_blocksci_s3_pbs,
     submit_coinjoin_analysis_s3_pbs,
+    submit_mappings_s3_pbs,
     submit_unified_report_s3_pbs,
 )
-from client.wrapper import run_pbs_from_s3  # noqa: E402
+from client.wrapper import (  # noqa: E402
+    build_parser,
+    run_pbs_from_s3,
+    validate_artifact_arguments,
+)
 
 COMMON = dict(
     artifact_uri="s3://bucket/runs",
@@ -52,7 +64,9 @@ def render_kubernetes_manifest(*, reuse_namespace: bool = False) -> dict:
     )
 
 
-def s3_pbs_args(*, analysis: bool = True, blocksci: bool = True) -> SimpleNamespace:
+def s3_pbs_args(
+    *, analysis: bool = True, blocksci: bool = True, mappings: bool = False
+) -> SimpleNamespace:
     return SimpleNamespace(
         artifact_uri=COMMON["artifact_uri"],
         run_id=COMMON["run_id"],
@@ -62,6 +76,7 @@ def s3_pbs_args(*, analysis: bool = True, blocksci: bool = True) -> SimpleNamesp
         dry_run=False,
         analysisPbs=analysis,
         blocksciPbs=blocksci,
+        mappingsPbs=mappings,
         coinjoin_type="wasabi2",
         min_input_count=2,
         joinmarket_detector="definite",
@@ -69,6 +84,16 @@ def s3_pbs_args(*, analysis: bool = True, blocksci: bool = True) -> SimpleNamesp
         joinmarket_percentage_fee=0.00004,
         joinmarket_max_depth=200000,
         test_values=True,
+        blocksci_workflow="combined",
+        blocksci_task="detect",
+        blocksci_script=None,
+        blocksci_notebook_port=8888,
+        blocksci_notebooks_dir=None,
+        blocksci_cache_source_run_id=None,
+        blocksci_external_bitcoin_datadir=None,
+        blocksci_external_blocksci_dir=None,
+        blocksci_network=None,
+        blocksci_max_block=None,
     )
 
 
@@ -80,9 +105,14 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
         **COMMON, image="docker://blocksci", command="analyze"
     )
     report = render_unified_report_s3_pbs(
-        **COMMON, image="docker://blocksci", command="report"
+        **COMMON, image="docker://pipeline", command="report"
     )
-    for script in (coinjoin, blocksci, report):
+    mappings = render_mappings_s3_pbs(
+        **COMMON,
+        enumerator_image="docker://enumerator",
+        sake_image="docker://sake",
+    )
+    for script in (coinjoin, blocksci, mappings, report):
         assert "$SCRATCHDIR/coinjoin-run/$RUN_ID" in script
         assert "s5cmd --credentials-file" in script
         assert '--profile "$S3_PROFILE"' in script
@@ -107,15 +137,144 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
     assert '"$BITCOIN_DATADIR:/mnt/data:ro"' in blocksci
     assert "requires a Bitcoin datadir containing regtest/blocks" in blocksci
     assert "requires coinjoin-analysis_data/coinjoin_tx_info.json" in blocksci
-    assert "Unified S3 report requires blocksci_data/config.json" in report
+    assert "Unified S3 report requires blocksci-analysis_data/blocksci_analysis.json" in report
     assert "Unified S3 report requires coinjoin-analysis_data/coinjoin_tx_info.json" in report
     assert "#PBS -l select=1:ncpus=8:mem=64gb:scratch_local=100gb" in blocksci
-    assert "#PBS -l select=1:ncpus=2:mem=8gb:scratch_local=100gb" in report
+    assert "#PBS -l select=1:ncpus=2:mem=8gb:scratch_local=10gb" in report
     for script in (blocksci, report):
         assert 'REPORT_DIR="$RUN_WORK/coinjoinPipeline_data"' in script
         assert 'sync "$REPORT_DIR/" "$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"' in script
         assert "blocksciEmulatorAnalysis_data" not in script
     assert "/mnt/data" not in report
+    assert '"$ARTIFACT_URI/$RUN_ID/*"' not in report
+    assert '"$ARTIFACT_URI/$RUN_ID/blocksci_data/*"' not in report
+    assert '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"' not in report
+    assert '"$ARTIFACT_URI/$RUN_ID/blocksci-analysis_data/*"' in report
+    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/*"' in report
+    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/*"' in report
+    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/*"' in mappings
+    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin-mappings_data/"' in mappings
+    assert ".pbs/coinjoin-mappings.done" in mappings
+    assert "coinjoin_mappings.json" in mappings
+
+
+def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
+    parse = render_blocksci_parse_s3_pbs(
+        **COMMON,
+        image="docker://blocksci",
+        command=blocksci_parse_pbs_command("run-1"),
+    )
+    analyze = render_blocksci_analyze_s3_pbs(
+        **COMMON,
+        image="docker://blocksci",
+        command=blocksci_analysis_pbs_command(
+            "run-1", "wasabi2", 2, "definite", 5000, 0.00004, 200000, True
+        ),
+    )
+
+    subprocess.run(["bash", "-n"], input=parse, text=True, check=True)
+    subprocess.run(["bash", "-n"], input=analyze, text=True, check=True)
+    assert "blocksci_parser" in parse
+    assert "blocksci_data.tar.gz" in parse
+    assert "sha256sum blocksci_data.tar.gz" in parse
+    assert ".pbs/blocksci-parse.done" in parse
+    assert "blocksci_parser" not in analyze
+    assert "sha256sum -c blocksci_data.tar.gz.sha256" in analyze
+    assert "blocksci_analysis.py" in analyze
+    assert ".pbs/blocksci-analyze.done" in analyze
+    assert '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"' not in analyze
+
+    notebook = render_blocksci_analyze_s3_pbs(
+        **COMMON,
+        image="docker://blocksci",
+        command="uv run jupyter notebook",
+        mode="blocksci-notebook",
+    )
+    subprocess.run(["bash", "-n"], input=notebook, text=True, check=True)
+    assert "ssh -N -J $LOGIN@$FRONTEND" in notebook
+    assert ".pbs/blocksci-notebook.done" in notebook
+    assert '"$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/*"' not in notebook
+    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/*"' not in notebook
+
+
+def test_external_bitcoin_parse_uses_shared_blocks_without_s3_emulator_inputs() -> None:
+    with (
+        mock.patch("client.pbs.require_storage_path"),
+        mock.patch("client.pbs.require_existing_path"),
+        mock.patch.object(Path, "is_dir", return_value=True),
+    ):
+        script = render_blocksci_parse_s3_pbs(
+            **COMMON,
+            image="docker://blocksci",
+            command=blocksci_parse_pbs_command(
+                "run-1",
+                coin_type="bitcoin",
+                disk_path="/mnt/data",
+                max_block_expression="850001",
+            ),
+            external_bitcoin_datadir=Path("/storage/external/bitcoin"),
+            external_network="bitcoin",
+            external_max_block=850000,
+        )
+
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert '--bind "$BITCOIN_DATADIR:/mnt/data:ro"' in script
+    assert "generate-config bitcoin " in script
+    assert "--disk /mnt/data --max-block 850001" in script
+    assert '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"' not in script
+    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/' not in script
+    assert '"external-bitcoin" "bitcoin" "$EXPORTED_MAX_BLOCK"' in script
+
+
+def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target() -> None:
+    with (
+        mock.patch("client.pbs.require_storage_path"),
+        mock.patch("client.pbs.require_existing_path"),
+        mock.patch.object(Path, "is_dir", return_value=True),
+    ):
+        script = render_blocksci_update_s3_pbs(
+            **COMMON,
+            source_run_id="run-0",
+            image="docker://blocksci",
+            command=blocksci_update_pbs_command("run-1"),
+            external_bitcoin_datadir=Path("/storage/external/bitcoin"),
+            external_network="bitcoin",
+            external_max_block=850100,
+        )
+
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert 'SOURCE_RUN_ID=run-0' in script
+    assert '"$ARTIFACT_URI/$SOURCE_RUN_ID/blocksci-parse_data/*"' in script
+    assert '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/"' in script
+    assert "sha256sum -c blocksci_data.tar.gz.sha256" in script
+    assert '"source_kind": "external-bitcoin"' in script
+    assert '"cache_operation": "incremental-update"' in script
+    assert '"source_run_id": "%s"' in script
+    assert "generate-config" not in script
+    assert "blocksci_parser /runs/emulation/logs/run-1/blocksci_data/config.json update" in script
+    assert "Target maximum block" in script
+    assert ".pbs/blocksci-update.done" in script
+
+
+def test_external_blocksci_import_repackages_index_without_parser() -> None:
+    with (
+        mock.patch("client.pbs.require_storage_path"),
+        mock.patch("client.pbs.require_existing_path"),
+        mock.patch.object(Path, "is_file", return_value=True),
+    ):
+        script = render_blocksci_parse_s3_pbs(
+            **COMMON,
+            image="docker://blocksci",
+            command=blocksci_parse_pbs_command("run-1"),
+            external_blocksci_dir=Path("/storage/external/blocksci_data"),
+        )
+
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert 'cp -a "$EXTERNAL_BLOCKSCI_DIR" "$RUN_WORK/blocksci_data"' in script
+    assert "blocksci_parser" not in script
+    assert '"external-blocksci" "from-config" "$EXPORTED_MAX_BLOCK"' in script
+    assert "CANONICAL_PARSED" in script
+    assert '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"' not in script
 
 
 def test_wrapper_images_package_unified_report_s3_template() -> None:
@@ -123,9 +282,12 @@ def test_wrapper_images_package_unified_report_s3_template() -> None:
         PROJECT_ROOT / "Dockerfile",
         PROJECT_ROOT / "pipeline" / "client" / "Dockerfile",
     ):
-        assert "unified_report_s3_template.sh" in dockerfile.read_text(
-            encoding="utf-8"
-        )
+        content = dockerfile.read_text(encoding="utf-8")
+        assert "unified_report_s3_template.sh" in content
+        assert "blocksci_parse_s3_template.sh" in content
+        assert "blocksci_update_s3_template.sh" in content
+        assert "blocksci_analyze_s3_template.sh" in content
+        assert "mappings_s3_template.sh" in content
 
 
 def test_s3_emulation_job_name_is_unique_and_dns_safe() -> None:
@@ -150,6 +312,23 @@ def test_blocksci_s3_parse_only_does_not_require_or_upload_report() -> None:
     assert "blocksciEmulatorAnalysis_data/" not in blocksci
     assert "REPORT_DIR=" not in blocksci
     assert "blocksci_data/" in blocksci
+
+
+def test_blocksci_s3_analysis_mode_uploads_precomputed_artifact() -> None:
+    blocksci = render_blocksci_s3_pbs(
+        **COMMON,
+        image="docker://blocksci",
+        command="parse-and-analyze",
+        include_report=False,
+        export_analysis=True,
+    )
+
+    assert "blocksci-analysis_data/blocksci_analysis.json" in blocksci
+    assert (
+        'sync "$RUN_WORK/blocksci-analysis_data/" '
+        '"$ARTIFACT_URI/$RUN_ID/blocksci-analysis_data/"'
+    ) in blocksci
+    assert "coinjoinPipeline_data/" not in blocksci
 
 
 def test_frontend_submit_does_not_invoke_s5cmd() -> None:
@@ -202,6 +381,23 @@ def test_unified_report_submission_forwards_both_dependencies() -> None:
     assert qsub.call_args.args[1] == ("analysis.server", "blocksci.server")
 
 
+def test_mappings_submission_forwards_analysis_dependency() -> None:
+    with (
+        mock.patch("client.pbs.require_qsub"),
+        mock.patch("client.pbs.submit_pbs_text", return_value="mappings.server") as qsub,
+    ):
+        assert (
+            submit_mappings_s3_pbs(
+                **COMMON,
+                enumerator_image="docker://enumerator",
+                sake_image="docker://sake",
+                dependency_job_id="analysis.server",
+            )
+            == "mappings.server"
+        )
+    assert qsub.call_args.args[1] == "analysis.server"
+
+
 def test_pbs_from_s3_submits_parallel_analyzers_then_dependent_report() -> None:
     args = s3_pbs_args()
     with (
@@ -224,15 +420,20 @@ def test_pbs_from_s3_submits_parallel_analyzers_then_dependent_report() -> None:
     blocksci.assert_called_once()
     report.assert_called_once()
     assert blocksci.call_args.kwargs["include_report"] is False
+    assert blocksci.call_args.kwargs["export_analysis"] is True
     assert "unified_report.py" not in blocksci.call_args.kwargs["command"]
+    assert "blocksci_analysis.py" in blocksci.call_args.kwargs["command"]
     assert report.call_args.kwargs["dependency_job_ids"] == (
         "analysis.server",
         "blocksci.server",
     )
     assert report.call_args.kwargs["ncpus"] == 2
     assert report.call_args.kwargs["mem"] == "8gb"
-    assert report.call_args.kwargs["scratch"] == "100gb"
-    assert report.call_args.kwargs["walltime"] == "24:00:00"
+    assert report.call_args.kwargs["scratch"] == "10gb"
+    assert report.call_args.kwargs["walltime"] == "01:00:00"
+    assert report.call_args.kwargs["image"] == (
+        "docker://ghcr.io/ondrejman/coinjoin-pipeline:latest"
+    )
     assert report.call_args.kwargs["command"] == blocksci_export_pbs_command(
         run_id="run-1",
         coinjoin_type="wasabi2",
@@ -243,6 +444,72 @@ def test_pbs_from_s3_submits_parallel_analyzers_then_dependent_report() -> None:
         joinmarket_max_depth=200000,
         test_values=True,
     )
+
+
+def test_pbs_from_s3_mappings_depend_on_analysis_and_gate_report() -> None:
+    args = s3_pbs_args(mappings=True)
+    with (
+        mock.patch(
+            "client.wrapper.submit_coinjoin_analysis_s3_pbs",
+            return_value="analysis.server",
+        ),
+        mock.patch(
+            "client.wrapper.submit_mappings_s3_pbs",
+            return_value="mappings.server",
+        ) as mappings,
+        mock.patch(
+            "client.wrapper.submit_blocksci_s3_pbs",
+            return_value="blocksci.server",
+        ) as blocksci,
+        mock.patch(
+            "client.wrapper.submit_unified_report_s3_pbs",
+            return_value="report.server",
+        ) as report,
+    ):
+        jobs = run_pbs_from_s3(args)
+
+    assert mappings.call_args.kwargs["dependency_job_id"] == "analysis.server"
+    assert blocksci.call_args.kwargs["include_report"] is False
+    assert blocksci.call_args.kwargs["export_analysis"] is True
+    assert report.call_args.kwargs["dependency_job_ids"] == (
+        "analysis.server",
+        "blocksci.server",
+        "mappings.server",
+    )
+    assert report.call_args.kwargs["include_mappings"] is True
+    assert jobs.coinjoin_mappings == "mappings.server"
+
+
+def test_pbs_from_s3_mappings_only_uses_existing_baseline() -> None:
+    args = s3_pbs_args(analysis=False, blocksci=False, mappings=True)
+    with (
+        mock.patch(
+            "client.wrapper.submit_mappings_s3_pbs",
+            return_value="mappings.server",
+        ) as mappings,
+        mock.patch("client.wrapper.submit_unified_report_s3_pbs") as report,
+    ):
+        jobs = run_pbs_from_s3(args)
+
+    mappings.assert_called_once()
+    assert mappings.call_args.kwargs["dependency_job_id"] is None
+    report.assert_not_called()
+    assert jobs.coinjoin_mappings == "mappings.server"
+
+
+def test_unified_report_downloads_mappings_only_when_requested() -> None:
+    without_mappings = render_unified_report_s3_pbs(
+        **COMMON, image="docker://pipeline", command="report"
+    )
+    with_mappings = render_unified_report_s3_pbs(
+        **COMMON,
+        image="docker://pipeline",
+        command="report",
+        include_mappings=True,
+    )
+
+    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin-mappings_data/*"' not in without_mappings
+    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin-mappings_data/*"' in with_mappings
 
 
 def test_pbs_from_s3_report_specific_resources_override_shared_resources() -> None:
@@ -295,7 +562,170 @@ def test_pbs_from_s3_blocksci_only_keeps_combined_report() -> None:
     blocksci.assert_called_once()
     report.assert_not_called()
     assert blocksci.call_args.kwargs["include_report"] is True
+    assert blocksci.call_args.kwargs["export_analysis"] is False
     assert "unified_report.py" in blocksci.call_args.kwargs["command"]
+
+
+def test_pbs_from_s3_reusable_submits_parse_analyze_and_report_chain() -> None:
+    args = s3_pbs_args()
+    args.blocksci_workflow = "reusable"
+    with (
+        mock.patch(
+            "client.wrapper.submit_coinjoin_analysis_s3_pbs",
+            return_value="analysis.server",
+        ),
+        mock.patch(
+            "client.wrapper.submit_blocksci_parse_s3_pbs",
+            return_value="parse.server",
+        ) as parse,
+        mock.patch(
+            "client.wrapper.submit_blocksci_analyze_s3_pbs",
+            return_value="blocksci-analyze.server",
+        ) as analyze,
+        mock.patch(
+            "client.wrapper.submit_unified_report_s3_pbs",
+            return_value="report.server",
+        ) as report,
+    ):
+        jobs = run_pbs_from_s3(args)
+
+    parse.assert_called_once()
+    analyze.assert_called_once()
+    assert analyze.call_args.kwargs["dependency_job_id"] == "parse.server"
+    assert analyze.call_args.kwargs["mode"] == "blocksci-analyze"
+    assert "blocksci_parser" not in analyze.call_args.kwargs["command"]
+    assert report.call_args.kwargs["dependency_job_ids"] == (
+        "analysis.server",
+        "blocksci-analyze.server",
+    )
+    assert jobs.blocksci_parse == "parse.server"
+    assert jobs.blocksci_work == "blocksci-analyze.server"
+
+
+def test_pbs_from_s3_cached_notebook_skips_parse_and_report() -> None:
+    args = s3_pbs_args(analysis=False)
+    args.blocksci_workflow = "cached"
+    args.blocksci_task = "notebook"
+    with (
+        mock.patch("client.wrapper.submit_blocksci_parse_s3_pbs") as parse,
+        mock.patch(
+            "client.wrapper.submit_blocksci_analyze_s3_pbs",
+            return_value="notebook.server",
+        ) as notebook,
+        mock.patch("client.wrapper.submit_unified_report_s3_pbs") as report,
+    ):
+        jobs = run_pbs_from_s3(args)
+
+    parse.assert_not_called()
+    report.assert_not_called()
+    assert notebook.call_args.kwargs["dependency_job_id"] is None
+    assert notebook.call_args.kwargs["mode"] == "blocksci-notebook"
+    assert "jupyter notebook" in notebook.call_args.kwargs["command"]
+    assert jobs.blocksci_work == "notebook.server"
+
+
+def test_pbs_from_s3_parse_only_publishes_cache_without_work() -> None:
+    args = s3_pbs_args(analysis=False)
+    args.blocksci_workflow = "reusable"
+    args.blocksci_task = "parse"
+    with (
+        mock.patch(
+            "client.wrapper.submit_blocksci_parse_s3_pbs",
+            return_value="parse.server",
+        ) as parse,
+        mock.patch("client.wrapper.submit_blocksci_analyze_s3_pbs") as work,
+        mock.patch("client.wrapper.submit_unified_report_s3_pbs") as report,
+    ):
+        jobs = run_pbs_from_s3(args)
+
+    parse.assert_called_once()
+    work.assert_not_called()
+    report.assert_not_called()
+    assert jobs.blocksci_parse == "parse.server"
+    assert jobs.blocksci_work is None
+
+
+def test_pbs_from_s3_incremental_update_preflights_and_submits_only_update() -> None:
+    args = s3_pbs_args(analysis=False)
+    args.run_id = "run-2"
+    args.blocksci_workflow = "cached"
+    args.blocksci_task = "update"
+    args.blocksci_cache_source_run_id = "run-1"
+    args.blocksci_external_bitcoin_datadir = "/storage/external/bitcoin"
+    args.blocksci_network = "bitcoin"
+    args.blocksci_max_block = 850100
+    with (
+        mock.patch("client.wrapper.s3_access_preflight") as preflight,
+        mock.patch("client.wrapper.s3_object_exists", return_value=True) as exists,
+        mock.patch("client.wrapper.ensure_empty_run_prefix") as empty,
+        mock.patch(
+            "client.wrapper.submit_blocksci_update_s3_pbs",
+            return_value="update.server",
+        ) as update,
+        mock.patch("client.wrapper.submit_blocksci_parse_s3_pbs") as parse,
+        mock.patch("client.wrapper.submit_blocksci_analyze_s3_pbs") as work,
+        mock.patch("client.wrapper.submit_unified_report_s3_pbs") as report,
+    ):
+        jobs = run_pbs_from_s3(args)
+
+    preflight.assert_called_once()
+    assert "run-1/blocksci-parse_data/manifest.json" in exists.call_args.args[1]
+    empty.assert_called_once()
+    update.assert_called_once()
+    kwargs = update.call_args.kwargs
+    assert kwargs["source_run_id"] == "run-1"
+    assert kwargs["external_bitcoin_datadir"] == Path("/storage/external/bitcoin")
+    assert kwargs["external_max_block"] == 850100
+    assert "generate-config" not in kwargs["command"]
+    parse.assert_not_called()
+    work.assert_not_called()
+    report.assert_not_called()
+    assert jobs.blocksci_update == "update.server"
+
+
+def test_wrapper_accepts_versioned_incremental_update_arguments() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pbs-from-s3",
+            "--run-id", "run-2",
+            "--artifact-uri", "s3://bucket/runs",
+            "--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz",
+            "--s3-credentials-file", "/storage/user/.aws/credentials",
+            "--s3-profile", "coinjoin",
+            "--engine", "joinmarket",
+            "--blocksciPbs",
+            "--blocksci-workflow", "cached",
+            "--blocksci-task", "update",
+            "--blocksci-cache-source-run-id", "run-1",
+            "--blocksci-external-bitcoin-datadir", "/storage/external/bitcoin",
+            "--blocksci-network", "bitcoin",
+            "--blocksci-max-block", "850100",
+        ]
+    )
+
+    validate_artifact_arguments(parser, args)
+    assert args.blocksci_cache_source_run_id == "run-1"
+    assert args.run_id == "run-2"
+
+
+def test_pbs_from_s3_external_bitcoin_builds_network_specific_parse() -> None:
+    args = s3_pbs_args(analysis=False)
+    args.blocksci_workflow = "reusable"
+    args.blocksci_task = "parse"
+    args.blocksci_external_bitcoin_datadir = "/storage/external/bitcoin"
+    args.blocksci_external_blocksci_dir = None
+    args.blocksci_network = "bitcoin"
+    args.blocksci_max_block = 850000
+    with mock.patch(
+        "client.wrapper.submit_blocksci_parse_s3_pbs", return_value="parse.server"
+    ) as parse:
+        run_pbs_from_s3(args)
+
+    kwargs = parse.call_args.kwargs
+    assert kwargs["external_bitcoin_datadir"] == Path("/storage/external/bitcoin")
+    assert "generate-config bitcoin " in kwargs["command"]
+    assert "--disk /mnt/data --max-block 850001" in kwargs["command"]
 
 
 def test_s3_submission_pipes_script_to_qsub_stdin() -> None:

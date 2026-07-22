@@ -244,6 +244,26 @@ class PBSTemplateTest(unittest.TestCase):
         self.assertIn("blocksci_parser", command)
         self.assertNotIn("unified_report.py", command)
 
+    def test_blocksci_pbs_command_can_persist_analysis_for_lightweight_report(self):
+        command = blocksci_pbs_command(
+            run_id="run-a",
+            coinjoin_type="wasabi2",
+            min_input_count=None,
+            joinmarket_detector="definite",
+            joinmarket_min_base_fee=5000,
+            joinmarket_percentage_fee=0.00004,
+            joinmarket_max_depth=200000,
+            test_values=True,
+            include_report=False,
+            export_analysis=True,
+        )
+
+        self.assertIn("blocksci_parser", command)
+        self.assertIn("python3 /mnt/exporters/blocksci_analysis.py", command)
+        self.assertIn("--min-input-count default", command)
+        self.assertIn("--test-values", command)
+        self.assertNotIn("unified_report.py", command)
+
     def test_blocksci_export_pbs_command_is_report_only(self):
         command = blocksci_export_pbs_command(
             run_id="run-a",
@@ -257,6 +277,7 @@ class PBSTemplateTest(unittest.TestCase):
         )
 
         self.assertIn("unified_report.py", command)
+        self.assertIn("--blocksci-analysis", command)
         self.assertIn("--test-values", command)
         self.assertNotIn("blocksci_parser", command)
 

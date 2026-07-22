@@ -25,7 +25,7 @@ ACTION_ALIASES = {"coinjoin": "coinjoin-analysis"}
 PBS_STAGE_ACTIONS = {
     "--analysisPbs": ("full-run", "coinjoin-analysis", "coinjoin", "pbs-from-s3"),
     "--blocksciPbs": ("full-run", "analyze", "pbs-from-s3"),
-    "--mappingsPbs": ("full-run", "mappings"),
+    "--mappingsPbs": ("full-run", "mappings", "pbs-from-s3"),
 }
 
 
@@ -126,25 +126,136 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
             supported = ", ".join(name for name in permitted if name not in ACTION_ALIASES)
             errors.append(f"{flag} is supported only by {supported}")
     backend = option_value(argv, "--artifact-backend") or "shared-storage"
+    blocksci_workflow = option_value(argv, "--blocksci-workflow") or "combined"
+    blocksci_task = option_value(argv, "--blocksci-task") or "detect"
+    if blocksci_workflow != "combined" and not has_option(argv, "--blocksciPbs"):
+        errors.append("reusable BlockSci workflows require --blocksciPbs")
+    if blocksci_task == "parse":
+        if action != "pbs-from-s3" or blocksci_workflow != "reusable":
+            errors.append(
+                "--blocksci-task parse requires pbs-from-s3 --blocksci-workflow reusable"
+            )
+        if has_option(argv, "--analysisPbs") or not has_option(argv, "--blocksciPbs"):
+            errors.append(
+                "--blocksci-task parse requires --blocksciPbs without --analysisPbs"
+            )
+    elif blocksci_task == "update":
+        if action != "pbs-from-s3" or blocksci_workflow != "cached":
+            errors.append(
+                "--blocksci-task update requires pbs-from-s3 --blocksci-workflow cached"
+            )
+        if has_option(argv, "--analysisPbs") or not has_option(argv, "--blocksciPbs"):
+            errors.append(
+                "--blocksci-task update requires --blocksciPbs without --analysisPbs"
+            )
+    elif blocksci_task != "detect":
+        if action != "pbs-from-s3":
+            errors.append("BlockSci script and notebook tasks are submitted with pbs-from-s3")
+        if blocksci_workflow == "combined":
+            errors.append(
+                "BlockSci script and notebook tasks require --blocksci-workflow reusable or cached"
+            )
+        if has_option(argv, "--analysisPbs") or not has_option(argv, "--blocksciPbs"):
+            errors.append(
+                "BlockSci script and notebook tasks require --blocksciPbs without --analysisPbs"
+            )
+    if action == "pbs-from-s3" and blocksci_task == "script" and not (
+        has_option(argv, "--blocksci-script") or has_option(argv, "--blocksciScript")
+    ):
+        errors.append("--blocksci-task script requires --blocksci-script")
+    if action == "pbs-from-s3" and blocksci_task != "script" and (
+        has_option(argv, "--blocksci-script") or has_option(argv, "--blocksciScript")
+    ):
+        errors.append("--blocksci-script requires --blocksci-task script")
+    if blocksci_task != "notebook" and has_option(argv, "--blocksci-notebooks-dir"):
+        errors.append("--blocksci-notebooks-dir requires --blocksci-task notebook")
+    if blocksci_task != "notebook" and has_option(argv, "--blocksci-notebook-port"):
+        errors.append("--blocksci-notebook-port requires --blocksci-task notebook")
+    external_bitcoin = has_option(argv, "--blocksci-external-bitcoin-datadir")
+    external_index = has_option(argv, "--blocksci-external-blocksci-dir")
+    external_network = has_option(argv, "--blocksci-network")
+    external_max_block = has_option(argv, "--blocksci-max-block")
+    source_cache_run_id = option_value(argv, "--blocksci-cache-source-run-id")
+    if blocksci_task == "update":
+        if not source_cache_run_id:
+            errors.append("--blocksci-task update requires --blocksci-cache-source-run-id")
+        if not external_bitcoin:
+            errors.append("--blocksci-task update requires --blocksci-external-bitcoin-datadir")
+        if external_index:
+            errors.append("--blocksci-task update does not support --blocksci-external-blocksci-dir")
+        target_run_id = option_value(argv, "--run-id")
+        if source_cache_run_id and target_run_id == source_cache_run_id:
+            errors.append("--blocksci-cache-source-run-id must differ from target --run-id")
+    elif source_cache_run_id:
+        errors.append("--blocksci-cache-source-run-id requires --blocksci-task update")
+    if external_bitcoin and external_index:
+        errors.append(
+            "choose either --blocksci-external-bitcoin-datadir or "
+            "--blocksci-external-blocksci-dir, not both"
+        )
+    if external_bitcoin or external_index:
+        parse_source = (
+            action == "pbs-from-s3"
+            and blocksci_workflow == "reusable"
+            and blocksci_task == "parse"
+        )
+        update_source = (
+            action == "pbs-from-s3"
+            and blocksci_workflow == "cached"
+            and blocksci_task == "update"
+            and external_bitcoin
+            and not external_index
+        )
+        if not (parse_source or update_source):
+            errors.append(
+                "external BlockSci sources require either reusable parse or cached update"
+            )
+    if external_bitcoin:
+        if not external_network or not external_max_block:
+            errors.append(
+                "--blocksci-external-bitcoin-datadir requires --blocksci-network "
+                "and --blocksci-max-block"
+            )
+    elif external_network or external_max_block:
+        errors.append(
+            "--blocksci-network and --blocksci-max-block require "
+            "--blocksci-external-bitcoin-datadir"
+        )
     if action == "pbs-from-s3":
         for flag in ("--run-id", "--artifact-uri", "--s3-endpoint-url", "--s3-credentials-file", "--s3-profile", "--engine"):
             if not has_option(argv, flag):
                 errors.append(f"pbs-from-s3 requires {flag}")
-        if not has_option(argv, "--analysisPbs") and not has_option(argv, "--blocksciPbs"):
-            errors.append("pbs-from-s3 requires --analysisPbs or --blocksciPbs")
+        if not any(
+            has_option(argv, flag)
+            for flag in ("--analysisPbs", "--blocksciPbs", "--mappingsPbs")
+        ):
+            errors.append(
+                "pbs-from-s3 requires --analysisPbs, --blocksciPbs, or --mappingsPbs"
+            )
         report_resource_flags = (
             "--pbs-unified-report-ncpus",
             "--pbs-unified-report-mem",
             "--pbs-unified-report-scratch",
             "--pbs-unified-report-walltime",
         )
-        if any(has_option(argv, flag) for flag in report_resource_flags) and not (
-            has_option(argv, "--analysisPbs") and has_option(argv, "--blocksciPbs")
-        ):
+        separate_report = (
+            has_option(argv, "--blocksciPbs")
+            and blocksci_task == "detect"
+            and (
+                has_option(argv, "--analysisPbs")
+                or has_option(argv, "--mappingsPbs")
+                or blocksci_workflow != "combined"
+            )
+        )
+        if any(has_option(argv, flag) for flag in report_resource_flags) and not separate_report:
             errors.append(
-                "unified-report PBS resource overrides require both --analysisPbs and --blocksciPbs"
+                "unified-report PBS resource overrides require a separate unified-report job"
             )
     if backend == "s3" and action == "full-run":
+        if blocksci_workflow == "cached":
+            errors.append(
+                "full-run cannot reuse a cache before emulation; use --blocksci-workflow reusable"
+            )
         if option_value(argv, "--driver") != "kubernetes":
             errors.append("full-run --artifact-backend s3 requires --driver kubernetes")
         for flag in (
@@ -164,8 +275,6 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
                 "Kubernetes S3-compatible mode requires --reuse-namespace because "
                 "the credentials Secret must exist before the Job is created"
             )
-        if has_option(argv, "--mappingsPbs"):
-            errors.append("S3-compatible mappings are not implemented yet")
         if has_option(argv, "--parallel"):
             errors.append("full-run --artifact-backend s3 does not support --parallel")
         if has_option(argv, "--blocksci-script") or has_option(argv, "--blocksciScript"):
@@ -187,6 +296,12 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
         for flag in ("--kubernetes-btc-datadir", "--pbs-bitcoin-datadir", "--copy-to-host"):
             if has_option(argv, flag):
                 errors.append(f"Kubernetes S3-compatible mode does not support {flag}")
+    if action == "full-run" and backend != "s3" and (
+        blocksci_workflow != "combined" or blocksci_task != "detect"
+    ):
+        errors.append(
+            "reusable BlockSci workflows are currently supported only with the S3 artifact backend"
+        )
     engine = option_value(argv, "--engine")
     if engine is not None and engine not in {"wasabi", "joinmarket"}:
         errors.append("--engine must be wasabi or joinmarket")

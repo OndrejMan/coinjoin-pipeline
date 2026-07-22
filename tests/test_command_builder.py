@@ -150,8 +150,50 @@ class CommandBuilderTests(unittest.TestCase):
                 ("--reuse-namespace", None),
                 ("--analysisPbs", None),
                 ("--blocksciPbs", None),
+                ("--mappingsPbs", None),
             ],
         )
+        self.assertEqual(MODULE.validate_command(command).errors, [])
+
+    def test_s3_mappings_and_blocksci_allow_report_resource_overrides(self) -> None:
+        command = MODULE.Command(
+            action="pbs-from-s3",
+            options=[
+                ("--run-id", "run-1"),
+                ("--artifact-uri", "s3://bucket/runs"),
+                ("--s3-endpoint-url", "https://s3.example.test"),
+                ("--s3-credentials-file", "/storage/user/.aws/credentials"),
+                ("--s3-profile", "coinjoin"),
+                ("--engine", "wasabi"),
+                ("--coinjoin-type", "wasabi2"),
+                ("--blocksciPbs", None),
+                ("--mappingsPbs", None),
+                ("--pbs-unified-report-ncpus", "1"),
+            ],
+        )
+
+        self.assertEqual(MODULE.validate_command(command).errors, [])
+
+    def test_validation_accepts_versioned_s3_blocksci_update(self) -> None:
+        command = MODULE.Command(
+            action="pbs-from-s3",
+            options=[
+                ("--engine", "joinmarket"),
+                ("--artifact-uri", "s3://bucket/runs"),
+                ("--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz"),
+                ("--s3-credentials-file", "/storage/user/.aws/credentials"),
+                ("--s3-profile", "coinjoin"),
+                ("--run-id", "mainnet-850100"),
+                ("--blocksciPbs", None),
+                ("--blocksci-workflow", "cached"),
+                ("--blocksci-task", "update"),
+                ("--blocksci-cache-source-run-id", "mainnet-850000"),
+                ("--blocksci-external-bitcoin-datadir", "/storage/user/bitcoin"),
+                ("--blocksci-network", "bitcoin"),
+                ("--blocksci-max-block", "850100"),
+            ],
+        )
+
         self.assertEqual(MODULE.validate_command(command).errors, [])
 
     def test_validation_requires_s3_full_run_transport_and_stages(self) -> None:
@@ -416,6 +458,43 @@ class CommandBuilderTests(unittest.TestCase):
         )
         errors = MODULE.validate_command(missing).errors
         self.assertTrue(any("--blocksci-script not found or not a file" in error for error in errors))
+
+    def test_reusable_blocksci_parse_from_s3_is_valid(self) -> None:
+        command = MODULE.Command(
+            action="pbs-from-s3",
+            options=[
+                ("--run-id", "run-1"),
+                ("--artifact-uri", "s3://bucket/runs"),
+                ("--s3-endpoint-url", "https://s3.example.invalid"),
+                ("--s3-credentials-file", "/storage/user/.aws/credentials"),
+                ("--s3-profile", "coinjoin"),
+                ("--engine", "wasabi"),
+                ("--blocksciPbs", None),
+                ("--blocksci-workflow", "reusable"),
+                ("--blocksci-task", "parse"),
+            ],
+        )
+        self.assertEqual(MODULE.validate_command(command).errors, [])
+
+    def test_external_bitcoin_parse_from_s3_is_valid(self) -> None:
+        command = MODULE.Command(
+            action="pbs-from-s3",
+            options=[
+                ("--run-id", "run-1"),
+                ("--artifact-uri", "s3://bucket/runs"),
+                ("--s3-endpoint-url", "https://s3.example.invalid"),
+                ("--s3-credentials-file", "/storage/user/.aws/credentials"),
+                ("--s3-profile", "coinjoin"),
+                ("--engine", "wasabi"),
+                ("--blocksciPbs", None),
+                ("--blocksci-workflow", "reusable"),
+                ("--blocksci-task", "parse"),
+                ("--blocksci-external-bitcoin-datadir", "/storage/external/bitcoin"),
+                ("--blocksci-network", "bitcoin"),
+                ("--blocksci-max-block", "850000"),
+            ],
+        )
+        self.assertEqual(MODULE.validate_command(command).errors, [])
 
     def test_external_analyze_validates_network_and_coinjoin_type_choices(self) -> None:
         valid = MODULE.Command(

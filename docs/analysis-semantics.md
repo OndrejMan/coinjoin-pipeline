@@ -101,6 +101,30 @@ detects zero transactions, the JSON and Markdown reports carry a
 The exporter fails with a rebuild instruction when the installed BlockSci
 module lacks the raw binding; it never silently substitutes the linked subset.
 
+In the parallel S3 PBS graph, these detector results and the associated
+integration diagnostics and clustering assignments are persisted as
+`blocksci-analysis_data/blocksci_analysis.json` (schema 1.0). Report assembly
+requires the artifact's run ID and detector parameters to exactly match the
+requested report; a mismatched or stale artifact fails rather than being
+silently combined with a different baseline.
+
+The optional reusable S3 workflow separates that analyzer artifact from the
+parser cache. `blocksci-parse_data/manifest.json` schema 1.0 identifies the
+run, BlockSci image, exported maximum block, archive name, and archive SHA-256.
+Consumers verify the accompanying checksum before extracting the index and
+never treat a successful S3 download alone as proof that the parsed chain is
+valid. Standard detector output retains the same
+`blocksci-analysis_data/blocksci_analysis.json` contract regardless of whether
+it came from the combined or reusable workflow, so report semantics do not
+change.
+
+The same cache schema can represent emulator data, an external Bitcoin Core
+coin directory, or an imported BlockSci index; `source_kind` and `network` in
+the manifest preserve that provenance. Notebook and custom-script consumers
+operate only on the verified index. The standard detector remains tied to
+emulator label and exported-block inputs, so importing external chain data
+does not by itself create a unified emulator-comparison report.
+
 ## PBS template inputs
 
 Before rendering a PBS script, the pipeline validates shared-storage paths,
