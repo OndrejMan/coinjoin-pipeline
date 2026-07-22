@@ -1,0 +1,35 @@
+engine: wasabi
+coinjoin_type: wasabi2
+driver: kubernetes
+
+kubernetes:
+  namespace: man5-ns
+  reuse_namespace: true
+
+artifacts:
+  backend: s3
+  uri: s3://coinjoin-thesis/runs
+  endpoint_url: https://s3.cl4.du.cesnet.cz
+  secret_name: coinjoin-s3-credentials
+  credentials_file: /storage/brno2/home/xman/.aws/credentials
+  profile: coinjoin
+
+stages:
+  mappings: true
+
+pbs:
+  blocksci:
+    ncpus: 32
+    mem: 2tb
+    scratch: 2tb
+    walltime: "48:00:00"
+  analysis:
+    ncpus: 8
+    mem: 32gb
+    scratch: 100gb
+    walltime: "08:00:00"
+  mappings:
+    ncpus: 8
+    mem: 32gb
+    scratch: 100gb
+    walltime: "08:00:00"

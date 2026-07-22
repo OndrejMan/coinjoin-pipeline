@@ -548,6 +548,58 @@ def test_pbs_from_s3_report_specific_resources_override_shared_resources() -> No
     assert report.call_args.kwargs["walltime"] == "01:00:00"
 
 
+def test_pbs_from_s3_stage_resources_override_shared_fallback_independently() -> None:
+    args = s3_pbs_args(mappings=True)
+    args.pbs_ncpus = 4
+    args.pbs_mem = "24gb"
+    args.pbs_scratch = "50gb"
+    args.pbs_walltime = "04:00:00"
+    args.pbs_analysis_ncpus = 8
+    args.pbs_analysis_mem = "32gb"
+    args.pbs_analysis_scratch = "100gb"
+    args.pbs_analysis_walltime = "08:00:00"
+    args.pbs_blocksci_ncpus = 32
+    args.pbs_blocksci_mem = "2tb"
+    args.pbs_blocksci_scratch = "2tb"
+    args.pbs_blocksci_walltime = "48:00:00"
+    args.pbs_mappings_ncpus = 6
+    args.pbs_mappings_mem = "16gb"
+    args.pbs_mappings_scratch = "40gb"
+    args.pbs_mappings_walltime = "02:00:00"
+    with (
+        mock.patch(
+            "client.wrapper.submit_coinjoin_analysis_s3_pbs",
+            return_value="analysis.server",
+        ) as analysis,
+        mock.patch(
+            "client.wrapper.submit_mappings_s3_pbs",
+            return_value="mappings.server",
+        ) as mappings,
+        mock.patch(
+            "client.wrapper.submit_blocksci_s3_pbs",
+            return_value="blocksci.server",
+        ) as blocksci,
+        mock.patch(
+            "client.wrapper.submit_unified_report_s3_pbs",
+            return_value="report.server",
+        ),
+    ):
+        run_pbs_from_s3(args)
+
+    assert analysis.call_args.kwargs["ncpus"] == 8
+    assert analysis.call_args.kwargs["mem"] == "32gb"
+    assert analysis.call_args.kwargs["scratch"] == "100gb"
+    assert analysis.call_args.kwargs["walltime"] == "08:00:00"
+    assert blocksci.call_args.kwargs["ncpus"] == 32
+    assert blocksci.call_args.kwargs["mem"] == "2tb"
+    assert blocksci.call_args.kwargs["scratch"] == "2tb"
+    assert blocksci.call_args.kwargs["walltime"] == "48:00:00"
+    assert mappings.call_args.kwargs["ncpus"] == 6
+    assert mappings.call_args.kwargs["mem"] == "16gb"
+    assert mappings.call_args.kwargs["scratch"] == "40gb"
+    assert mappings.call_args.kwargs["walltime"] == "02:00:00"
+
+
 def test_pbs_from_s3_blocksci_only_keeps_combined_report() -> None:
     args = s3_pbs_args(analysis=False)
     with (

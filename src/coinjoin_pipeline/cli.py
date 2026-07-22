@@ -10,6 +10,7 @@ import sys
 
 from . import MANIFEST_SCHEMA_VERSION, __version__
 from .commands import action_from, launcher_command, option_value, validate_passthrough
+from .configuration import ConfigurationError, expand_configuration
 from .doctor import check as doctor_check, validate_arguments
 from .host import (
     add_effective_image_arguments,
@@ -82,11 +83,17 @@ Host options:
   --blocksci-image IMAGE
   --mappings-image IMAGE
   --sake-image IMAGE
+  --from-configuration FILE     load pipeline options from YAML
+  --fromConfiguration FILE      compatibility alias
 """)
 
 
 def main(argv: list[str] | None = None) -> int:
-    raw = list(sys.argv[1:] if argv is None else argv)
+    original_raw = list(sys.argv[1:] if argv is None else argv)
+    try:
+        raw, configuration_path = expand_configuration(original_raw)
+    except ConfigurationError as exc:
+        return fail(str(exc))
     if not raw or raw[0] in {"-h", "--help"}:
         usage()
         return 0
@@ -131,6 +138,13 @@ def main(argv: list[str] | None = None) -> int:
         return pull(runtime, images)
 
     action = action_from(passthrough)
+    if (
+        configuration_path is not None
+        and action == "full-run"
+        and option_value(passthrough, "--artifact-backend") == "s3"
+        and not option_value(passthrough, "--run-id")
+    ):
+        passthrough.extend(("--run-id", run_id_for(passthrough)))
     passthrough = add_effective_image_arguments(action, passthrough, images)
     required_images = required_image_components(action, passthrough)
     errors = validate_passthrough(passthrough, action)
@@ -148,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 2
-    reproduction = shlex.join(["coinjoin-pipeline", *raw])
+    reproduction = shlex.join(["coinjoin-pipeline", *original_raw])
     launcher_resource = files("coinjoin_pipeline").joinpath("resources/container/launcher.sh")
     with as_file(launcher_resource) as launcher:
         command = launcher_command(launcher, runtime, passthrough, images, runs_root, reproduction)
@@ -187,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
             requested_version=("local" if host["local_build"] else host.get("version") or DEFAULT_VERSION),
             effective_images=images.as_dict(),
             runtime=runtime,
-            user_arguments=raw,
+            user_arguments=original_raw,
             pipeline_arguments=passthrough,
             user_command=reproduction,
             generated_runtime_command=command.rendered(),

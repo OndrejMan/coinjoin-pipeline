@@ -249,6 +249,18 @@ OPTIONS_WITH_VALUES = (
     "--pbs-mem",
     "--pbs-scratch",
     "--pbs-walltime",
+    "--pbs-blocksci-ncpus",
+    "--pbs-blocksci-mem",
+    "--pbs-blocksci-scratch",
+    "--pbs-blocksci-walltime",
+    "--pbs-analysis-ncpus",
+    "--pbs-analysis-mem",
+    "--pbs-analysis-scratch",
+    "--pbs-analysis-walltime",
+    "--pbs-mappings-ncpus",
+    "--pbs-mappings-mem",
+    "--pbs-mappings-scratch",
+    "--pbs-mappings-walltime",
     "--pbs-image",
     "--pbs-blocksci-image",
     "--pbs-coinjoin-analysis-image",
@@ -1527,6 +1539,61 @@ def add_pbs_arguments(arg_parser: argparse.ArgumentParser) -> None:
             f"{DEFAULT_COINJOIN_ANALYSIS_WALLTIME} for coinjoin-analysis)."
         ),
     )
+    stage_defaults = {
+        "blocksci": (
+            DEFAULT_BLOCKSCI_NCPUS,
+            DEFAULT_BLOCKSCI_MEM,
+            DEFAULT_BLOCKSCI_SCRATCH,
+            DEFAULT_BLOCKSCI_WALLTIME,
+        ),
+        "analysis": (
+            DEFAULT_COINJOIN_ANALYSIS_NCPUS,
+            DEFAULT_COINJOIN_ANALYSIS_MEM,
+            DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
+            DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+        ),
+        "mappings": (
+            DEFAULT_COINJOIN_ANALYSIS_NCPUS,
+            DEFAULT_COINJOIN_ANALYSIS_MEM,
+            DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
+            DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+        ),
+    }
+    for stage, (ncpus, mem, scratch, walltime) in stage_defaults.items():
+        label = "coinjoin-analysis" if stage == "analysis" else stage
+        arg_parser.add_argument(
+            f"--pbs-{stage}-ncpus",
+            type=int,
+            default=None,
+            help=(
+                f"CPU count for the {label} PBS job "
+                f"(default: {ncpus}; overrides --pbs-ncpus)."
+            ),
+        )
+        arg_parser.add_argument(
+            f"--pbs-{stage}-mem",
+            default=None,
+            help=(
+                f"Memory for the {label} PBS job "
+                f"(default: {mem}; overrides --pbs-mem)."
+            ),
+        )
+        arg_parser.add_argument(
+            f"--pbs-{stage}-scratch",
+            default=None,
+            help=(
+                f"Scratch storage for the {label} PBS job "
+                f"(default: {scratch}; overrides --pbs-scratch)."
+            ),
+        )
+        arg_parser.add_argument(
+            f"--pbs-{stage}-walltime",
+            default=None,
+            help=(
+                f"Walltime for the {label} PBS job "
+                f"(default: {walltime}; overrides --pbs-walltime)."
+            ),
+        )
     arg_parser.add_argument(
         "--pbs-image",
         type=str,
@@ -1644,6 +1711,19 @@ def resolve_pbs_resource(args: argparse.Namespace, name: str, default: PBSResour
     return default if value is None else cast(PBSResource, value)
 
 
+def resolve_stage_pbs_resource(
+    args: argparse.Namespace,
+    stage: str,
+    name: str,
+    default: PBSResource,
+) -> PBSResource:
+    """Resolve a stage-specific value before the shared PBS fallback."""
+    stage_value = getattr(args, f"pbs_{stage}_{name}", None)
+    if stage_value is not None:
+        return cast(PBSResource, stage_value)
+    return resolve_pbs_resource(args, f"pbs_{name}", default)
+
+
 def resolve_unified_report_pbs_resource(
     args: argparse.Namespace,
     name: str,
@@ -1696,7 +1776,9 @@ def run_blocksci_pbs_stage(
         include_report=include_report,
         blocksci_script=staged_script,
     )
-    walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME)
+    walltime = resolve_stage_pbs_resource(
+        args, "blocksci", "walltime", DEFAULT_BLOCKSCI_WALLTIME
+    )
     submit_blocksci_pbs(
         run_dir=run_dir,
         logs_root=Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve(),
@@ -1704,9 +1786,13 @@ def run_blocksci_pbs_stage(
         exporters_dir=Path(env["EXPORTERS_DIR"]).expanduser().resolve(),
         image=image,
         command=command,
-        ncpus=resolve_pbs_resource(args, "pbs_ncpus", DEFAULT_BLOCKSCI_NCPUS),
-        mem=resolve_pbs_resource(args, "pbs_mem", DEFAULT_BLOCKSCI_MEM),
-        scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_BLOCKSCI_SCRATCH),
+        ncpus=resolve_stage_pbs_resource(
+            args, "blocksci", "ncpus", DEFAULT_BLOCKSCI_NCPUS
+        ),
+        mem=resolve_stage_pbs_resource(args, "blocksci", "mem", DEFAULT_BLOCKSCI_MEM),
+        scratch=resolve_stage_pbs_resource(
+            args, "blocksci", "scratch", DEFAULT_BLOCKSCI_SCRATCH
+        ),
         walltime=walltime,
         dry_run=args.dry_run,
     )
@@ -1727,16 +1813,24 @@ def run_coinjoin_analysis_pbs_stage(
         raise PBSError(f"analyze_only requires an existing baseline: {baseline_path}")
     image = resolve_pbs_image(args, DEFAULT_PBS_COINJOIN_ANALYSIS_IMAGE, "pbs_coinjoin_analysis_image")
     command = coinjoin_analysis_pbs_command(analysis_action)
-    walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME)
+    walltime = resolve_stage_pbs_resource(
+        args, "analysis", "walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
+    )
     submit_coinjoin_analysis_pbs(
         run_dir=run_dir,
         output_dir=run_dir / "coinjoin-analysis_data",
         input_data_dir=run_dir / "coinjoin_emulator_data" / "data",
         image=image,
         command=command,
-        ncpus=resolve_pbs_resource(args, "pbs_ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS),
-        mem=resolve_pbs_resource(args, "pbs_mem", DEFAULT_COINJOIN_ANALYSIS_MEM),
-        scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH),
+        ncpus=resolve_stage_pbs_resource(
+            args, "analysis", "ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS
+        ),
+        mem=resolve_stage_pbs_resource(
+            args, "analysis", "mem", DEFAULT_COINJOIN_ANALYSIS_MEM
+        ),
+        scratch=resolve_stage_pbs_resource(
+            args, "analysis", "scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH
+        ),
         walltime=walltime,
         dry_run=args.dry_run,
     )
@@ -1748,7 +1842,9 @@ def run_mappings_pbs_stage(args: argparse.Namespace, run_dir: Path) -> None:
     """Run both Wasabi mapping tools in one PBS allocation."""
     if args.engine != "wasabi" or args.coinjoin_type != "wasabi2":
         raise PBSError("CoinJoin mappings are supported only for Wasabi/wasabi2 runs")
-    walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME)
+    walltime = resolve_stage_pbs_resource(
+        args, "mappings", "walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
+    )
     submit_mappings_pbs(
         run_dir,
         args.pbs_mappings_enumerator_image,
@@ -1760,9 +1856,15 @@ def run_mappings_pbs_stage(args: argparse.Namespace, run_dir: Path) -> None:
         timeout=args.mapping_timeout,
         retry_timeout=args.mapping_retry_timeout,
         sake_seed=args.sake_seed,
-        ncpus=resolve_pbs_resource(args, "pbs_ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS),
-        mem=resolve_pbs_resource(args, "pbs_mem", DEFAULT_COINJOIN_ANALYSIS_MEM),
-        scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH),
+        ncpus=resolve_stage_pbs_resource(
+            args, "mappings", "ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS
+        ),
+        mem=resolve_stage_pbs_resource(
+            args, "mappings", "mem", DEFAULT_COINJOIN_ANALYSIS_MEM
+        ),
+        scratch=resolve_stage_pbs_resource(
+            args, "mappings", "scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH
+        ),
         walltime=walltime,
         dry_run=args.dry_run,
     )
@@ -1816,7 +1918,12 @@ def run_parallel_analysis(args: argparse.Namespace, run_dir: Path, logs_root: Pa
             if getattr(args, "analysisPbs", False):
                 try:
                     run_coinjoin_analysis_pbs_stage(args, run_dir, wait=False)
-                    walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME)
+                    walltime = resolve_stage_pbs_resource(
+                        args,
+                        "analysis",
+                        "walltime",
+                        DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+                    )
                     future = executor.submit(
                         wait_for_pbs_marker,
                         run_dir,
@@ -1835,7 +1942,9 @@ def run_parallel_analysis(args: argparse.Namespace, run_dir: Path, logs_root: Pa
             if getattr(args, "blocksciPbs", False):
                 try:
                     run_blocksci_pbs_stage(args, run_dir, wait=False, include_report=False)
-                    walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME)
+                    walltime = resolve_stage_pbs_resource(
+                        args, "blocksci", "walltime", DEFAULT_BLOCKSCI_WALLTIME
+                    )
                     future = executor.submit(
                         wait_for_pbs_marker,
                         run_dir,
@@ -2219,10 +2328,18 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
             **common,
             image=resolve_pbs_image(args, DEFAULT_PBS_COINJOIN_ANALYSIS_IMAGE, "pbs_coinjoin_analysis_image"),
             command=coinjoin_analysis_pbs_command("collect_docker"),
-            ncpus=resolve_pbs_resource(args, "pbs_ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS),
-            mem=resolve_pbs_resource(args, "pbs_mem", DEFAULT_COINJOIN_ANALYSIS_MEM),
-            scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH),
-            walltime=resolve_pbs_resource(args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME),
+            ncpus=resolve_stage_pbs_resource(
+                args, "analysis", "ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS
+            ),
+            mem=resolve_stage_pbs_resource(
+                args, "analysis", "mem", DEFAULT_COINJOIN_ANALYSIS_MEM
+            ),
+            scratch=resolve_stage_pbs_resource(
+                args, "analysis", "scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH
+            ),
+            walltime=resolve_stage_pbs_resource(
+                args, "analysis", "walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
+            ),
         )
     if mappings_pbs:
         mappings_job_id = submit_mappings_s3_pbs(
@@ -2246,26 +2363,34 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
             timeout=getattr(args, "mapping_timeout", 60),
             retry_timeout=getattr(args, "mapping_retry_timeout", 600),
             sake_seed=getattr(args, "sake_seed", 20260704),
-            ncpus=resolve_pbs_resource(
-                args, "pbs_ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS
+            ncpus=resolve_stage_pbs_resource(
+                args, "mappings", "ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS
             ),
-            mem=resolve_pbs_resource(
-                args, "pbs_mem", DEFAULT_COINJOIN_ANALYSIS_MEM
+            mem=resolve_stage_pbs_resource(
+                args, "mappings", "mem", DEFAULT_COINJOIN_ANALYSIS_MEM
             ),
-            scratch=resolve_pbs_resource(
-                args, "pbs_scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH
+            scratch=resolve_stage_pbs_resource(
+                args, "mappings", "scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH
             ),
-            walltime=resolve_pbs_resource(
-                args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
+            walltime=resolve_stage_pbs_resource(
+                args, "mappings", "walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
             ),
             dependency_job_id=analysis_job_id,
         )
     if args.blocksciPbs:
         blocksci_resources: PBSResources = dict(
-            ncpus=resolve_pbs_resource(args, "pbs_ncpus", DEFAULT_BLOCKSCI_NCPUS),
-            mem=resolve_pbs_resource(args, "pbs_mem", DEFAULT_BLOCKSCI_MEM),
-            scratch=resolve_pbs_resource(args, "pbs_scratch", DEFAULT_BLOCKSCI_SCRATCH),
-            walltime=resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME),
+            ncpus=resolve_stage_pbs_resource(
+                args, "blocksci", "ncpus", DEFAULT_BLOCKSCI_NCPUS
+            ),
+            mem=resolve_stage_pbs_resource(
+                args, "blocksci", "mem", DEFAULT_BLOCKSCI_MEM
+            ),
+            scratch=resolve_stage_pbs_resource(
+                args, "blocksci", "scratch", DEFAULT_BLOCKSCI_SCRATCH
+            ),
+            walltime=resolve_stage_pbs_resource(
+                args, "blocksci", "walltime", DEFAULT_BLOCKSCI_WALLTIME
+            ),
         )
         blocksci_image = resolve_pbs_image(
             args, DEFAULT_PBS_BLOCKSCI_IMAGE, "pbs_blocksci_image"
@@ -2491,11 +2616,15 @@ def run_full_run_s3(args: argparse.Namespace) -> None:
     blocksci_parse_job_id = jobs.blocksci_parse
     blocksci_job_id = jobs.blocksci_work
     report_job_id = jobs.unified_report
-    analysis_walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME)
-    mappings_walltime = resolve_pbs_resource(
-        args, "pbs_walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
+    analysis_walltime = resolve_stage_pbs_resource(
+        args, "analysis", "walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
     )
-    blocksci_walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME)
+    mappings_walltime = resolve_stage_pbs_resource(
+        args, "mappings", "walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
+    )
+    blocksci_walltime = resolve_stage_pbs_resource(
+        args, "blocksci", "walltime", DEFAULT_BLOCKSCI_WALLTIME
+    )
     report_walltime = resolve_unified_report_pbs_resource(
         args, "walltime", DEFAULT_UNIFIED_REPORT_WALLTIME
     )

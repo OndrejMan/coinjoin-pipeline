@@ -231,6 +231,54 @@
           "required": false,
           "takes_value": true
         },
+        "--pbs-analysis-mem": {
+          "aliases": [
+            "--pbs-analysis-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-mem",
+          "help": "Memory for the coinjoin-analysis PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-ncpus": {
+          "aliases": [
+            "--pbs-analysis-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-ncpus",
+          "help": "CPU count for the coinjoin-analysis PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-scratch": {
+          "aliases": [
+            "--pbs-analysis-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-scratch",
+          "help": "Scratch storage for the coinjoin-analysis PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-walltime": {
+          "aliases": [
+            "--pbs-analysis-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-walltime",
+          "help": "Walltime for the coinjoin-analysis PBS job (default: 04:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
         "--pbs-bitcoin-datadir": {
           "aliases": [
             "--pbs-bitcoin-datadir"
@@ -251,6 +299,54 @@
           "default": null,
           "flag": "--pbs-blocksci-image",
           "help": "Singularity image for BlockSci PBS jobs (default: docker://ghcr.io/ondrejman/blocksci-complete:latest).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-mem": {
+          "aliases": [
+            "--pbs-blocksci-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-mem",
+          "help": "Memory for the blocksci PBS job (default: 64gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-ncpus": {
+          "aliases": [
+            "--pbs-blocksci-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-ncpus",
+          "help": "CPU count for the blocksci PBS job (default: 8; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-scratch": {
+          "aliases": [
+            "--pbs-blocksci-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-scratch",
+          "help": "Scratch storage for the blocksci PBS job (default: 100gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-walltime": {
+          "aliases": [
+            "--pbs-blocksci-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-walltime",
+          "help": "Walltime for the blocksci PBS job (default: 24:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -287,6 +383,54 @@
           "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:latest",
           "flag": "--pbs-mappings-enumerator-image",
           "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-mem": {
+          "aliases": [
+            "--pbs-mappings-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-mem",
+          "help": "Memory for the mappings PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-ncpus": {
+          "aliases": [
+            "--pbs-mappings-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-ncpus",
+          "help": "CPU count for the mappings PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-scratch": {
+          "aliases": [
+            "--pbs-mappings-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-scratch",
+          "help": "Scratch storage for the mappings PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-walltime": {
+          "aliases": [
+            "--pbs-mappings-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-walltime",
+          "help": "Walltime for the mappings PBS job (default: 04:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -581,6 +725,54 @@
           "required": false,
           "takes_value": false
         },
+        "--pbs-analysis-mem": {
+          "aliases": [
+            "--pbs-analysis-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-mem",
+          "help": "Memory for the coinjoin-analysis PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-ncpus": {
+          "aliases": [
+            "--pbs-analysis-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-ncpus",
+          "help": "CPU count for the coinjoin-analysis PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-scratch": {
+          "aliases": [
+            "--pbs-analysis-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-scratch",
+          "help": "Scratch storage for the coinjoin-analysis PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-walltime": {
+          "aliases": [
+            "--pbs-analysis-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-walltime",
+          "help": "Walltime for the coinjoin-analysis PBS job (default: 04:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
         "--pbs-bitcoin-datadir": {
           "aliases": [
             "--pbs-bitcoin-datadir"
@@ -601,6 +793,54 @@
           "default": null,
           "flag": "--pbs-blocksci-image",
           "help": "Singularity image for BlockSci PBS jobs (default: docker://ghcr.io/ondrejman/blocksci-complete:latest).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-mem": {
+          "aliases": [
+            "--pbs-blocksci-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-mem",
+          "help": "Memory for the blocksci PBS job (default: 64gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-ncpus": {
+          "aliases": [
+            "--pbs-blocksci-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-ncpus",
+          "help": "CPU count for the blocksci PBS job (default: 8; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-scratch": {
+          "aliases": [
+            "--pbs-blocksci-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-scratch",
+          "help": "Scratch storage for the blocksci PBS job (default: 100gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-walltime": {
+          "aliases": [
+            "--pbs-blocksci-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-walltime",
+          "help": "Walltime for the blocksci PBS job (default: 24:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -637,6 +877,54 @@
           "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:latest",
           "flag": "--pbs-mappings-enumerator-image",
           "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-mem": {
+          "aliases": [
+            "--pbs-mappings-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-mem",
+          "help": "Memory for the mappings PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-ncpus": {
+          "aliases": [
+            "--pbs-mappings-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-ncpus",
+          "help": "CPU count for the mappings PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-scratch": {
+          "aliases": [
+            "--pbs-mappings-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-scratch",
+          "help": "Scratch storage for the mappings PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-walltime": {
+          "aliases": [
+            "--pbs-mappings-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-walltime",
+          "help": "Walltime for the mappings PBS job (default: 04:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -1492,6 +1780,54 @@
           "required": false,
           "takes_value": false
         },
+        "--pbs-analysis-mem": {
+          "aliases": [
+            "--pbs-analysis-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-mem",
+          "help": "Memory for the coinjoin-analysis PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-ncpus": {
+          "aliases": [
+            "--pbs-analysis-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-ncpus",
+          "help": "CPU count for the coinjoin-analysis PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-scratch": {
+          "aliases": [
+            "--pbs-analysis-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-scratch",
+          "help": "Scratch storage for the coinjoin-analysis PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-walltime": {
+          "aliases": [
+            "--pbs-analysis-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-walltime",
+          "help": "Walltime for the coinjoin-analysis PBS job (default: 04:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
         "--pbs-bitcoin-datadir": {
           "aliases": [
             "--pbs-bitcoin-datadir"
@@ -1512,6 +1848,54 @@
           "default": null,
           "flag": "--pbs-blocksci-image",
           "help": "Singularity image for BlockSci PBS jobs (default: docker://ghcr.io/ondrejman/blocksci-complete:latest).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-mem": {
+          "aliases": [
+            "--pbs-blocksci-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-mem",
+          "help": "Memory for the blocksci PBS job (default: 64gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-ncpus": {
+          "aliases": [
+            "--pbs-blocksci-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-ncpus",
+          "help": "CPU count for the blocksci PBS job (default: 8; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-scratch": {
+          "aliases": [
+            "--pbs-blocksci-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-scratch",
+          "help": "Scratch storage for the blocksci PBS job (default: 100gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-walltime": {
+          "aliases": [
+            "--pbs-blocksci-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-walltime",
+          "help": "Walltime for the blocksci PBS job (default: 24:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -1548,6 +1932,54 @@
           "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:latest",
           "flag": "--pbs-mappings-enumerator-image",
           "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-mem": {
+          "aliases": [
+            "--pbs-mappings-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-mem",
+          "help": "Memory for the mappings PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-ncpus": {
+          "aliases": [
+            "--pbs-mappings-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-ncpus",
+          "help": "CPU count for the mappings PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-scratch": {
+          "aliases": [
+            "--pbs-mappings-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-scratch",
+          "help": "Scratch storage for the mappings PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-walltime": {
+          "aliases": [
+            "--pbs-mappings-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-walltime",
+          "help": "Walltime for the mappings PBS job (default: 04:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -1953,6 +2385,54 @@
           "required": false,
           "takes_value": false
         },
+        "--pbs-analysis-mem": {
+          "aliases": [
+            "--pbs-analysis-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-mem",
+          "help": "Memory for the coinjoin-analysis PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-ncpus": {
+          "aliases": [
+            "--pbs-analysis-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-ncpus",
+          "help": "CPU count for the coinjoin-analysis PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-scratch": {
+          "aliases": [
+            "--pbs-analysis-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-scratch",
+          "help": "Scratch storage for the coinjoin-analysis PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-walltime": {
+          "aliases": [
+            "--pbs-analysis-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-walltime",
+          "help": "Walltime for the coinjoin-analysis PBS job (default: 04:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
         "--pbs-bitcoin-datadir": {
           "aliases": [
             "--pbs-bitcoin-datadir"
@@ -1973,6 +2453,54 @@
           "default": null,
           "flag": "--pbs-blocksci-image",
           "help": "Singularity image for BlockSci PBS jobs (default: docker://ghcr.io/ondrejman/blocksci-complete:latest).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-mem": {
+          "aliases": [
+            "--pbs-blocksci-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-mem",
+          "help": "Memory for the blocksci PBS job (default: 64gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-ncpus": {
+          "aliases": [
+            "--pbs-blocksci-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-ncpus",
+          "help": "CPU count for the blocksci PBS job (default: 8; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-scratch": {
+          "aliases": [
+            "--pbs-blocksci-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-scratch",
+          "help": "Scratch storage for the blocksci PBS job (default: 100gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-walltime": {
+          "aliases": [
+            "--pbs-blocksci-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-walltime",
+          "help": "Walltime for the blocksci PBS job (default: 24:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -2009,6 +2537,54 @@
           "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:latest",
           "flag": "--pbs-mappings-enumerator-image",
           "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-mem": {
+          "aliases": [
+            "--pbs-mappings-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-mem",
+          "help": "Memory for the mappings PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-ncpus": {
+          "aliases": [
+            "--pbs-mappings-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-ncpus",
+          "help": "CPU count for the mappings PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-scratch": {
+          "aliases": [
+            "--pbs-mappings-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-scratch",
+          "help": "Scratch storage for the mappings PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-walltime": {
+          "aliases": [
+            "--pbs-mappings-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-walltime",
+          "help": "Walltime for the mappings PBS job (default: 04:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -2479,6 +3055,54 @@
           "required": false,
           "takes_value": true
         },
+        "--pbs-analysis-mem": {
+          "aliases": [
+            "--pbs-analysis-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-mem",
+          "help": "Memory for the coinjoin-analysis PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-ncpus": {
+          "aliases": [
+            "--pbs-analysis-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-ncpus",
+          "help": "CPU count for the coinjoin-analysis PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-scratch": {
+          "aliases": [
+            "--pbs-analysis-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-scratch",
+          "help": "Scratch storage for the coinjoin-analysis PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-walltime": {
+          "aliases": [
+            "--pbs-analysis-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-walltime",
+          "help": "Walltime for the coinjoin-analysis PBS job (default: 04:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
         "--pbs-bitcoin-datadir": {
           "aliases": [
             "--pbs-bitcoin-datadir"
@@ -2499,6 +3123,54 @@
           "default": null,
           "flag": "--pbs-blocksci-image",
           "help": "Singularity image for BlockSci PBS jobs (default: docker://ghcr.io/ondrejman/blocksci-complete:latest).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-mem": {
+          "aliases": [
+            "--pbs-blocksci-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-mem",
+          "help": "Memory for the blocksci PBS job (default: 64gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-ncpus": {
+          "aliases": [
+            "--pbs-blocksci-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-ncpus",
+          "help": "CPU count for the blocksci PBS job (default: 8; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-scratch": {
+          "aliases": [
+            "--pbs-blocksci-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-scratch",
+          "help": "Scratch storage for the blocksci PBS job (default: 100gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-walltime": {
+          "aliases": [
+            "--pbs-blocksci-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-walltime",
+          "help": "Walltime for the blocksci PBS job (default: 24:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -2535,6 +3207,54 @@
           "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:latest",
           "flag": "--pbs-mappings-enumerator-image",
           "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-mem": {
+          "aliases": [
+            "--pbs-mappings-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-mem",
+          "help": "Memory for the mappings PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-ncpus": {
+          "aliases": [
+            "--pbs-mappings-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-ncpus",
+          "help": "CPU count for the mappings PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-scratch": {
+          "aliases": [
+            "--pbs-mappings-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-scratch",
+          "help": "Scratch storage for the mappings PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-walltime": {
+          "aliases": [
+            "--pbs-mappings-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-walltime",
+          "help": "Walltime for the mappings PBS job (default: 04:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true

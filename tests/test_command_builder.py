@@ -380,6 +380,21 @@ class CommandBuilderTests(unittest.TestCase):
                 for error in errors)
         )
 
+    def test_stage_specific_pbs_resource_requires_matching_stage(self) -> None:
+        command = MODULE.Command(
+            action="full-run",
+            options=[
+                ("--engine", "wasabi"),
+                ("--analysisPbs", None),
+                ("--pbs-analysis-mem", "32gb"),
+                ("--pbs-blocksci-mem", "2tb"),
+            ],
+        )
+        errors = MODULE.validate_command(command).errors
+        self.assertTrue(
+            any("blocksci-specific PBS resources require --blocksciPbs" in error for error in errors)
+        )
+
     def test_mappings_pbs_requires_wasabi_and_wasabi2(self) -> None:
         wrong_engine = MODULE.Command(
             action="full-run",

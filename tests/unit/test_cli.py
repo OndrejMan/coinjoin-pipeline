@@ -280,6 +280,54 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         check.assert_not_called()
 
+    def test_yaml_s3_full_run_generates_run_id_before_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            configuration = root / "experiment.yaml"
+            configuration.write_text(
+                """\
+engine: wasabi
+driver: kubernetes
+dry_run: true
+kubernetes:
+  reuse_namespace: true
+artifacts:
+  backend: s3
+  uri: s3://bucket/runs
+  endpoint_url: https://s3.example.invalid
+  secret_name: coinjoin-s3
+  credentials_file: /storage/user/.aws/credentials
+  profile: coinjoin
+pbs:
+  analysis:
+    mem: 32gb
+  blocksci:
+    mem: 2tb
+""",
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.dict("os.environ", {"PBS_FRONTEND_DIRECT": "1"}),
+                mock.patch("coinjoin_pipeline.cli.run", return_value=0) as run_mock,
+                redirect_stdout(io.StringIO()),
+            ):
+                code = main(
+                    [
+                        "--runs-root",
+                        str(root / "runs"),
+                        "--fromConfiguration",
+                        str(configuration),
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        command = run_mock.call_args.args[0]
+        self.assertIn("--run-id", command)
+        generated_run_id = command[command.index("--run-id") + 1]
+        self.assertTrue(valid_run_id(generated_run_id))
+        self.assertIn("--pbs-analysis-mem", command)
+        self.assertIn("--pbs-blocksci-mem", command)
+
     def test_metadata_required_fields_and_choices_are_enforced(self) -> None:
         self.assertTrue(
             any(
@@ -339,6 +387,24 @@ class CliTests(unittest.TestCase):
         self.assertEqual(
             validate_passthrough(cached_blocksci_only, "pbs-from-s3"), []
         )
+
+    def test_stage_specific_resources_require_the_matching_stage(self) -> None:
+        arguments = [
+            "full-run",
+            "--engine",
+            "wasabi",
+            "--analysisPbs",
+            "--pbs-analysis-mem",
+            "32gb",
+            "--pbs-blocksci-mem",
+            "2tb",
+        ]
+        errors = validate_passthrough(arguments, "full-run")
+        self.assertTrue(
+            any("blocksci-specific PBS resources require --blocksciPbs" in error for error in errors)
+        )
+        arguments.append("--blocksciPbs")
+        self.assertEqual(validate_passthrough(arguments, "full-run"), [])
 
     def test_s3_full_run_passthrough_validation(self) -> None:
         complete = [

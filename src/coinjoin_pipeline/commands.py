@@ -125,6 +125,19 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
         if has_option(argv, flag) and action not in permitted:
             supported = ", ".join(name for name in permitted if name not in ACTION_ALIASES)
             errors.append(f"{flag} is supported only by {supported}")
+    for stage, enabling_flag in (
+        ("analysis", "--analysisPbs"),
+        ("blocksci", "--blocksciPbs"),
+        ("mappings", "--mappingsPbs"),
+    ):
+        stage_resources = tuple(
+            f"--pbs-{stage}-{resource}"
+            for resource in ("ncpus", "mem", "scratch", "walltime")
+        )
+        if any(has_option(argv, flag) for flag in stage_resources) and not has_option(
+            argv, enabling_flag
+        ):
+            errors.append(f"{stage}-specific PBS resources require {enabling_flag}")
     backend = option_value(argv, "--artifact-backend") or "shared-storage"
     blocksci_workflow = option_value(argv, "--blocksci-workflow") or "combined"
     blocksci_task = option_value(argv, "--blocksci-task") or "detect"

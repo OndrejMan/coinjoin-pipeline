@@ -97,9 +97,14 @@ not submit a unified report. A custom script is bound read-only from shared
 independent PBS job; its termination marker describes notebook shutdown, not
 completion of the standard analysis graph.
 
-The S3 report-only job has independent defaults: 2 CPUs, 8 GB RAM, 10 GB
-scratch, and a 1-hour walltime. Report-specific `--pbs-unified-report-*`
-options take precedence over the shared `--pbs-*` resource options.
+PBS resources resolve independently for each stage. The
+`--pbs-{blocksci,analysis,mappings}-{ncpus,mem,scratch,walltime}` options take
+precedence for their stage, followed by the backward-compatible shared
+`--pbs-{ncpus,mem,scratch,walltime}` fallback, followed by the existing stage
+default. The S3 report-only job has independent defaults: 2 CPUs, 8 GB RAM,
+10 GB scratch, and a 1-hour walltime. Report-specific
+`--pbs-unified-report-*` options use the same precedence over the shared
+fallback.
 
 ## Frontend waiting (`wait_for_pbs_marker`)
 

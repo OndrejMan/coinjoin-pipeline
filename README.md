@@ -203,6 +203,25 @@ the unified-report job waits for and embeds its uploaded mapping results. The
 full-run at a time per frontend. The end-to-end test for this path is
 `tests/test-kubernetes-s3-minio.sh` (k3d + local PBS rig + MinIO).
 
+The same run can be described in YAML. `--fromConfiguration` is retained as a
+compatibility spelling; new scripts may use `--from-configuration`. The
+configuration is translated to the normal CLI arguments before validation, so
+the same S3/PBS checks and research manifest apply. For an S3 `full-run`, a
+missing `run_id` is generated automatically; `pbs.analysis`, `pbs.blocksci`,
+and `pbs.mappings` enable their corresponding PBS stages.
+
+```bash
+PBS_FRONTEND_DIRECT=1 ./runIt.sh \
+  --fromConfiguration examples/metacentrum-s3.yaml
+```
+
+See `examples/metacentrum-s3.yaml` for the complete schema used by this path.
+An explicit CLI option after `--fromConfiguration FILE` overrides the same
+value from YAML. Programmatic consumers can load the same schema through the
+immutable typed `PipelineConfiguration.from_yaml()` model in
+`coinjoin_pipeline.configuration` and call `to_arguments()` when they need the
+public CLI representation.
+
 ### Decomposed two-command workflow
 
 The same chain can run as two independent commands — emulation from any
@@ -453,6 +472,12 @@ refuses a failed or incomplete report stage and requires `s5cmd` on `PATH`.
 the combined BlockSci-plus-report behavior and requires the remote run to
 already contain `coinjoin-analysis_data/coinjoin_tx_info.json`. Both S3 report
 paths require and upload the canonical `coinjoinPipeline_data` output.
+
+The general `--pbs-{ncpus,mem,scratch,walltime}` values are backward-compatible
+fallbacks. Use `--pbs-blocksci-*`, `--pbs-analysis-*`, and `--pbs-mappings-*`
+to size those allocations independently. A stage-specific value takes
+precedence over the general fallback and otherwise retains that stage's
+existing default.
 
 The report-only job defaults to 2 CPUs, 8 GB RAM, 10 GB scratch, and a one-hour
 walltime. Use `--pbs-unified-report-ncpus`,
