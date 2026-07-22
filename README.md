@@ -215,12 +215,43 @@ PBS_FRONTEND_DIRECT=1 ./runIt.sh \
   --fromConfiguration examples/metacentrum-s3.yaml
 ```
 
-See `examples/metacentrum-s3.yaml` for the complete schema used by this path.
+`examples/metacentrum-s3.yaml` is the recommended default run configuration.
 An explicit CLI option after `--fromConfiguration FILE` overrides the same
-value from YAML. Programmatic consumers can load the same schema through the
-immutable typed `PipelineConfiguration.from_yaml()` model in
-`coinjoin_pipeline.configuration` and call `to_arguments()` when they need the
-public CLI representation.
+value from YAML. Programmatic consumers can load the schema through the
+immutable typed `PipelineConfiguration.from_yaml()` model exported by
+`coinjoin_pipeline` and call `to_arguments()` when they need the public CLI
+representation.
+
+The typed schema also covers the advanced modes used by decomposed and mainnet
+workflows:
+
+- `blocksci`: `workflow`, `task`, custom script/notebook settings, cache source,
+  external Bitcoin or BlockSci source, network, and inclusive maximum block;
+- `joinmarket`: detector selection, base fee, percentage fee, and search depth;
+- `mappings`: fee model, decomposition limit, mode, timeouts, and Sake seed;
+- `external`: external Bitcoin datadir, baseline JSON, repeatable false-positive
+  files, network, minimum free disk space, and resume mode for
+  `action: external-analyze` (also accepts `action: external analyze`);
+- `images`: coordinated version/local-build selection and every component image
+  override;
+- `pbs`: shared and per-stage resources, PBS image overrides, Bitcoin datadir,
+  and unified-report resources;
+- top-level operational fields such as `action`, `runtime`, `runs_root`,
+  `run_dir`, `analysis_action`, and `emulation_timeout`.
+
+External mainnet analysis can therefore use the same typed configuration path:
+
+```bash
+./runIt.sh --from-configuration examples/external-analysis.yaml
+```
+
+For an existing external run, retain `run_id`, remove `bitcoin_datadir` and
+`baseline`, and set `external.resume: true`.
+
+Cross-field restrictions remain identical to CLI validation. For example,
+external Bitcoin and external BlockSci sources are mutually exclusive, and
+external parsing is valid only for the appropriate `pbs-from-s3` reusable or
+cached task.
 
 ### Decomposed two-command workflow
 

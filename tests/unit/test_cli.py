@@ -328,6 +328,30 @@ pbs:
         self.assertIn("--pbs-analysis-mem", command)
         self.assertIn("--pbs-blocksci-mem", command)
 
+    def test_default_yaml_run_configuration_passes_host_validation(self) -> None:
+        configuration = Path(__file__).resolve().parents[2] / "examples/metacentrum-s3.yaml"
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                mock.patch.dict("os.environ", {"PBS_FRONTEND_DIRECT": "1"}),
+                mock.patch("coinjoin_pipeline.cli.run", return_value=0) as run_mock,
+                redirect_stdout(io.StringIO()),
+            ):
+                code = main(
+                    [
+                        "--runs-root",
+                        directory,
+                        "--fromConfiguration",
+                        str(configuration),
+                        "--dry-run",
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        command = run_mock.call_args.args[0]
+        self.assertIn("--blocksci-workflow", command)
+        self.assertEqual(command[command.index("--blocksci-workflow") + 1], "reusable")
+        self.assertIn("--pbs-unified-report-mem", command)
+
     def test_metadata_required_fields_and_choices_are_enforced(self) -> None:
         self.assertTrue(
             any(

@@ -1,6 +1,12 @@
+action: full-run
 engine: wasabi
 coinjoin_type: wasabi2
 driver: kubernetes
+emulation_timeout: 21600
+
+images:
+  # Pin this to an immutable release/commit tag for thesis evidence.
+  version: latest
 
 kubernetes:
   namespace: man5-ns
@@ -16,6 +22,20 @@ artifacts:
 
 stages:
   mappings: true
+
+blocksci:
+  # Parse once, publish a checksummed cache, then run detection from it.
+  workflow: reusable
+  task: detect
+
+mappings:
+  mining_fee_rate: 1
+  coordination_fee_rate: 0.003
+  max_decomposition_fee: 6000
+  mode: numeric
+  timeout: 60
+  retry_timeout: 600
+  sake_seed: 20260704
 
 pbs:
   blocksci:
@@ -33,3 +53,8 @@ pbs:
     mem: 32gb
     scratch: 100gb
     walltime: "08:00:00"
+  unified_report:
+    ncpus: 2
+    mem: 8gb
+    scratch: 10gb
+    walltime: "01:00:00"
