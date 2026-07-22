@@ -2470,7 +2470,15 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
                         args.test_values,
                     )
                 elif task == "script":
-                    work_command = blocksci_script_pbs_command(args.run_id)
+                    work_command = blocksci_script_pbs_command(
+                        args.run_id,
+                        args.coinjoin_type,
+                        args.min_input_count,
+                        args.joinmarket_detector,
+                        args.joinmarket_min_base_fee,
+                        args.joinmarket_percentage_fee,
+                        args.joinmarket_max_depth,
+                    )
                 else:
                     work_command = blocksci_notebook_pbs_command(
                         getattr(args, "blocksci_notebook_port", None) or 8888

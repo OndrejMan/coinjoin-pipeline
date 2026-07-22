@@ -212,10 +212,29 @@ and `pbs.mappings` enable their corresponding PBS stages.
 
 ```bash
 PBS_FRONTEND_DIRECT=1 ./runIt.sh \
-  --fromConfiguration examples/metacentrum-s3.yaml
+  --fromConfiguration examples/metacentrum-regtest-s3.yaml
 ```
 
-`examples/metacentrum-s3.yaml` is the recommended default run configuration.
+`examples/metacentrum-regtest-s3.yaml` is the recommended regtest full-run
+configuration; `examples/metacentrum-s3.yaml` remains as its compatibility
+predecessor. Mainnet is deliberately split into two submissions:
+
+```bash
+# Produces a checksummed reusable BlockSci cache from the external mainnet datadir.
+PBS_FRONTEND_DIRECT=1 ./runIt.sh \
+  --from-configuration examples/metacentrum-mainnet-parse.yaml
+
+# Reuses that run ID and cache to produce joinmarket-mainnet-summary.json.
+PBS_FRONTEND_DIRECT=1 ./runIt.sh \
+  --from-configuration examples/metacentrum-mainnet-analyze.yaml
+```
+
+Before submission, set the same `run_id` and immutable `images.version` in
+both mainnet files, update the inclusive `blocksci.max_block`, and replace the
+shared-storage paths. The analyze job writes the summary under
+`blocksci-custom-analysis_data/` in the same S3 run. It is detector output
+without emulator ground truth, not a precision/recall unified report.
+
 An explicit CLI option after `--fromConfiguration FILE` overrides the same
 value from YAML. Programmatic consumers can load the schema through the
 immutable typed `PipelineConfiguration.from_yaml()` model exported by

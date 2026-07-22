@@ -14,6 +14,7 @@ from client.pbs import (  # noqa: E402
     _qstat_job_state,
     blocksci_export_pbs_command,
     blocksci_pbs_command,
+    blocksci_script_pbs_command,
     coinjoin_analysis_pbs_command,
     pbs_job_probe,
     render_blocksci_pbs,
@@ -280,6 +281,27 @@ class PBSTemplateTest(unittest.TestCase):
         self.assertIn("--blocksci-analysis", command)
         self.assertIn("--test-values", command)
         self.assertNotIn("blocksci_parser", command)
+
+    def test_blocksci_script_command_exports_typed_detector_settings(self):
+        command = blocksci_script_pbs_command(
+            run_id="mainnet-850000",
+            coinjoin_type="joinmarket",
+            min_input_count=None,
+            joinmarket_detector="possible",
+            joinmarket_min_base_fee=4000,
+            joinmarket_percentage_fee=0.00005,
+            joinmarket_max_depth=150000,
+        )
+
+        self.assertIn("BLOCKSCI_CONFIG=", command)
+        self.assertIn("BLOCKSCI_OUTPUT_DIR=", command)
+        self.assertIn("COINJOIN_TYPE=joinmarket", command)
+        self.assertIn("JOINMARKET_DETECTOR=possible", command)
+        self.assertIn("JOINMARKET_MIN_BASE_FEE=4000", command)
+        self.assertIn("JOINMARKET_PERCENTAGE_FEE=5e-05", command)
+        self.assertIn("JOINMARKET_MAX_DEPTH=150000", command)
+        self.assertNotIn("MIN_INPUT_COUNT=", command)
+        self.assertTrue(command.endswith("python3 /mnt/user-analysis.py"))
 
     def test_coinjoin_analysis_pbs_command_supports_analyze_only(self):
         command = coinjoin_analysis_pbs_command("analyze_only")

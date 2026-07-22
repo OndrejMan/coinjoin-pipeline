@@ -1,0 +1,36 @@
+action: pbs-from-s3
+engine: joinmarket
+coinjoin_type: joinmarket
+
+# The analyze configuration must reuse this exact run ID.
+run_id: mainnet-850000
+
+images:
+  # Parse and analyze must use the same immutable image tag.
+  version: latest
+
+artifacts:
+  backend: s3
+  uri: s3://coinjoin-thesis/runs
+  endpoint_url: https://s3.cl4.du.cesnet.cz
+  credentials_file: /storage/brno2/home/xman/.aws/credentials
+  profile: coinjoin
+
+stages:
+  blocksci: true
+
+blocksci:
+  workflow: reusable
+  task: parse
+  # This directory directly contains the mainnet blocks/ directory.
+  external_bitcoin_datadir: /storage/brno2/home/xman/bitcoin-mainnet
+  network: bitcoin
+  # Inclusive. Replace together with run_id; use a separate ID for smoke tests.
+  max_block: 850000
+
+pbs:
+  blocksci:
+    ncpus: 8
+    mem: 64gb
+    scratch: 2tb
+    walltime: "48:00:00"

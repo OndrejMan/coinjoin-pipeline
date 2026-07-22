@@ -1,0 +1,39 @@
+action: pbs-from-s3
+engine: joinmarket
+coinjoin_type: joinmarket
+
+# Must identify a successful run produced by metacentrum-mainnet-parse.yaml.
+run_id: mainnet-850000
+
+images:
+  # Must match the immutable image tag used to produce the cache.
+  version: latest
+
+artifacts:
+  backend: s3
+  uri: s3://coinjoin-thesis/runs
+  endpoint_url: https://s3.cl4.du.cesnet.cz
+  credentials_file: /storage/brno2/home/xman/.aws/credentials
+  profile: coinjoin
+
+stages:
+  blocksci: true
+
+blocksci:
+  workflow: cached
+  task: script
+  # Custom PBS scripts must be readable from MetaCentrum shared storage.
+  script: /storage/brno2/home/xman/diplomka/thesis/scripts/metacentrum_mainnet_coinjoin_scan.py
+
+joinmarket:
+  detector: definite
+  min_base_fee: 5000
+  percentage_fee: 0.00004
+  max_depth: 200000
+
+pbs:
+  blocksci:
+    ncpus: 8
+    mem: 64gb
+    scratch: 2tb
+    walltime: "24:00:00"

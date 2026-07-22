@@ -1731,16 +1731,36 @@ def blocksci_analysis_pbs_command(
     return command
 
 
-def blocksci_script_pbs_command(run_id: str) -> str:
+def blocksci_script_pbs_command(
+    run_id: str,
+    coinjoin_type: str,
+    min_input_count: int | None,
+    joinmarket_detector: str,
+    joinmarket_min_base_fee: int,
+    joinmarket_percentage_fee: float,
+    joinmarket_max_depth: int,
+) -> str:
     """Build custom-script execution over an already parsed BlockSci index."""
     run_dir = f"/runs/emulation/logs/{run_id}"
     config = f"{run_dir}/blocksci_data/config.json"
     output = f"{run_dir}/blocksci-custom-analysis_data"
-    return (
-        f"ACTIVE_RUN_ID={run_id} BLOCKSCI_CONFIG={config} "
-        f"BLOCKSCI_RUN_DIR={run_dir} BLOCKSCI_OUTPUT_DIR={output} "
-        "python3 /mnt/user-analysis.py"
+    environment = {
+        "ACTIVE_RUN_ID": run_id,
+        "BLOCKSCI_CONFIG": config,
+        "BLOCKSCI_RUN_DIR": run_dir,
+        "BLOCKSCI_OUTPUT_DIR": output,
+        "COINJOIN_TYPE": coinjoin_type,
+        "JOINMARKET_DETECTOR": joinmarket_detector,
+        "JOINMARKET_MIN_BASE_FEE": str(joinmarket_min_base_fee),
+        "JOINMARKET_PERCENTAGE_FEE": str(joinmarket_percentage_fee),
+        "JOINMARKET_MAX_DEPTH": str(joinmarket_max_depth),
+    }
+    if min_input_count is not None:
+        environment["MIN_INPUT_COUNT"] = str(min_input_count)
+    assignments = " ".join(
+        shell_assignment(name, value) for name, value in environment.items()
     )
+    return f"{assignments} python3 /mnt/user-analysis.py"
 
 
 def blocksci_notebook_pbs_command(notebook_port: int) -> str:

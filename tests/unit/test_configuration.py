@@ -386,3 +386,24 @@ def test_configuration_rejects_explicit_external_cli_action(tmp_path: Path) -> N
         expand_configuration(
             ["--from-configuration", str(path), "external", "analyze"]
         )
+
+
+@pytest.mark.parametrize(
+    ("filename", "action", "task"),
+    [
+        ("metacentrum-regtest-s3.yaml", "full-run", "detect"),
+        ("metacentrum-mainnet-parse.yaml", "pbs-from-s3", "parse"),
+        ("metacentrum-mainnet-analyze.yaml", "pbs-from-s3", "script"),
+    ],
+)
+def test_metacentrum_examples_load_as_typed_configurations(
+    filename: str, action: str, task: str
+) -> None:
+    path = Path(__file__).resolve().parents[2] / "examples" / filename
+
+    configuration = PipelineConfiguration.from_yaml(path)
+    arguments = configuration.to_arguments()
+
+    assert configuration.action == action
+    assert configuration.blocksci.task == task
+    assert "--blocksciPbs" in arguments

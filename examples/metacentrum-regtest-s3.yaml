@@ -5,7 +5,7 @@ driver: kubernetes
 emulation_timeout: 21600
 
 images:
-  # Pin this to an immutable release/commit tag for thesis evidence.
+  # Replace latest with one immutable release/commit tag for thesis evidence.
   version: latest
 
 kubernetes:
@@ -24,7 +24,7 @@ stages:
   mappings: true
 
 blocksci:
-  # Parse once, publish a checksummed cache, then run detection from it.
+  # Parse once and run detection from the checksummed reusable cache.
   workflow: reusable
   task: detect
 
