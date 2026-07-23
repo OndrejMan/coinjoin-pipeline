@@ -9,10 +9,10 @@ import sys
 from pathlib import Path
 
 if __package__ in {None, ""}:
-    sys.path.append(str(Path(__file__).resolve().parents[1]))
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from exporters.artifact_paths import blocksci_analysis_dir, emulator_dir
-from exporters.blocksci_export import (
+from exporters.blocksci.detector import (
     blocksci,
     export_blocksci_cluster_assignments_for_addresses,
     export_blocksci_records,

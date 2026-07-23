@@ -9,7 +9,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "pipeline"))
 
-from exporters.blocksci_analysis import (  # noqa: E402
+from exporters.blocksci.analysis import (  # noqa: E402
     SCHEMA_VERSION,
     detector_parameters,
     exported_addresses,
@@ -109,25 +109,25 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
     )
     fake_blocksci = mock.Mock()
     with (
-        mock.patch("exporters.blocksci_analysis.blocksci", fake_blocksci),
+        mock.patch("exporters.blocksci.analysis.blocksci", fake_blocksci),
         mock.patch(
-            "exporters.blocksci_analysis.export_blocksci_records",
+            "exporters.blocksci.analysis.export_blocksci_records",
             return_value=({"tx": {"txid": "tx"}}, ["skipped"]),
         ),
         mock.patch(
-            "exporters.blocksci_analysis.build_integration_diagnostics",
+            "exporters.blocksci.analysis.build_integration_diagnostics",
             return_value={"status": "ok"},
         ),
         mock.patch(
-            "exporters.blocksci_analysis.exported_addresses",
+            "exporters.blocksci.analysis.exported_addresses",
             return_value={"bcrt1-address"},
         ),
         mock.patch(
-            "exporters.blocksci_analysis.export_blocksci_cluster_assignments_for_addresses",
+            "exporters.blocksci.analysis.export_blocksci_cluster_assignments_for_addresses",
             return_value=({"bcrt1-address": "7"}, None),
         ),
         mock.patch(
-            "exporters.blocksci_analysis.load_first_wasabi2_block",
+            "exporters.blocksci.analysis.load_first_wasabi2_block",
             return_value=850237,
         ),
     ):

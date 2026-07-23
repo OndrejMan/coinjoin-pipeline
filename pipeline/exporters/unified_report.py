@@ -22,10 +22,10 @@ except ImportError:
 if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from exporters import blocksci_export as _blocksci_export
+from exporters.blocksci import detector as _blocksci_export
 from exporters import cli as _cli
 from exporters import integration_diagnostics as _integration_diagnostics
-from exporters.blocksci_export import *  # noqa: F403
+from exporters.blocksci.detector import *  # noqa: F403
 from exporters.cli import *  # noqa: F403
 from exporters.common import *  # noqa: F403
 from exporters.common import (

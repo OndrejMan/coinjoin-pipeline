@@ -260,7 +260,7 @@ class PBSTemplateTest(unittest.TestCase):
         )
 
         self.assertIn("blocksci_parser", command)
-        self.assertIn("python3 /mnt/exporters/blocksci_analysis.py", command)
+        self.assertIn("python3 /mnt/exporters/blocksci/analysis.py", command)
         self.assertIn("--min-input-count default", command)
         self.assertIn("--test-values", command)
         self.assertNotIn("unified_report.py", command)

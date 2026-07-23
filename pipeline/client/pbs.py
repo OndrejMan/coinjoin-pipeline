@@ -1646,7 +1646,7 @@ def blocksci_pbs_command(
         )
     if export_analysis:
         parts.append(
-            "python3 /mnt/exporters/blocksci_analysis.py "
+            "python3 /mnt/exporters/blocksci/analysis.py "
             "--config {config} "
             "--run-dir {run_dir_container} "
             "--coinjoin-type {coinjoin_type} "
@@ -1729,7 +1729,7 @@ def blocksci_analysis_pbs_command(
     config = f"/runs/emulation/logs/{run_id}/blocksci_data/config.json"
     run_dir = f"/runs/emulation/logs/{run_id}"
     command = (
-        "python3 /mnt/exporters/blocksci_analysis.py "
+        "python3 /mnt/exporters/blocksci/analysis.py "
         f"--config {config} --run-dir {run_dir} "
         f"--coinjoin-type {coinjoin_type} "
         f"--min-input-count {min_input_count if min_input_count is not None else 'default'} "

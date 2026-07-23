@@ -9,13 +9,13 @@ import sys
 from pathlib import Path
 
 from exporters.artifact_paths import coinjoin_analysis_dir, mappings_dir, report_dir
-from exporters.blocksci_analysis import (
+from exporters.blocksci.analysis import (
     detector_parameters as blocksci_detector_parameters,
 )
-from exporters.blocksci_analysis import (
+from exporters.blocksci.analysis import (
     load_analysis as load_blocksci_analysis,
 )
-from exporters.blocksci_export import blocksci, export_blocksci_cluster_assignments, export_blocksci_records
+from exporters.blocksci.detector import blocksci, export_blocksci_cluster_assignments, export_blocksci_records
 from exporters.common import (
     DEFAULT_JOINMARKET_DETECTOR,
     DEFAULT_JOINMARKET_MAX_DEPTH,

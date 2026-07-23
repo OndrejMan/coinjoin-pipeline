@@ -1,4 +1,4 @@
-"""BlockSci export and clustering adapters."""
+"""BlockSci detector and clustering adapters."""
 
 from __future__ import annotations
 

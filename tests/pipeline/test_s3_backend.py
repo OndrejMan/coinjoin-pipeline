@@ -193,7 +193,7 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     assert ".pbs/blocksci-parse.done" in parse
     assert "blocksci_parser" not in analyze
     assert "sha256sum -c blocksci_data.tar.gz.sha256" in analyze
-    assert "blocksci_analysis.py" in analyze
+    assert "blocksci/analysis.py" in analyze
     assert ".pbs/blocksci-analyze.done" in analyze
     assert '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"' not in analyze
 
@@ -435,7 +435,7 @@ def test_pbs_from_s3_submits_parallel_analyzers_then_dependent_report() -> None:
     assert blocksci.call_args.kwargs["include_report"] is False
     assert blocksci.call_args.kwargs["export_analysis"] is True
     assert "unified_report.py" not in blocksci.call_args.kwargs["command"]
-    assert "blocksci_analysis.py" in blocksci.call_args.kwargs["command"]
+    assert "blocksci/analysis.py" in blocksci.call_args.kwargs["command"]
     assert report.call_args.kwargs["dependency_job_ids"] == (
         "analysis.server",
         "blocksci.server",
