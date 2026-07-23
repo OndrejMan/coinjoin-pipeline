@@ -518,6 +518,36 @@ The default destination is
 `--runs-root PATH` option or `--output-dir PATH` to change it. The command
 refuses a failed or incomplete report stage and requires `s5cmd` on `PATH`.
 
+### Cleaning the S3 backend
+
+To remove artifacts from the bucket, `clean-s3` deletes every object under an
+S3 run root (or a single run) directly on the frontend, without Docker/Podman.
+It is irreversible, so it first lists the matching objects and, unless `--yes`
+is given, requires you to retype the target prefix at an interactive prompt
+(non-interactive stdin is refused without `--yes`). Use `--dry-run` to preview.
+
+```bash
+# Preview what a full wipe of the runs root would remove.
+./runIt.sh clean-s3 --dry-run \
+  --artifact-uri s3://xman-coinjoin/runs \
+  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
+  --s3-credentials-file /storage/brno2/home/xman/.aws/credentials \
+  --s3-profile coinjoin
+
+# Delete a single run non-interactively.
+./runIt.sh clean-s3 --yes \
+  --run-id '<id>' \
+  --artifact-uri s3://xman-coinjoin/runs \
+  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
+  --s3-credentials-file /storage/brno2/home/xman/.aws/credentials \
+  --s3-profile coinjoin
+```
+
+Omit `--run-id` to clean everything under `--artifact-uri`; point `--artifact-uri`
+at the bucket root (`s3://xman-coinjoin`) to wipe the whole bucket. The
+`--artifact-uri`, `--s3-*` options also read the `ARTIFACT_URI`, `S3_ENDPOINT_URL`,
+`S3_CREDENTIALS_FILE`, and `S3_PROFILE` environment variables.
+
 `--blocksciPbs` by itself remains available only to `pbs-from-s3`; it retains
 the combined BlockSci-plus-report behavior and requires the remote run to
 already contain `coinjoin-analysis_data/coinjoin_tx_info.json`. Both S3 report
