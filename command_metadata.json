@@ -1015,6 +1015,235 @@
         }
       }
     },
+    "emulate": {
+      "options": {
+        "--artifact-backend": {
+          "aliases": [
+            "--artifact-backend"
+          ],
+          "choices": [
+            "shared-storage",
+            "s3"
+          ],
+          "default": "shared-storage",
+          "flag": "--artifact-backend",
+          "help": "Artifact transport backend (default: shared-storage).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--artifact-uri": {
+          "aliases": [
+            "--artifact-uri"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--artifact-uri",
+          "help": "S3-compatible run prefix, for example s3://bucket/runs.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--coinjoin-infrastructure-local-build": {
+          "aliases": [
+            "--coinjoin-infrastructure-local-build"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--coinjoin-infrastructure-local-build",
+          "help": "Build btc-node, JoinMarket client-server, and IRC server locally inside the emulator runtime.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--copy-to-host": {
+          "aliases": [
+            "--copy-to-host"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--copy-to-host",
+          "help": "Use the legacy pod-to-wrapper Bitcoin datadir download instead of writing directly to shared storage.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--driver": {
+          "aliases": [
+            "--driver"
+          ],
+          "choices": [
+            "docker",
+            "kubernetes"
+          ],
+          "default": "docker",
+          "flag": "--driver",
+          "help": "Container orchestration driver for the emulation step. 'docker' uses Docker-in-Docker via compose (default). 'kubernetes' runs the emulation pods on a Kubernetes cluster.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--dry-run": {
+          "aliases": [
+            "--dry-run"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--dry-run",
+          "help": "Print the selected pipeline stages and exit without side effects.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--engine": {
+          "aliases": [
+            "--engine"
+          ],
+          "choices": [
+            "wasabi",
+            "joinmarket"
+          ],
+          "default": null,
+          "flag": "--engine",
+          "help": "CoinJoin emulator engine to run. Select explicitly: wasabi or joinmarket.",
+          "metavar": null,
+          "required": true,
+          "takes_value": true
+        },
+        "--image-prefix": {
+          "aliases": [
+            "--image-prefix"
+          ],
+          "choices": [],
+          "default": "ghcr.io/ondrejman/",
+          "flag": "--image-prefix",
+          "help": "Image registry prefix for Kubernetes pods (default: ghcr.io/ondrejman/).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--kubeconfig": {
+          "aliases": [
+            "--kubeconfig"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--kubeconfig",
+          "help": "Path to kubeconfig file (default: ~/.kube/config).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--kubernetes-btc-datadir": {
+          "aliases": [
+            "--kubernetes-btc-datadir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--kubernetes-btc-datadir",
+          "help": "Shared absolute Bitcoin Core datadir mounted directly into the Kubernetes btc-node pod. Defaults to --pbs-bitcoin-datadir when set.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--namespace": {
+          "aliases": [
+            "--namespace"
+          ],
+          "choices": [],
+          "default": "coinjoin",
+          "flag": "--namespace",
+          "help": "Kubernetes namespace for emulation pods (default: coinjoin).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-bitcoin-datadir": {
+          "aliases": [
+            "--pbs-bitcoin-datadir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-bitcoin-datadir",
+          "help": "Shared-storage-only PBS Bitcoin datadir; rejected by Kubernetes S3-compatible mode.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--reuse-namespace": {
+          "aliases": [
+            "--reuse-namespace"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--reuse-namespace",
+          "help": "Reuse an existing Kubernetes namespace instead of creating a new one.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--run-id": {
+          "aliases": [
+            "--run-id"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--run-id",
+          "help": "Deterministic artifact run identifier.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--run-timezone": {
+          "aliases": [
+            "--run-timezone"
+          ],
+          "choices": [],
+          "default": "Europe/Prague",
+          "flag": "--run-timezone",
+          "help": "IANA timezone used in newly created run directory names (default: Europe/Prague).",
+          "metavar": "IANA_ZONE",
+          "required": false,
+          "takes_value": true
+        },
+        "--s3-endpoint-url": {
+          "aliases": [
+            "--s3-endpoint-url"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--s3-endpoint-url",
+          "help": "CESNET/MetaCentrum S3-compatible endpoint URL.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--s3-secret-name": {
+          "aliases": [
+            "--s3-secret-name"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--s3-secret-name",
+          "help": "Pre-created Kubernetes Secret for S3-compatible upload.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--scenario": {
+          "aliases": [
+            "--scenario"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--scenario",
+          "help": "JSON scenario path.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        }
+      }
+    },
     "export": {
       "options": {
         "--coinjoin-type": {
@@ -3438,235 +3667,6 @@
           "metavar": null,
           "required": false,
           "takes_value": false
-        }
-      }
-    },
-    "recreate": {
-      "options": {
-        "--artifact-backend": {
-          "aliases": [
-            "--artifact-backend"
-          ],
-          "choices": [
-            "shared-storage",
-            "s3"
-          ],
-          "default": "shared-storage",
-          "flag": "--artifact-backend",
-          "help": "Artifact transport backend (default: shared-storage).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--artifact-uri": {
-          "aliases": [
-            "--artifact-uri"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--artifact-uri",
-          "help": "S3-compatible run prefix, for example s3://bucket/runs.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--coinjoin-infrastructure-local-build": {
-          "aliases": [
-            "--coinjoin-infrastructure-local-build"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--coinjoin-infrastructure-local-build",
-          "help": "Build btc-node, JoinMarket client-server, and IRC server locally inside the emulator runtime.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--copy-to-host": {
-          "aliases": [
-            "--copy-to-host"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--copy-to-host",
-          "help": "Use the legacy pod-to-wrapper Bitcoin datadir download instead of writing directly to shared storage.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--driver": {
-          "aliases": [
-            "--driver"
-          ],
-          "choices": [
-            "docker",
-            "kubernetes"
-          ],
-          "default": "docker",
-          "flag": "--driver",
-          "help": "Container orchestration driver for the emulation step. 'docker' uses Docker-in-Docker via compose (default). 'kubernetes' runs the emulation pods on a Kubernetes cluster.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--dry-run": {
-          "aliases": [
-            "--dry-run"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--dry-run",
-          "help": "Print the selected pipeline stages and exit without side effects.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--engine": {
-          "aliases": [
-            "--engine"
-          ],
-          "choices": [
-            "wasabi",
-            "joinmarket"
-          ],
-          "default": null,
-          "flag": "--engine",
-          "help": "CoinJoin emulator engine to run. Select explicitly: wasabi or joinmarket.",
-          "metavar": null,
-          "required": true,
-          "takes_value": true
-        },
-        "--image-prefix": {
-          "aliases": [
-            "--image-prefix"
-          ],
-          "choices": [],
-          "default": "ghcr.io/ondrejman/",
-          "flag": "--image-prefix",
-          "help": "Image registry prefix for Kubernetes pods (default: ghcr.io/ondrejman/).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--kubeconfig": {
-          "aliases": [
-            "--kubeconfig"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--kubeconfig",
-          "help": "Path to kubeconfig file (default: ~/.kube/config).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--kubernetes-btc-datadir": {
-          "aliases": [
-            "--kubernetes-btc-datadir"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--kubernetes-btc-datadir",
-          "help": "Shared absolute Bitcoin Core datadir mounted directly into the Kubernetes btc-node pod. Defaults to --pbs-bitcoin-datadir when set.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--namespace": {
-          "aliases": [
-            "--namespace"
-          ],
-          "choices": [],
-          "default": "coinjoin",
-          "flag": "--namespace",
-          "help": "Kubernetes namespace for emulation pods (default: coinjoin).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-bitcoin-datadir": {
-          "aliases": [
-            "--pbs-bitcoin-datadir"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-bitcoin-datadir",
-          "help": "Shared-storage-only PBS Bitcoin datadir; rejected by Kubernetes S3-compatible mode.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--reuse-namespace": {
-          "aliases": [
-            "--reuse-namespace"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--reuse-namespace",
-          "help": "Reuse an existing Kubernetes namespace instead of creating a new one.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--run-id": {
-          "aliases": [
-            "--run-id"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--run-id",
-          "help": "Deterministic artifact run identifier.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--run-timezone": {
-          "aliases": [
-            "--run-timezone"
-          ],
-          "choices": [],
-          "default": "Europe/Prague",
-          "flag": "--run-timezone",
-          "help": "IANA timezone used in newly created run directory names (default: Europe/Prague).",
-          "metavar": "IANA_ZONE",
-          "required": false,
-          "takes_value": true
-        },
-        "--s3-endpoint-url": {
-          "aliases": [
-            "--s3-endpoint-url"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--s3-endpoint-url",
-          "help": "CESNET/MetaCentrum S3-compatible endpoint URL.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--s3-secret-name": {
-          "aliases": [
-            "--s3-secret-name"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--s3-secret-name",
-          "help": "Pre-created Kubernetes Secret for S3-compatible upload.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--scenario": {
-          "aliases": [
-            "--scenario"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--scenario",
-          "help": "JSON scenario path.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
         }
       }
     },

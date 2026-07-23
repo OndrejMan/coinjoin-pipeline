@@ -100,7 +100,7 @@ def required_image_components(action: str, arguments: list[str]) -> set[str]:
         return {"pipeline"}
     if action == "external analyze":
         return {"pipeline", "blocksci"}
-    if action == "recreate":
+    if action == "emulate":
         return {"pipeline", "emulator"}
     if action == "pbs-from-s3":
         return set()

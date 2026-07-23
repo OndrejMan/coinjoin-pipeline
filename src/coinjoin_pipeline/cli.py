@@ -69,7 +69,7 @@ def usage() -> None:
     print("""usage: coinjoin-pipeline [HOST OPTIONS] ACTION [PIPELINE OPTIONS]
 
 Host actions: doctor, pull, version, builder, watch, download-report, clean-s3
-Pipeline actions: full-run, recreate, clean, analyze, export,
+Pipeline actions: full-run, emulate, clean, analyze, export,
   coinjoin-analysis, pbs-from-s3, mappings, initialize, runs ..., scenarios ..., external ...
 
 Host options:
@@ -170,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     with as_file(launcher_resource) as launcher:
         command = launcher_command(launcher, runtime, passthrough, images, runs_root, reproduction)
         pipeline_run_id: str | None = None
-        if action in {"full-run", "recreate"} and not option_value(passthrough, "--run-dir"):
+        if action in {"full-run", "emulate"} and not option_value(passthrough, "--run-dir"):
             candidate_run_id = run_id_for(passthrough)
             if valid_run_id(candidate_run_id):
                 pipeline_run_id = candidate_run_id
@@ -193,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
             or (action == "coinjoin-analysis" and "--analysisPbs" in passthrough)
             or (action == "mappings" and "--mappingsPbs" in passthrough)
             or action == "pbs-from-s3"
-            or (action in {"recreate", "full-run"} and option_value(passthrough, "--artifact-backend") == "s3")
+            or (action in {"emulate", "full-run"} and option_value(passthrough, "--artifact-backend") == "s3")
         )
         if "--dry-run" in passthrough and not stage_pbs_dry_run:
             print("[dry-run] validation passed; command was not executed")

@@ -118,7 +118,7 @@ fi
 
 # Kubernetes preflight fails before launch when the kubeconfig is missing.
 set +e
-run_it bash "${LAUNCHER}" recreate --engine wasabi --scenario scenarios/overactive-local.json --driver kubernetes --kubeconfig "${TMP_DIR}/missing-kubeconfig" >"${TMP_DIR}/kube.out" 2>&1
+run_it bash "${LAUNCHER}" emulate --engine wasabi --scenario scenarios/overactive-local.json --driver kubernetes --kubeconfig "${TMP_DIR}/missing-kubeconfig" >"${TMP_DIR}/kube.out" 2>&1
 kube_exit=$?
 set -e
 [[ "${kube_exit}" -ne 0 ]]

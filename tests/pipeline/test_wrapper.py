@@ -593,8 +593,8 @@ class WrapperExportTest(unittest.TestCase):
 
     def test_normalize_argv_keeps_explicit_action(self):
         self.assertEqual(
-            normalize_argv(["recreate", "--scenario", "overactive-local.json"]),
-            ["recreate", "--scenario", "overactive-local.json"],
+            normalize_argv(["emulate", "--scenario", "overactive-local.json"]),
+            ["emulate", "--scenario", "overactive-local.json"],
         )
 
     def test_normalize_argv_keeps_help_without_default_action(self):
@@ -774,7 +774,7 @@ class WrapperExportTest(unittest.TestCase):
 
     def test_kubernetes_s3_rejects_shared_storage_flags(self):
         result = subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"), "recreate",
+            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"), "emulate",
              "--engine", "wasabi", "--driver", "kubernetes", "--artifact-backend", "s3",
              "--artifact-uri", "s3://bucket/runs", "--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz",
              "--s3-secret-name", "coinjoin-s3", "--run-id", "run-1",

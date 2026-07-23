@@ -235,9 +235,9 @@ class CommandBuilderTests(unittest.TestCase):
         self.assertTrue(any("--parallel" in error for error in errors))
         self.assertTrue(any("--copy-to-host" in error for error in errors))
 
-    def test_validation_requires_existing_namespace_for_s3_recreate(self) -> None:
+    def test_validation_requires_existing_namespace_for_s3_emulate(self) -> None:
         command = MODULE.Command(
-            action="recreate",
+            action="emulate",
             options=[
                 ("--engine", "wasabi"),
                 ("--driver", "kubernetes"),
@@ -545,7 +545,7 @@ class CommandBuilderTests(unittest.TestCase):
         self.assertEqual(
             set(metadata),
             {
-                "recreate", "clean", "analyze", "export", "coinjoin-analysis", "mappings",
+                "emulate", "clean", "analyze", "export", "coinjoin-analysis", "mappings",
                 "initialize", "full-run", "pbs-from-s3", "runs list", "runs inspect", "runs validate",
                 "scenarios list", "scenarios show", "scenarios validate", "external analyze",
             },

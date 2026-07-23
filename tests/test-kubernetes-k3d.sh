@@ -15,7 +15,7 @@ WAIT_TIMEOUT="${WAIT_TIMEOUT:-180s}"
 # the docker path takes.
 EMULATION_TIMEOUT="${EMULATION_TIMEOUT:-90m}"
 SCENARIO="${SCENARIO:-overactive-local.json}"
-ACTION="${ACTION:-recreate}"
+ACTION="${ACTION:-emulate}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
 WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/coinjoin-pipeline:latest}"
 EMULATOR_IMAGE="${EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"

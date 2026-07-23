@@ -53,7 +53,7 @@ def manifest_target(
         if not target.is_absolute():
             target = runs_root / target
         return target / "research_manifest.json"
-    if action in {"full-run", "recreate"}:
+    if action in {"full-run", "emulate"}:
         return runs_root / (run_id or run_id_for(arguments)) / "research_manifest.json"
     return None
 

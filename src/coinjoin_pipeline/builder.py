@@ -263,8 +263,8 @@ def validate_command(command: Command) -> Validation:
     if has_option(command, "--yes") and has_option(command, "--dry-run"):
         result.errors.append("Use either --yes or --dry-run for clean, not both.")
 
-    if driver == "kubernetes" and action not in {"full-run", "recreate"}:
-        result.errors.append("--driver kubernetes is supported only by full-run and recreate.")
+    if driver == "kubernetes" and action not in {"full-run", "emulate"}:
+        result.errors.append("--driver kubernetes is supported only by full-run and emulate.")
     driver_dependent_flags = KUBERNETES_FLAGS - {"--driver", "--coinjoin-infrastructure-local-build"}
     if driver != "kubernetes" and any(has_option(command, flag) for flag in driver_dependent_flags):
         result.errors.append("Kubernetes-specific options require --driver kubernetes.")
@@ -325,7 +325,7 @@ def validate_command(command: Command) -> Validation:
         for flag in ("--kubernetes-btc-datadir", "--pbs-bitcoin-datadir", "--copy-to-host"):
             if has_option(command, flag):
                 result.errors.append(f"Kubernetes S3-compatible mode does not support {flag}.")
-    if backend == "s3" and action == "recreate":
+    if backend == "s3" and action == "emulate":
         if driver != "kubernetes":
             result.errors.append("--artifact-backend s3 requires --driver kubernetes.")
         for flag in ("--run-id", "--artifact-uri", "--s3-endpoint-url", "--s3-secret-name"):
@@ -551,7 +551,7 @@ def explain_command(command: Command) -> list[str]:
     action = command.action.split()[0]
     descriptions = {
         "full-run": "clean runtime resources, emulate CoinJoins, analyze, and export a report",
-        "recreate": "run CoinJoin emulation only",
+        "emulate": "run CoinJoin emulation only",
         "analyze": "analyze an existing emulator run",
         "export": "regenerate the unified report from existing analysis outputs",
         "coinjoin-analysis": "run the baseline coinjoin-analysis stage only",
@@ -1138,7 +1138,7 @@ def collect_command() -> Command:
 
     action_labels = {
         "full-run": "Full run (clean, emulate, analyze)",
-        "recreate": "Emulation only",
+        "emulate": "Emulation only",
         "analyze": "Analyze an existing run",
         "export": "Export an existing run",
         "coinjoin-analysis": "coinjoin-analysis only",
@@ -1300,7 +1300,7 @@ def main() -> None:
         console.print("\n[dim]Cancelled.[/dim]")
         raise SystemExit(130)
     if base_action(command) in {
-        "full-run", "recreate", "clean", "analyze", "export",
+        "full-run", "emulate", "clean", "analyze", "export",
         "coinjoin-analysis", "mappings", "initialize", "external analyze",
     }:
         command.version = questionary.text(

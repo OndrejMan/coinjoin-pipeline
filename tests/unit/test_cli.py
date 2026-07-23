@@ -245,10 +245,10 @@ class CliTests(unittest.TestCase):
             all(image.endswith(":latest") for image in images.as_dict().values())
         )
 
-    def test_recreate_checks_only_images_used_by_that_stage(self) -> None:
+    def test_emulate_checks_only_images_used_by_that_stage(self) -> None:
         self.assertEqual(
             required_image_components(
-                "recreate", ["recreate", "--driver", "kubernetes"]
+                "emulate", ["emulate", "--driver", "kubernetes"]
             ),
             {"pipeline", "emulator"},
         )

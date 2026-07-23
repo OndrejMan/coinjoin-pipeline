@@ -142,13 +142,13 @@ if ! grep -q -- "^container cleanup --rm isolated_docker_daemon " "${PODMAN_LOG}
 fi
 
 if ! grep -q -- "^rm -f -i emulator_manager btc_data_wiper dind_image_prefetch isolated_docker_daemon " "${PODMAN_LOG}"; then
-  echo "FAIL: expected Podman cleanup to remove recreate containers" >&2
+  echo "FAIL: expected Podman cleanup to remove emulate containers" >&2
   echo "Observed: $(cat "${PODMAN_LOG}")" >&2
   exit 1
 fi
 
 if ! grep -q -- "^network rm -f blocksci-emulator_default " "${PODMAN_LOG}"; then
-  echo "FAIL: expected Podman cleanup to remove the recreate network" >&2
+  echo "FAIL: expected Podman cleanup to remove the emulate network" >&2
   echo "Observed: $(cat "${PODMAN_LOG}")" >&2
   exit 1
 fi
@@ -166,7 +166,7 @@ touch "${KUBE_CONFIG}"
   KUBERNETES_CONTROL_IP="172.17.0.1" \
   WRAPPER_IMAGE="ghcr.io/ondrejman/coinjoin-pipeline:latest" \
   PATH="${FAKE_BIN}:${PATH}" \
-  ./runIt.sh container podman recreate \
+  ./runIt.sh container podman emulate \
     --engine wasabi \
     --scenario overactive-local.json \
     --driver=kubernetes \
@@ -223,8 +223,8 @@ if ! grep -q -- "--reuse-namespace --copy-to-host --image-prefix ghcr.io/test/" 
   exit 1
 fi
 
-if grep -q -- "_ recreate .*--test-values" "${PODMAN_LOG}"; then
-  echo "FAIL: expected recreate-only run not to receive BlockSci test values flag" >&2
+if grep -q -- "_ emulate .*--test-values" "${PODMAN_LOG}"; then
+  echo "FAIL: expected emulate-only run not to receive BlockSci test values flag" >&2
   echo "Observed: $(cat "${PODMAN_LOG}")" >&2
   exit 1
 fi

@@ -14,7 +14,7 @@ from .images import Images
 
 
 MUTATING_ACTIONS = {
-    "full-run", "recreate", "analyze", "export", "coinjoin-analysis",
+    "full-run", "emulate", "analyze", "export", "coinjoin-analysis",
     "coinjoin", "mappings", "initialize", "external analyze", "clean",
     "pbs-from-s3",
 }
@@ -295,7 +295,7 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
         for flag in ("--kubernetes-btc-datadir", "--pbs-bitcoin-datadir", "--copy-to-host"):
             if has_option(argv, flag):
                 errors.append(f"Kubernetes S3-compatible mode does not support {flag}")
-    if backend == "s3" and action == "recreate":
+    if backend == "s3" and action == "emulate":
         for flag in ("--run-id", "--artifact-uri", "--s3-endpoint-url", "--s3-secret-name"):
             if not has_option(argv, flag):
                 errors.append(f"Kubernetes S3-compatible mode requires {flag}")

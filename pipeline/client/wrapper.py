@@ -206,7 +206,7 @@ except ImportError:
     )
 ROOT_DIR = Path(__file__).resolve().parent.parent
 CLIENT_DIR = Path(__file__).resolve().parent
-RECREATE_SCRIPT = ROOT_DIR / "recreate.sh"
+EMULATE_SCRIPT = ROOT_DIR / "emulate.sh"
 DELETE_SCRIPT = ROOT_DIR / "delete.sh"
 ANALYSIS_SCRIPT = ROOT_DIR / "analysis.sh"
 COMPOSE_FILE = ROOT_DIR / "compose.yaml"
@@ -218,7 +218,7 @@ COINJOIN_ANALYSIS_INPUT_DATA_PATH_ENV = "COINJOIN_ANALYSIS_INPUT_DATA_PATH"
 VALID_DRIVERS = ("docker", "kubernetes")
 DEFAULT_ACTION = "full-run"
 WRAPPER_ACTIONS = (
-    "recreate",
+    "emulate",
     "clean",
     "analyze",
     "export",
@@ -718,7 +718,7 @@ def initialize_images() -> None:
     try:
         # 1. Pull the outer compose images
         run_command(
-            [*compose_cmd, "--profile", "recreate", "--profile", "analysis", "pull"],
+            [*compose_cmd, "--profile", "emulate", "--profile", "analysis", "pull"],
             cwd=CLIENT_DIR,
             env=env,
         )
@@ -727,14 +727,14 @@ def initialize_images() -> None:
         # By removing --no-deps, Compose will automatically start 'dind' and wait
         # for it to be healthy before executing the prefetch commands.
         run_command(
-            [*compose_cmd, "--profile", "recreate", "run", "--rm", "dind_image_prefetch"],
+            [*compose_cmd, "--profile", "emulate", "run", "--rm", "dind_image_prefetch"],
             cwd=CLIENT_DIR,
             env=env,
         )
 
         # 3. Cleanup transient services and the DinD daemon
         run_command(
-            [*compose_cmd, "--profile", "recreate", "down"],
+            [*compose_cmd, "--profile", "emulate", "down"],
             cwd=CLIENT_DIR,
             env=env,
         )
@@ -757,7 +757,7 @@ def run_coinjoin_analysis(
 
     if not active_run_ids:
         print(
-            "[ERROR] No grouped emulation run folder found. Run recreate/full-run first or pass --run-dir explicitly.",
+            "[ERROR] No grouped emulation run folder found. Run emulate/full-run first or pass --run-dir explicitly.",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -1122,7 +1122,7 @@ def export_preflight_error(
             "neither prerequisite is ready.\n"
             f"Missing CoinJoin output: {coinjoin_path}\n"
             f"Missing BlockSci run output: {blocksci_location} or {parsed_chain_location}\n"
-            "Run the full pipeline first, or run recreate/analyze before export."
+            "Run the full pipeline first, or run emulate/analyze before export."
         )
 
     if not coinjoin_ready:
@@ -1207,7 +1207,7 @@ def run_export_only(args: argparse.Namespace) -> None:
     active_run_id = resolve_run_id(args.run_dir, env)
     if not active_run_id:
         print(
-            "[ERROR] No emulation run folder found. Run recreate/full-run first, or pass --run-dir explicitly.",
+            "[ERROR] No emulation run folder found. Run emulate/full-run first, or pass --run-dir explicitly.",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -2186,8 +2186,8 @@ def validate_artifact_arguments(parser: argparse.ArgumentParser, args: argparse.
                 )
             if getattr(args, "blocksci_script", None):
                 parser.error("full-run --artifact-backend s3 does not support --blocksci-script")
-        elif args.action != "recreate" or getattr(args, "driver", None) != "kubernetes":
-            parser.error("--artifact-backend s3 is supported only by full-run and recreate with --driver kubernetes")
+        elif args.action != "emulate" or getattr(args, "driver", None) != "kubernetes":
+            parser.error("--artifact-backend s3 is supported only by full-run and emulate with --driver kubernetes")
         else:
             for attribute, flag in (
                 ("artifact_uri", "--artifact-uri"),
@@ -2785,15 +2785,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="action", required=True)
 
-    recreate_parser = subparsers.add_parser("recreate", help="Run recreate.sh with optional JSON scenario.")
-    add_runtime_argument(recreate_parser)
-    add_engine_argument(recreate_parser, required=True)
-    add_dry_run_argument(recreate_parser)
-    recreate_parser.add_argument("--scenario", help="JSON scenario path.")
-    add_run_timezone_argument(recreate_parser)
-    add_kubernetes_arguments(recreate_parser)
-    add_artifact_arguments(recreate_parser, kubernetes_secret=True)
-    recreate_parser.add_argument(
+    emulate_parser = subparsers.add_parser("emulate", help="Run emulate.sh with optional JSON scenario.")
+    add_runtime_argument(emulate_parser)
+    add_engine_argument(emulate_parser, required=True)
+    add_dry_run_argument(emulate_parser)
+    emulate_parser.add_argument("--scenario", help="JSON scenario path.")
+    add_run_timezone_argument(emulate_parser)
+    add_kubernetes_arguments(emulate_parser)
+    add_artifact_arguments(emulate_parser, kubernetes_secret=True)
+    emulate_parser.add_argument(
         "--pbs-bitcoin-datadir",
         default=None,
         help="Shared-storage-only PBS Bitcoin datadir; rejected by Kubernetes S3-compatible mode.",
@@ -2870,7 +2870,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_pbs_arguments(coinjoin_parser)
     initialize_parser = subparsers.add_parser(
-        "initialize", help="Download all required images for recreate/analyze ahead of time."
+        "initialize", help="Download all required images for emulate/analyze ahead of time."
     )
     add_runtime_argument(initialize_parser)
     add_dry_run_argument(initialize_parser)
@@ -2892,7 +2892,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_pbs_arguments(s3_pbs_parser)
     add_unified_report_pbs_arguments(s3_pbs_parser)
 
-    full_parser = subparsers.add_parser("full-run", help="Run delete.sh, then recreate.sh, then analysis.sh.")
+    full_parser = subparsers.add_parser("full-run", help="Run delete.sh, then emulate.sh, then analysis.sh.")
     add_runtime_argument(full_parser)
     add_engine_argument(full_parser, required=True)
     add_dry_run_argument(full_parser)
@@ -2984,7 +2984,7 @@ def main() -> None:
         or (args.action == "mappings" and getattr(args, "mappingsPbs", False))
         or args.action == "pbs-from-s3"
         or (
-            args.action in ("recreate", "full-run")
+            args.action in ("emulate", "full-run")
             and getattr(args, "artifact_backend", "shared-storage") == "s3"
         )
     )
@@ -2994,7 +2994,7 @@ def main() -> None:
         if hasattr(args, "engine"):
             print(f"[dry-run] engine: {args.engine}")
         if use_pbs_dry_run:
-            if args.action == "recreate":
+            if args.action == "emulate":
                 print("[dry-run] Kubernetes resources will be rendered but not applied with kubectl.")
             elif args.action == "full-run":
                 print("[dry-run] Kubernetes resources and PBS job scripts will be rendered but not submitted.")
@@ -3035,7 +3035,7 @@ def main() -> None:
         except (ArtifactTransportError, PBSError) as error:
             print(f"[ERROR] {error}", file=sys.stderr)
             sys.exit(2)
-    elif args.action == "recreate":
+    elif args.action == "emulate":
         logs_root = Path(compose_env().get("EMULATION_LOGS_DIR", ".")).expanduser().resolve()
         if use_kubernetes and getattr(args, "artifact_backend", "shared-storage") == "s3":
             try:
@@ -3072,7 +3072,7 @@ def main() -> None:
                 emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
                 before = run_dirs(emulation_logs_dir)
                 run_script(
-                    RECREATE_SCRIPT,
+                    EMULATE_SCRIPT,
                     *(["--scenario", args.scenario] if args.scenario else []),
                     engine=args.engine,
                     run_timezone_name=args.run_timezone,
@@ -3232,7 +3232,7 @@ def main() -> None:
             before = run_dirs(emulation_logs_dir)
             with captured_pipeline_stage(logs_root, "Docker emulation") as emulation_log:
                 run_script(
-                    RECREATE_SCRIPT,
+                    EMULATE_SCRIPT,
                     *(["--scenario", args.scenario] if args.scenario else []),
                     engine=args.engine,
                     run_timezone_name=args.run_timezone,

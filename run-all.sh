@@ -383,8 +383,8 @@ fi
 if [[ "${RUN_TESTS}" == "1" ]]; then
   tests=(
     "tests/test-command-builder-contract.sh"
-    "tests/pipeline/test_recreate_exit_status.sh"
-    "tests/pipeline/test_recreate_interrupt_cleanup.sh"
+    "tests/pipeline/test_emulate_exit_status.sh"
+    "tests/pipeline/test_emulate_interrupt_cleanup.sh"
     "tests/test-runIt-overactive-local.sh"
     "tests/test-podman-no-host-docker.sh"
     "tests/test-runIt-overactive-local-docker.sh"

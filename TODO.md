@@ -19,7 +19,7 @@ on the floating `docker:29-dind` tag — a newly published 29.x image changed th
   binds 2375 in ~1.5s instead of ~17s.
 - `start_period: 20s` on the healthcheck — headroom for future slow starts.
 
-Verified: `docker compose --profile recreate up -d --wait dind` reaches `healthy`, no
+Verified: `docker compose --profile emulate up -d --wait dind` reaches `healthy`, no
 slowdown warning in logs.
 
 **Follow-up:** pin `docker:29-dind` to a digest (or specific minor) so `pull_policy: always`

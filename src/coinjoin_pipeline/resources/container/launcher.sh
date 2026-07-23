@@ -147,7 +147,7 @@ SELECTED_ACTION=""; DOCTOR_ENGINE=""; HAS_DRY_RUN=false; HAS_ANALYSIS_PBS=false;
 for ((index=0; index<${#WRAPPER_ARGS[@]}; index++)); do
   item="${WRAPPER_ARGS[index]}"
   case "${item}" in
-    full-run|recreate|clean|analyze|export|coinjoin-analysis|coinjoin|mappings|initialize|pbs-from-s3) [[ -z "${SELECTED_ACTION}" ]] && SELECTED_ACTION="${item}" ;;
+    full-run|emulate|clean|analyze|export|coinjoin-analysis|coinjoin|mappings|initialize|pbs-from-s3) [[ -z "${SELECTED_ACTION}" ]] && SELECTED_ACTION="${item}" ;;
     --engine) DOCTOR_ENGINE="${WRAPPER_ARGS[index + 1]:-}" ;;
     --engine=*) DOCTOR_ENGINE="${item#--engine=}" ;;
     --dry-run) HAS_DRY_RUN=true ;;
@@ -222,7 +222,7 @@ if [[ "${DRIVER}" == kubernetes && "${HAS_DRY_RUN}" == false ]]; then
   command -v kubectl >/dev/null 2>&1 && kubectl --kubeconfig "${KUBE_CFG}" get --raw=/version >/dev/null 2>&1 || fail "Kubernetes API is not reachable with ${KUBE_CFG}"
 fi
 DIRECT_KUBERNETES_BTC=false
-if [[ "${DRIVER}" == kubernetes && ( "${ACTION}" == full-run || "${ACTION}" == recreate ) && "${HAS_COPY_TO_HOST}" == false ]]; then
+if [[ "${DRIVER}" == kubernetes && ( "${ACTION}" == full-run || "${ACTION}" == emulate ) && "${HAS_COPY_TO_HOST}" == false ]]; then
   DIRECT_KUBERNETES_BTC=true
 fi
 if [[ "${HAS_BLOCKSCI_PBS}" == true && -n "${PBS_BITCOIN_DATADIR_PATH}" ]]; then

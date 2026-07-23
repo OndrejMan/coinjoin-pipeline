@@ -18,7 +18,7 @@ chmod 0755 "${TMP_DIR}/bin/docker"
 FAKE_DOCKER_ARGS="${TMP_DIR}/docker.args" \
 PATH="${TMP_DIR}/bin:${PATH}" \
 "${PROJECT_DIR}/run-pipeline-image.sh" --build --setup "${TMP_DIR}/kubeconfig" --logs-dir "${TMP_DIR}/logs" \
-  recreate --engine wasabi --namespace thesis-test
+  emulate --engine wasabi --namespace thesis-test
 
 rg -Fx -- build "${TMP_DIR}/docker.args"
 rg -Fx -- "${TMP_DIR}/kubeconfig:/root/.kube/config:ro" "${TMP_DIR}/docker.args"

@@ -45,7 +45,7 @@ export DOCKER_LOG WAIT_STARTED
   cd "${PROJECT_DIR}"
   PATH="${FAKE_BIN}:${PATH}" \
   COMPOSE_FILE="${PROJECT_DIR}/compose.yaml" \
-  bash recreate.sh
+  bash emulate.sh
 ) &
 RUN_PID=$!
 
@@ -55,7 +55,7 @@ for _ in {1..50}; do
 done
 
 if [[ ! -e "${WAIT_STARTED}" ]]; then
-  echo "FAIL: recreate.sh did not reach docker wait" >&2
+  echo "FAIL: emulate.sh did not reach docker wait" >&2
   kill "${RUN_PID}" >/dev/null 2>&1 || true
   wait "${RUN_PID}" >/dev/null 2>&1 || true
   exit 1
@@ -68,15 +68,15 @@ RUN_EXIT_CODE=$?
 set -e
 
 if [[ "${RUN_EXIT_CODE}" -ne 130 ]]; then
-  echo "FAIL: expected recreate.sh to exit 130 after TERM, got ${RUN_EXIT_CODE}" >&2
+  echo "FAIL: expected emulate.sh to exit 130 after TERM, got ${RUN_EXIT_CODE}" >&2
   echo "Observed: $(cat "${DOCKER_LOG}")" >&2
   exit 1
 fi
 
-if ! grep -q -- "compose -f ${PROJECT_DIR}/compose.yaml -p blocksci-emulator --profile recreate down " "${DOCKER_LOG}"; then
-  echo "FAIL: expected recreate.sh interrupt cleanup to run compose down" >&2
+if ! grep -q -- "compose -f ${PROJECT_DIR}/compose.yaml -p blocksci-emulator --profile emulate down " "${DOCKER_LOG}"; then
+  echo "FAIL: expected emulate.sh interrupt cleanup to run compose down" >&2
   echo "Observed: $(cat "${DOCKER_LOG}")" >&2
   exit 1
 fi
 
-echo "PASS: recreate.sh cleans up the compose stack on interrupt."
+echo "PASS: emulate.sh cleans up the compose stack on interrupt."

@@ -102,7 +102,7 @@ unified output. `--pbs` adds PBS stdout/stderr to the Kubernetes stream, while
 `.pbs/*.jobid`, from `$HOME/<run-id>-full-run.log`, or supplied explicitly with
 repeatable `--pbs-job STAGE=JOB_ID`; job state changes are included in the
 prefixed stream. All merged parser
-commands remain represented by `command_metadata.json`: `full-run`, `recreate`,
+commands remain represented by `command_metadata.json`: `full-run`, `emulate`,
 `clean`, `analyze`, `export`, `coinjoin-analysis`, `pbs-from-s3`, `mappings`, `initialize`, and
 the `runs`, `scenarios`, and `external` command groups.
 
@@ -280,7 +280,7 @@ machine with a kubeconfig, analysis later from the frontend.
 Submit Kubernetes emulation and upload:
 
 ```bash
-coinjoin-pipeline recreate \
+coinjoin-pipeline emulate \
   --driver kubernetes \
   --namespace man5-ns --reuse-namespace \
   --artifact-backend s3 \

@@ -39,7 +39,7 @@ WAIT_PID=""
 WAIT_RESULT_FILE="$(mktemp)"
 STACK_STARTED=false
 
-cleanup_recreate_stack() {
+cleanup_emulate_stack() {
   if [[ -n "${WAIT_PID}" ]] && kill -0 "${WAIT_PID}" >/dev/null 2>&1; then
     kill "${WAIT_PID}" >/dev/null 2>&1 || true
     wait "${WAIT_PID}" >/dev/null 2>&1 || true
@@ -51,7 +51,7 @@ cleanup_recreate_stack() {
   fi
 
   if [[ "${STACK_STARTED}" == "true" ]]; then
-    if ! "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile recreate down; then
+    if ! "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile emulate down; then
       echo "WARN: compose down failed during cleanup" >&2
     fi
   fi
@@ -61,12 +61,12 @@ cleanup_recreate_stack() {
 
 handle_interrupt() {
   trap - INT TERM
-  echo "Interrupted; stopping recreate stack..." >&2
+  echo "Interrupted; stopping emulate stack..." >&2
   exit 130
 }
 
 trap handle_interrupt INT TERM
-trap 'status=$?; cleanup_recreate_stack; exit "${status}"' EXIT
+trap 'status=$?; cleanup_emulate_stack; exit "${status}"' EXIT
 
 if [[ $# -gt 0 ]]; then
   if [[ "$1" == "--scenario" && $# -ge 2 ]]; then
@@ -91,19 +91,19 @@ echo "Using scenario: ${SCENARIO_PATH}"
 echo "Using engine: ${COINJOIN_ENGINE}"
 
 # 1. Start the stack in the background
-SCENARIO_PATH="${SCENARIO_PATH}" COINJOIN_ENGINE="${COINJOIN_ENGINE}" "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile recreate up -d
+SCENARIO_PATH="${SCENARIO_PATH}" COINJOIN_ENGINE="${COINJOIN_ENGINE}" "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile emulate up -d
 STACK_STARTED=true
 
 # 2. Start streaming logs in the background 
 # The `-f` flag "follows" the logs in real-time.
 # The `&` at the end runs this command in the background so the script can move on.
-"${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile recreate logs -f &
+"${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile emulate logs -f &
 
 # Capture the Process ID (PID) of that background log stream
 LOG_PID=$!
 
 # 3. Wait ONLY for the manager to exit and capture its exit code
-MANAGER_CONTAINER_ID=$("${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile recreate ps -q manager)
+MANAGER_CONTAINER_ID=$("${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile emulate ps -q manager)
 "${CONTAINER_RUNTIME}" wait "${MANAGER_CONTAINER_ID}" >"${WAIT_RESULT_FILE}" &
 WAIT_PID=$!
 set +e

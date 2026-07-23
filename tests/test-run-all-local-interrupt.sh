@@ -43,8 +43,8 @@ chmod +x "${ISOLATED_PROJECT}/tests/test-runIt-overactive-local.sh"
 
 for test_script in \
   test-command-builder-contract.sh \
-  pipeline/test_recreate_exit_status.sh \
-  pipeline/test_recreate_interrupt_cleanup.sh \
+  pipeline/test_emulate_exit_status.sh \
+  pipeline/test_emulate_interrupt_cleanup.sh \
   test-podman-no-host-docker.sh \
   test-runIt-overactive-local-docker.sh \
   test-runIt-joinmarket-local-docker.sh \

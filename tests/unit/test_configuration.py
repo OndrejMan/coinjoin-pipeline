@@ -277,7 +277,7 @@ def test_configuration_rejects_explicit_cli_action(tmp_path: Path) -> None:
     path.write_text("engine: wasabi\n", encoding="utf-8")
 
     with pytest.raises(ConfigurationError, match="put the action in YAML"):
-        expand_configuration(["--from-configuration", str(path), "recreate"])
+        expand_configuration(["--from-configuration", str(path), "emulate"])
 
 
 def test_external_analysis_configuration_matches_cli_contract(tmp_path: Path) -> None:

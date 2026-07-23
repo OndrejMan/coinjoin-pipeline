@@ -37,15 +37,15 @@ set +e
   cd "${PROJECT_DIR}"
   PATH="${FAKE_BIN}:${PATH}" \
     COMPOSE_FILE="${PROJECT_DIR}/compose.yaml" \
-    bash recreate.sh
+    bash emulate.sh
 )
 RUN_EXIT_CODE=$?
 set -e
 
 if [[ "${RUN_EXIT_CODE}" -ne 17 ]]; then
-  echo "FAIL: expected recreate.sh to propagate manager exit 17, got ${RUN_EXIT_CODE}" >&2
+  echo "FAIL: expected emulate.sh to propagate manager exit 17, got ${RUN_EXIT_CODE}" >&2
   echo "Observed: $(cat "${DOCKER_LOG}")" >&2
   exit 1
 fi
 
-echo "PASS: recreate.sh propagates the manager container exit status."
+echo "PASS: emulate.sh propagates the manager container exit status."

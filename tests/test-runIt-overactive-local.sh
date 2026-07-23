@@ -299,7 +299,7 @@ COPY_TO_HOST_DIR="${TMP_DIR}/kubernetes-copy-to-host"
   EMULATION_LOGS_DIR="${FAKE_LOGS}" \
   KUBERNETES_COPY_TO_HOST_DIR="${COPY_TO_HOST_DIR}" \
   PATH="${FAKE_BIN}:${PATH}" \
-  bash "${LAUNCHER}" recreate --engine wasabi --driver kubernetes \
+  bash "${LAUNCHER}" emulate --engine wasabi --driver kubernetes \
     --kubeconfig "${KUBE_CONFIG}" --copy-to-host
 )
 

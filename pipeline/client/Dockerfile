@@ -23,12 +23,12 @@ COPY client/run_catalog.py /app/client/run_catalog.py
 COPY client/scenarios.py /app/client/scenarios.py
 COPY exporters /app/exporters
 COPY analysis.sh /analysis.sh
-COPY recreate.sh /recreate.sh
+COPY emulate.sh /emulate.sh
 COPY delete.sh /delete.sh
 COPY compose.yaml /compose.yaml
 COPY client/develop.sh /app/develop.sh
 RUN chmod -R a+rX /app/client /app/exporters \
-    && chmod +x /analysis.sh /recreate.sh /delete.sh /app/develop.sh /app/wrapper.py
+    && chmod +x /analysis.sh /emulate.sh /delete.sh /app/develop.sh /app/wrapper.py
 
 WORKDIR /app
 ENTRYPOINT ["python3", "/app/wrapper.py"]

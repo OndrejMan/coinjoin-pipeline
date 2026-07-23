@@ -1,7 +1,7 @@
 services:
   # The Python Manager that controls the emulator
   dind:
-      profiles: ["recreate"]
+      profiles: ["emulate"]
       image: docker:29-dind
       pull_policy: always
       container_name: isolated_docker_daemon
@@ -22,7 +22,7 @@ services:
         retries: 10
 
   data_wiper:
-      profiles: ["recreate"]
+      profiles: ["emulate"]
       image: alpine
       pull_policy: always
       container_name: btc_data_wiper
@@ -38,7 +38,7 @@ services:
           condition: service_healthy
 
   dind_image_prefetch:
-      profiles: ["recreate"]
+      profiles: ["emulate"]
       image: docker:29-cli
       pull_policy: always
       container_name: dind_image_prefetch
@@ -84,7 +84,7 @@ services:
                     "
 
   manager:
-    profiles: ["recreate"]
+    profiles: ["emulate"]
     image: ${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}
     pull_policy: ${COINJOIN_EMULATOR_PULL_POLICY:-always}
     container_name: emulator_manager

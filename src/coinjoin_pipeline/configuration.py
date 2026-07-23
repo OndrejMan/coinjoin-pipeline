@@ -15,7 +15,7 @@ class ConfigurationError(ValueError):
 
 PipelineAction = Literal[
     "full-run",
-    "recreate",
+    "emulate",
     "analyze",
     "export",
     "coinjoin-analysis",
@@ -40,7 +40,7 @@ ExternalNetwork = Literal["bitcoin"]
 
 KNOWN_ACTIONS = {
     "full-run",
-    "recreate",
+    "emulate",
     "analyze",
     "export",
     "coinjoin-analysis",
