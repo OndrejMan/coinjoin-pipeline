@@ -26,6 +26,7 @@ mkdir -p "$RUN_WORK/.pbs" "$SOURCE_CACHE_DIR" "$CACHE_DIR"
 on_exit() {{
   status=$?
   trap - EXIT TERM
+  set +e
   if [ "$status" -eq 0 ]; then
     printf 'done\n' > "$DONE_MARKER"
     {upload_done}

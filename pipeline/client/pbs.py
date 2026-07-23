@@ -465,6 +465,12 @@ def render_coinjoin_analysis_s3_pbs(
         scratch=scratch,
         walltime=walltime,
         s5cmd_check=render_s5cmd_check(),
+        clear_markers="\n".join(
+            (
+                render_s5cmd_rm('"$ARTIFACT_URI/$RUN_ID/.pbs/coinjoin-analysis.done"') + " || true",
+                render_s5cmd_rm('"$ARTIFACT_URI/$RUN_ID/.pbs/coinjoin-analysis.failed"') + " || true",
+            )
+        ),
         download_run=render_s5cmd_sync('"$ARTIFACT_URI/$RUN_ID/*"', '"$RUN_WORK/"'),
         upload_results=render_s5cmd_sync(
             '"$RUN_WORK/coinjoin-analysis_data/"', '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/"'
@@ -594,6 +600,12 @@ def render_blocksci_s3_pbs(
         scratch=scratch,
         walltime=walltime,
         s5cmd_check=render_s5cmd_check(),
+        clear_markers="\n".join(
+            (
+                render_s5cmd_rm('"$ARTIFACT_URI/$RUN_ID/.pbs/blocksci.done"') + " || true",
+                render_s5cmd_rm('"$ARTIFACT_URI/$RUN_ID/.pbs/blocksci.failed"') + " || true",
+            )
+        ),
         download_run=render_s5cmd_sync('"$ARTIFACT_URI/$RUN_ID/*"', '"$RUN_WORK/"'),
         coinjoin_analysis_check=(
             'test -f "$RUN_WORK/coinjoin-analysis_data/coinjoin_tx_info.json" || {\n'

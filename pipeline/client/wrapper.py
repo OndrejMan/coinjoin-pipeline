@@ -2313,6 +2313,29 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
             )
         ensure_empty_run_prefix(access, args.artifact_uri, args.run_id)
     mappings_pbs = getattr(args, "mappingsPbs", False)
+    # Mappings and every detect-mode report consume the coinjoin-analysis
+    # baseline. When this invocation does not also produce it (--analysisPbs
+    # absent, i.e. a resume), fail fast on the frontend instead of letting the
+    # stage queue and then abort on the compute node for a missing input.
+    if (
+        not args.dry_run
+        and not args.analysisPbs
+        and (mappings_pbs or (args.blocksciPbs and task == "detect"))
+    ):
+        access = S3Access(
+            endpoint_url=args.s3_endpoint_url,
+            credentials_file=args.s3_credentials_file,
+            profile=args.s3_profile,
+        )
+        s3_access_preflight(access, args.artifact_uri)
+        if not s3_object_exists(
+            access,
+            f"{args.artifact_uri}/{args.run_id}/coinjoin-analysis_data/coinjoin_tx_info.json",
+        ):
+            raise ArtifactTransportError(
+                "resuming without --analysisPbs requires an existing "
+                f"coinjoin-analysis_data/coinjoin_tx_info.json for run {args.run_id}"
+            )
     separate_combined_report = (
         args.blocksciPbs
         and task == "detect"

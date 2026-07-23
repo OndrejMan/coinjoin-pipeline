@@ -7,9 +7,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "pipeline"))
 
+from client.artifacts import ArtifactTransportError  # noqa: E402
 from client.kubernetes import (  # noqa: E402
     render_s3_emulation_resources,
     s3_emulation_job_name,
@@ -120,7 +123,17 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
         assert "/storage:/storage" not in script
         assert ".failed" in script and ".done" in script
         assert "aws s3" not in script and "s3cmd" not in script
+        # The marker upload runs in the EXIT trap; a transient s5cmd failure
+        # there must not abort the trap before the marker is written locally.
+        assert "trap - EXIT TERM\n  set +e" in script
         subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    # The pre-existing analysis and combined-blocksci stages must also clear
+    # stale markers so a resubmitted run cannot read a previous attempt's marker.
+    assert ".pbs/coinjoin-analysis.done" in coinjoin
+    assert ".pbs/coinjoin-analysis.failed" in coinjoin
+    assert "rm " in coinjoin
+    assert ".pbs/blocksci.done" in blocksci
+    assert ".pbs/blocksci.failed" in blocksci
     assert '"$CONTAINER_WORK_ROOT:/runs/emulation/selected:rw"' in coinjoin
     assert (
         '"$RUN_WORK/coinjoin-analysis_data:/runs/emulation/selected/$RUN_ID:rw"'
@@ -483,6 +496,10 @@ def test_pbs_from_s3_mappings_depend_on_analysis_and_gate_report() -> None:
 def test_pbs_from_s3_mappings_only_uses_existing_baseline() -> None:
     args = s3_pbs_args(analysis=False, blocksci=False, mappings=True)
     with (
+        mock.patch("client.wrapper.s3_access_preflight"),
+        mock.patch(
+            "client.wrapper.s3_object_exists", return_value=True
+        ) as baseline_probe,
         mock.patch(
             "client.wrapper.submit_mappings_s3_pbs",
             return_value="mappings.server",
@@ -495,6 +512,21 @@ def test_pbs_from_s3_mappings_only_uses_existing_baseline() -> None:
     assert mappings.call_args.kwargs["dependency_job_id"] is None
     report.assert_not_called()
     assert jobs.coinjoin_mappings == "mappings.server"
+    assert baseline_probe.call_args.args[1].endswith(
+        "coinjoin-analysis_data/coinjoin_tx_info.json"
+    )
+
+
+def test_pbs_from_s3_resume_without_baseline_fails_fast() -> None:
+    args = s3_pbs_args(analysis=False, blocksci=False, mappings=True)
+    with (
+        mock.patch("client.wrapper.s3_access_preflight"),
+        mock.patch("client.wrapper.s3_object_exists", return_value=False),
+        mock.patch("client.wrapper.submit_mappings_s3_pbs") as mappings,
+    ):
+        with pytest.raises(ArtifactTransportError, match="requires an existing"):
+            run_pbs_from_s3(args)
+    mappings.assert_not_called()
 
 
 def test_unified_report_downloads_mappings_only_when_requested() -> None:
@@ -603,6 +635,8 @@ def test_pbs_from_s3_stage_resources_override_shared_fallback_independently() ->
 def test_pbs_from_s3_blocksci_only_keeps_combined_report() -> None:
     args = s3_pbs_args(analysis=False)
     with (
+        mock.patch("client.wrapper.s3_access_preflight"),
+        mock.patch("client.wrapper.s3_object_exists", return_value=True),
         mock.patch(
             "client.wrapper.submit_blocksci_s3_pbs",
             return_value="blocksci.server",
