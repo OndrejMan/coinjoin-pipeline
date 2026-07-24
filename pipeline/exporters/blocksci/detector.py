@@ -34,51 +34,121 @@ except ImportError:  # pragma: no cover - exercised in environments without Bloc
     blocksci = None
 
 
+def _iter_attr(obj: object, name: str) -> Iterable[object]:
+    """Return the named attribute if it is iterable, else an empty iterable."""
+    value = safe_attr(obj, name, [])
+    return value if isinstance(value, Iterable) else []
+
+
+def _base_io_record(item: object, fallback_index: int) -> JsonObject:
+    """Build the fields shared by every input and output record."""
+    return {
+        "index": str(safe_attr(item, "index", fallback_index)),
+        "value": coerce_sats(safe_attr(item, "value")),
+        "address": to_json_text(safe_attr(item, "address")),
+    }
+
+
+def _referenced_txid(item: object, tx_attr: str) -> str | None:
+    """Resolve the hash of a tx referenced by ``item`` via ``tx_attr``."""
+    referenced_tx = safe_attr(item, tx_attr)
+    if referenced_tx is None:
+        return None
+    return to_json_text(safe_attr(referenced_tx, "hash"))
+
+
+def _normalize_input(input_value: object, fallback_index: int) -> JsonObject:
+    record = _base_io_record(input_value, fallback_index)
+    spent_txid = _referenced_txid(input_value, "spent_tx")
+    spent_index = safe_attr(input_value, "spent_tx_index")
+    if spent_txid is not None and spent_index is not None:
+        record["spending_tx"] = f"vout_{spent_txid}_{spent_index}"
+    return record
+
+
+def _normalize_output(output_value: object, fallback_index: int) -> JsonObject:
+    record = _base_io_record(output_value, fallback_index)
+    spending_txid = _referenced_txid(output_value, "spending_tx")
+    spending_index = safe_attr(output_value, "spending_tx_index")
+    if spending_txid is not None and spending_index is not None:
+        record["spend_by_tx"] = f"vin_{spending_txid}_{spending_index}"
+    return record
+
+
+def _sorted_by_index(records: list[JsonObject]) -> list[JsonObject]:
+    return sorted(records, key=lambda item: int(str(item["index"])))
+
+
 def normalize_blocksci_tx(tx: object) -> JsonObject:
-    txid = to_json_text(safe_attr(tx, "hash"))
-    block_time = safe_attr(tx, "block_time")
-    block_height = safe_attr(tx, "block_height")
-    inputs: list[JsonObject] = []
-    outputs: list[JsonObject] = []
-
-    raw_inputs = safe_attr(tx, "inputs", [])
-    inputs_iterable = raw_inputs if isinstance(raw_inputs, Iterable) else []
-    for input_value in inputs_iterable:
-        spent_tx = safe_attr(input_value, "spent_tx")
-        spent_txid = to_json_text(safe_attr(spent_tx, "hash")) if spent_tx is not None else None
-        spent_index = safe_attr(input_value, "spent_tx_index")
-        input_record = {
-            "index": str(safe_attr(input_value, "index", len(inputs))),
-            "value": coerce_sats(safe_attr(input_value, "value")),
-            "address": to_json_text(safe_attr(input_value, "address")),
-        }
-        if spent_txid is not None and spent_index is not None:
-            input_record["spending_tx"] = f"vout_{spent_txid}_{spent_index}"
-        inputs.append(input_record)
-
-    raw_outputs = safe_attr(tx, "outputs", [])
-    outputs_iterable = raw_outputs if isinstance(raw_outputs, Iterable) else []
-    for output_value in outputs_iterable:
-        spending_tx = safe_attr(output_value, "spending_tx")
-        spending_txid = to_json_text(safe_attr(spending_tx, "hash")) if spending_tx is not None else None
-        spending_index = safe_attr(output_value, "spending_tx_index")
-        output_record = {
-            "index": str(safe_attr(output_value, "index", len(outputs))),
-            "value": coerce_sats(safe_attr(output_value, "value")),
-            "address": to_json_text(safe_attr(output_value, "address")),
-        }
-        if spending_txid is not None and spending_index is not None:
-            output_record["spend_by_tx"] = f"vin_{spending_txid}_{spending_index}"
-        outputs.append(output_record)
+    inputs = [
+        _normalize_input(input_value, index)
+        for index, input_value in enumerate(_iter_attr(tx, "inputs"))
+    ]
+    outputs = [
+        _normalize_output(output_value, index)
+        for index, output_value in enumerate(_iter_attr(tx, "outputs"))
+    ]
 
     record = {
-        "txid": txid,
-        "broadcast_time": to_json_text(block_time),
-        "block_height": block_height,
-        "inputs": sorted(inputs, key=lambda item: int(str(item["index"]))),
-        "outputs": sorted(outputs, key=lambda item: int(str(item["index"]))),
+        "txid": to_json_text(safe_attr(tx, "hash")),
+        "broadcast_time": to_json_text(safe_attr(tx, "block_time")),
+        "block_height": safe_attr(tx, "block_height"),
+        "inputs": _sorted_by_index(inputs),
+        "outputs": _sorted_by_index(outputs),
     }
     return add_common_metrics(record)
+
+
+def _require_binding(chain: object, method: str, hint: str) -> None:
+    """Fail loudly when the BlockSci build lacks the required report binding."""
+    if not hasattr(chain, method):
+        raise RuntimeError(
+            f"This BlockSci build does not expose Blockchain.{method}; rebuild BlockSci with the {hint}."
+        )
+
+
+def _filter_joinmarket_txes(
+    chain: object,
+    joinmarket_detector: str,
+    joinmarket_min_base_fee: int,
+    joinmarket_percentage_fee: float,
+    joinmarket_max_depth: int,
+) -> tuple[Iterable[object], list[str]]:
+    _require_binding(chain, "filter_joinmarket_txes", "JoinMarket report binding")
+    txes, skipped = chain.filter_joinmarket_txes(
+        0,
+        len(chain),
+        joinmarket_detector,
+        joinmarket_min_base_fee,
+        joinmarket_percentage_fee,
+        joinmarket_max_depth,
+    )
+    skipped_txids = sorted(
+        txid
+        for txid in (to_json_text(safe_attr(tx, "hash")) for tx in skipped)
+        if txid
+    )
+    return txes, skipped_txids
+
+
+def _filter_raw_coinjoin_txes(
+    chain: object,
+    coinjoin_type: str,
+    min_input_count: int | None,
+) -> Iterable[object]:
+    _require_binding(chain, "filter_coinjoin_txes_raw", "raw CoinJoin report binding")
+    if min_input_count is None:
+        return chain.filter_coinjoin_txes_raw(0, len(chain), coinjoin_type)
+    return chain.filter_coinjoin_txes_raw(0, len(chain), coinjoin_type, min_input_count)
+
+
+def _records_by_txid(txes: Iterable[object]) -> dict[str, JsonObject]:
+    records = [normalize_blocksci_tx(tx) for tx in txes]
+    return {
+        record["txid"]: record
+        for record in sorted(records, key=lambda item: item["txid"] or "")
+        if record["txid"]
+    }
 
 
 def export_blocksci_records(
@@ -93,43 +163,20 @@ def export_blocksci_records(
     if blocksci is None:
         raise RuntimeError("BlockSci Python module is required to export BlockSci records.")
     chain = blocksci.Blockchain(str(config_path))
-    skipped_txids: list[str] = []
+
     if coinjoin_type == "joinmarket":
-        if not hasattr(chain, "filter_joinmarket_txes"):
-            raise RuntimeError(
-                "This BlockSci build does not expose Blockchain.filter_joinmarket_txes; "
-                "rebuild BlockSci with the JoinMarket report binding."
-            )
-        txes, skipped = chain.filter_joinmarket_txes(
-            0,
-            len(chain),
+        txes, skipped_txids = _filter_joinmarket_txes(
+            chain,
             joinmarket_detector,
             joinmarket_min_base_fee,
             joinmarket_percentage_fee,
             joinmarket_max_depth,
         )
-        skipped_txids = sorted(
-            txid
-            for txid in (to_json_text(safe_attr(tx, "hash")) for tx in skipped)
-            if txid
-        )
     else:
-        if not hasattr(chain, "filter_coinjoin_txes_raw"):
-            raise RuntimeError(
-                "This BlockSci build does not expose Blockchain.filter_coinjoin_txes_raw; "
-                "rebuild BlockSci with the raw CoinJoin report binding."
-            )
-        if min_input_count is None:
-            txes = chain.filter_coinjoin_txes_raw(0, len(chain), coinjoin_type)
-        else:
-            txes = chain.filter_coinjoin_txes_raw(0, len(chain), coinjoin_type, min_input_count)
+        txes = _filter_raw_coinjoin_txes(chain, coinjoin_type, min_input_count)
+        skipped_txids = []
 
-    records = [normalize_blocksci_tx(tx) for tx in txes]
-    return {
-        record["txid"]: record
-        for record in sorted(records, key=lambda item: item["txid"] or "")
-        if record["txid"]
-    }, skipped_txids
+    return _records_by_txid(txes), skipped_txids
 
 
 def build_default_coinjoin_clustering_heuristic() -> object:
@@ -162,6 +209,44 @@ def export_blocksci_cluster_assignments(
     )
 
 
+def _run_coinjoin_clustering(
+    chain: object,
+    output_dir: Path,
+    coinjoin_type: str,
+    max_distance: int,
+) -> object:
+    """Build the CoinJoin cluster manager for the whole chain."""
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    return blocksci.cluster.CoinjoinClusterManager.create_clustering(
+        chain=chain,
+        start=0,
+        stop=-1,
+        heuristic_func=build_default_coinjoin_clustering_heuristic(),
+        output_path=str(output_dir),
+        overwrite=True,
+        coinjoin_type=coinjoin_type,
+        max_distance=max_distance,
+    )
+
+
+def _cluster_index_for_address(chain: object, clusterer: object, address_text: str) -> str | None:
+    """Return the cluster index for ``address_text``, or None if it is not comparable."""
+    try:
+        address = chain.address_from_string(address_text)
+        if not address:
+            return None
+        cluster = clusterer.cluster_with_address(address)
+        address_count = safe_attr(cluster, "address_count")
+        if callable(address_count) and address_count() == 0:
+            return None
+        cluster_index = safe_attr(cluster, "index")
+        if cluster_index is None:
+            return None
+        return str(cluster_index)
+    except Exception:
+        return None
+
+
 def export_blocksci_cluster_assignments_for_addresses(
     config_path: Path,
     addresses: Iterable[str],
@@ -175,42 +260,19 @@ def export_blocksci_cluster_assignments_for_addresses(
         return None, "No addresses were supplied for BlockSci clustering."
 
     try:
-        output_dir.parent.mkdir(parents=True, exist_ok=True)
         chain = blocksci.Blockchain(str(config_path))
-        heuristic = build_default_coinjoin_clustering_heuristic()
-        clusterer = blocksci.cluster.CoinjoinClusterManager.create_clustering(
-            chain=chain,
-            start=0,
-            stop=-1,
-            heuristic_func=heuristic,
-            output_path=str(output_dir),
-            overwrite=True,
-            coinjoin_type=coinjoin_type,
-            max_distance=max_distance,
-        )
+        clusterer = _run_coinjoin_clustering(chain, output_dir, coinjoin_type, max_distance)
     except Exception as exc:
         return None, f"BlockSci cluster assignment export failed: {exc}"
 
     predicted: dict[str, str] = {}
     skipped = 0
     for address_text in requested_addresses:
-        try:
-            address = chain.address_from_string(address_text)
-            if not address:
-                skipped += 1
-                continue
-            cluster = clusterer.cluster_with_address(address)
-            address_count = safe_attr(cluster, "address_count")
-            if callable(address_count) and address_count() == 0:
-                skipped += 1
-                continue
-            cluster_index = safe_attr(cluster, "index")
-            if cluster_index is None:
-                skipped += 1
-                continue
-            predicted[address_text] = str(cluster_index)
-        except Exception:
+        cluster_index = _cluster_index_for_address(chain, clusterer, address_text)
+        if cluster_index is None:
             skipped += 1
+            continue
+        predicted[address_text] = cluster_index
 
     if not predicted:
         return None, f"BlockSci clustering produced no comparable address labels; skipped {skipped} addresses."
