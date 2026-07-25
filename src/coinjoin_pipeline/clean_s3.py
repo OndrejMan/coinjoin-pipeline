@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--artifact-uri",
         default=os.environ.get("ARTIFACT_URI"),
-        help="S3 run root to clean, for example s3://xman-coinjoin/runs.",
+        help="S3 run root to clean, for example s3://<bucket>/runs.",
     )
     parser.add_argument(
         "--run-id",

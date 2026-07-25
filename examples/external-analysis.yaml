@@ -1,6 +1,6 @@
 action: external-analyze
 runtime: docker
-runs_root: /storage/brno2/home/xman/coinjoin-runs
+runs_root: /storage/brno2/home/<login>/coinjoin-runs
 run_id: mainnet-external-2026
 coinjoin_type: joinmarket
 
@@ -9,10 +9,10 @@ images:
   version: latest
 
 external:
-  bitcoin_datadir: /storage/brno2/home/xman/.bitcoin
-  baseline: /storage/brno2/home/xman/coinjoin_tx_info.json
+  bitcoin_datadir: /storage/brno2/home/<login>/.bitcoin
+  baseline: /storage/brno2/home/<login>/coinjoin_tx_info.json
   # Optional; omit to discover false_cjtxs.json* next to the baseline.
   # false_cjtxs:
-  #   - /storage/brno2/home/xman/false_cjtxs.json
+  #   - /storage/brno2/home/<login>/false_cjtxs.json
   network: bitcoin
   min_free_gb: 250

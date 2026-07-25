@@ -104,14 +104,14 @@ def test_parse_qstat_extracts_state_and_wrapped_output_path() -> None:
         """Job Id: 123.server
     Job_Name = blocksci_analysis_s3
     job_state = R
-    Output_Path = frontend:/storage/brno2/home/xman/
+    Output_Path = frontend:/storage/brno2/home/user/
         blocksci_analysis_s3.o123
 """
     )
 
     assert fields["job_state"] == "R"
     assert fields["Output_Path"] == (
-        "frontend:/storage/brno2/home/xman/blocksci_analysis_s3.o123"
+        "frontend:/storage/brno2/home/user/blocksci_analysis_s3.o123"
     )
 
 

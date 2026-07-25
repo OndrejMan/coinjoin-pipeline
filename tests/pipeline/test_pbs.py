@@ -355,7 +355,7 @@ class PBSValidationTest(unittest.TestCase):
             require_storage_path(Path("/tmp/run-a"))
 
     def test_require_storage_path_accepts_storage_path(self):
-        require_storage_path(Path("/storage/brno2/home/xman/run-a"))
+        require_storage_path(Path("/storage/brno2/home/user/run-a"))
 
 
 class PBSSubmissionTest(unittest.TestCase):

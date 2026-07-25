@@ -8,10 +8,12 @@ This is a local prototype and is not published to PyPI.
 
 ## Install and run
 
+Run these from the repository checkout:
+
 ```bash
-pipx install /home/administrator/diplomka/coinjoin-pipeline
+pipx install .
 # development install with the optional interactive builder and tests
-python3 -m pip install -e '/home/administrator/diplomka/coinjoin-pipeline[builder,test]'
+python3 -m pip install -e '.[builder,test]'
 
 coinjoin-pipeline version
 cjp doctor
@@ -181,7 +183,7 @@ PBS_FRONTEND_DIRECT=1 coinjoin-pipeline full-run \
   --artifact-uri s3://coinjoin-thesis/runs \
   --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
   --s3-secret-name coinjoin-s3-credentials \
-  --s3-credentials-file /storage/brno2/home/xman/.aws/credentials \
+  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
   --s3-profile coinjoin \
   --run-id '<id>' \
   --test-values \
@@ -298,7 +300,7 @@ PBS_FRONTEND_DIRECT=1 coinjoin-pipeline pbs-from-s3 \
   --run-id '<id>' \
   --artifact-uri s3://coinjoin-thesis/runs \
   --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
-  --s3-credentials-file /storage/brno2/home/xman/.aws/credentials \
+  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
   --s3-profile coinjoin \
   --engine wasabi \
   --test-values \
@@ -509,7 +511,7 @@ directly on the frontend without starting Docker or Podman:
   --run-id '<id>' \
   --artifact-uri s3://coinjoin-thesis/runs \
   --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
-  --s3-credentials-file /storage/brno2/home/xman/.aws/credentials \
+  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
   --s3-profile coinjoin
 ```
 
@@ -529,22 +531,22 @@ is given, requires you to retype the target prefix at an interactive prompt
 ```bash
 # Preview what a full wipe of the runs root would remove.
 ./runIt.sh clean-s3 --dry-run \
-  --artifact-uri s3://xman-coinjoin/runs \
+  --artifact-uri s3://<bucket>/runs \
   --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
-  --s3-credentials-file /storage/brno2/home/xman/.aws/credentials \
+  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
   --s3-profile coinjoin
 
 # Delete a single run non-interactively.
 ./runIt.sh clean-s3 --yes \
   --run-id '<id>' \
-  --artifact-uri s3://xman-coinjoin/runs \
+  --artifact-uri s3://<bucket>/runs \
   --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
-  --s3-credentials-file /storage/brno2/home/xman/.aws/credentials \
+  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
   --s3-profile coinjoin
 ```
 
 Omit `--run-id` to clean everything under `--artifact-uri`; point `--artifact-uri`
-at the bucket root (`s3://xman-coinjoin`) to wipe the whole bucket. The
+at the bucket root (`s3://<bucket>`) to wipe the whole bucket. The
 `--artifact-uri`, `--s3-*` options also read the `ARTIFACT_URI`, `S3_ENDPOINT_URL`,
 `S3_CREDENTIALS_FILE`, and `S3_PROFILE` environment variables.
 

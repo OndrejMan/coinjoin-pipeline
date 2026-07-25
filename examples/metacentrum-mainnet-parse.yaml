@@ -13,7 +13,7 @@ artifacts:
   backend: s3
   uri: s3://coinjoin-thesis/runs
   endpoint_url: https://s3.cl4.du.cesnet.cz
-  credentials_file: /storage/brno2/home/xman/.aws/credentials
+  credentials_file: /storage/brno2/home/<login>/.aws/credentials
   profile: coinjoin
 
 stages:
@@ -23,7 +23,7 @@ blocksci:
   workflow: reusable
   task: parse
   # This directory directly contains the mainnet blocks/ directory.
-  external_bitcoin_datadir: /storage/brno2/home/xman/bitcoin-mainnet
+  external_bitcoin_datadir: /storage/brno2/home/<login>/bitcoin-mainnet
   network: bitcoin
   # Inclusive. Replace together with run_id; use a separate ID for smoke tests.
   max_block: 850000
