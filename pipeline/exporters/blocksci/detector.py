@@ -107,15 +107,15 @@ def _require_binding(chain: object, method: str, hint: str) -> None:
         )
 
 
-def _filter_joinmarket_txes(
+def _scan_coinjoins_by_subset_matching(
     chain: object,
     joinmarket_detector: str,
     joinmarket_min_base_fee: int,
     joinmarket_percentage_fee: float,
     joinmarket_max_depth: int,
 ) -> tuple[Iterable[object], list[str]]:
-    _require_binding(chain, "filter_joinmarket_txes", "JoinMarket report binding")
-    txes, skipped = chain.filter_joinmarket_txes(
+    _require_binding(chain, "scan_coinjoins_by_subset_matching", "subset-matching scan binding")
+    txes, skipped = chain.scan_coinjoins_by_subset_matching(
         0,
         len(chain),
         joinmarket_detector,
@@ -165,7 +165,7 @@ def export_blocksci_records(
     chain = blocksci.Blockchain(str(config_path))
 
     if coinjoin_type == "joinmarket":
-        txes, skipped_txids = _filter_joinmarket_txes(
+        txes, skipped_txids = _scan_coinjoins_by_subset_matching(
             chain,
             joinmarket_detector,
             joinmarket_min_base_fee,

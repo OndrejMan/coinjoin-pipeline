@@ -94,9 +94,12 @@ detects zero transactions, the JSON and Markdown reports carry a
 - `filter_coinjoin_txes` is a separate linked-transaction API. It returns both
   endpoints of connections between matched transactions and excludes isolated
   matches. It is useful for linked-chain analysis, not detector metrics.
-- `filter_joinmarket_txes` directly scans the range with the selected
-  JoinMarket subset detector and returns `(detected, skipped)`. `skipped`
-  records searches that reached the configured depth limit.
+- `scan_coinjoins_by_subset_matching` directly scans the range with the
+  selected subset-matching detector (`possible` / `definite`) and returns
+  `(detected, skipped)`. `skipped` records searches that reached the
+  configured depth limit. This detector is not protocol-specific: it matches
+  equal-value outputs fundable by distinct input subsets and does not exclude
+  Wasabi, Whirlpool or Ashigaru.
 
 The exporter fails with a rebuild instruction when the installed BlockSci
 module lacks the raw binding; it never silently substitutes the linked subset.
