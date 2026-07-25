@@ -23,7 +23,9 @@ blocksci:
   workflow: cached
   task: script
   # Custom PBS scripts must be readable from MetaCentrum shared storage.
-  script: /storage/brno2/home/xman/diplomka/thesis/scripts/metacentrum_mainnet_coinjoin_scan.py
+  # Relative paths resolve against the directory cjp is invoked from, so run
+  # this from the coinjoin-pipeline checkout.
+  script: ./scripts/metacentrum_mainnet_coinjoin_scan.py
 
 joinmarket:
   detector: definite
