@@ -235,6 +235,18 @@ and `pbs.mappings` enable their corresponding PBS stages.
 configuration; `examples/metacentrum-s3.yaml` remains as its compatibility
 predecessor. Mainnet is deliberately split into two submissions:
 
+For the default JoinMarket regtest scenario, use the measured MetaCentrum
+profile. It requests 2 CPUs, 16 GB RAM, and 8 GB scratch for BlockSci, plus
+2 CPUs and 8 GB RAM for coinjoin-analysis:
+
+```bash
+./runIt.sh \
+  --from-configuration examples/metacentrum-joinmarket-regtest-s3.yaml
+```
+
+The profile uses `scenarios/defaultJoinMarket.json`, enables regtest detector
+thresholds, and leaves the larger global/mainnet PBS defaults unchanged.
+
 ```bash
 # Produces a checksummed reusable BlockSci cache from the external mainnet datadir.
 ./runIt.sh \

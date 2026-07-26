@@ -19,6 +19,8 @@ class Capability(Enum):
     CONTAINER_RUNTIME = auto()
     KUBECTL = auto()
     QSUB = auto()
+    QSTAT = auto()
+    QDEL = auto()
     S5CMD_FRONTEND = auto()
 
 
@@ -48,6 +50,10 @@ def required_capabilities(action: str, arguments: list[str]) -> set[Capability]:
     # without this the preflight would pass and the wrapper would fail later.
     if (uses_pbs or (uses_s3 and action == "full-run")) and live:
         capabilities.add(Capability.QSUB)
+        # qsub alone is not enough: duplicate-submission prevention and every
+        # marker wait poll qstat, and failed-graph rollback shells out to qdel.
+        capabilities.add(Capability.QSTAT)
+        capabilities.add(Capability.QDEL)
     if (uses_s3 or action == "pbs-from-s3") and live:
         capabilities.add(Capability.S5CMD_FRONTEND)
     # The frontend needs a local daemon only when it still runs containers
@@ -162,6 +168,8 @@ def check(
     for capability, command, purpose in (
         (Capability.KUBECTL, "kubectl", "the Kubernetes driver"),
         (Capability.QSUB, "qsub", "PBS execution"),
+        (Capability.QSTAT, "qstat", "PBS job state polling"),
+        (Capability.QDEL, "qdel", "PBS graph rollback"),
         (Capability.S5CMD_FRONTEND, "s5cmd", "S3 artifact transport"),
     ):
         if capabilities and capability in capabilities and shutil.which(command) is None:

@@ -13,6 +13,7 @@ the expected artifacts.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -62,8 +63,16 @@ BLOCKSCI_IMAGE_PYTHON_COMMAND = (
 )
 
 POLL_INTERVAL_SECONDS = 30
-PBS_TERMINAL_STATES = {"C", "F"}
-PBS_ACTIVE_STATES = {"B", "E", "H", "M", "Q", "R", "S", "T", "U", "W"}
+# Single source of truth for qstat job_state handling. "X" is emitted for
+# finished subjobs (and by some PBS Pro builds for expired jobs), so it is
+# terminal here as well as in the watcher -- previously the watcher treated it
+# as terminal while pbs_job_probe/wait_for_pbs_marker raised on it.
+# src/coinjoin_pipeline/watch.py cannot import this module (pipeline/ is a
+# subprocess runtime root, not a packaged module), so it keeps a copy that
+# tests/pipeline/test_pbs.py::PBSStateSetParityTest pins to these values.
+PBS_TERMINAL_STATES = {"C", "F", "X"}
+PBS_QUEUED_STATES = {"H", "Q", "W"}
+PBS_ACTIVE_STATES = {"B", "E", "M", "R", "S", "T", "U"} | PBS_QUEUED_STATES
 PBS_QUEUE_MARGIN_SECONDS = 60 * 60
 
 
@@ -274,6 +283,22 @@ def render_mappings_pbs(
     )
 
 
+def _parse_qsub_job_id(stdout: str) -> str:
+    """Validate the job ID qsub printed on a zero exit.
+
+    A zero exit with unusable stdout is worse than a failure: the scheduler may
+    well have accepted the job, but an unrecorded job ID cannot be persisted,
+    depended on, or cancelled during rollback. Fail loudly instead.
+    """
+    job_id = (stdout or "").strip()
+    if not job_id or "\n" in job_id:
+        raise PBSError(f"qsub returned an invalid job ID: {job_id!r}")
+    # MetaCentrum job IDs are `<seq>.<server-fqdn>`, which SAFE_PBS_TOKEN_RE
+    # covers. Job arrays (`123[].server`) would be rejected; no stage submits one.
+    require_safe_pbs_token(job_id, "PBS job ID")
+    return job_id
+
+
 def submit_pbs(
     script_path: Path,
     dependency_job_id: str | Sequence[str] | None = None,
@@ -299,7 +324,7 @@ def submit_pbs(
     )
     if result.returncode != 0:
         raise PBSError(f"qsub failed (exit {result.returncode}): {result.stderr.strip()}")
-    return result.stdout.strip()
+    return _parse_qsub_job_id(result.stdout)
 
 
 def submit_pbs_text(
@@ -331,13 +356,29 @@ def submit_pbs_text(
     )
     if result.returncode != 0:
         raise PBSError(f"qsub failed (exit {result.returncode}): {result.stderr.strip()}")
-    return result.stdout.strip()
+    return _parse_qsub_job_id(result.stdout)
 
 
 def persist_pbs_job_id(run_dir: Path, stage: str, job_id: str) -> None:
+    """Record a submitted job ID atomically.
+
+    A truncating write can be interrupted, and the overlap check skips empty
+    .jobid files -- which would let a duplicate graph be submitted while the
+    recorded job is still active. Write-then-rename never exposes a partial file.
+    """
     marker_dir = run_dir / ".pbs"
     marker_dir.mkdir(parents=True, exist_ok=True)
-    (marker_dir / f"{stage}.jobid").write_text(f"{job_id}\n", encoding="utf-8")
+    target = marker_dir / f"{stage}.jobid"
+    temp_path = marker_dir / f".{stage}.jobid.tmp"
+    try:
+        with temp_path.open("w", encoding="utf-8") as handle:
+            handle.write(f"{job_id}\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, target)
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def _read_pbs_job_id(run_dir: Path, stage: str) -> str | None:
@@ -387,10 +428,16 @@ def _qstat_job_state(job_id: str) -> str | None:
     return None
 
 
-def qdel_pbs_job(job_id: str) -> None:
+def qdel_pbs_job(job_id: str) -> bool:
+    """Cancel a PBS job; return whether the cancellation was confirmed.
+
+    Callers such as ``rollback_s3_pbs_submissions`` must be able to tell a
+    cancelled job from one that is still burning allocation, so failures are
+    reported rather than only printed.
+    """
     if shutil.which("qdel") is None:
-        print(f"[pbs] qdel unavailable; cannot cancel PBS job {job_id}")
-        return
+        print(f"[pbs] qdel unavailable; cannot cancel PBS job {job_id}", file=sys.stderr)
+        return False
     result = subprocess.run(
         ["qdel", job_id],
         check=False,
@@ -399,7 +446,16 @@ def qdel_pbs_job(job_id: str) -> None:
         stderr=subprocess.PIPE,
     )
     if result.returncode != 0:
-        print(f"[pbs] qdel {job_id} failed (exit {result.returncode}): {result.stderr.strip()}")
+        stderr = (result.stderr or "").strip()
+        # A job that already left the queue counts as cancelled for rollback.
+        if "unknown job" in stderr.lower() or "job has finished" in stderr.lower():
+            return True
+        print(
+            f"[pbs] qdel {job_id} failed (exit {result.returncode}): {stderr}",
+            file=sys.stderr,
+        )
+        return False
+    return True
 
 
 def pbs_job_probe(job_id: str) -> Callable[[], str]:
@@ -411,7 +467,7 @@ def pbs_job_probe(job_id: str) -> Callable[[], str]:
             return PROBE_TERMINAL
         if state is None:
             return PROBE_UNKNOWN
-        if state in {"Q", "H", "W"}:
+        if state in PBS_QUEUED_STATES:
             return PROBE_QUEUED
         if state in PBS_ACTIVE_STATES:
             return PROBE_RUNNING
@@ -420,10 +476,11 @@ def pbs_job_probe(job_id: str) -> Callable[[], str]:
     return probe
 
 
-def qdel_pbs_stage(run_dir: Path, stage: str) -> None:
+def qdel_pbs_stage(run_dir: Path, stage: str) -> bool:
     job_id = _read_pbs_job_id(run_dir, stage)
     if job_id:
-        qdel_pbs_job(job_id)
+        return qdel_pbs_job(job_id)
+    return True
 
 
 def _s3_values(

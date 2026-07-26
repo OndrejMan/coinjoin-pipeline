@@ -15,8 +15,13 @@ from client.artifacts import (  # noqa: E402
     PROBE_UNKNOWN,
 )
 from client.pbs import (  # noqa: E402
+    PBS_ACTIVE_STATES,
+    PBS_QUEUED_STATES,
+    PBS_TERMINAL_STATES,
     PBSError,
     _qstat_job_state,
+    persist_pbs_job_id,
+    qdel_pbs_job,
     blocksci_export_pbs_command,
     blocksci_pbs_command,
     blocksci_script_pbs_command,
@@ -41,16 +46,30 @@ class PBSJobProbeTest(unittest.TestCase):
             return pbs_job_probe("7.server")()
 
     def test_terminal_states_map_to_terminal(self):
-        for state in ("C", "F", "MISSING"):
+        # "X" is terminal for the watcher too; the two must not disagree.
+        for state in ("C", "F", "X", "MISSING"):
             self.assertEqual(self._probe_state(state), PROBE_TERMINAL)
 
     def test_active_states_map_to_running(self):
-        for state in ("R", "E"):
+        for state in ("B", "E", "M", "R", "S", "T", "U"):
             self.assertEqual(self._probe_state(state), PROBE_RUNNING)
 
     def test_queued_states_map_to_queued(self):
         for state in ("Q", "H", "W"):
             self.assertEqual(self._probe_state(state), PROBE_QUEUED)
+
+    def test_every_recognized_state_has_a_probe_verdict(self):
+        """No recognized qstat state may fall through to the raise."""
+        for state in PBS_TERMINAL_STATES | PBS_ACTIVE_STATES:
+            with self.subTest(state=state):
+                self.assertIn(
+                    self._probe_state(state),
+                    (PROBE_TERMINAL, PROBE_RUNNING, PROBE_QUEUED),
+                )
+
+    def test_terminal_and_active_state_sets_are_disjoint(self):
+        self.assertEqual(PBS_TERMINAL_STATES & PBS_ACTIVE_STATES, set())
+        self.assertLessEqual(PBS_QUEUED_STATES, PBS_ACTIVE_STATES)
 
     def test_inconclusive_qstat_maps_to_unknown(self):
         self.assertEqual(self._probe_state(None), PROBE_UNKNOWN)
@@ -80,6 +99,100 @@ class PBSJobProbeTest(unittest.TestCase):
         self.assertEqual(run.call_args_list[1].args[0], ["qstat", "-f", "7.server"])
 
 
+class PBSStateSetParityTest(unittest.TestCase):
+    """client.pbs owns the state sets; the watcher copies them.
+
+    src/coinjoin_pipeline/watch.py cannot import client.pbs (pipeline/ is a
+    subprocess runtime root, not a packaged module), so the duplicate is
+    asserted here instead of being allowed to drift.
+    """
+
+    def test_watch_terminal_states_match_client_pbs(self):
+        watch_path = (
+            Path(__file__).resolve().parents[2]
+            / "src"
+            / "coinjoin_pipeline"
+            / "watch.py"
+        )
+        namespace: dict[str, object] = {}
+        for line in watch_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("PBS_TERMINAL_STATES"):
+                exec(line, namespace)  # noqa: S102 - constant literal only
+                break
+        self.assertEqual(namespace["PBS_TERMINAL_STATES"], PBS_TERMINAL_STATES)
+
+
+class PBSQdelTest(unittest.TestCase):
+    def test_qdel_reports_success(self):
+        with (
+            mock.patch("client.pbs.shutil.which", return_value="/usr/bin/qdel"),
+            mock.patch("client.pbs.subprocess.run") as run,
+        ):
+            run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+            self.assertTrue(qdel_pbs_job("7.server"))
+
+    def test_qdel_reports_failure_when_unavailable(self):
+        """Rollback must not claim success when qdel is not installed."""
+        with mock.patch("client.pbs.shutil.which", return_value=None):
+            self.assertFalse(qdel_pbs_job("7.server"))
+
+    def test_qdel_reports_failure_when_scheduler_rejects(self):
+        with (
+            mock.patch("client.pbs.shutil.which", return_value="/usr/bin/qdel"),
+            mock.patch("client.pbs.subprocess.run") as run,
+        ):
+            run.return_value = mock.Mock(
+                returncode=1, stdout="", stderr="qdel: Permission denied"
+            )
+            self.assertFalse(qdel_pbs_job("7.server"))
+
+    def test_qdel_treats_already_finished_job_as_cancelled(self):
+        with (
+            mock.patch("client.pbs.shutil.which", return_value="/usr/bin/qdel"),
+            mock.patch("client.pbs.subprocess.run") as run,
+        ):
+            run.return_value = mock.Mock(
+                returncode=1, stdout="", stderr="qdel: Unknown Job Id 7.server"
+            )
+            self.assertTrue(qdel_pbs_job("7.server"))
+
+
+class PBSJobIdPersistenceTest(unittest.TestCase):
+    def test_persist_writes_job_id_atomically(self):
+        with tempfile.TemporaryDirectory() as raw:
+            run_dir = Path(raw)
+            persist_pbs_job_id(run_dir, "blocksci", "7.server")
+            jobid_path = run_dir / ".pbs" / "blocksci.jobid"
+            self.assertEqual(jobid_path.read_text(encoding="utf-8"), "7.server\n")
+            # No temp file may survive a successful write.
+            self.assertEqual(
+                sorted(p.name for p in (run_dir / ".pbs").iterdir()),
+                ["blocksci.jobid"],
+            )
+
+    def test_persist_leaves_no_partial_file_when_write_fails(self):
+        """An interrupted write must not leave an empty .jobid file.
+
+        ensure_no_active_s3_pbs_submission() skips empty files, so a truncated
+        record would let a duplicate graph be submitted for a live run.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            run_dir = Path(raw)
+            persist_pbs_job_id(run_dir, "blocksci", "7.server")
+            with mock.patch("client.pbs.os.replace", side_effect=OSError("boom")):
+                with self.assertRaises(OSError):
+                    persist_pbs_job_id(run_dir, "blocksci", "8.server")
+            marker_dir = run_dir / ".pbs"
+            # Previous good value intact, no stray temp file left behind.
+            self.assertEqual(
+                (marker_dir / "blocksci.jobid").read_text(encoding="utf-8"),
+                "7.server\n",
+            )
+            self.assertEqual(
+                sorted(p.name for p in marker_dir.iterdir()), ["blocksci.jobid"]
+            )
+
+
 class PBSStdinSubmissionTest(unittest.TestCase):
     def test_submit_pbs_text_pipes_script_and_dependency(self):
         with mock.patch("client.pbs.subprocess.run") as run:
@@ -107,6 +220,56 @@ class PBSStdinSubmissionTest(unittest.TestCase):
             run.return_value = mock.Mock(returncode=1, stdout="", stderr="bad queue")
             with self.assertRaises(PBSError):
                 submit_pbs_text("#PBS -N stage\ntrue\n")
+
+    def test_submit_pbs_text_rejects_empty_job_id_on_zero_exit(self):
+        """A zero exit with no job ID may still have queued a job.
+
+        Returning "" makes record_job() skip persistence, so the job would be
+        untracked: no .jobid file, no dependency target, and rollback could not
+        cancel it. Fail loudly instead.
+        """
+        for stdout in ("", "   \n"):
+            with self.subTest(stdout=stdout):
+                with mock.patch("client.pbs.subprocess.run") as run:
+                    run.return_value = mock.Mock(returncode=0, stdout=stdout, stderr="")
+                    with self.assertRaisesRegex(PBSError, "invalid job ID"):
+                        submit_pbs_text("#PBS -N stage\ntrue\n")
+
+    def test_submit_pbs_text_rejects_multiline_job_id(self):
+        with mock.patch("client.pbs.subprocess.run") as run:
+            run.return_value = mock.Mock(
+                returncode=0,
+                stdout="warning: queue is full\n11.server\n",
+                stderr="",
+            )
+            with self.assertRaisesRegex(PBSError, "invalid job ID"):
+                submit_pbs_text("#PBS -N stage\ntrue\n")
+
+    def test_submit_pbs_text_rejects_unsafe_job_id(self):
+        with mock.patch("client.pbs.subprocess.run") as run:
+            run.return_value = mock.Mock(
+                returncode=0, stdout="11.server; rm -rf /\n", stderr=""
+            )
+            with self.assertRaises(PBSError):
+                submit_pbs_text("#PBS -N stage\ntrue\n")
+
+    def test_submit_pbs_text_accepts_metacentrum_job_id(self):
+        with mock.patch("client.pbs.subprocess.run") as run:
+            run.return_value = mock.Mock(
+                returncode=0,
+                stdout="12345678.meta-pbs.metacentrum.cz\n",
+                stderr="",
+            )
+            self.assertEqual(
+                submit_pbs_text("#PBS -N stage\ntrue\n"),
+                "12345678.meta-pbs.metacentrum.cz",
+            )
+
+    def test_submit_pbs_rejects_empty_job_id_on_zero_exit(self):
+        with mock.patch("client.pbs.subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout="\n", stderr="")
+            with self.assertRaisesRegex(PBSError, "invalid job ID"):
+                submit_pbs(Path("/storage/run-a/job.pbs"))
 
 
 class PBSTemplateTest(unittest.TestCase):

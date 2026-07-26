@@ -391,7 +391,12 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
 
 class WrapperExportTest(unittest.TestCase):
     def test_pbs_from_s3_submits_parallel_analyzers_then_report(self):
+        # run_pbs_from_s3 takes <submission-dir>/.pbs-submit.lock and persists
+        # job IDs there; keep both out of the real runs root.
+        submission_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(submission_dir.cleanup)
         args = Namespace(
+            pbs_submission_dir=Path(submission_dir.name),
             artifact_uri="s3://bucket/runs",
             run_id="run-1",
             s3_endpoint_url="https://s3.cl4.du.cesnet.cz",

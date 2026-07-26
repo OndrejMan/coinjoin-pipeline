@@ -131,6 +131,31 @@ def test_example_configuration_flattens_to_public_cli(tmp_path: Path) -> None:
     assert "--run-id" not in arguments
 
 
+def test_joinmarket_regtest_example_uses_measured_pbs_resources() -> None:
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "examples"
+        / "metacentrum-joinmarket-regtest-s3.yaml"
+    )
+
+    arguments = configuration_arguments(path)
+
+    assert arguments[0] == "full-run"
+    assert arguments[arguments.index("--engine") + 1] == "joinmarket"
+    assert arguments[arguments.index("--coinjoin-type") + 1] == "joinmarket"
+    assert arguments[arguments.index("--scenario") + 1] == (
+        "scenarios/defaultJoinMarket.json"
+    )
+    assert "--test-values" in arguments
+    assert "--analysisPbs" in arguments
+    assert "--blocksciPbs" in arguments
+    assert arguments[arguments.index("--pbs-blocksci-ncpus") + 1] == "2"
+    assert arguments[arguments.index("--pbs-blocksci-mem") + 1] == "16gb"
+    assert arguments[arguments.index("--pbs-blocksci-scratch") + 1] == "8gb"
+    assert arguments[arguments.index("--pbs-analysis-ncpus") + 1] == "2"
+    assert arguments[arguments.index("--pbs-analysis-mem") + 1] == "8gb"
+
+
 def test_yaml_loads_typed_pipeline_configuration(tmp_path: Path) -> None:
     path = tmp_path / "experiment.yaml"
     path.write_text(CONFIG, encoding="utf-8")

@@ -225,3 +225,64 @@ def test_main_uses_host_runs_root_for_pbs_job_discovery(tmp_path: Path) -> None:
     assert code == 0
     details.assert_called_once_with("blocksci", "102.server")
     assert stream.call_args.kwargs["pbs_jobs"] == {"pbs:blocksci": job}
+
+
+def test_main_skips_stale_pbs_jobs_and_still_watches_live_ones(
+    tmp_path: Path, capsys
+) -> None:
+    """One unresolvable .jobid must not hide every other stage.
+
+    .jobid files are never pruned, so an old job that qstat can no longer
+    describe would otherwise make the whole watcher exit before showing
+    anything.
+    """
+    marker_dir = tmp_path / "run-1" / ".pbs"
+    marker_dir.mkdir(parents=True)
+    (marker_dir / "blocksci.jobid").write_text("102.server\n", encoding="utf-8")
+    (marker_dir / "coinjoin-analysis.jobid").write_text("7.server\n", encoding="utf-8")
+    job = PbsJob(
+        stage="blocksci",
+        job_id="102.server",
+        output_path=tmp_path / "blocksci.o102",
+        state="R",
+    )
+
+    def details(stage: str, job_id: str) -> PbsJob:
+        if job_id == "7.server":
+            raise RuntimeError("cannot inspect PBS job 7.server: Unknown Job Id")
+        return job
+
+    with (
+        mock.patch("coinjoin_pipeline.watch._pbs_job_details", side_effect=details),
+        mock.patch("coinjoin_pipeline.watch.stream_sources", return_value=0) as stream,
+    ):
+        code = main(
+            ["--run-id", "run-1", "--pbs-only", "--no-follow"],
+            runs_root=tmp_path,
+        )
+
+    assert code == 0
+    assert stream.call_args.kwargs["pbs_jobs"] == {"pbs:blocksci": job}
+    assert "skipping coinjoin-analysis=7.server" in capsys.readouterr().err
+
+
+def test_main_fails_when_no_pbs_job_can_be_inspected(tmp_path: Path, capsys) -> None:
+    marker_dir = tmp_path / "run-1" / ".pbs"
+    marker_dir.mkdir(parents=True)
+    (marker_dir / "blocksci.jobid").write_text("102.server\n", encoding="utf-8")
+
+    with (
+        mock.patch(
+            "coinjoin_pipeline.watch._pbs_job_details",
+            side_effect=RuntimeError("Unknown Job Id"),
+        ),
+        mock.patch("coinjoin_pipeline.watch.stream_sources", return_value=0) as stream,
+    ):
+        code = main(
+            ["--run-id", "run-1", "--pbs-only", "--no-follow"],
+            runs_root=tmp_path,
+        )
+
+    assert code == 2
+    stream.assert_not_called()
+    assert "none of the discovered PBS jobs could be inspected" in capsys.readouterr().err

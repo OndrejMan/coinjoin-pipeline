@@ -663,6 +663,12 @@ def apply_s3_emulation_resources(manifest: str, kubeconfig_path: Path) -> None:
     command = ["kubectl", "--kubeconfig", str(kubeconfig_path), "apply", "-f", "-"]
     completed = subprocess.run(command, input=manifest, text=True, check=False)
     if completed.returncode:
+        # The manifest orders the support resources before the Job, so a partial
+        # apply can leave them behind with no Job to own them.
+        delete_s3_emulation_job(kubeconfig_path, namespace, job_name)
+        delete_s3_emulation_support_resources(
+            kubeconfig_path, namespace, job_name
+        )
         raise RuntimeError(f"kubectl apply failed with exit {completed.returncode}")
 
     uid_command = [

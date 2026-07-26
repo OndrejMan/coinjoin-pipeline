@@ -658,9 +658,42 @@ pbs:
         # A pure S3 full-run on a PBS frontend must not demand a local daemon.
         self.assertNotIn(Capability.CONTAINER_RUNTIME, capabilities)
         self.assertEqual(
-            {Capability.KUBECTL, Capability.QSUB, Capability.S5CMD_FRONTEND},
+            {
+                Capability.KUBECTL,
+                Capability.QSUB,
+                Capability.QSTAT,
+                Capability.QDEL,
+                Capability.S5CMD_FRONTEND,
+            },
             capabilities,
         )
+
+    def test_pbs_actions_require_qstat_and_qdel_alongside_qsub(self) -> None:
+        """qsub alone is not enough to run a PBS graph safely.
+
+        Duplicate-submission prevention and every marker wait poll qstat, and
+        rolling back a partially submitted graph shells out to qdel; missing
+        either turns a clear preflight error into a mid-run failure or a
+        rollback that silently leaves jobs running.
+        """
+        for action, arguments in (
+            ("pbs-from-s3", ["pbs-from-s3", "--run-id", "run-1"]),
+            (
+                "full-run",
+                ["full-run", "--artifact-backend", "s3", "--run-id", "run-1"],
+            ),
+            ("analyze", ["analyze", "--run-dir", "run-1", "--blocksciPbs"]),
+        ):
+            capabilities = required_capabilities(action, arguments)
+            self.assertIn(Capability.QSTAT, capabilities, action)
+            self.assertIn(Capability.QDEL, capabilities, action)
+
+    def test_dry_runs_do_not_require_pbs_tooling(self) -> None:
+        capabilities = required_capabilities(
+            "pbs-from-s3", ["pbs-from-s3", "--run-id", "run-1", "--dry-run"]
+        )
+        for capability in (Capability.QSUB, Capability.QSTAT, Capability.QDEL):
+            self.assertNotIn(capability, capabilities)
 
     def test_research_actions_do_not_need_a_container_runtime(self) -> None:
         # `runs`/`scenarios` only read the runs tree in-process. Requiring Docker

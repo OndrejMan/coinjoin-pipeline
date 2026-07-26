@@ -1,0 +1,42 @@
+action: full-run
+engine: joinmarket
+coinjoin_type: joinmarket
+driver: kubernetes
+scenario: scenarios/defaultJoinMarket.json
+test_values: true
+emulation_timeout: 21600
+
+images:
+  # Replace latest with one immutable release/commit tag for thesis evidence.
+  version: latest
+
+kubernetes:
+  namespace: man5-ns
+  reuse_namespace: true
+
+artifacts:
+  backend: s3
+  uri: s3://xman-coinjoin/runs
+  endpoint_url: https://s3.cl4.du.cesnet.cz
+  secret_name: coinjoin-s3-credentials
+  credentials_file: /storage/brno2/home/xman/.aws/credentials
+  profile: coinjoin
+
+blocksci:
+  workflow: combined
+  task: detect
+
+joinmarket:
+  detector: definite
+  min_base_fee: 5000
+  percentage_fee: 0.00004
+  max_depth: 200000
+
+pbs:
+  blocksci:
+    ncpus: 2
+    mem: 16gb
+    scratch: 8gb
+  analysis:
+    ncpus: 2
+    mem: 8gb

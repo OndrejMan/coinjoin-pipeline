@@ -349,8 +349,20 @@ IMAGE_PROVENANCE_ENV = {
 
 
 def acquire_lock(path: Path) -> object:
-    """Acquire a non-blocking advisory lock that is released on process exit."""
+    """Acquire a non-blocking advisory lock that is released on process exit.
+
+    Re-acquiring a lock this process already holds is a no-op. ``flock`` keys
+    locks to the open file description, so a second handle on the same path
+    would deadlock against our own first handle; ``full-run`` deliberately
+    nests the per-run PBS submit lock inside the general pipeline lock.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Key on the resolved path so a relative and an absolute spelling of the
+    # same lock are recognised as one.
+    key = path.resolve()
+    held = _HELD_LOCKS.get(key)
+    if held is not None:
+        return held
     try:
         handle = path.open("a+", encoding="utf-8")
     except PermissionError as error:
@@ -374,13 +386,22 @@ def acquire_lock(path: Path) -> object:
     handle.flush()
     atexit.register(handle.close)
     _LOCK_HANDLES.append(handle)
+    _HELD_LOCKS[key] = handle
     return handle
+
+
+PBS_SUBMIT_LOCK_NAME = ".pbs-submit.lock"
+
+
+def pbs_submit_lock_path(logs_root: Path, run_id: str) -> Path:
+    """Return the per-run lock serialising decomposed S3 PBS submissions."""
+    return logs_root / run_id / PBS_SUBMIT_LOCK_NAME
 
 
 def command_lock_path(args: argparse.Namespace, logs_root: Path) -> Path:
     """Return the local/shared advisory lock that protects this command."""
     if args.action == "pbs-from-s3":
-        return logs_root / args.run_id / ".pbs-submit.lock"
+        return pbs_submit_lock_path(logs_root, args.run_id)
     requested_run = getattr(args, "run_dir", None)
     if requested_run and args.action in (
         "analyze",
@@ -425,6 +446,7 @@ PEER_CONTAINERS = (
 )
 
 _LOCK_HANDLES: list[TextIO] = []
+_HELD_LOCKS: dict[Path, TextIO] = {}
 _CLEANUP_DONE = False
 
 
@@ -2539,25 +2561,93 @@ class PBSResources(TypedDict):
     walltime: str
 
 
+def cancel_dependent_pbs_job(stage_name: str, job_id: str) -> bool:
+    """Cancel a dependent stage after an upstream wait failed, and say so.
+
+    Reports the recovery command when qdel is missing or refused, so the
+    operator is never told a job was cancelled when it is still queued.
+    """
+    print(
+        f"[full-run] Cancelling dependent {stage_name} PBS job {job_id}",
+        file=sys.stderr,
+    )
+    try:
+        cancelled = qdel_pbs_job(job_id)
+    except (OSError, PBSError, RuntimeError) as error:
+        print(
+            f"[full-run] Could not cancel {stage_name} job {job_id}: {error}",
+            file=sys.stderr,
+        )
+        cancelled = False
+    if not cancelled:
+        print(
+            f"[full-run] {stage_name} PBS job {job_id} may still be queued or "
+            f"running; cancel it with: qdel {job_id}",
+            file=sys.stderr,
+        )
+    return cancelled
+
+
 def rollback_s3_pbs_submissions(
     submitted_jobs: list[tuple[str, str]],
 ) -> None:
-    """Cancel every job obtained before an S3 PBS graph submission failed."""
+    """Cancel every job obtained before an S3 PBS graph submission failed.
+
+    Rollback is best effort: report exactly which jobs are still queued or
+    running so the operator can finish the job, instead of implying the graph
+    was fully withdrawn.
+    """
+    failed: list[tuple[str, str]] = []
     for stage, job_id in reversed(submitted_jobs):
         print(
             f"[pbs] Rolling back submitted {stage} job {job_id}",
             file=sys.stderr,
         )
         try:
-            qdel_pbs_job(job_id)
+            cancelled = qdel_pbs_job(job_id)
         except (OSError, PBSError, RuntimeError) as error:
             print(
                 f"[pbs] Could not roll back {stage} job {job_id}: {error}",
                 file=sys.stderr,
             )
+            cancelled = False
+        if not cancelled:
+            failed.append((stage, job_id))
+    if failed:
+        print(
+            "[pbs] ROLLBACK INCOMPLETE: the following jobs may still be queued "
+            "or running and will consume allocation until cancelled manually:",
+            file=sys.stderr,
+        )
+        for stage, job_id in failed:
+            print(f"[pbs]   {stage}: qdel {job_id}", file=sys.stderr)
+    elif submitted_jobs:
+        print(
+            f"[pbs] Rolled back {len(submitted_jobs)} submitted job(s).",
+            file=sys.stderr,
+        )
 
 
 def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
+    # The lock lives here rather than in main() so that every caller is
+    # serialised: `full-run --artifact-backend s3` reaches this function
+    # directly and only holds the general .pipeline.lock, which does not stop a
+    # concurrent `pbs-from-s3 --run-id <same-run>` from submitting a second
+    # graph for the same run.
+    if not args.dry_run:
+        submission_dir = getattr(args, "pbs_submission_dir", None)
+        if submission_dir is None:
+            logs_root = Path(
+                compose_env().get("EMULATION_LOGS_DIR", ".")
+            ).expanduser().resolve()
+            submission_dir = pbs_submit_lock_path(logs_root, args.run_id).parent
+            args.pbs_submission_dir = submission_dir
+        submission_dir = Path(submission_dir)
+        acquire_lock(submission_dir / PBS_SUBMIT_LOCK_NAME)
+        # Must run under the lock: otherwise a racing submitter can pass its own
+        # check before either process has persisted its first job ID.
+        ensure_no_active_s3_pbs_submission(submission_dir)
+
     submitted_jobs: list[tuple[str, str]] = []
     try:
         return _run_pbs_from_s3(args, submitted_jobs)
@@ -3064,11 +3154,7 @@ def run_full_run_s3(args: argparse.Namespace) -> None:
                 ("unified-report", report_job_id),
             ):
                 if job_id:
-                    print(
-                        f"[full-run] Cancelling dependent {stage_name} PBS job {job_id}",
-                        file=sys.stderr,
-                    )
-                    qdel_pbs_job(job_id)
+                    cancel_dependent_pbs_job(stage_name, job_id)
             if blocksci_job_id:
                 print(
                     f"[full-run] BlockSci work PBS job {blocksci_job_id} is left running; "
@@ -3093,11 +3179,7 @@ def run_full_run_s3(args: argparse.Namespace) -> None:
                 ("unified-report", report_job_id),
             ):
                 if job_id:
-                    print(
-                        f"[full-run] Cancelling dependent {stage_name} PBS job {job_id}",
-                        file=sys.stderr,
-                    )
-                    qdel_pbs_job(job_id)
+                    cancel_dependent_pbs_job(stage_name, job_id)
             raise
     if blocksci_job_id:
         blocksci_stage = "blocksci-analyze" if blocksci_parse_job_id else "blocksci"
@@ -3113,11 +3195,7 @@ def run_full_run_s3(args: argparse.Namespace) -> None:
             )
         except (ArtifactTransportError, PBSError):
             if report_job_id:
-                print(
-                    f"[full-run] Cancelling dependent unified-report PBS job {report_job_id}",
-                    file=sys.stderr,
-                )
-                qdel_pbs_job(report_job_id)
+                cancel_dependent_pbs_job("unified-report", report_job_id)
             raise
     if mappings_job_id:
         print(
@@ -3134,11 +3212,7 @@ def run_full_run_s3(args: argparse.Namespace) -> None:
             )
         except (ArtifactTransportError, PBSError):
             if report_job_id:
-                print(
-                    f"[full-run] Cancelling dependent unified-report PBS job {report_job_id}",
-                    file=sys.stderr,
-                )
-                qdel_pbs_job(report_job_id)
+                cancel_dependent_pbs_job("unified-report", report_job_id)
             raise
     if report_job_id:
         print(f"[full-run] Waiting for unified-report marker (PBS job {report_job_id})")
@@ -3422,12 +3496,9 @@ def main() -> None:
         except RuntimeError as error:
             print(f"[ERROR] {error}", file=sys.stderr)
             sys.exit(2)
+    # run_pbs_from_s3() acquires the per-run .pbs-submit.lock and runs the
+    # active-graph check under it, for both this action and full-run.
     if args.action == "pbs-from-s3" and not args.dry_run:
-        try:
-            ensure_no_active_s3_pbs_submission(lock_path.parent)
-        except (RuntimeError, PBSError) as error:
-            print(f"[ERROR] {error}", file=sys.stderr)
-            sys.exit(2)
         args.pbs_submission_dir = lock_path.parent
     elif (
         args.action == "full-run"

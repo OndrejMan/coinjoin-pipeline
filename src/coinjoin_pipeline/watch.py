@@ -33,6 +33,10 @@ OUTER_POD_SELECTOR = "app.kubernetes.io/name=coinjoin-s3"
 PBS_SUBMISSION_RE = re.compile(
     r"\[pbs\] Submitted (?P<stage>[a-z0-9-]+)(?: S3-compatible)? PBS job: (?P<job_id>\S+)"
 )
+# Must stay identical to client.pbs.PBS_TERMINAL_STATES. The watcher runs
+# in-process from the installed package while pipeline/client is only reachable
+# as a subprocess runtime root, so the set cannot be imported; the parity is
+# asserted by tests/pipeline/test_pbs.py::PBSStateSetParityTest instead.
 PBS_TERMINAL_STATES = {"C", "F", "X"}
 
 
@@ -557,13 +561,26 @@ def main(
                 file=sys.stderr,
             )
             return 2
+        # Resolve each job on its own: .jobid files are never pruned, so one
+        # stale job that qstat can no longer describe must not hide every live
+        # stage. A missing qstat (FileNotFoundError) is still fatal.
+        skipped: list[str] = []
         try:
-            pbs_jobs = {
-                f"pbs:{stage}": _pbs_job_details(stage, job_id)
-                for stage, job_id in sorted(job_ids.items())
-            }
-        except (FileNotFoundError, RuntimeError) as error:
+            for stage, job_id in sorted(job_ids.items()):
+                try:
+                    pbs_jobs[f"pbs:{stage}"] = _pbs_job_details(stage, job_id)
+                except RuntimeError as error:
+                    skipped.append(f"{stage}={job_id}")
+                    print(f"[WARN] skipping {stage}={job_id}: {error}", file=sys.stderr)
+        except FileNotFoundError as error:
             print(f"ERROR: {error}", file=sys.stderr)
+            return 2
+        if not pbs_jobs:
+            print(
+                "ERROR: none of the discovered PBS jobs could be inspected: "
+                f"{', '.join(skipped)}",
+                file=sys.stderr,
+            )
             return 2
 
     print(

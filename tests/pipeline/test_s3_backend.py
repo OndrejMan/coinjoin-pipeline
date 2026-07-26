@@ -14,6 +14,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "pipeline"))
 
 from client.artifacts import (  # noqa: E402
     ArtifactTransportError,
+    PROBE_RUNNING,
     REQUIRED_EXPORTERS,
     STAGED_EXPORTERS_COMPLETE,
     STAGED_EXPORTERS_MISSING,
@@ -43,9 +44,11 @@ from client.pbs import (  # noqa: E402
     submit_unified_report_s3_pbs,
 )
 from client.wrapper import (  # noqa: E402
+    acquire_lock,
     build_parser,
     ensure_staged_exporters,
     pbs_stages_need_exporters,
+    rollback_s3_pbs_submissions,
     run_kubernetes_s3_emulation,
     run_pbs_from_s3,
     validate_artifact_arguments,
@@ -58,6 +61,24 @@ COMMON = dict(
     credentials_file="/storage/user/.aws/credentials",
     profile="coinjoin",
 )
+
+
+_SUBMISSION_DIR: list[Path] = []
+
+
+@pytest.fixture(autouse=True)
+def isolated_submission_dir(tmp_path_factory):
+    """Keep the per-run PBS submit lock and .jobid files inside the test tmp dir.
+
+    `run_pbs_from_s3` acquires `<submission-dir>/.pbs-submit.lock` and runs the
+    active-graph check under it, so without this every submission test would
+    write into the real runs root and the persisted job IDs would make the next
+    test look like an overlapping submission.
+    """
+    _SUBMISSION_DIR.clear()
+    _SUBMISSION_DIR.append(tmp_path_factory.mktemp("submission"))
+    yield
+    _SUBMISSION_DIR.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -123,6 +144,9 @@ def s3_pbs_args(
         s3_endpoint_url=COMMON["endpoint_url"],
         s3_credentials_file=COMMON["credentials_file"],
         s3_profile=COMMON["profile"],
+        # main() resolves this to <runs-root>/<run-id>; point it at the test tmp
+        # dir so the submit lock and .jobid files stay out of the real runs root.
+        pbs_submission_dir=_SUBMISSION_DIR[0] if _SUBMISSION_DIR else None,
         dry_run=False,
         analysisPbs=analysis,
         blocksciPbs=blocksci,
@@ -873,6 +897,43 @@ def test_pbs_from_s3_rolls_back_jobs_when_later_preparation_fails() -> None:
     ]
 
 
+def test_rollback_reports_jobs_it_could_not_cancel(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Rollback is best effort; an uncancelled job must not be reported as done.
+
+    qdel can be missing entirely or refused by the scheduler, and those jobs keep
+    consuming allocation, so the operator needs the exact recovery commands.
+    """
+    with mock.patch(
+        "client.wrapper.qdel_pbs_job", side_effect=[False, True]
+    ) as qdel:
+        rollback_s3_pbs_submissions(
+            [("coinjoin-analysis", "analysis.server"), ("blocksci", "blocksci.server")]
+        )
+
+    assert qdel.call_args_list == [
+        mock.call("blocksci.server"),
+        mock.call("analysis.server"),
+    ]
+    stderr = capsys.readouterr().err
+    assert "ROLLBACK INCOMPLETE" in stderr
+    assert "blocksci: qdel blocksci.server" in stderr
+    # The job that was cancelled must not appear in the recovery list.
+    assert "coinjoin-analysis: qdel" not in stderr
+
+
+def test_rollback_confirms_success_when_every_job_is_cancelled(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with mock.patch("client.wrapper.qdel_pbs_job", return_value=True):
+        rollback_s3_pbs_submissions([("blocksci", "blocksci.server")])
+
+    stderr = capsys.readouterr().err
+    assert "ROLLBACK INCOMPLETE" not in stderr
+    assert "Rolled back 1 submitted job(s)." in stderr
+
+
 def test_pbs_from_s3_persists_each_job_id_for_overlap_detection(
     tmp_path: Path,
 ) -> None:
@@ -888,6 +949,80 @@ def test_pbs_from_s3_persists_each_job_id_for_overlap_detection(
     assert (tmp_path / ".pbs" / "coinjoin-analysis.jobid").read_text(
         encoding="utf-8"
     ) == "analysis.server\n"
+
+
+def test_pbs_from_s3_holds_per_run_submit_lock_during_submission(
+    tmp_path: Path,
+) -> None:
+    """Every submitter must take the per-run lock, not just `pbs-from-s3`.
+
+    `full-run --artifact-backend s3` reaches run_pbs_from_s3() directly holding
+    only the general .pipeline.lock, which does not stop a concurrent
+    `pbs-from-s3 --run-id <same-run>` from submitting a second graph.
+    """
+    args = s3_pbs_args(analysis=True, blocksci=False)
+    args.pbs_submission_dir = tmp_path
+    locked: list[Path] = []
+
+    with (
+        mock.patch(
+            "client.wrapper.acquire_lock", side_effect=lambda path: locked.append(path)
+        ),
+        mock.patch(
+            "client.wrapper.submit_coinjoin_analysis_s3_pbs",
+            return_value="analysis.server",
+        ),
+    ):
+        run_pbs_from_s3(args)
+
+    assert locked == [tmp_path / ".pbs-submit.lock"]
+
+
+def test_pbs_from_s3_refuses_to_overlap_an_active_graph(tmp_path: Path) -> None:
+    """The active-graph check must run for every caller, under the lock."""
+    args = s3_pbs_args(analysis=True, blocksci=False)
+    args.pbs_submission_dir = tmp_path
+    marker_dir = tmp_path / ".pbs"
+    marker_dir.mkdir()
+    (marker_dir / "coinjoin-analysis.jobid").write_text(
+        "earlier.server\n", encoding="utf-8"
+    )
+
+    with (
+        mock.patch("client.wrapper.pbs_job_probe", return_value=lambda: PROBE_RUNNING),
+        mock.patch(
+            "client.wrapper.submit_coinjoin_analysis_s3_pbs"
+        ) as submit,
+        pytest.raises(RuntimeError, match="still active or cannot be verified"),
+    ):
+        run_pbs_from_s3(args)
+
+    submit.assert_not_called()
+
+
+def test_pbs_from_s3_dry_run_takes_no_lock(tmp_path: Path) -> None:
+    """A dry run must stay side-effect free: no lock file, no overlap check."""
+    args = s3_pbs_args(analysis=True, blocksci=False)
+    args.pbs_submission_dir = tmp_path
+    args.dry_run = True
+
+    with mock.patch("client.wrapper.acquire_lock") as acquire:
+        run_pbs_from_s3(args)
+
+    acquire.assert_not_called()
+    assert not (tmp_path / ".pbs-submit.lock").exists()
+
+
+def test_acquire_lock_is_reentrant_for_the_same_process(tmp_path: Path) -> None:
+    """full-run nests the PBS submit lock inside the general pipeline lock.
+
+    flock keys locks to the open file description, so a second handle on a path
+    this process already holds would block against our own first handle.
+    """
+    lock_path = tmp_path / ".pbs-submit.lock"
+    first = acquire_lock(lock_path)
+    second = acquire_lock(lock_path)
+    assert first is second
 
 
 def test_pbs_from_s3_mappings_depend_on_analysis_and_gate_report() -> None:
@@ -1478,6 +1613,40 @@ def test_apply_s3_resources_rolls_back_when_owner_patch_fails(
             "client.kubernetes.delete_s3_emulation_support_resources"
         ) as delete_support,
         pytest.raises(RuntimeError, match="could not attach Job ownership"),
+    ):
+        apply_s3_emulation_resources(manifest, tmp_path / "kubeconfig")
+
+    resource_name = s3_emulation_job_name("run-1")
+    delete_job.assert_called_once_with(
+        tmp_path / "kubeconfig", "coinjoin", resource_name
+    )
+    delete_support.assert_called_once_with(
+        tmp_path / "kubeconfig", "coinjoin", resource_name
+    )
+
+
+def test_apply_s3_resources_rolls_back_when_initial_apply_fails(
+    tmp_path: Path,
+) -> None:
+    """A rejected Job still leaves the earlier support resources applied.
+
+    The manifest orders ServiceAccount/ConfigMap/Role/RoleBinding before the
+    Job, so admission policy, a quota or an immutable existing Job can fail the
+    apply after those four were accepted, with no Job to own them.
+    """
+    manifest = json.dumps(render_kubernetes_manifest())
+    apply_failure = subprocess.CompletedProcess([], 1, "", "admission webhook denied")
+
+    with (
+        mock.patch(
+            "client.kubernetes.subprocess.run",
+            side_effect=[apply_failure],
+        ),
+        mock.patch("client.kubernetes.delete_s3_emulation_job") as delete_job,
+        mock.patch(
+            "client.kubernetes.delete_s3_emulation_support_resources"
+        ) as delete_support,
+        pytest.raises(RuntimeError, match="kubectl apply failed with exit 1"),
     ):
         apply_s3_emulation_resources(manifest, tmp_path / "kubeconfig")
 
