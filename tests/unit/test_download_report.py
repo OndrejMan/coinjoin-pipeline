@@ -10,6 +10,7 @@ from coinjoin_pipeline.download_report import (
     DownloadError,
     S3Access,
     download_report,
+    validate_output_directory,
 )
 
 
@@ -18,6 +19,45 @@ ACCESS = S3Access(
     credentials_file=Path("/storage/user/.aws/credentials"),
     profile="coinjoin",
 )
+
+
+def test_output_directory_rejects_protected_and_unrecognized_paths(
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "runs"
+    runs_root.mkdir()
+    unrecognized = tmp_path / "existing"
+    unrecognized.mkdir()
+    report = tmp_path / "report"
+    report.mkdir()
+    (report / "unified_report.json").write_text("{}", encoding="utf-8")
+    symlink = tmp_path / "report-link"
+    symlink.symlink_to(report, target_is_directory=True)
+
+    for path in (
+        Path("/"),
+        Path.home(),
+        Path.cwd(),
+        runs_root,
+        unrecognized,
+        symlink,
+    ):
+        with pytest.raises(ValueError, match="refusing|recognized|symbolic"):
+            validate_output_directory(path, runs_root)
+
+
+def test_output_directory_allows_new_or_recognized_report_paths(
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "runs"
+    existing = tmp_path / "report"
+    existing.mkdir()
+    (existing / "unified_report.json").write_text("{}", encoding="utf-8")
+
+    assert validate_output_directory(tmp_path / "new-report", runs_root) == (
+        tmp_path / "new-report"
+    )
+    assert validate_output_directory(existing, runs_root) == existing
 
 
 def test_download_requires_completed_report_marker(tmp_path: Path) -> None:

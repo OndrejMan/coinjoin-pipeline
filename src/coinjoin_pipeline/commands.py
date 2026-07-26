@@ -319,7 +319,14 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
             if has_option(argv, flag):
                 errors.append(f"Kubernetes S3-compatible mode does not support {flag}")
     if backend == "s3" and action == "emulate":
-        for flag in ("--run-id", "--artifact-uri", "--s3-endpoint-url", "--s3-secret-name"):
+        for flag in (
+            "--run-id",
+            "--artifact-uri",
+            "--s3-endpoint-url",
+            "--s3-secret-name",
+            "--s3-credentials-file",
+            "--s3-profile",
+        ):
             if not has_option(argv, flag):
                 errors.append(f"Kubernetes S3-compatible mode requires {flag}")
         if option_value(argv, "--driver") != "kubernetes":

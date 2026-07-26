@@ -65,17 +65,20 @@ def stub_exporter_staging():
     The submission tests are about job wiring and must not reach a real bucket;
     the staging decision itself is covered directly further down.
     """
-    with mock.patch("client.wrapper.ensure_staged_exporters"):
+    with (
+        mock.patch("client.wrapper.ensure_staged_exporters"),
+        mock.patch("client.wrapper.clear_s3_stage_markers"),
+    ):
         yield
 
 
-def render_kubernetes_manifest(*, reuse_namespace: bool = False) -> dict:
+def render_kubernetes_manifest(*, reuse_namespace: bool = False, engine: str = "wasabi") -> dict:
     return json.loads(
         render_s3_emulation_resources(
             namespace="coinjoin",
             run_id="run-1",
             scenario_json="{}",
-            engine="wasabi",
+            engine=engine,
             image_prefix="ghcr.io/ondrejman/",
             emulator_image="emulator:latest",
             uploader_image="pipeline:latest",
@@ -85,6 +88,28 @@ def render_kubernetes_manifest(*, reuse_namespace: bool = False) -> dict:
             reuse_namespace=reuse_namespace,
         )
     )
+
+
+def test_s3_joinmarket_controller_enables_descriptor_regtest_fallback() -> None:
+    joinmarket_manifest = render_kubernetes_manifest(engine="joinmarket")
+    joinmarket_job = next(
+        item for item in joinmarket_manifest["items"] if item["kind"] == "Job"
+    )
+    joinmarket_controller = next(
+        container
+        for container in joinmarket_job["spec"]["template"]["spec"]["containers"]
+        if container["name"] == "controller"
+    )
+    assert "--joinmarket-descriptor-regtest-fallback" in joinmarket_controller["command"][-1]
+
+    wasabi_manifest = render_kubernetes_manifest(engine="wasabi")
+    wasabi_job = next(item for item in wasabi_manifest["items"] if item["kind"] == "Job")
+    wasabi_controller = next(
+        container
+        for container in wasabi_job["spec"]["template"]["spec"]["containers"]
+        if container["name"] == "controller"
+    )
+    assert "--joinmarket-descriptor-regtest-fallback" not in wasabi_controller["command"][-1]
 
 
 def s3_pbs_args(
@@ -147,16 +172,16 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
         # there must not abort the trap before the marker is written locally.
         assert "trap - EXIT TERM\n  set +e" in script
         subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    # The pre-existing analysis and combined-blocksci stages must also clear
-    # stale markers so a resubmitted run cannot read a previous attempt's marker.
+    # Stale markers are cleared strictly on the frontend before qsub, never by
+    # a PBS job that could race a newer submission.
     assert ".pbs/coinjoin-analysis.done" in coinjoin
     assert ".pbs/coinjoin-analysis.failed" in coinjoin
-    assert "rm " in coinjoin
+    assert " rm " not in coinjoin
     assert ".pbs/blocksci.done" in blocksci
     assert ".pbs/blocksci.failed" in blocksci
     assert ".pbs/unified-report.done" in report
     assert ".pbs/unified-report.failed" in report
-    assert "rm " in report
+    assert " rm " not in report
     assert '"$CONTAINER_WORK_ROOT:/runs/emulation/selected:rw"' in coinjoin
     assert (
         '"$RUN_WORK/coinjoin-analysis_data:/runs/emulation/selected/$RUN_ID:rw"'
@@ -771,6 +796,43 @@ def test_pbs_from_s3_submits_parallel_analyzers_then_dependent_report() -> None:
     assert "--unified-report-image python:3.12-slim-bookworm" in command
 
 
+def test_pbs_from_s3_clears_each_marker_immediately_before_submission() -> None:
+    args = s3_pbs_args()
+    events: list[str] = []
+
+    def clear(_access, _uri, _run_id, stage):
+        events.append(f"clear:{stage}")
+
+    with (
+        mock.patch("client.wrapper.clear_s3_stage_markers", side_effect=clear),
+        mock.patch(
+            "client.wrapper.submit_coinjoin_analysis_s3_pbs",
+            side_effect=lambda **_kwargs: events.append("submit:coinjoin-analysis")
+            or "analysis.server",
+        ),
+        mock.patch(
+            "client.wrapper.submit_blocksci_s3_pbs",
+            side_effect=lambda **_kwargs: events.append("submit:blocksci")
+            or "blocksci.server",
+        ),
+        mock.patch(
+            "client.wrapper.submit_unified_report_s3_pbs",
+            side_effect=lambda **_kwargs: events.append("submit:unified-report")
+            or "report.server",
+        ),
+    ):
+        run_pbs_from_s3(args)
+
+    assert events == [
+        "clear:coinjoin-analysis",
+        "submit:coinjoin-analysis",
+        "clear:blocksci",
+        "submit:blocksci",
+        "clear:unified-report",
+        "submit:unified-report",
+    ]
+
+
 def test_pbs_from_s3_mappings_depend_on_analysis_and_gate_report() -> None:
     args = s3_pbs_args(mappings=True)
     with (
@@ -1225,9 +1287,11 @@ def test_kubernetes_manifest_has_controller_uploader_secret_and_rbac() -> None:
     }
     assert permissions["pods/status"] == {"get"}
     assert {"get", "list", "watch"}.issubset(permissions["events"])
+    assert permissions["jobs"] == {"get", "delete"}
 
     job = next(item for item in manifest["items"] if item["kind"] == "Job")
     assert job["spec"]["ttlSecondsAfterFinished"] == 3600
+    assert job["spec"]["activeDeadlineSeconds"] == 21600 + 1800 + 60
     spec = job["spec"]["template"]["spec"]
     assert spec["securityContext"] == {
         "runAsNonRoot": True,
@@ -1282,8 +1346,13 @@ def test_kubernetes_manifest_has_controller_uploader_secret_and_rbac() -> None:
         item["name"]: item for item in containers["uploader"]["env"]
     }
     assert uploader_env["EMULATION_TIMEOUT_SECONDS"]["value"] == "21600"
+    assert uploader_env["JOB_NAME"]["value"] == job["metadata"]["name"]
     assert (
         "controller exceeded emulation timeout"
+        in containers["uploader"]["command"][-1]
+    )
+    assert (
+        'delete job "$JOB_NAME" --wait=false'
         in containers["uploader"]["command"][-1]
     )
     rendered = json.dumps(manifest)

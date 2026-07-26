@@ -20,7 +20,12 @@ from .commands import RUN_ID_RE
 
 DEFAULT_NAMESPACE = "coinjoin"
 DEFAULT_WAIT_SECONDS = 120
-VALID_COMPONENTS = {"controller", "uploader", "coordinator"}
+ALL_COMPONENTS = {"controller", "uploader", "engine"}
+VALID_COMPONENTS = ALL_COMPONENTS | {"coordinator"}
+ENGINE_SELECTORS = {
+    "wasabi": "app=wasabi-coordinator",
+    "joinmarket": "app=joinmarket-client-server",
+}
 PBS_SUBMISSION_RE = re.compile(
     r"\[pbs\] Submitted (?P<stage>[a-z0-9-]+)(?: S3-compatible)? PBS job: (?P<job_id>\S+)"
 )
@@ -64,12 +69,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--components",
         default="controller",
-        help="Comma-separated Kubernetes log sources: controller,uploader,coordinator.",
+        help=(
+            "Comma-separated Kubernetes log sources: controller,uploader,engine "
+            "(coordinator is a Wasabi-only compatibility alias)."
+        ),
     )
     parser.add_argument(
         "--all",
         action="store_true",
-        help="Stream controller, uploader, and coordinator.",
+        help="Stream controller, uploader, and the selected run's engine service.",
+    )
+    parser.add_argument(
+        "--engine",
+        choices=tuple(ENGINE_SELECTORS),
+        help="Run engine; inferred from the outer controller pod when omitted.",
     )
     parser.add_argument(
         "--frontend-log", type=Path, help="Also follow the local full-run tee log."
@@ -145,6 +158,31 @@ def _discover_pod(
         if time.monotonic() >= deadline:
             raise RuntimeError(f"Timed out waiting for {description}: {last_error}")
         time.sleep(2)
+
+
+def _discover_engine(kubectl: list[str], outer_pod: str) -> str:
+    result = subprocess.run(
+        [*kubectl, "get", "pod", outer_pod, "-o", "json"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "kubectl failed").strip()
+        raise RuntimeError(f"Could not inspect engine for pod {outer_pod}: {detail}")
+    try:
+        containers = json.loads(result.stdout).get("spec", {}).get("containers", [])
+    except (json.JSONDecodeError, AttributeError) as error:
+        raise RuntimeError(
+            f"Could not parse engine metadata for pod {outer_pod}"
+        ) from error
+    for container in containers:
+        if container.get("name") != "controller":
+            continue
+        for item in container.get("env") or []:
+            if item.get("name") == "ENGINE" and item.get("value") in ENGINE_SELECTORS:
+                return str(item["value"])
+    raise RuntimeError(f"Controller pod {outer_pod} does not declare a supported ENGINE")
 
 
 def _kubernetes_log_command(
@@ -402,7 +440,7 @@ def main(
     watch_kubernetes = not args.pbs_only
     watch_pbs = args.pbs or args.pbs_only or bool(args.pbs_job)
     components = (
-        VALID_COMPONENTS
+        ALL_COMPONENTS
         if args.all
         else {item.strip() for item in args.components.split(",") if item.strip()}
     )
@@ -433,17 +471,33 @@ def main(
         except (FileNotFoundError, RuntimeError) as error:
             print(f"ERROR: {error}", file=sys.stderr)
             return 2
+        selected_engine = args.engine
+        if components & {"engine", "coordinator"}:
+            if selected_engine is None:
+                try:
+                    selected_engine = _discover_engine(kubectl, outer_pod)
+                except RuntimeError as error:
+                    print(f"ERROR: {error}", file=sys.stderr)
+                    return 2
+            if "coordinator" in components and selected_engine != "wasabi":
+                print(
+                    "ERROR: coordinator is Wasabi-specific; use --components engine "
+                    "for JoinMarket runs",
+                    file=sys.stderr,
+                )
+                return 2
         for component in sorted(components):
             if component in {"controller", "uploader"}:
                 pod = outer_pod
                 container = component
             else:
+                selector = ENGINE_SELECTORS[selected_engine]
                 try:
                     pod = _discover_pod(
                         kubectl,
-                        f"app=wasabi-coordinator,coinjoin.run-id={args.run_id}",
+                        f"{selector},coinjoin.run-id={args.run_id}",
                         wait_seconds=args.wait_seconds,
-                        description="Wasabi coordinator pod",
+                        description=f"{selected_engine} engine pod",
                     )
                 except RuntimeError as error:
                     print(f"ERROR: {error}", file=sys.stderr)

@@ -72,6 +72,10 @@ def test_main_builds_unified_all_component_sources() -> None:
     with tempfile.NamedTemporaryFile() as kubeconfig:
         with (
             mock.patch(
+                "coinjoin_pipeline.watch._discover_engine",
+                return_value="wasabi",
+            ),
+            mock.patch(
                 "coinjoin_pipeline.watch._discover_pod",
                 side_effect=["outer-pod", "coordinator-pod"],
             ) as discover,
@@ -94,11 +98,46 @@ def test_main_builds_unified_all_component_sources() -> None:
 
     assert code == 0
     sources = stream.call_args.args[0]
-    assert set(sources) == {"controller", "uploader", "coordinator"}
+    assert set(sources) == {"controller", "uploader", "engine"}
     assert sources["controller"][-1] == "--timestamps=true"
     assert "--follow=true" not in sources["controller"]
     assert discover.call_args_list[1].args[1] == (
         "app=wasabi-coordinator,coinjoin.run-id=run-1"
+    )
+
+
+def test_main_all_discovers_joinmarket_engine_service() -> None:
+    with tempfile.NamedTemporaryFile() as kubeconfig:
+        with (
+            mock.patch(
+                "coinjoin_pipeline.watch._discover_engine",
+                return_value="joinmarket",
+            ),
+            mock.patch(
+                "coinjoin_pipeline.watch._discover_pod",
+                side_effect=["outer-pod", "joinmarket-pod"],
+            ) as discover,
+            mock.patch(
+                "coinjoin_pipeline.watch.stream_sources", return_value=0
+            ) as stream,
+        ):
+            code = main(
+                [
+                    "--run-id",
+                    "run-1",
+                    "--namespace",
+                    "man5-ns",
+                    "--kubeconfig",
+                    kubeconfig.name,
+                    "--all",
+                    "--no-follow",
+                ]
+            )
+
+    assert code == 0
+    assert set(stream.call_args.args[0]) == {"controller", "uploader", "engine"}
+    assert discover.call_args_list[1].args[1] == (
+        "app=joinmarket-client-server,coinjoin.run-id=run-1"
     )
 
 

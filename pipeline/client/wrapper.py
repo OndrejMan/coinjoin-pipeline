@@ -26,6 +26,7 @@ from client.artifacts import (
     STAGED_EXPORTERS_PARTIAL,
     ArtifactTransportError,
     S3Access,
+    clear_s3_stage_markers,
     ensure_empty_run_prefix,
     s3_access_preflight,
     s3_object_exists,
@@ -46,8 +47,10 @@ from client.cli_options import (
     add_runtime_argument,
 )
 from client.kubernetes import (
+    S3_JOB_START_TIMEOUT_SECONDS,
     apply_s3_emulation_resources,
     collect_s3_emulation_diagnostics,
+    delete_s3_emulation_job,
     kubernetes_auth_preflight,
     kubernetes_job_probe,
     kubernetes_s3_auth_preflight,
@@ -2461,6 +2464,18 @@ class PBSResources(TypedDict):
 
 
 def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
+    access = S3Access(
+        endpoint_url=args.s3_endpoint_url,
+        credentials_file=args.s3_credentials_file,
+        profile=args.s3_profile,
+    )
+
+    def prepare_stage(stage: str) -> None:
+        if args.dry_run:
+            print(f"[dry-run] Would clear stale .pbs/{stage}.done|failed markers")
+            return
+        clear_s3_stage_markers(access, args.artifact_uri, args.run_id, stage)
+
     common = dict(
         artifact_uri=args.artifact_uri,
         run_id=args.run_id,
@@ -2472,11 +2487,6 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
     workflow = getattr(args, "blocksci_workflow", "combined")
     task = getattr(args, "blocksci_task", "detect")
     if task == "update" and not args.dry_run:
-        access = S3Access(
-            endpoint_url=args.s3_endpoint_url,
-            credentials_file=args.s3_credentials_file,
-            profile=args.s3_profile,
-        )
         source_run_id = args.blocksci_cache_source_run_id
         s3_access_preflight(access, args.artifact_uri)
         if not s3_object_exists(
@@ -2497,11 +2507,6 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
         and not args.analysisPbs
         and (mappings_pbs or (args.blocksciPbs and task == "detect"))
     ):
-        access = S3Access(
-            endpoint_url=args.s3_endpoint_url,
-            credentials_file=args.s3_credentials_file,
-            profile=args.s3_profile,
-        )
         s3_access_preflight(access, args.artifact_uri)
         if not s3_object_exists(
             access,
@@ -2526,6 +2531,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
     blocksci_update_job_id = None
     blocksci_work_job_id = None
     if args.analysisPbs:
+        prepare_stage("coinjoin-analysis")
         analysis_job_id = submit_coinjoin_analysis_s3_pbs(
             **common,
             image=resolve_pbs_image(args, DEFAULT_PBS_COINJOIN_ANALYSIS_IMAGE, "pbs_coinjoin_analysis_image"),
@@ -2544,6 +2550,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
             ),
         )
     if mappings_pbs:
+        prepare_stage("coinjoin-mappings")
         mappings_job_id = submit_mappings_s3_pbs(
             **common,
             enumerator_image=resolve_pbs_image(
@@ -2598,6 +2605,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
             args, DEFAULT_PBS_BLOCKSCI_IMAGE, "pbs_blocksci_image"
         )
         if task == "update":
+            prepare_stage("blocksci-update")
             blocksci_update_job_id = submit_blocksci_update_s3_pbs(
                 **common,
                 source_run_id=args.blocksci_cache_source_run_id,
@@ -2609,6 +2617,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
                 **blocksci_resources,
             )
         elif workflow == "combined":
+            prepare_stage("blocksci")
             blocksci_work_job_id = submit_blocksci_s3_pbs(
                 **common,
                 image=blocksci_image,
@@ -2644,6 +2653,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
                         disk_path="/mnt/data",
                         max_block_expression=str(args.blocksci_max_block + 1),
                     )
+                prepare_stage("blocksci-parse")
                 blocksci_parse_job_id = submit_blocksci_parse_s3_pbs(
                     **common,
                     image=blocksci_image,
@@ -2685,6 +2695,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
                     work_command = blocksci_notebook_pbs_command(
                         getattr(args, "blocksci_notebook_port", None) or 8888
                     )
+                prepare_stage(mode)
                 blocksci_work_job_id = submit_blocksci_analyze_s3_pbs(
                     **common,
                     image=blocksci_image,
@@ -2721,6 +2732,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
         )
         if not args.dry_run and len(dependency_job_ids) != expected_dependencies:
             raise PBSError("Could not obtain analyzer job IDs for the unified report dependency")
+        prepare_stage("unified-report")
         report_job_id = submit_unified_report_s3_pbs(
             **common,
             image=resolve_unified_report_pbs_image(args),
@@ -2883,13 +2895,15 @@ def run_full_run_s3(args: argparse.Namespace) -> None:
             f"{run_prefix}/.k8s/upload.failed",
             access,
             timeout_seconds=args.emulation_timeout,
+            start_timeout_seconds=S3_JOB_START_TIMEOUT_SECONDS,
             probe=kubernetes_job_probe(kubeconfig_path, args.namespace, job_name),
         )
     except ArtifactTransportError:
         print(collect_s3_emulation_diagnostics(kubeconfig_path, args.namespace, job_name), file=sys.stderr)
+        delete_s3_emulation_job(kubeconfig_path, args.namespace, job_name)
         print(
-            f"[full-run] Emulation resources left in place for inspection; clean up with: "
-            f"kubectl --kubeconfig {kubeconfig_path} --namespace {args.namespace} delete job {job_name}",
+            f"[full-run] Requested deletion of failed Kubernetes Job {job_name} "
+            "after collecting diagnostics.",
             file=sys.stderr,
         )
         raise
@@ -3200,7 +3214,13 @@ def main() -> None:
     install_termination_handlers()
     parser = build_parser()
 
-    args = parser.parse_args(normalize_argv(sys.argv[1:]))
+    normalized_argv = normalize_argv(sys.argv[1:])
+    from coinjoin_pipeline.commands import action_from, validate_passthrough
+
+    args = parser.parse_args(normalized_argv)
+    public_errors = validate_passthrough(normalized_argv, action_from(normalized_argv))
+    if public_errors:
+        parser.error("; ".join(public_errors))
     validate_artifact_arguments(parser, args)
     if getattr(args, "blocksci_script", None):
         script_path = Path(args.blocksci_script).expanduser().resolve()

@@ -98,6 +98,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
                 "kubernetes_job_probe",
                 "qdel_pbs_job",
                 "collect_s3_emulation_diagnostics",
+                "delete_s3_emulation_job",
             )
         }
 
@@ -149,6 +150,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
 
         mocks["run_pbs_from_s3"].assert_not_called()
         mocks["collect_s3_emulation_diagnostics"].assert_called_once()
+        mocks["delete_s3_emulation_job"].assert_called_once()
 
     def test_full_run_s3_waits_for_mappings_before_report(self):
         patches = self._patches()
@@ -297,6 +299,7 @@ class WrapperExportTest(unittest.TestCase):
         with (
             # The run prefix check before submission is covered in test_s3_backend.
             mock.patch("client.wrapper.ensure_staged_exporters"),
+            mock.patch("client.wrapper.clear_s3_stage_markers"),
             mock.patch(
                 "client.wrapper.submit_coinjoin_analysis_s3_pbs",
                 return_value="analysis.job",

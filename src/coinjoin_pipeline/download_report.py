@@ -31,6 +31,37 @@ class DownloadError(RuntimeError):
     """Raised when the remote report cannot be downloaded safely."""
 
 
+def validate_output_directory(output_dir: Path, runs_root: Path) -> Path:
+    """Refuse broad or unrecognizable destinations before atomic replacement."""
+    expanded = output_dir.expanduser()
+    if expanded.is_symlink():
+        raise ValueError(
+            f"existing report output must not be a symbolic link: {expanded}"
+        )
+    destination = expanded.resolve()
+    protected = {
+        Path("/").resolve(),
+        Path.home().resolve(),
+        Path.cwd().resolve(),
+        runs_root.expanduser().resolve(),
+    }
+    if destination in protected or not destination.name:
+        raise ValueError(
+            f"refusing unsafe report output directory: {destination}"
+        )
+    if destination.exists():
+        if not destination.is_dir():
+            raise ValueError(
+                f"existing report output must be a real directory: {destination}"
+            )
+        if not (destination / "unified_report.json").is_file():
+            raise ValueError(
+                "refusing to replace an existing directory that is not a "
+                f"recognized pipeline report: {destination}"
+            )
+    return destination
+
+
 @dataclass(frozen=True)
 class S3Access:
     endpoint_url: str
@@ -258,11 +289,14 @@ def main(argv: list[str] | None = None, *, runs_root: Path | None = None) -> int
         return 2
 
     root = (runs_root or Path.cwd() / "coinjoin-runs").expanduser().resolve()
-    output_dir = (
-        args.output_dir.expanduser().resolve()
-        if args.output_dir
-        else root / run_id / "coinjoinPipeline_data"
-    )
+    try:
+        output_dir = validate_output_directory(
+            args.output_dir if args.output_dir else root / run_id / "coinjoinPipeline_data",
+            root,
+        )
+    except ValueError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
     try:
         json_report, markdown_report = download_report(
             access, artifact_uri, run_id, output_dir

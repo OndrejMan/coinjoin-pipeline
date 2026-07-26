@@ -33,7 +33,11 @@ class PublishWorkflowTests(unittest.TestCase):
 
     def test_test_workflow_no_longer_publishes_a_wrapper_image(self) -> None:
         workflow = (WORKFLOWS / "tests.yaml").read_text(encoding="utf-8")
-        self.assertIn("group: coinjoin-pipeline-${{ github.ref }}", workflow)
+        self.assertIn(
+            "group: coinjoin-pipeline-${{ github.workflow }}-"
+            "${{ github.event.pull_request.number || github.ref }}",
+            workflow,
+        )
         self.assertIn("cancel-in-progress: true", workflow)
         self.assertNotIn("publish-pipeline-image", workflow)
         self.assertNotIn("WRAPPER_IMAGE", workflow)

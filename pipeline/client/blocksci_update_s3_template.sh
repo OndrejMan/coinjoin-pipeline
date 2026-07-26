@@ -41,7 +41,6 @@ trap 'exit 143' TERM
 test -r "$S3_CREDENTIALS_FILE" || {{ echo "S3 credentials file is not readable: $S3_CREDENTIALS_FILE" >&2; exit 1; }}
 test -d "$BITCOIN_DATADIR/blocks" || {{ echo "External Bitcoin coin directory must contain blocks/: $BITCOIN_DATADIR" >&2; exit 1; }}
 {s5cmd_check}
-{clear_markers}
 export TMPDIR="$SCRATCHDIR" SINGULARITY_CACHEDIR="$SCRATCHDIR" SINGULARITY_TMPDIR="$SCRATCHDIR" SINGULARITY_LOCALCACHEDIR="$SCRATCHDIR"
 
 echo "[blocksci-update] downloading cache from run $SOURCE_RUN_ID"

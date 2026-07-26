@@ -17,6 +17,8 @@ S3_CONTROLLER_RESOURCE_LIMITS = {"cpu": "1", "memory": "1Gi"}
 S3_UPLOADER_RESOURCE_REQUESTS = {"cpu": "100m", "memory": "128Mi"}
 S3_UPLOADER_RESOURCE_LIMITS = {"cpu": "500m", "memory": "512Mi"}
 S3_JOB_TTL_SECONDS_AFTER_FINISHED = 3600
+S3_JOB_START_TIMEOUT_SECONDS = 1800
+S3_JOB_DEADLINE_GRACE_SECONDS = 60
 CONTROLLER_LOG_TAIL_LINES = 100
 CONTROLLER_FATAL_SUMMARY_MARKERS = ("Kubernetes CPU quota exhausted",)
 
@@ -106,6 +108,7 @@ def kubernetes_s3_auth_preflight(
         ("create", "roles.rbac.authorization.k8s.io"),
         ("create", "rolebindings.rbac.authorization.k8s.io"),
         ("get", "jobs.batch"),
+        ("delete", "jobs.batch"),
     ):
         kubectl_auth_can_i(kubeconfig_path, verb, resource, namespace)
     if reuse_namespace:
@@ -261,6 +264,39 @@ def collect_s3_emulation_diagnostics(kubeconfig_path: Path, namespace: str, job_
     return "\n".join(sections)
 
 
+def delete_s3_emulation_job(kubeconfig_path: Path, namespace: str, job_name: str) -> None:
+    """Best-effort frontend cleanup after a failed or timed-out marker wait."""
+    command = [
+        "kubectl",
+        "--kubeconfig",
+        str(kubeconfig_path),
+        "--namespace",
+        namespace,
+        "delete",
+        "job",
+        job_name,
+        "--ignore-not-found",
+        "--wait=false",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        print(f"[WARN] kubectl unavailable; could not delete Job {job_name}", file=sys.stderr)
+        return
+    if result.returncode != 0:
+        print(
+            f"[WARN] failed to delete Kubernetes Job {job_name}: "
+            f"{(result.stderr or result.stdout or '').strip()}",
+            file=sys.stderr,
+        )
+
+
 def render_s3_emulation_resources(
     *,
     namespace: str,
@@ -274,15 +310,20 @@ def render_s3_emulation_resources(
     endpoint_url: str,
     secret_name: str,
     emulation_timeout_seconds: int = 21600,
+    scheduling_timeout_seconds: int = S3_JOB_START_TIMEOUT_SECONDS,
     reuse_namespace: bool = False,
 ) -> str:
     """Render a kubectl-compatible JSON resource list for in-cluster emulation."""
     name = s3_emulation_job_name(run_id)
     labels = {"app.kubernetes.io/name": "coinjoin-s3", "coinjoin.run-id": run_id}
+    joinmarket_fallback = (
+        " --joinmarket-descriptor-regtest-fallback" if engine == "joinmarket" else ""
+    )
     controller = (
         'python manager.py --driver kubernetes --engine "$ENGINE" run '
         '--scenario /config/scenario.json --namespace "$NAMESPACE" --reuse-namespace '
-        '--disable-port-forward --image-prefix "$IMAGE_PREFIX" --run-id "$RUN_ID" '
+        '--disable-port-forward --image-prefix "$IMAGE_PREFIX" --run-id "$RUN_ID"'
+        f"{joinmarket_fallback} "
         '--btc-node-arg=-blocksxor=0 --download-btc-data "/app/logs/$RUN_ID/bitcoin_data" '
         "--controller-done-marker /app/logs/.controller.done "
         "--controller-failed-marker /app/logs/.controller.failed"
@@ -380,6 +421,7 @@ if [ -f /artifacts/.controller.failed ]; then
   s5 cp "/artifacts/$RUN_ID/.k8s/upload.failed" "$ARTIFACT_URI/$RUN_ID/.k8s/upload.failed" || true
   s5 sync "/artifacts/$RUN_ID/" "$ARTIFACT_URI/$RUN_ID/" || true
   rm -f /credentials/credentials
+  kubectl --namespace "$NAMESPACE" delete job "$JOB_NAME" --wait=false || true
   exit 1
 fi
 s5 sync "/artifacts/$RUN_ID/" "$ARTIFACT_URI/$RUN_ID/"
@@ -408,6 +450,7 @@ rm -f /credentials/credentials"""
     ]
     uploader_env = [
         {"name": "NAMESPACE", "value": namespace},
+        {"name": "JOB_NAME", "value": name},
         {
             "name": "EMULATION_TIMEOUT_SECONDS",
             "value": str(emulation_timeout_seconds),
@@ -447,6 +490,12 @@ rm -f /credentials/credentials"""
                 },
                 {"apiGroups": [""], "resources": ["pods/exec"], "verbs": ["create", "get"]},
                 {"apiGroups": [""], "resources": ["events"], "verbs": ["get", "list", "watch"]},
+                {
+                    "apiGroups": ["batch"],
+                    "resources": ["jobs"],
+                    "resourceNames": [name],
+                    "verbs": ["get", "delete"],
+                },
             ],
         },
         {
@@ -462,6 +511,11 @@ rm -f /credentials/credentials"""
             "metadata": {"name": name, "namespace": namespace, "labels": labels},
             "spec": {
                 "backoffLimit": 0,
+                "activeDeadlineSeconds": (
+                    scheduling_timeout_seconds
+                    + emulation_timeout_seconds
+                    + S3_JOB_DEADLINE_GRACE_SECONDS
+                ),
                 "ttlSecondsAfterFinished": S3_JOB_TTL_SECONDS_AFTER_FINISHED,
                 "template": {
                     "metadata": {"labels": labels},

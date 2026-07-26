@@ -112,11 +112,6 @@ def render_s5cmd_cp(source_expr: str, destination_expr: str) -> str:
     return f"{_prefix()} cp {source_expr} {destination_expr}"
 
 
-def render_s5cmd_rm(target_expr: str) -> str:
-    """Render deletion of one validated, explicitly constructed object key."""
-    return f"{_prefix()} rm {target_expr}"
-
-
 def shell_assignment(name: str, value: str) -> str:
     return f"{name}={shlex.quote(value)}"
 
@@ -157,6 +152,32 @@ def s3_object_exists(access: S3Access, object_uri: str) -> bool:
     if "no object found" in stderr.lower():
         return False
     raise ArtifactTransportError(f"s5cmd ls {object_uri} failed (exit {result.returncode}): {stderr}")
+
+
+def delete_s3_object_if_present(access: S3Access, object_uri: str) -> None:
+    """Strictly remove one object while treating an absent object as success."""
+    if not s3_object_exists(access, object_uri):
+        return
+    result = run_s5cmd(access, "rm", object_uri)
+    if result.returncode != 0:
+        raise ArtifactTransportError(
+            f"s5cmd rm {object_uri} failed "
+            f"(exit {result.returncode}): {(result.stderr or '').strip()}"
+        )
+    if s3_object_exists(access, object_uri):
+        raise ArtifactTransportError(f"S3 object still exists after deletion: {object_uri}")
+
+
+def clear_s3_stage_markers(
+    access: S3Access,
+    artifact_uri: str,
+    run_id: str,
+    stage: str,
+) -> None:
+    """Clear stale completion markers before submitting the stage that owns them."""
+    prefix = f"{artifact_uri}/{run_id}/.pbs/{stage}"
+    delete_s3_object_if_present(access, f"{prefix}.failed")
+    delete_s3_object_if_present(access, f"{prefix}.done")
 
 
 # `sync --exclude` (used when staging the exporters) landed in s5cmd 2.1.
@@ -302,6 +323,7 @@ def wait_for_s3_marker(
     access: S3Access,
     *,
     timeout_seconds: int,
+    start_timeout_seconds: int | None = None,
     poll_interval: int = S3_POLL_INTERVAL_SECONDS,
     probe: Callable[[], str] | None = None,
 ) -> None:
@@ -309,11 +331,14 @@ def wait_for_s3_marker(
 
     ``probe`` reports remote state (``PROBE_QUEUED``/``PROBE_RUNNING``/
     ``PROBE_TERMINAL``/``PROBE_UNKNOWN``). Queue time may extend the start
-    deadline, but the execution deadline starts once the job is observed
-    running and is never extended. After a terminal report one extra poll
-    cycle runs so a marker upload that races the probe still wins.
+    deadline when ``start_timeout_seconds`` is omitted (the PBS queueing
+    contract), but callers can supply a finite scheduling deadline. The
+    execution deadline starts once the job is observed running and is never
+    extended. After a terminal report one extra poll cycle runs so a marker
+    upload that races the probe still wins.
     """
-    start_deadline = time.monotonic() + timeout_seconds
+    start_budget = timeout_seconds if start_timeout_seconds is None else start_timeout_seconds
+    start_deadline = time.monotonic() + start_budget
     execution_deadline: float | None = None
     terminal_seen = False
     while True:
@@ -328,7 +353,11 @@ def wait_for_s3_marker(
             execution_deadline = now + timeout_seconds
         deadline = execution_deadline if execution_deadline is not None else start_deadline
         if now >= deadline:
-            if execution_deadline is not None or probe_state != PROBE_QUEUED:
+            if (
+                execution_deadline is not None
+                or probe_state != PROBE_QUEUED
+                or start_timeout_seconds is not None
+            ):
                 raise ArtifactTransportError(
                     f"Timed out waiting for S3 stage marker: {stage} ({done_uri})"
                 )

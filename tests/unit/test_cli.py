@@ -130,6 +130,21 @@ class CliTests(unittest.TestCase):
         self.assertFalse(valid_run_id("a/../b"))
         self.assertFalse(valid_run_id("x" * 64))
 
+    def test_generated_run_id_slugifies_and_bounds_scenario_name(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            scenario = Path(directory) / "scenario.json"
+            scenario.write_text(
+                json.dumps({"name": "Žltý Wasabi experiment #1 " + "x" * 100}),
+                encoding="utf-8",
+            )
+            run_id = run_id_for(
+                ["full-run", "--engine", "wasabi", "--scenario", str(scenario)]
+            )
+
+        self.assertTrue(valid_run_id(run_id))
+        self.assertLessEqual(len(run_id), 63)
+        self.assertIn("_zlty-wasabi-experiment-1-", run_id)
+
     def test_stage_actions_require_explicit_run(self) -> None:
         self.assertEqual(action_from(["analyze", "--engine", "joinmarket"]), "analyze")
         errors = validate_passthrough(["analyze", "--engine", "joinmarket"], "analyze")
@@ -530,6 +545,39 @@ pbs:
         rejected = validate_passthrough([*complete, "--parallel", "--copy-to-host"], "full-run")
         self.assertTrue(any("--parallel" in error for error in rejected))
         self.assertTrue(any("--copy-to-host" in error for error in rejected))
+
+    def test_s3_emulate_requires_frontend_credentials_in_shared_validator(self) -> None:
+        arguments = [
+            "emulate",
+            "--engine",
+            "wasabi",
+            "--driver",
+            "kubernetes",
+            "--artifact-backend",
+            "s3",
+            "--artifact-uri",
+            "s3://bucket/runs",
+            "--s3-endpoint-url",
+            "https://s3.example.invalid",
+            "--s3-secret-name",
+            "coinjoin-s3",
+            "--run-id",
+            "run-1",
+            "--reuse-namespace",
+        ]
+        errors = validate_passthrough(arguments, "emulate")
+        self.assertTrue(any("--s3-credentials-file" in error for error in errors))
+        self.assertTrue(any("--s3-profile" in error for error in errors))
+
+        arguments.extend(
+            [
+                "--s3-credentials-file",
+                "/storage/user/.aws/credentials",
+                "--s3-profile",
+                "coinjoin",
+            ]
+        )
+        self.assertEqual(validate_passthrough(arguments, "emulate"), [])
 
     def test_reusable_blocksci_task_validation(self) -> None:
         base = [

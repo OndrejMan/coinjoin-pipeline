@@ -34,7 +34,6 @@ trap on_exit EXIT
 trap 'exit 143' TERM
 test -r "$S3_CREDENTIALS_FILE" || {{ echo "S3 credentials file is not readable: $S3_CREDENTIALS_FILE" >&2; exit 1; }}
 {s5cmd_check}
-{clear_markers}
 export TMPDIR="$SCRATCHDIR" SINGULARITY_CACHEDIR="$SCRATCHDIR" SINGULARITY_TMPDIR="$SCRATCHDIR" SINGULARITY_LOCALCACHEDIR="$SCRATCHDIR"
 {download_run}
 BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"

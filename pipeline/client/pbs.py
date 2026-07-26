@@ -22,13 +22,12 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from client.artifacts import (
-    PROBE_RUNNING,
     PROBE_QUEUED,
+    PROBE_RUNNING,
     PROBE_TERMINAL,
     PROBE_UNKNOWN,
     render_s5cmd_check,
     render_s5cmd_cp,
-    render_s5cmd_rm,
     render_s5cmd_sync,
     shell_assignment,
     validate_artifact_uri,
@@ -468,12 +467,6 @@ def render_coinjoin_analysis_s3_pbs(
         scratch=scratch,
         walltime=walltime,
         s5cmd_check=render_s5cmd_check(),
-        clear_markers="\n".join(
-            (
-                render_s5cmd_rm('"$ARTIFACT_URI/$RUN_ID/.pbs/coinjoin-analysis.done"') + " || true",
-                render_s5cmd_rm('"$ARTIFACT_URI/$RUN_ID/.pbs/coinjoin-analysis.failed"') + " || true",
-            )
-        ),
         download_run=render_s5cmd_sync('"$ARTIFACT_URI/$RUN_ID/*"', '"$RUN_WORK/"'),
         upload_results=render_s5cmd_sync(
             '"$RUN_WORK/coinjoin-analysis_data/"', '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/"'
@@ -552,12 +545,6 @@ def render_mappings_s3_pbs(
         scratch=scratch,
         walltime=walltime,
         s5cmd_check=render_s5cmd_check(),
-        clear_markers="\n".join(
-            (
-                render_s5cmd_rm('"$ARTIFACT_URI/$RUN_ID/.pbs/coinjoin-mappings.done"') + " || true",
-                render_s5cmd_rm('"$ARTIFACT_URI/$RUN_ID/.pbs/coinjoin-mappings.failed"') + " || true",
-            )
-        ),
         download_input=render_s5cmd_sync(
             '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/*"',
             '"$RUN_WORK/coinjoin-analysis_data/"',
@@ -603,12 +590,6 @@ def render_blocksci_s3_pbs(
         scratch=scratch,
         walltime=walltime,
         s5cmd_check=render_s5cmd_check(),
-        clear_markers="\n".join(
-            (
-                render_s5cmd_rm('"$ARTIFACT_URI/$RUN_ID/.pbs/blocksci.done"') + " || true",
-                render_s5cmd_rm('"$ARTIFACT_URI/$RUN_ID/.pbs/blocksci.failed"') + " || true",
-            )
-        ),
         download_run=render_s5cmd_sync('"$ARTIFACT_URI/$RUN_ID/*"', '"$RUN_WORK/"'),
         coinjoin_analysis_check=(
             'test -f "$RUN_WORK/coinjoin-analysis_data/coinjoin_tx_info.json" || {\n'
@@ -806,12 +787,6 @@ def render_blocksci_parse_s3_pbs(
         scratch=scratch,
         walltime=walltime,
         s5cmd_check=render_s5cmd_check(),
-        clear_markers="\n".join(
-            (
-                render_s5cmd_rm('"$ARTIFACT_URI/$RUN_ID/.pbs/blocksci-parse.done"') + " || true",
-                render_s5cmd_rm('"$ARTIFACT_URI/$RUN_ID/.pbs/blocksci-parse.failed"') + " || true",
-            )
-        ),
         source_description=source_description,
         source_kind=source_kind,
         network=network,
@@ -890,12 +865,6 @@ def render_blocksci_update_s3_pbs(
         scratch=scratch,
         walltime=walltime,
         s5cmd_check=render_s5cmd_check(),
-        clear_markers="\n".join(
-            (
-                render_s5cmd_rm('"$ARTIFACT_URI/$RUN_ID/.pbs/blocksci-update.done"') + " || true",
-                render_s5cmd_rm('"$ARTIFACT_URI/$RUN_ID/.pbs/blocksci-update.failed"') + " || true",
-            )
-        ),
         download_source_cache=render_s5cmd_sync(
             '"$ARTIFACT_URI/$SOURCE_RUN_ID/blocksci-parse_data/*"',
             '"$SOURCE_CACHE_DIR/"',
@@ -1046,12 +1015,6 @@ def render_blocksci_analyze_s3_pbs(
         scratch=scratch,
         walltime=walltime,
         s5cmd_check=render_s5cmd_check(),
-        clear_markers="\n".join(
-            (
-                render_s5cmd_rm(f'"$ARTIFACT_URI/$RUN_ID/.pbs/{mode}.done"') + " || true",
-                render_s5cmd_rm(f'"$ARTIFACT_URI/$RUN_ID/.pbs/{mode}.failed"') + " || true",
-            )
-        ),
         download_inputs="\n".join(downloads),
         prepare_mode=prepare_mode,
         extra_binds=extra_binds,
@@ -1123,18 +1086,6 @@ def render_unified_report_s3_pbs(
         scratch=scratch,
         walltime=walltime,
         s5cmd_check=render_s5cmd_check(),
-        clear_markers="\n".join(
-            (
-                render_s5cmd_rm(
-                    '"$ARTIFACT_URI/$RUN_ID/.pbs/unified-report.done"'
-                )
-                + " || true",
-                render_s5cmd_rm(
-                    '"$ARTIFACT_URI/$RUN_ID/.pbs/unified-report.failed"'
-                )
-                + " || true",
-            )
-        ),
         download_inputs="\n".join(downloads),
         upload_report=render_s5cmd_sync(
             '"$REPORT_DIR/"',
