@@ -88,10 +88,13 @@ def assert_real_blocksci(module: object) -> None:
     )
 
 
+BLOCKSCI_IMPORT_ERROR: ImportError | None = None
+
 try:
     blocksci = import_blocksci_bindings()
-except ImportError:  # pragma: no cover - exercised in environments without BlockSci.
+except ImportError as error:  # pragma: no cover - exercised without BlockSci.
     blocksci = None
+    BLOCKSCI_IMPORT_ERROR = error
 else:
     assert_real_blocksci(blocksci)
 

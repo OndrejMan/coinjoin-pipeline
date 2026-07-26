@@ -65,6 +65,7 @@ EXTRA_BINDS=()
 echo "[$MODE] starting on $(hostname -f)"
 {connection_help}
 singularity exec \
+  --cleanenv \
   --bind "$RUNS_ROOT:/runs/emulation/logs:rw" \
   --bind "$RUN_WORK/.pipeline/exporters:/mnt/exporters:ro" \
   "${{EXTRA_BINDS[@]}}" \

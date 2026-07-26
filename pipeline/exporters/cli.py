@@ -15,7 +15,12 @@ from exporters.blocksci_export.analysis import (
 from exporters.blocksci_export.analysis import (
     load_analysis as load_blocksci_analysis,
 )
-from exporters.blocksci_export.detector import blocksci, export_blocksci_cluster_assignments, export_blocksci_records
+from exporters.blocksci_export.detector import (
+    BLOCKSCI_IMPORT_ERROR,
+    blocksci,
+    export_blocksci_cluster_assignments,
+    export_blocksci_records,
+)
 from exporters.common import (
     DEFAULT_JOINMARKET_DETECTOR,
     DEFAULT_JOINMARKET_MAX_DEPTH,
@@ -234,10 +239,15 @@ def main(argv: list[str] | None = None) -> int:
     else:
         first_wasabi2_block = load_first_wasabi2_block(config_path)
         if blocksci is None:
+            detail = (
+                f" Original import error: {BLOCKSCI_IMPORT_ERROR!r}."
+                if BLOCKSCI_IMPORT_ERROR is not None
+                else ""
+            )
             raise RuntimeError(
                 "BlockSci Python module is required when no precomputed "
-                "--blocksci-analysis artifact is provided."
-            )
+                f"--blocksci-analysis artifact is provided.{detail}"
+            ) from BLOCKSCI_IMPORT_ERROR
         blocksci.heuristics.set_test_values_enabled(args.test_values)
         blocksci_records, blocksci_skipped_txids = export_blocksci_records(
             config_path,

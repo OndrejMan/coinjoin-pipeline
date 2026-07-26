@@ -17,6 +17,7 @@ if __package__ in {None, ""}:
 
 from exporters.artifact_paths import blocksci_analysis_dir, emulator_dir
 from exporters.blocksci_export.detector import (
+    BLOCKSCI_IMPORT_ERROR,
     blocksci,
     export_blocksci_cluster_assignments_for_addresses,
     export_blocksci_records,
@@ -111,7 +112,14 @@ def write_analysis(args: argparse.Namespace) -> Path:
     run_dir = args.run_dir.resolve()
     config_path = args.config.resolve()
     if blocksci is None:
-        raise RuntimeError("BlockSci Python module is required to export BlockSci analysis.")
+        detail = (
+            f" Original import error: {BLOCKSCI_IMPORT_ERROR!r}."
+            if BLOCKSCI_IMPORT_ERROR is not None
+            else ""
+        )
+        raise RuntimeError(
+            f"BlockSci Python module is required to export BlockSci analysis.{detail}"
+        ) from BLOCKSCI_IMPORT_ERROR
 
     blocksci.heuristics.set_test_values_enabled(args.test_values)
     records, skipped_txids = export_blocksci_records(

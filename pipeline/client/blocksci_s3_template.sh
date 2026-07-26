@@ -49,6 +49,7 @@ test -d "$RUN_WORK/.pipeline/exporters"
 EXPORTED_MAX_BLOCK="$(find "$RUN_WORK/coinjoin_emulator_data/data/btc-node" -maxdepth 1 -type f -name 'block_*.json' -printf '%f\n' | sed -nE 's/^block_([0-9]+)\.json$/\1/p' | sort -n | tail -n 1)"
 test -n "$EXPORTED_MAX_BLOCK"
 singularity exec \
+  --cleanenv \
   --bind "$RUNS_ROOT:/runs/emulation/logs:rw" \
   --bind "$BITCOIN_DATADIR:/mnt/data:ro" \
   --bind "$RUN_WORK/.pipeline/exporters:/mnt/exporters:ro" \
