@@ -2433,6 +2433,7 @@ def run_kubernetes_s3_emulation(args: argparse.Namespace) -> None:
         artifact_uri=args.artifact_uri,
         endpoint_url=args.s3_endpoint_url,
         secret_name=args.s3_secret_name,
+        emulation_timeout_seconds=args.emulation_timeout,
         reuse_namespace=args.reuse_namespace,
     )
     if args.dry_run:

@@ -16,6 +16,7 @@ import threading
 import time
 from typing import TextIO
 
+from .commands import RUN_ID_RE
 
 DEFAULT_NAMESPACE = "coinjoin"
 DEFAULT_WAIT_SECONDS = 120
@@ -24,6 +25,16 @@ PBS_SUBMISSION_RE = re.compile(
     r"\[pbs\] Submitted (?P<stage>[a-z0-9-]+)(?: S3-compatible)? PBS job: (?P<job_id>\S+)"
 )
 PBS_TERMINAL_STATES = {"C", "F", "X"}
+
+
+def _run_id(value: str) -> str:
+    if len(value) > 63 or ".." in value or not RUN_ID_RE.fullmatch(value):
+        raise argparse.ArgumentTypeError(
+            "run ID must be at most 63 characters, begin and end with an "
+            "alphanumeric character, contain only [A-Za-z0-9._-], and not "
+            "contain '..'"
+        )
+    return value
 
 
 @dataclass(frozen=True)
@@ -42,6 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--run-id",
         required=True,
+        type=_run_id,
         help="Pipeline run ID used for Kubernetes and PBS source discovery.",
     )
     parser.add_argument("--namespace", default=DEFAULT_NAMESPACE)
@@ -429,7 +441,7 @@ def main(
                 try:
                     pod = _discover_pod(
                         kubectl,
-                        "app=wasabi-coordinator",
+                        f"app=wasabi-coordinator,coinjoin.run-id={args.run_id}",
                         wait_seconds=args.wait_seconds,
                         description="Wasabi coordinator pod",
                     )

@@ -74,7 +74,7 @@ def test_main_builds_unified_all_component_sources() -> None:
             mock.patch(
                 "coinjoin_pipeline.watch._discover_pod",
                 side_effect=["outer-pod", "coordinator-pod"],
-            ),
+            ) as discover,
             mock.patch(
                 "coinjoin_pipeline.watch.stream_sources", return_value=0
             ) as stream,
@@ -97,6 +97,9 @@ def test_main_builds_unified_all_component_sources() -> None:
     assert set(sources) == {"controller", "uploader", "coordinator"}
     assert sources["controller"][-1] == "--timestamps=true"
     assert "--follow=true" not in sources["controller"]
+    assert discover.call_args_list[1].args[1] == (
+        "app=wasabi-coordinator,coinjoin.run-id=run-1"
+    )
 
 
 def test_parse_qstat_extracts_state_and_wrapped_output_path() -> None:

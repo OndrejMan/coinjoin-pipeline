@@ -68,8 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
 def _validate_run_id(value: str) -> str:
     if len(value) > 63 or ".." in value or not RUN_ID_RE.fullmatch(value):
         raise ValueError(
-            "run ID must be at most 63 characters, match "
-            "[A-Za-z0-9][A-Za-z0-9._-]*, and must not contain '..'"
+            "run ID must be at most 63 characters, begin and end with an "
+            "alphanumeric character, contain only [A-Za-z0-9._-], and must "
+            "not contain '..'"
         )
     return value
 

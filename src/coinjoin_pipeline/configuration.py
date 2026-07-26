@@ -8,6 +8,9 @@ from typing import Any, Literal, Mapping, TypeVar, cast
 
 import yaml
 
+from .commands import validate_passthrough, value_taking_aliases
+from .host import HOST_VALUE_OPTIONS, parse_host_options
+
 
 class ConfigurationError(ValueError):
     """Raised when a YAML configuration cannot be translated safely."""
@@ -271,6 +274,8 @@ class ImageConfiguration:
     blocksci: str | None = None
     mappings: str | None = None
     sake: str | None = None
+    uploader: str | None = None
+    unified_report: str | None = None
 
     @classmethod
     def from_mapping(cls, value: Any) -> ImageConfiguration:
@@ -285,6 +290,8 @@ class ImageConfiguration:
                 "blocksci",
                 "mappings",
                 "sake",
+                "uploader",
+                "unified_report",
             },
             "images",
         )
@@ -298,6 +305,8 @@ class ImageConfiguration:
             blocksci=_optional_string(data, "blocksci", "images"),
             mappings=_optional_string(data, "mappings", "images"),
             sake=_optional_string(data, "sake", "images"),
+            uploader=_optional_string(data, "uploader", "images"),
+            unified_report=_optional_string(data, "unified_report", "images"),
         )
 
     def append_arguments(self, arguments: list[str]) -> None:
@@ -310,6 +319,10 @@ class ImageConfiguration:
         _append_option(arguments, "--blocksci-image", self.blocksci)
         _append_option(arguments, "--mappings-image", self.mappings)
         _append_option(arguments, "--sake-image", self.sake)
+        _append_option(arguments, "--uploader-image", self.uploader)
+        _append_option(
+            arguments, "--unified-report-image", self.unified_report
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -860,24 +873,37 @@ class PipelineConfiguration:
                 raise ConfigurationError(
                     "external settings require action: external analyze"
                 )
-            return
-        supplied_inputs = (
-            self.external.bitcoin_datadir is not None
-            or self.external.baseline is not None
-        )
-        if self.external.resume and supplied_inputs:
-            raise ConfigurationError(
-                "external.resume cannot be combined with external.bitcoin_datadir "
-                "or external.baseline"
+        else:
+            supplied_inputs = (
+                self.external.bitcoin_datadir is not None
+                or self.external.baseline is not None
             )
-        if not self.external.resume and (
-            self.external.bitcoin_datadir is None
-            or self.external.baseline is None
+            if self.external.resume and supplied_inputs:
+                raise ConfigurationError(
+                    "external.resume cannot be combined with external.bitcoin_datadir "
+                    "or external.baseline"
+                )
+            if not self.external.resume and (
+                self.external.bitcoin_datadir is None
+                or self.external.baseline is None
+            ):
+                raise ConfigurationError(
+                    "a new external analysis requires external.bitcoin_datadir and "
+                    "external.baseline"
+                )
+
+        arguments, _host = parse_host_options(self.to_arguments())
+        if (
+            self.action == "full-run"
+            and self.artifacts.backend == "s3"
+            and self.run_id is None
         ):
-            raise ConfigurationError(
-                "a new external analysis requires external.bitcoin_datadir and "
-                "external.baseline"
-            )
+            # The host CLI deterministically allocates this value after loading
+            # YAML and before invoking the shared validator.
+            arguments.extend(("--run-id", "configuration-generated-run"))
+        errors = validate_passthrough(arguments, self.action)
+        if errors:
+            raise ConfigurationError("; ".join(errors))
 
     @classmethod
     def from_yaml(cls, path: Path) -> PipelineConfiguration:
@@ -964,11 +990,24 @@ def expand_configuration(argv: list[str]) -> tuple[list[str], Path | None]:
         raise ConfigurationError("--from-configuration requires a YAML file path")
     remaining = list(argv)
     del remaining[index : index + (2 if consumes_next else 1)]
-    contains_external_action = any(
-        remaining[index : index + 2] == ["external", "analyze"]
-        for index in range(len(remaining) - 1)
+    value_options = value_taking_aliases() | frozenset(HOST_VALUE_OPTIONS)
+    positional: list[str] = []
+    skip_next = False
+    for item in remaining:
+        if skip_next:
+            skip_next = False
+            continue
+        if item in value_options:
+            skip_next = True
+            continue
+        if item.startswith("-"):
+            continue
+        positional.append(item)
+    explicit_action = (
+        (len(positional) >= 2 and f"{positional[0]} {positional[1]}" in KNOWN_ACTIONS)
+        or (bool(positional) and positional[0] in KNOWN_ACTIONS)
     )
-    if any(item in KNOWN_ACTIONS for item in remaining) or contains_external_action:
+    if explicit_action:
         raise ConfigurationError(
             "put the action in YAML when using --from-configuration"
         )

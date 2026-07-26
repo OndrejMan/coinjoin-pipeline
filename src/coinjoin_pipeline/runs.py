@@ -12,8 +12,10 @@ from zoneinfo import ZoneInfo
 from .commands import option_value
 from .manifest import atomic_write
 
-# Mirrors the run-id validation in coinjoin-emulator's manager CLI.
-RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# Mirrors the run-id validation in commands.py and coinjoin-emulator's CLI.
+RUN_ID_PATTERN = re.compile(
+    r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?"
+)
 
 
 def valid_run_id(run_id: str) -> bool:

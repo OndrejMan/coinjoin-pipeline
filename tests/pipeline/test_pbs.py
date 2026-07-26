@@ -8,7 +8,12 @@ from unittest import mock
 PROJECT_ROOT = Path(__file__).resolve().parents[2] / "pipeline"
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from client.artifacts import PROBE_RUNNING, PROBE_TERMINAL, PROBE_UNKNOWN  # noqa: E402
+from client.artifacts import (  # noqa: E402
+    PROBE_QUEUED,
+    PROBE_RUNNING,
+    PROBE_TERMINAL,
+    PROBE_UNKNOWN,
+)
 from client.pbs import (  # noqa: E402
     PBSError,
     _qstat_job_state,
@@ -40,8 +45,12 @@ class PBSJobProbeTest(unittest.TestCase):
             self.assertEqual(self._probe_state(state), PROBE_TERMINAL)
 
     def test_active_states_map_to_running(self):
-        for state in ("Q", "R", "H"):
+        for state in ("R", "E"):
             self.assertEqual(self._probe_state(state), PROBE_RUNNING)
+
+    def test_queued_states_map_to_queued(self):
+        for state in ("Q", "H", "W"):
+            self.assertEqual(self._probe_state(state), PROBE_QUEUED)
 
     def test_inconclusive_qstat_maps_to_unknown(self):
         self.assertEqual(self._probe_state(None), PROBE_UNKNOWN)

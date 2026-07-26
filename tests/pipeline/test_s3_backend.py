@@ -44,6 +44,7 @@ from client.wrapper import (  # noqa: E402
     build_parser,
     ensure_staged_exporters,
     pbs_stages_need_exporters,
+    run_kubernetes_s3_emulation,
     run_pbs_from_s3,
     validate_artifact_arguments,
 )
@@ -153,6 +154,9 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
     assert "rm " in coinjoin
     assert ".pbs/blocksci.done" in blocksci
     assert ".pbs/blocksci.failed" in blocksci
+    assert ".pbs/unified-report.done" in report
+    assert ".pbs/unified-report.failed" in report
+    assert "rm " in report
     assert '"$CONTAINER_WORK_ROOT:/runs/emulation/selected:rw"' in coinjoin
     assert (
         '"$RUN_WORK/coinjoin-analysis_data:/runs/emulation/selected/$RUN_ID:rw"'
@@ -436,6 +440,54 @@ def test_standalone_s3_emulation_can_supply_frontend_credentials() -> None:
         validate_artifact_arguments(parser, parser.parse_args(arguments))
 
 
+def test_s3_emulation_forwards_timeout_to_uploader_manifest(
+    tmp_path: Path,
+) -> None:
+    scenario = tmp_path / "scenario.json"
+    scenario.write_text("{}", encoding="utf-8")
+    args = SimpleNamespace(
+        engine="wasabi",
+        scenario="scenario.json",
+        run_timezone="UTC",
+        kubeconfig=None,
+        dry_run=True,
+        namespace="coinjoin",
+        run_id="run-1",
+        image_prefix="ghcr.io/ondrejman/",
+        artifact_uri="s3://bucket/runs",
+        s3_endpoint_url="https://s3.example.invalid",
+        s3_secret_name="coinjoin-s3",
+        emulation_timeout=123,
+        reuse_namespace=True,
+        uploader_image="uploader:test",
+    )
+    with (
+        mock.patch(
+            "client.wrapper.compose_env",
+            return_value={"SCENARIOS_DIR": str(tmp_path)},
+        ),
+        mock.patch(
+            "client.wrapper.container_scenario_path",
+            return_value="/config/scenario.json",
+        ),
+        mock.patch(
+            "client.wrapper.host_scenario_path",
+            return_value=scenario,
+        ),
+        mock.patch(
+            "client.wrapper.resolve_uploader_image",
+            return_value="uploader:test",
+        ),
+        mock.patch(
+            "client.wrapper.render_s3_emulation_resources",
+            return_value="{}",
+        ) as render,
+    ):
+        run_kubernetes_s3_emulation(args)
+
+    assert render.call_args.kwargs["emulation_timeout_seconds"] == 123
+
+
 def test_pbs_from_s3_stages_exporters_into_a_prefix_without_them() -> None:
     # A `--blocksci-task update` run starts from a fresh, empty prefix, but the
     # analyze and report jobs download .pipeline/exporters/ from that same one.
@@ -544,7 +596,7 @@ def test_job_probe_stops_waiting_when_a_container_cannot_start() -> None:
             assert probe() == "terminal", name
 
 
-def test_job_probe_keeps_waiting_while_containers_are_merely_pending() -> None:
+def test_job_probe_reports_queued_while_containers_are_pending() -> None:
     from client.kubernetes import kubernetes_job_probe
 
     probe = kubernetes_job_probe(Path("/kube/config"), "coinjoin", "coinjoin-s3-run-1")
@@ -552,7 +604,7 @@ def test_job_probe_keeps_waiting_while_containers_are_merely_pending() -> None:
         "client.kubernetes.subprocess.run",
         side_effect=kubectl_results({}, [waiting_pod("containerStatuses", "controller", "PodInitializing")]),
     ):
-        assert probe() == "running"
+        assert probe() == "queued"
 
 
 def test_s3_emulation_job_name_is_unique_and_dns_safe() -> None:
@@ -1225,6 +1277,14 @@ def test_kubernetes_manifest_has_controller_uploader_secret_and_rbac() -> None:
     assert any(
         mount["name"] == "credentials"
         for mount in containers["uploader"]["volumeMounts"]
+    )
+    uploader_env = {
+        item["name"]: item for item in containers["uploader"]["env"]
+    }
+    assert uploader_env["EMULATION_TIMEOUT_SECONDS"]["value"] == "21600"
+    assert (
+        "controller exceeded emulation timeout"
+        in containers["uploader"]["command"][-1]
     )
     rendered = json.dumps(manifest)
     assert (

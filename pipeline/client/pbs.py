@@ -23,6 +23,7 @@ from pathlib import Path
 
 from client.artifacts import (
     PROBE_RUNNING,
+    PROBE_QUEUED,
     PROBE_TERMINAL,
     PROBE_UNKNOWN,
     render_s5cmd_check,
@@ -407,6 +408,8 @@ def pbs_job_probe(job_id: str) -> Callable[[], str]:
             return PROBE_TERMINAL
         if state is None:
             return PROBE_UNKNOWN
+        if state in {"Q", "H", "W"}:
+            return PROBE_QUEUED
         if state in PBS_ACTIVE_STATES:
             return PROBE_RUNNING
         raise PBSError(f"PBS job has unexpected qstat state: {job_id} (state {state})")
@@ -1120,6 +1123,18 @@ def render_unified_report_s3_pbs(
         scratch=scratch,
         walltime=walltime,
         s5cmd_check=render_s5cmd_check(),
+        clear_markers="\n".join(
+            (
+                render_s5cmd_rm(
+                    '"$ARTIFACT_URI/$RUN_ID/.pbs/unified-report.done"'
+                )
+                + " || true",
+                render_s5cmd_rm(
+                    '"$ARTIFACT_URI/$RUN_ID/.pbs/unified-report.failed"'
+                )
+                + " || true",
+            )
+        ),
         download_inputs="\n".join(downloads),
         upload_report=render_s5cmd_sync(
             '"$REPORT_DIR/"',

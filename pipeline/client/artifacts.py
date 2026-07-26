@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 # logs here — otherwise the two provenance values are not comparable.
 from exporters.common import tree_sha256
 
-RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+RUN_ID_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
 PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 AWS_SCRUB_VARIABLES = (
@@ -34,6 +34,7 @@ AWS_SCRUB_VARIABLES = (
 
 S3_POLL_INTERVAL_SECONDS = 30
 PROBE_RUNNING = "running"
+PROBE_QUEUED = "queued"
 PROBE_TERMINAL = "terminal"
 PROBE_UNKNOWN = "unknown"
 
@@ -62,7 +63,9 @@ def validate_artifact_uri(uri: str) -> str:
 def validate_run_id(run_id: str) -> str:
     if len(run_id) > 63 or ".." in run_id or not RUN_ID_RE.fullmatch(run_id):
         raise ValueError(
-            "run ID must be at most 63 characters, match [A-Za-z0-9][A-Za-z0-9._-]*, and must not contain '..'"
+            "run ID must be at most 63 characters, begin and end with an "
+            "alphanumeric character, contain only [A-Za-z0-9._-], and must "
+            "not contain '..'"
         )
     return run_id
 
@@ -304,11 +307,14 @@ def wait_for_s3_marker(
 ) -> None:
     """Block until the stage uploads its S3 marker, with probe and deadline fallbacks.
 
-    ``probe`` reports remote liveness (``PROBE_RUNNING``/``PROBE_TERMINAL``/
-    ``PROBE_UNKNOWN``); after a terminal report one extra poll cycle runs so a
-    marker upload that races the probe still wins.
+    ``probe`` reports remote state (``PROBE_QUEUED``/``PROBE_RUNNING``/
+    ``PROBE_TERMINAL``/``PROBE_UNKNOWN``). Queue time may extend the start
+    deadline, but the execution deadline starts once the job is observed
+    running and is never extended. After a terminal report one extra poll
+    cycle runs so a marker upload that races the probe still wins.
     """
-    deadline = time.monotonic() + timeout_seconds
+    start_deadline = time.monotonic() + timeout_seconds
+    execution_deadline: float | None = None
     terminal_seen = False
     while True:
         if s3_object_exists(access, failed_uri):
@@ -317,17 +323,20 @@ def wait_for_s3_marker(
             return
         # Not probed during the grace cycle: the terminal report already landed.
         probe_state = probe() if probe is not None and not terminal_seen else None
-        if time.monotonic() >= deadline:
-            if probe_state != PROBE_RUNNING:
+        now = time.monotonic()
+        if probe_state == PROBE_RUNNING and execution_deadline is None:
+            execution_deadline = now + timeout_seconds
+        deadline = execution_deadline if execution_deadline is not None else start_deadline
+        if now >= deadline:
+            if execution_deadline is not None or probe_state != PROBE_QUEUED:
                 raise ArtifactTransportError(
                     f"Timed out waiting for S3 stage marker: {stage} ({done_uri})"
                 )
-            # The job is verifiably alive (queued or running); shared-cluster
-            # queue time must not be counted against the walltime budget.
-            deadline = time.monotonic() + timeout_seconds
+            # Shared-cluster queue time must not consume the execution budget.
+            start_deadline = now + timeout_seconds
             print(
-                f"[WARN] {stage} exceeded its {timeout_seconds}s wait budget but the job is "
-                f"still alive; extending the deadline.",
+                f"[WARN] {stage} exceeded its {timeout_seconds}s start budget but the job "
+                f"is still queued; extending the start deadline.",
                 file=sys.stderr,
             )
         if terminal_seen:

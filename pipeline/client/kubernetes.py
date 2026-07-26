@@ -10,7 +10,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from client.artifacts import PROBE_RUNNING, PROBE_TERMINAL, PROBE_UNKNOWN
+from client.artifacts import PROBE_QUEUED, PROBE_RUNNING, PROBE_TERMINAL, PROBE_UNKNOWN
 
 S3_CONTROLLER_RESOURCE_REQUESTS = {"cpu": "250m", "memory": "512Mi"}
 S3_CONTROLLER_RESOURCE_LIMITS = {"cpu": "1", "memory": "1Gi"}
@@ -163,7 +163,7 @@ def kubernetes_job_probe(kubeconfig_path: Path, namespace: str, job_name: str) -
     """
     job_seen = False
 
-    def unstartable() -> bool:
+    def pod_state() -> str:
         command = [
             "kubectl", "--kubeconfig", str(kubeconfig_path), "get", "pods",
             "--namespace", namespace, "--selector", f"job-name={job_name}", "-o", "json",
@@ -171,13 +171,15 @@ def kubernetes_job_probe(kubeconfig_path: Path, namespace: str, job_name: str) -
         try:
             result = subprocess.run(command, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         except FileNotFoundError:
-            return False
+            return PROBE_UNKNOWN
         if result.returncode != 0:
-            return False
+            return PROBE_UNKNOWN
         try:
             pods = json.loads(result.stdout).get("items") or []
         except json.JSONDecodeError:
-            return False
+            return PROBE_UNKNOWN
+        if not pods:
+            return PROBE_QUEUED
         for pod in pods:
             reason = unstartable_pod_reason(pod)
             if reason:
@@ -185,8 +187,16 @@ def kubernetes_job_probe(kubeconfig_path: Path, namespace: str, job_name: str) -
                     f"[kubernetes] Job {job_name} cannot start its containers ({reason})",
                     file=sys.stderr,
                 )
-                return True
-        return False
+                return PROBE_TERMINAL
+        for pod in pods:
+            status = pod.get("status") or {}
+            if status.get("phase") == "Running":
+                return PROBE_RUNNING
+            for key in ("initContainerStatuses", "containerStatuses"):
+                for container in status.get(key) or []:
+                    if (container.get("state") or {}).get("running") is not None:
+                        return PROBE_RUNNING
+        return PROBE_QUEUED
 
     def probe() -> str:
         nonlocal job_seen
@@ -219,7 +229,7 @@ def kubernetes_job_probe(kubeconfig_path: Path, namespace: str, job_name: str) -
         for condition in status.get("conditions") or []:
             if condition.get("type") in {"Complete", "Failed"} and condition.get("status") == "True":
                 return PROBE_TERMINAL
-        return PROBE_TERMINAL if unstartable() else PROBE_RUNNING
+        return pod_state()
 
     return probe
 
@@ -263,6 +273,7 @@ def render_s3_emulation_resources(
     artifact_uri: str,
     endpoint_url: str,
     secret_name: str,
+    emulation_timeout_seconds: int = 21600,
     reuse_namespace: bool = False,
 ) -> str:
     """Render a kubectl-compatible JSON resource list for in-cluster emulation."""
@@ -336,7 +347,13 @@ s5() {
     s5cmd --credentials-file /credentials/credentials \
     --profile coinjoin --endpoint-url "$S3_ENDPOINT_URL" "$@"
 }
+remaining="$EMULATION_TIMEOUT_SECONDS"
 while [ ! -f /artifacts/.controller.done ] && [ ! -f /artifacts/.controller.failed ]; do
+  if [ "$remaining" -le 0 ]; then
+    printf 'controller exceeded emulation timeout (%ss)\n' "$EMULATION_TIMEOUT_SECONDS" >&2
+    printf 'failed\n' > /artifacts/.controller.failed
+    break
+  fi
   terminated_exit="$(kubectl --namespace "$NAMESPACE" get pod "$POD_NAME" \
     -o 'jsonpath={.status.containerStatuses[?(@.name=="controller")].state.terminated.exitCode}' \
     2>/dev/null || true)"
@@ -356,6 +373,7 @@ while [ ! -f /artifacts/.controller.done ] && [ ! -f /artifacts/.controller.fail
       ;;
   esac
   sleep 2
+  remaining=$((remaining - 2))
 done
 if [ -f /artifacts/.controller.failed ]; then
   printf 'failed\n' > "/artifacts/$RUN_ID/.k8s/upload.failed"
@@ -390,6 +408,10 @@ rm -f /credentials/credentials"""
     ]
     uploader_env = [
         {"name": "NAMESPACE", "value": namespace},
+        {
+            "name": "EMULATION_TIMEOUT_SECONDS",
+            "value": str(emulation_timeout_seconds),
+        },
         {
             "name": "POD_NAME",
             "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}},

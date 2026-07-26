@@ -14,8 +14,8 @@ import tempfile
 from urllib.parse import urlparse
 
 
-RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-PROFILE_RE = RUN_ID_RE
+RUN_ID_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
+PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 AWS_SCRUB_VARIABLES = (
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
@@ -78,8 +78,9 @@ def build_parser() -> argparse.ArgumentParser:
 def _validate_run_id(value: str) -> str:
     if len(value) > 63 or ".." in value or not RUN_ID_RE.fullmatch(value):
         raise ValueError(
-            "run ID must be at most 63 characters, match "
-            "[A-Za-z0-9][A-Za-z0-9._-]*, and must not contain '..'"
+            "run ID must be at most 63 characters, begin and end with an "
+            "alphanumeric character, contain only [A-Za-z0-9._-], and must "
+            "not contain '..'"
         )
     return value
 
@@ -212,17 +213,28 @@ def download_report(
             )
 
         has_markdown = staged_markdown.is_file()
-        output_dir.mkdir(parents=True, exist_ok=True)
         markdown_report = output_dir / "unified_report.md"
-        if not has_markdown and markdown_report.exists():
-            if markdown_report.is_dir() and not markdown_report.is_symlink():
-                raise DownloadError(
-                    "cannot replace stale unified_report.md because it is a directory: "
-                    f"{markdown_report}"
+        backup_dir: Path | None = None
+        if output_dir.exists() or output_dir.is_symlink():
+            backup_dir = Path(
+                tempfile.mkdtemp(
+                    prefix=f".{output_dir.name}.previous-",
+                    dir=output_dir.parent,
                 )
-        shutil.copytree(staging_dir, output_dir, dirs_exist_ok=True)
-        if not has_markdown and markdown_report.exists():
-            markdown_report.unlink()
+            )
+            backup_dir.rmdir()
+            os.replace(output_dir, backup_dir)
+        try:
+            os.replace(staging_dir, output_dir)
+        except OSError:
+            if backup_dir is not None:
+                os.replace(backup_dir, output_dir)
+            raise
+        if backup_dir is not None:
+            if backup_dir.is_dir() and not backup_dir.is_symlink():
+                shutil.rmtree(backup_dir)
+            else:
+                backup_dir.unlink()
 
     json_report = output_dir / "unified_report.json"
     return json_report, markdown_report if has_markdown else None

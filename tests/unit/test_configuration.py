@@ -61,7 +61,6 @@ runs_root: /storage/user/coinjoin-runs
 engine: wasabi
 coinjoin_type: wasabi2
 run_id: advanced-run-1
-emulation_timeout: 21600
 
 artifacts:
   backend: s3
@@ -77,15 +76,13 @@ images:
   blocksci: registry/blocksci:test
   mappings: registry/mappings:test
   sake: registry/sake:test
+  uploader: registry/uploader:test
+  unified_report: registry/report:test
 
 blocksci:
   workflow: reusable
   task: parse
-  cache_source_run_id: source-run
-  notebook_port: 8888
-  notebooks_dir: /storage/user/notebooks
   external_bitcoin_datadir: /storage/user/bitcoin
-  external_blocksci_dir: /storage/user/blocksci
   network: bitcoin
   max_block: 850000
 
@@ -153,7 +150,10 @@ def test_yaml_loads_typed_pipeline_configuration(tmp_path: Path) -> None:
 
 def test_shared_pbs_resources_are_directly_typed_on_pbs_model() -> None:
     configuration = PipelineConfiguration.from_mapping(
-        {"pbs": {"ncpus": 4, "mem": "24gb", "walltime": "04:00:00"}}
+        {
+            "engine": "wasabi",
+            "pbs": {"ncpus": 4, "mem": "24gb", "walltime": "04:00:00"},
+        }
     )
 
     assert configuration.pbs.ncpus == 4
@@ -161,6 +161,8 @@ def test_shared_pbs_resources_are_directly_typed_on_pbs_model() -> None:
     assert configuration.pbs.walltime == "04:00:00"
     assert configuration.to_arguments() == [
         "full-run",
+        "--engine",
+        "wasabi",
         "--pbs-ncpus",
         "4",
         "--pbs-mem",
@@ -181,28 +183,30 @@ def test_advanced_schema_maps_every_supported_section(tmp_path: Path) -> None:
     assert configuration.blocksci.workflow == "reusable"
     assert configuration.blocksci.task == "parse"
     assert configuration.blocksci.external_bitcoin_datadir == "/storage/user/bitcoin"
-    assert configuration.blocksci.external_blocksci_dir == "/storage/user/blocksci"
+    assert configuration.blocksci.external_blocksci_dir is None
     assert configuration.blocksci.max_block == 850000
     assert configuration.joinmarket.detector == "possible"
     assert configuration.joinmarket.percentage_fee == 0.00004
     assert configuration.mappings.timeout == 90
     assert configuration.mappings.retry_timeout == 900
-    assert configuration.emulation_timeout == 21600
+    assert configuration.emulation_timeout is None
     assert configuration.images.blocksci == "registry/blocksci:test"
+    assert configuration.images.uploader == "registry/uploader:test"
+    assert configuration.images.unified_report == "registry/report:test"
     assert configuration.pbs.blocksci_image == "docker://registry/blocksci:test"
 
     expected_pairs = {
         "--blocksci-workflow": "reusable",
         "--blocksci-task": "parse",
         "--blocksci-external-bitcoin-datadir": "/storage/user/bitcoin",
-        "--blocksci-external-blocksci-dir": "/storage/user/blocksci",
         "--blocksci-max-block": "850000",
         "--joinmarket-detector": "possible",
         "--joinmarket-percentage-fee": "4e-05",
         "--mapping-timeout": "90",
         "--mapping-retry-timeout": "900",
-        "--emulation-timeout": "21600",
         "--blocksci-image": "registry/blocksci:test",
+        "--uploader-image": "registry/uploader:test",
+        "--unified-report-image": "registry/report:test",
         "--pbs-blocksci-image": "docker://registry/blocksci:test",
     }
     for flag, expected in expected_pairs.items():
@@ -385,6 +389,58 @@ def test_configuration_rejects_explicit_external_cli_action(tmp_path: Path) -> N
         expand_configuration(
             ["--from-configuration", str(path), "external", "analyze"]
         )
+
+
+def test_configuration_does_not_mistake_option_value_for_action(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "experiment.yaml"
+    path.write_text("action: emulate\nengine: wasabi\n", encoding="utf-8")
+
+    arguments, _selected = expand_configuration(
+        ["--from-configuration", str(path), "--run-id", "analyze"]
+    )
+
+    assert arguments[:2] == ["emulate", "--engine"]
+    assert arguments[-2:] == ["--run-id", "analyze"]
+
+
+@pytest.mark.parametrize(
+    ("mapping", "message"),
+    [
+        (
+            {
+                "engine": "wasabi",
+                "driver": "docker",
+                "artifacts": {"backend": "s3"},
+            },
+            "requires --driver kubernetes",
+        ),
+        (
+            {
+                "action": "pbs-from-s3",
+                "engine": "wasabi",
+                "run_id": "run-1",
+                "artifacts": {"backend": "s3"},
+            },
+            "requires --artifact-uri",
+        ),
+        (
+            {
+                "action": "pbs-from-s3",
+                "engine": "wasabi",
+                "run_id": "run-1",
+                "blocksci": {"workflow": "reusable"},
+            },
+            "reusable BlockSci workflows require --blocksciPbs",
+        ),
+    ],
+)
+def test_configuration_applies_cli_cross_field_validation(
+    mapping: dict, message: str
+) -> None:
+    with pytest.raises(ConfigurationError, match=message):
+        PipelineConfiguration.from_mapping(mapping)
 
 
 @pytest.mark.parametrize(

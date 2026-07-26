@@ -124,6 +124,9 @@ class CliTests(unittest.TestCase):
         self.assertTrue(valid_run_id(run_id_for(["full-run", "--engine", "joinmarket"])))
         self.assertTrue(valid_run_id("2026-07-12_22-37_default-joinmarket"))
         self.assertFalse(valid_run_id("-leading-dash"))
+        self.assertFalse(valid_run_id("trailing-"))
+        self.assertFalse(valid_run_id("trailing_"))
+        self.assertFalse(valid_run_id("trailing."))
         self.assertFalse(valid_run_id("a/../b"))
         self.assertFalse(valid_run_id("x" * 64))
 

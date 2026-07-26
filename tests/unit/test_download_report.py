@@ -131,3 +131,33 @@ def test_download_removes_stale_markdown_when_remote_has_none(tmp_path: Path) ->
     assert json_report.read_text(encoding="utf-8") == '{"run": "new"}'
     assert markdown_report is None
     assert not stale_markdown.exists()
+
+
+def test_download_replaces_destination_instead_of_merging(tmp_path: Path) -> None:
+    output_dir = tmp_path / "report"
+    output_dir.mkdir()
+    stale_file = output_dir / "old-supplement.json"
+    stale_file.write_text("old", encoding="utf-8")
+
+    def fake_s5cmd(
+        _access: S3Access, *arguments: str
+    ) -> subprocess.CompletedProcess[str]:
+        staging_dir = Path(arguments[2])
+        (staging_dir / "unified_report.json").write_text(
+            '{"run": "new"}', encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    with (
+        mock.patch(
+            "coinjoin_pipeline.download_report._object_exists",
+            side_effect=[False, True],
+        ),
+        mock.patch(
+            "coinjoin_pipeline.download_report._run_s5cmd",
+            side_effect=fake_s5cmd,
+        ),
+    ):
+        download_report(ACCESS, "s3://bucket/runs", "run-1", output_dir)
+
+    assert not stale_file.exists()

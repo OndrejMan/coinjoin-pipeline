@@ -267,7 +267,8 @@ workflows:
   files, network, minimum free disk space, and resume mode for
   `action: external-analyze` (also accepts `action: external analyze`);
 - `images`: coordinated version/local-build selection and every component image
-  override;
+  override, including the separately versioned `uploader` and
+  `unified_report` images;
 - `pbs`: shared and per-stage resources, PBS image overrides, Bitcoin datadir,
   and unified-report resources;
 - top-level operational fields such as `action`, `runtime`, `runs_root`,

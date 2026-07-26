@@ -149,13 +149,18 @@ scrubbed first):
   — uploaded by the S3 PBS job traps. A full run returns successfully only
   after the report marker is present.
 
-Semantics mirror `wait_for_pbs_marker`: `failed` raises, `done` returns, the
-deadline raises (emulation: `--emulation-timeout`, default 21600 s; PBS
-stages: walltime + one hour). A liveness *probe* replaces the local qstat
-fallback — `qstat -x -f` for PBS stages, `kubectl get job -o json` for the
-emulation Job — and a terminal probe report without a marker fails the stage
-after one extra grace cycle (marker uploads race job termination). Probe
-errors are inconclusive and polling continues.
+Semantics mirror `wait_for_pbs_marker`: `failed` raises and `done` returns.
+The probe distinguishes queued from executing work. A queued job may extend
+its start deadline, but after the job is observed running its execution
+deadline is absolute and is never extended (emulation:
+`--emulation-timeout`, default 21600 s; PBS stages: walltime + one hour).
+The Kubernetes uploader has the same independent emulation timeout, so a
+deadlocked controller produces `upload.failed` instead of leaving the
+sidecar alive forever. A liveness *probe* replaces the local qstat fallback —
+`qstat -x -f` for PBS stages and the Job plus its pods for Kubernetes — and a
+terminal probe report without a marker fails the stage after one extra grace
+cycle (marker uploads race job termination). Probe errors are inconclusive
+and polling continues until the applicable deadline.
 
 Extra rules for the S3 chain:
 

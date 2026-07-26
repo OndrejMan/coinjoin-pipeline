@@ -10,6 +10,7 @@ from importlib.resources import files
 import os
 from pathlib import Path
 import platform
+import re
 import shlex
 import sys
 from typing import Any
@@ -38,6 +39,7 @@ PBS_STAGE_ACTIONS = {
     "--blocksciPbs": ("full-run", "analyze", "pbs-from-s3"),
     "--mappingsPbs": ("full-run", "mappings", "pbs-from-s3"),
 }
+RUN_ID_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
 
 
 def metadata() -> dict[str, Any]:
@@ -128,6 +130,16 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
             errors.append(f"{action} requires --run-dir (or --all-runs where supported)")
     if action == "clean" and not has_option(argv, "--dry-run") and not has_option(argv, "--yes"):
         errors.append("clean is destructive; pass --yes or --dry-run")
+    for flag in ("--run-id", "--blocksci-cache-source-run-id"):
+        run_id = option_value(argv, flag)
+        if run_id is not None and (
+            len(run_id) > 63 or ".." in run_id or not RUN_ID_RE.fullmatch(run_id)
+        ):
+            errors.append(
+                f"{flag} must be at most 63 characters, begin and end with an "
+                "alphanumeric character, contain only [A-Za-z0-9._-], and not "
+                "contain '..'"
+            )
     if option_value(argv, "--driver") != "kubernetes":
         for flag in ("--kubeconfig", "--namespace", "--reuse-namespace", "--copy-to-host"):
             if has_option(argv, flag):
