@@ -7,11 +7,13 @@ import fcntl
 import json
 import os
 import shlex
+import shutil
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, TypedDict, TypeVar, cast
+from typing import Mapping, TextIO, TypedDict, TypeVar, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 if __package__ in (None, ""):
@@ -20,11 +22,15 @@ if __package__ in (None, ""):
 # Explicit self-aliases preserve wrapper's historical re-export surface.
 # pylint: disable=useless-import-alias,unused-import
 from client.artifacts import (
+    STAGED_EXPORTERS_COMPLETE,
+    STAGED_EXPORTERS_PARTIAL,
     ArtifactTransportError,
     S3Access,
     ensure_empty_run_prefix,
     s3_access_preflight,
     s3_object_exists,
+    staged_exporters_state,
+    upload_exporters,
     validate_artifact_uri,
     validate_credentials_file,
     validate_run_id,
@@ -262,6 +268,8 @@ OPTIONS_WITH_VALUES = (
     "--pbs-mappings-scratch",
     "--pbs-mappings-walltime",
     "--pbs-image",
+    "--uploader-image",
+    "--unified-report-image",
     "--pbs-blocksci-image",
     "--pbs-coinjoin-analysis-image",
     "--pbs-mappings-enumerator-image",
@@ -327,14 +335,24 @@ IMAGE_PROVENANCE_ENV = {
     "BLOCKSCI_IMAGE": ("BLOCKSCI_IMAGE_ID", "BLOCKSCI_IMAGE_DIGEST"),
     "COINJOIN_ANALYSIS_IMAGE": ("COINJOIN_ANALYSIS_IMAGE_ID", "COINJOIN_ANALYSIS_IMAGE_DIGEST"),
     "COINJOIN_EMULATOR_IMAGE": ("COINJOIN_EMULATOR_IMAGE_ID", "COINJOIN_EMULATOR_IMAGE_DIGEST"),
-    "WRAPPER_IMAGE": ("WRAPPER_IMAGE_ID", "WRAPPER_IMAGE_DIGEST"),
 }
 
 
 def acquire_lock(path: Path) -> object:
     """Acquire a non-blocking advisory lock that is released on process exit."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    handle = path.open("a+", encoding="utf-8")
+    try:
+        handle = path.open("a+", encoding="utf-8")
+    except PermissionError as error:
+        # Runs roots used before the wrapper image was removed hold root-owned
+        # files: the wrapper ran as root inside its container, and now runs as
+        # the invoking user. Say so instead of raising a bare traceback.
+        raise RuntimeError(
+            f"Cannot open the pipeline lock {path}: {error.strerror}. "
+            "A runs root written by the old containerized wrapper holds root-owned "
+            f"files; take it over with `sudo chown -R $(id -u):$(id -g) {path.parent}` "
+            "(or point --runs-root somewhere else)"
+        ) from error
     try:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as error:
@@ -345,7 +363,69 @@ def acquire_lock(path: Path) -> object:
     handle.write(str(os.getpid()))
     handle.flush()
     atexit.register(handle.close)
+    _LOCK_HANDLES.append(handle)
     return handle
+
+
+# Peer containers started through docker/podman compose. The removed in-image
+# launcher stopped these from its own SIGINT/SIGTERM trap; running bare, the
+# wrapper owns that cleanup itself.
+PEER_CONTAINERS = (
+    "blocksci_analyzer",
+    "coinjoin_analysis",
+    "emulator_manager",
+    "btc_data_wiper",
+    "dind_image_prefetch",
+    "isolated_docker_daemon",
+)
+
+_LOCK_HANDLES: list[TextIO] = []
+_CLEANUP_DONE = False
+
+
+def cleanup_peer_containers() -> None:
+    """Stop peer containers and release locks; safe to call more than once."""
+    global _CLEANUP_DONE
+    if _CLEANUP_DONE:
+        return
+    _CLEANUP_DONE = True
+    runtime = os.environ.get(CONTAINER_RUNTIME_ENV, DEFAULT_CONTAINER_RUNTIME)
+    if shutil.which(runtime):
+        subprocess.run(
+            [runtime, "stop", *PEER_CONTAINERS],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
+        if runtime == "podman":
+            subprocess.run(
+                [runtime, "rm", "-f", "-i", *PEER_CONTAINERS],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+            )
+    for handle in _LOCK_HANDLES:
+        try:
+            handle.close()
+        except OSError:
+            pass
+
+
+def handle_termination(signum: int, _frame: object) -> None:
+    """Exit 130 after cleanup, matching the launcher's interrupt contract.
+
+    SIGTERM never unwinds through ``atexit``, so the lock release lived only in
+    the launcher's trap until now; both signals route here.
+    """
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    print(
+        f"Interrupted (signal {signum}); stopping CoinJoin analysis containers...",
+        file=sys.stderr,
+    )
+    cleanup_peer_containers()
+    sys.exit(130)
+
+
+def install_termination_handlers() -> None:
+    signal.signal(signal.SIGINT, handle_termination)
+    signal.signal(signal.SIGTERM, handle_termination)
 
 
 def run_command(command: list[str], *, cwd: Path | None = None, env: Mapping[str, str] | None = None) -> None:
@@ -1038,9 +1118,12 @@ def populate_btc_data_volume(btc_data_dir: Path) -> None:
     """
     volume_name = f"{COMPOSE_PROJECT}_btc_data"
     runtime = container_runtime()
-    # Reuse the wrapper image for the copy helper instead of pulling an
-    # unpinned `alpine`; it is already present and provides sh/cp.
-    helper_image = os.environ.get("WRAPPER_IMAGE", "ghcr.io/ondrejman/coinjoin-pipeline:latest")
+    # Reuse the emulator image for the copy helper instead of pulling a separate
+    # one: this only ever runs after a Kubernetes emulation, whose local manager
+    # container already pulled it, and it is covered by the image preflight and
+    # by --version/--emulator-image. A standalone alpine would be an unpinned,
+    # unchecked extra pull on the critical path.
+    helper_image = os.environ.get("COINJOIN_EMULATOR_IMAGE", DEFAULT_EMULATOR_IMAGE)
 
     # Ensure the volume exists
     subprocess.run(
@@ -1087,8 +1170,29 @@ def blocksci_container_config_path(active_run_id: str) -> str:
     return f"{RUNS_ROOT_CONTAINER}/{active_run_id}/blocksci_data/config.json"
 
 
+def exists_or_unreadable(path: Path) -> bool:
+    """True when ``path`` is present, or hidden behind a directory we may not read.
+
+    The analysis containers run as root, and ``blocksci_parser`` creates its
+    ``parsed/`` directory with mode 0700. The wrapper now runs as the invoking
+    user instead of as root inside its own container, so ``Path.is_file()``
+    turns the resulting EACCES into a plain ``False`` and a finished BlockSci
+    run reads as one that never happened. Everything that consumes these paths
+    runs as root in a container, so "cannot look" must not mean "not there".
+    """
+    if path.is_file():
+        return True
+    for parent in path.parents:
+        if not parent.exists():
+            continue
+        return not os.access(parent, os.R_OK | os.X_OK)
+    return False
+
+
 def blocksci_output_exists(run_dir: Path) -> bool:
-    return blocksci_config_path(run_dir).is_file() and blocksci_parsed_chain_path(run_dir).is_file()
+    return exists_or_unreadable(blocksci_config_path(run_dir)) and exists_or_unreadable(
+        blocksci_parsed_chain_path(run_dir)
+    )
 
 
 def stage_blocksci_script(script: str | None, run_dir: Path) -> str | None:
@@ -1179,9 +1283,8 @@ def export_command(active_run_id: str, env: dict[str, str]) -> str:
         ("--coinjoin-emulator-image", env.get("COINJOIN_EMULATOR_IMAGE")),
         ("--coinjoin-emulator-image-id", env.get("COINJOIN_EMULATOR_IMAGE_ID")),
         ("--coinjoin-emulator-image-digest", env.get("COINJOIN_EMULATOR_IMAGE_DIGEST")),
-        ("--wrapper-image", env.get("WRAPPER_IMAGE")),
-        ("--wrapper-image-id", env.get("WRAPPER_IMAGE_ID")),
-        ("--wrapper-image-digest", env.get("WRAPPER_IMAGE_DIGEST")),
+        ("--uploader-image", env.get("COINJOIN_UPLOADER_IMAGE")),
+        ("--unified-report-image", env.get("COINJOIN_UNIFIED_REPORT_IMAGE")),
     ]
     for flag, value in optional_args:
         if value:
@@ -1226,7 +1329,9 @@ def run_export_only(args: argparse.Namespace) -> None:
     )
     emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
     run_dir = emulation_logs_dir / active_run_id
-    coinjoin_ready = (run_dir / "coinjoin-analysis_data" / "coinjoin_tx_info.json").exists()
+    coinjoin_ready = exists_or_unreadable(
+        run_dir / "coinjoin-analysis_data" / "coinjoin_tx_info.json"
+    )
     blocksci_ready = blocksci_output_exists(run_dir)
 
     error = export_preflight_error(
@@ -1332,6 +1437,19 @@ def add_artifact_arguments(
         help="Artifact transport backend (default: shared-storage).",
     )
     arg_parser.add_argument("--artifact-uri", help="S3-compatible run prefix, for example s3://bucket/runs.")
+    arg_parser.add_argument(
+        "--uploader-image",
+        type=str,
+        default=None,
+        help="Override the in-cluster uploader/preflight image (default: container/uploader.image).",
+    )
+    arg_parser.add_argument(
+        "--unified-report-image",
+        type=str,
+        default=None,
+        help="Override the pinned Python image for the PBS unified-report step "
+             "(default: container/unified-report.image).",
+    )
     arg_parser.add_argument("--s3-endpoint-url", help="CESNET/MetaCentrum S3-compatible endpoint URL.")
     arg_parser.add_argument("--run-id", help="Deterministic artifact run identifier.")
     if pbs_credentials:
@@ -1695,12 +1813,64 @@ def resolve_pbs_image(args: argparse.Namespace, default_image: str, stage_option
     return default_image
 
 
-def resolve_unified_report_pbs_image() -> str:
-    """Use the lightweight pipeline image for JSON-only report assembly."""
-    image = os.environ.get(
-        "WRAPPER_IMAGE", "ghcr.io/ondrejman/coinjoin-pipeline:latest"
+CONTAINER_LOCK_DIR = Path(__file__).resolve().parents[2] / "container"
+
+
+def read_image_lock(name: str) -> str:
+    """Read a committed image reference from the checkout's container/ dir."""
+    path = CONTAINER_LOCK_DIR / name
+    try:
+        reference = path.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        raise RuntimeError(f"image lock file is unreadable: {path}") from error
+    if not reference:
+        raise RuntimeError(f"image lock file is empty: {path}")
+    return reference
+
+
+def resolve_uploader_image(args: argparse.Namespace | None = None) -> str:
+    """Explicit flag, then environment, then the committed lock file."""
+    explicit = getattr(args, "uploader_image", None) if args else None
+    return explicit or os.environ.get("COINJOIN_UPLOADER_IMAGE") or read_image_lock("uploader.image")
+
+
+# Singularity/Apptainer URI prefixes. Testing for "://" alone is not enough:
+# `docker-archive:/path.tar` (how the offline tests hand over a local image)
+# has no slashes after the colon and would get a second scheme glued in front,
+# while a plain `python:3.12-slim` must not be mistaken for a scheme.
+IMAGE_URI_SCHEMES = (
+    "docker://", "docker-archive:", "docker-daemon:", "oci:", "oci-archive:",
+    "library://", "shub://", "oras://", "http://", "https://", "file://",
+)
+
+
+def with_singularity_scheme(image: str) -> str:
+    """Prefix a bare registry reference with ``docker://``, leave URIs alone."""
+    return image if image.startswith(IMAGE_URI_SCHEMES) else f"docker://{image}"
+
+
+def unified_report_image_reference(args: argparse.Namespace | None = None) -> str:
+    """Neutral reference for the report image: explicit flag, env, lock file.
+
+    Kept separate from the PBS form because provenance records this reference as
+    written, while Singularity needs a scheme in front of it.
+    """
+    explicit = getattr(args, "unified_report_image", None) if args else None
+    return (
+        explicit
+        or os.environ.get("COINJOIN_UNIFIED_REPORT_IMAGE")
+        or read_image_lock("unified-report.image")
     )
-    return image if "://" in image else f"docker://{image}"
+
+
+def resolve_unified_report_pbs_image(args: argparse.Namespace | None = None) -> str:
+    """Pinned public Python image for JSON-only report assembly.
+
+    The lock file stores a neutral OCI reference usable directly as a
+    ``docker run`` argument; the ``docker://`` scheme belongs to the calling
+    runtime, so Singularity gets it added here instead.
+    """
+    return with_singularity_scheme(unified_report_image_reference(args))
 
 
 PBSResource = TypeVar("PBSResource", int, str)
@@ -2194,6 +2364,10 @@ def validate_artifact_arguments(parser: argparse.ArgumentParser, args: argparse.
                 ("s3_endpoint_url", "--s3-endpoint-url"),
                 ("run_id", "--run-id"),
                 ("s3_secret_name", "--s3-secret-name"),
+                # The frontend stages the exporters itself, so it needs its own
+                # credentials, not only the in-cluster Secret.
+                ("s3_credentials_file", "--s3-credentials-file"),
+                ("s3_profile", "--s3-profile"),
             ):
                 if not getattr(args, attribute, None):
                     parser.error(f"Kubernetes S3-compatible mode requires {flag}")
@@ -2255,7 +2429,7 @@ def run_kubernetes_s3_emulation(args: argparse.Namespace) -> None:
         engine=args.engine,
         image_prefix=args.image_prefix,
         emulator_image=os.environ.get("COINJOIN_EMULATOR_IMAGE", DEFAULT_EMULATOR_IMAGE),
-        uploader_image=os.environ.get("WRAPPER_IMAGE", "ghcr.io/ondrejman/coinjoin-pipeline:latest"),
+        uploader_image=resolve_uploader_image(args),
         artifact_uri=args.artifact_uri,
         endpoint_url=args.s3_endpoint_url,
         secret_name=args.s3_secret_name,
@@ -2336,6 +2510,10 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
                 "resuming without --analysisPbs requires an existing "
                 f"coinjoin-analysis_data/coinjoin_tx_info.json for run {args.run_id}"
             )
+    if not args.dry_run and (
+        getattr(args, "stage_exporters", False) or pbs_stages_need_exporters(args)
+    ):
+        ensure_staged_exporters(args)
     separate_combined_report = (
         args.blocksciPbs
         and task == "detect"
@@ -2544,7 +2722,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
             raise PBSError("Could not obtain analyzer job IDs for the unified report dependency")
         report_job_id = submit_unified_report_s3_pbs(
             **common,
-            image=resolve_unified_report_pbs_image(),
+            image=resolve_unified_report_pbs_image(args),
             command=blocksci_export_pbs_command(
                 args.run_id,
                 args.coinjoin_type,
@@ -2554,6 +2732,10 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
                 args.joinmarket_percentage_fee,
                 args.joinmarket_max_depth,
                 args.test_values,
+                # Only this job can tell the report which uploader produced the
+                # artifacts and which image assembles them.
+                uploader_image=resolve_uploader_image(args),
+                unified_report_image=unified_report_image_reference(args),
             ),
             ncpus=resolve_unified_report_pbs_resource(
                 args, "ncpus", DEFAULT_UNIFIED_REPORT_NCPUS
@@ -2578,6 +2760,78 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
         blocksci_work=blocksci_work_job_id,
         unified_report=report_job_id,
     )
+
+
+def pbs_stages_need_exporters(args: argparse.Namespace) -> bool:
+    """Report whether this invocation submits a job that runs the exporters.
+
+    Only the BlockSci detect path executes ``.pipeline/exporters/``: the
+    combined job (which always ends in an analysis export or the report) and,
+    in the reusable/cached workflows, the ``detect`` work job plus the
+    decoupled unified report. Baseline-only, mappings-only, parse, update,
+    script and notebook stages never bind anything but an empty exporters
+    directory, so staging for them would let a local exporter problem block a
+    job that cannot use them anyway.
+    """
+    if not args.blocksciPbs:
+        return False
+    task = getattr(args, "blocksci_task", "detect")
+    if task == "update":
+        return False
+    return getattr(args, "blocksci_workflow", "combined") == "combined" or task == "detect"
+
+
+def ensure_staged_exporters(args: argparse.Namespace) -> None:
+    """Stage the checkout's exporters into a run prefix that has none.
+
+    The BlockSci detect and unified-report jobs download
+    ``.pipeline/exporters/`` from their own run prefix. An S3 full-run stages it
+    before emulation, but a standalone ``pbs-from-s3`` — a resumed detect, above
+    all — can start from a prefix that has none. Only the missing case uploads:
+    a prefix that already carries exporters keeps the ones its earlier stages
+    actually ran with.
+    """
+    access = S3Access(
+        endpoint_url=args.s3_endpoint_url,
+        credentials_file=args.s3_credentials_file,
+        profile=args.s3_profile,
+    )
+    state, missing = staged_exporters_state(access, args.artifact_uri, args.run_id)
+    if state == STAGED_EXPORTERS_COMPLETE:
+        return
+    if state == STAGED_EXPORTERS_PARTIAL:
+        prefix = f"{args.artifact_uri}/{args.run_id}/.pipeline/exporters/"
+        raise ArtifactTransportError(
+            f"run prefix {prefix} carries an exporter tree without {', '.join(missing)}; "
+            "it predates the blocksci_export rename or a previous upload died halfway. "
+            "Re-staging it here would mix exporter versions across the run's stages, so "
+            "start a fresh --run-id (or delete the prefix and restage it deliberately)"
+        )
+    exporters_dir = Path(compose_env()["EXPORTERS_DIR"]).expanduser().resolve()
+    print(f"[stage] Run prefix has no exporters; uploading from {exporters_dir}")
+    upload_exporters(access, args.artifact_uri, args.run_id, exporters_dir)
+
+
+def stage_kubernetes_s3_run(args: argparse.Namespace, access: S3Access) -> None:
+    """Prepare the S3 run prefix before any Kubernetes Job is created.
+
+    Shared by ``full-run --artifact-backend s3`` and the standalone ``emulate``
+    S3 branch, which previously skipped these checks entirely. The cluster
+    preflight runs first on purpose: a failed auth check must not leave staged
+    exporters behind under a run id that then needs cleaning up.
+    """
+    kubeconfig_path = (
+        Path(args.kubeconfig).expanduser().resolve() if args.kubeconfig
+        else Path.home() / ".kube/config"
+    )
+    s3_access_preflight(access, args.artifact_uri)
+    kubernetes_s3_auth_preflight(
+        kubeconfig_path, args.namespace, args.reuse_namespace, args.s3_secret_name
+    )
+    ensure_empty_run_prefix(access, args.artifact_uri, args.run_id)
+    exporters_dir = Path(compose_env()["EXPORTERS_DIR"]).expanduser().resolve()
+    print(f"[stage] Uploading exporters from {exporters_dir}")
+    upload_exporters(access, args.artifact_uri, args.run_id, exporters_dir)
 
 
 def run_full_run_s3(args: argparse.Namespace) -> None:
@@ -2617,9 +2871,7 @@ def run_full_run_s3(args: argparse.Namespace) -> None:
         return
 
     require_qsub()
-    s3_access_preflight(access, args.artifact_uri)
-    ensure_empty_run_prefix(access, args.artifact_uri, args.run_id)
-    kubernetes_s3_auth_preflight(kubeconfig_path, args.namespace, args.reuse_namespace, args.s3_secret_name)
+    stage_kubernetes_s3_run(args, access)
 
     run_kubernetes_s3_emulation(args)
     print(f"[full-run] Waiting for emulation upload marker {run_prefix}/.k8s/upload.done")
@@ -2792,7 +3044,10 @@ def build_parser() -> argparse.ArgumentParser:
     emulate_parser.add_argument("--scenario", help="JSON scenario path.")
     add_run_timezone_argument(emulate_parser)
     add_kubernetes_arguments(emulate_parser)
-    add_artifact_arguments(emulate_parser, kubernetes_secret=True)
+    # Frontend credentials are no longer PBS-only here: standalone S3 emulation
+    # checks the run prefix and stages the exporters with the frontend's own
+    # s5cmd before creating the Job, exactly as full-run does.
+    add_artifact_arguments(emulate_parser, kubernetes_secret=True, pbs_credentials=True)
     emulate_parser.add_argument(
         "--pbs-bitcoin-datadir",
         default=None,
@@ -2889,6 +3144,17 @@ def build_parser() -> argparse.ArgumentParser:
     add_joinmarket_detector_arguments(s3_pbs_parser)
     add_blocksci_script_argument(s3_pbs_parser)
     add_blocksci_reusable_arguments(s3_pbs_parser)
+    # Staging follows the stages this invocation submits; pre-staging for a
+    # later detect/report run is deliberate, never a side effect.
+    s3_pbs_parser.add_argument(
+        "--stage-exporters",
+        action="store_true",
+        help=(
+            "Upload the checkout's exporters into the run prefix even when the "
+            "selected stages do not run them, so a later detect or report stage "
+            "finds the tree this invocation was launched from."
+        ),
+    )
     add_pbs_arguments(s3_pbs_parser)
     add_unified_report_pbs_arguments(s3_pbs_parser)
 
@@ -2930,6 +3196,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    install_termination_handlers()
     parser = build_parser()
 
     args = parser.parse_args(normalize_argv(sys.argv[1:]))
@@ -3039,8 +3306,19 @@ def main() -> None:
         logs_root = Path(compose_env().get("EMULATION_LOGS_DIR", ".")).expanduser().resolve()
         if use_kubernetes and getattr(args, "artifact_backend", "shared-storage") == "s3":
             try:
+                if not args.dry_run:
+                    # Same staging path as full-run; standalone emulate used to
+                    # skip every preflight and never staged the exporters.
+                    stage_kubernetes_s3_run(
+                        args,
+                        S3Access(
+                            endpoint_url=args.s3_endpoint_url,
+                            credentials_file=args.s3_credentials_file,
+                            profile=args.s3_profile,
+                        ),
+                    )
                 run_kubernetes_s3_emulation(args)
-            except RuntimeError as error:
+            except (ArtifactTransportError, RuntimeError) as error:
                 print(f"[ERROR] {error}", file=sys.stderr)
                 sys.exit(2)
         elif use_kubernetes:

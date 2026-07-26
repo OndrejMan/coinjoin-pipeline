@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stdout
 import io
 import json
 from pathlib import Path
@@ -15,13 +15,14 @@ from coinjoin_pipeline.cli import (
 )
 from coinjoin_pipeline.commands import (
     action_from,
-    launcher_command,
+    runtime_command,
+    runtime_environment,
     validate_passthrough,
 )
+from coinjoin_pipeline.doctor import Capability, required_capabilities
 from coinjoin_pipeline.images import resolve_images
 from coinjoin_pipeline.manifest import atomic_write
 from coinjoin_pipeline.builder import Command, parse_command, render_command
-from coinjoin_pipeline.pipeline_image import Configuration, runtime_command
 from coinjoin_pipeline.host import required_image_components
 from coinjoin_pipeline.runs import manifest_target, run_id_for, valid_run_id
 
@@ -69,7 +70,7 @@ class CliTests(unittest.TestCase):
 
     def test_image_version_and_override_precedence(self) -> None:
         images = resolve_images("thesis-2026-07", {"blocksci": "local/blocksci:test"})
-        self.assertTrue(images.pipeline.endswith(":thesis-2026-07"))
+        self.assertTrue(images.emulator.endswith(":thesis-2026-07"))
         self.assertEqual(images.blocksci, "local/blocksci:test")
 
     def test_invalid_image_and_version_are_rejected(self) -> None:
@@ -196,8 +197,8 @@ class CliTests(unittest.TestCase):
     def test_runtime_rendering_quotes_paths(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            command = launcher_command(
-                root / "launcher with spaces.sh",
+            command = runtime_command(
+                root / "pipeline with spaces",
                 "docker",
                 ["full-run", "--engine", "joinmarket"],
                 resolve_images("v1", {}),
@@ -205,7 +206,36 @@ class CliTests(unittest.TestCase):
                 "coinjoin-pipeline full-run",
             )
             self.assertIn("'", command.rendered())
-            self.assertIn("launcher with spaces.sh", command.rendered())
+            self.assertIn("pipeline with spaces", command.rendered())
+
+    def _runtime_environment(self, directory: str, **kwargs: object) -> dict[str, str]:
+        root = Path(directory)
+        return runtime_environment(
+            root / "pipeline",
+            "docker",
+            resolve_images("v1", {}),
+            root / "runs",
+            "coinjoin-pipeline full-run",
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    def test_launcher_derived_defaults_survive_wrapper_removal(self) -> None:
+        # These two used to come from the in-image launcher: without them a run
+        # hangs in Jupyter and the bare wrapper litters pipeline/ with bytecode
+        # that later ships to S3. Only a shell test covered them before.
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.dict("os.environ", {}, clear=True):
+                environment = self._runtime_environment(directory)
+        self.assertEqual(environment["BLOCKSCI_LAUNCH_JUPYTER"], "0")
+        self.assertEqual(environment["PYTHONDONTWRITEBYTECODE"], "1")
+
+    def test_explicit_jupyter_opt_in_beats_launcher_default(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.dict(
+                "os.environ", {"BLOCKSCI_LAUNCH_JUPYTER": "1"}, clear=True
+            ):
+                environment = self._runtime_environment(directory)
+        self.assertEqual(environment["BLOCKSCI_LAUNCH_JUPYTER"], "1")
 
     def test_manifest_redacts_sensitive_fields(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -236,7 +266,7 @@ class CliTests(unittest.TestCase):
         ):
             code = main(["full-run", "--engine", "joinmarket", "--dry-run"])
         self.assertEqual(code, 0)
-        self.assertIn("coinjoin-pipeline:latest", output.getvalue())
+        self.assertIn("coinjoin-emulator:latest", output.getvalue())
 
     def test_latest_defaults_match_published_runtime_images(self) -> None:
         images = resolve_images(None, {})
@@ -250,27 +280,60 @@ class CliTests(unittest.TestCase):
             required_image_components(
                 "emulate", ["emulate", "--driver", "kubernetes"]
             ),
-            {"pipeline", "emulator"},
+            {"emulator"},
         )
 
-    def test_direct_pbs_does_not_check_images_with_frontend_runtime(self) -> None:
-        with mock.patch.dict("os.environ", {"PBS_FRONTEND_DIRECT": "1"}):
-            self.assertEqual(
-                required_image_components(
-                    "coinjoin-analysis", ["coinjoin-analysis", "--analysisPbs"]
-                ),
-                set(),
-            )
+    def test_pbs_stages_do_not_require_local_images(self) -> None:
+        self.assertEqual(
+            required_image_components(
+                "coinjoin-analysis", ["coinjoin-analysis", "--analysisPbs"]
+            ),
+            set(),
+        )
 
-    def test_direct_pbs_skips_frontend_container_preflight(self) -> None:
+    def test_pbs_flags_only_drop_the_stage_they_delegate(self) -> None:
+        # A shared-storage full-run keeps emulating locally, so --analysisPbs
+        # must not turn the whole image preflight off.
+        self.assertEqual(
+            required_image_components(
+                "full-run", ["full-run", "--engine", "wasabi", "--analysisPbs"]
+            ),
+            {"emulator", "blocksci"},
+        )
+        self.assertEqual(
+            required_image_components(
+                "full-run",
+                ["full-run", "--engine", "wasabi", "--analysisPbs", "--blocksciPbs"],
+            ),
+            {"emulator"},
+        )
+        # A stage action delegates its whole body, unlike full-run/emulate.
+        self.assertEqual(
+            required_image_components(
+                "analyze", ["analyze", "--run-dir", "run", "--blocksciPbs"]
+            ),
+            set(),
+        )
+        self.assertEqual(
+            required_image_components("mappings", ["mappings", "--mappingsPbs"]),
+            set(),
+        )
+        self.assertEqual(
+            required_image_components(
+                "full-run",
+                ["full-run", "--engine", "wasabi", "--mappingsPbs"],
+            ),
+            {"emulator", "coinjoin_analysis", "blocksci"},
+        )
+
+    def test_pbs_stage_skips_frontend_container_preflight(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with (
-                mock.patch.dict("os.environ", {"PBS_FRONTEND_DIRECT": "1"}),
                 mock.patch(
                     "coinjoin_pipeline.doctor.shutil.which",
                     return_value="/usr/bin/qsub",
                 ),
-                mock.patch("coinjoin_pipeline.cli.doctor_check") as check,
+                mock.patch("coinjoin_pipeline.cli.doctor_check", return_value=[]) as check,
                 mock.patch("coinjoin_pipeline.cli.run", return_value=0),
                 redirect_stdout(io.StringIO()),
             ):
@@ -278,7 +341,9 @@ class CliTests(unittest.TestCase):
                     ["coinjoin-analysis", "--run-dir", directory, "--analysisPbs"]
                 )
         self.assertEqual(code, 0)
-        check.assert_not_called()
+        capabilities = check.call_args.kwargs["capabilities"]
+        self.assertNotIn(Capability.CONTAINER_RUNTIME, capabilities)
+        self.assertIn(Capability.QSUB, capabilities)
 
     def test_yaml_s3_full_run_generates_run_id_before_validation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -307,7 +372,6 @@ pbs:
                 encoding="utf-8",
             )
             with (
-                mock.patch.dict("os.environ", {"PBS_FRONTEND_DIRECT": "1"}),
                 mock.patch("coinjoin_pipeline.cli.run", return_value=0) as run_mock,
                 redirect_stdout(io.StringIO()),
             ):
@@ -332,7 +396,6 @@ pbs:
         configuration = Path(__file__).resolve().parents[2] / "examples/metacentrum-s3.yaml"
         with tempfile.TemporaryDirectory() as directory:
             with (
-                mock.patch.dict("os.environ", {"PBS_FRONTEND_DIRECT": "1"}),
                 mock.patch("coinjoin_pipeline.cli.run", return_value=0) as run_mock,
                 redirect_stdout(io.StringIO()),
             ):
@@ -527,7 +590,7 @@ pbs:
                 for error in validate_passthrough(missing_source, "pbs-from-s3"))
         )
 
-    def test_s3_full_run_requires_frontend_direct_environment(self) -> None:
+    def test_s3_full_run_needs_no_environment_switch(self) -> None:
         arguments = [
             "full-run", "--engine", "wasabi", "--driver", "kubernetes",
             "--artifact-backend", "s3",
@@ -540,15 +603,82 @@ pbs:
             "--reuse-namespace",
             "--analysisPbs", "--blocksciPbs",
         ]
-        stderr = io.StringIO()
-        with (
-            mock.patch.dict("os.environ", {"PBS_FRONTEND_DIRECT": "0"}),
-            redirect_stdout(io.StringIO()),
-            redirect_stderr(stderr),
+        capabilities = required_capabilities("full-run", arguments)
+        # A pure S3 full-run on a PBS frontend must not demand a local daemon.
+        self.assertNotIn(Capability.CONTAINER_RUNTIME, capabilities)
+        self.assertEqual(
+            {Capability.KUBECTL, Capability.QSUB, Capability.S5CMD_FRONTEND},
+            capabilities,
+        )
+
+    def test_research_actions_do_not_need_a_container_runtime(self) -> None:
+        # `runs`/`scenarios` only read the runs tree in-process. Requiring Docker
+        # would make them unusable on the Docker-less PBS frontend, which is
+        # exactly where S3 runs are launched from.
+        for action, arguments in (
+            ("runs list", ["runs", "list"]),
+            ("runs inspect", ["runs", "inspect", "--run-dir", "run-1"]),
+            ("scenarios list", ["scenarios", "list"]),
         ):
-            code = main(arguments)
-        self.assertEqual(code, 2)
-        self.assertIn("PBS_FRONTEND_DIRECT=1", stderr.getvalue())
+            self.assertEqual(set(), required_capabilities(action, arguments), action)
+
+    def test_runs_validate_is_not_exempt_from_the_container_preflight(self) -> None:
+        # It reopens the parsed chain by running the BlockSci image, so the
+        # Docker-less exemption its `runs ` siblings get would turn a clear
+        # preflight error into a failure inside `docker run`.
+        arguments = ["runs", "validate", "--run-dir", "run-1"]
+        self.assertEqual(
+            {Capability.CONTAINER_RUNTIME},
+            required_capabilities("runs validate", arguments),
+        )
+        self.assertEqual(
+            {"blocksci"},
+            required_image_components("runs validate", arguments),
+        )
+
+    def test_environment_variables_that_steer_a_run_are_rendered(self) -> None:
+        # The bare wrapper inherits the whole shell; anything the pipeline reads
+        # from it must show up in the printed command and the manifest, or a run
+        # is not reproducible from what was recorded.
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.dict(
+                "os.environ",
+                {
+                    "KUBERNETES_CONTROL_IP": "172.17.0.1",
+                    "PBS_BITCOIN_DATADIR": "/storage/user/bitcoin",
+                    "AWS_SECRET_ACCESS_KEY": "must-not-leak",
+                    "COINJOIN_S3_SECRET_NAME": "must-not-leak-either",
+                    "UNRELATED_VARIABLE": "ignored",
+                },
+                clear=True,
+            ):
+                environment = self._runtime_environment(directory)
+        self.assertEqual(environment["KUBERNETES_CONTROL_IP"], "172.17.0.1")
+        self.assertEqual(environment["PBS_BITCOIN_DATADIR"], "/storage/user/bitcoin")
+        self.assertNotIn("AWS_SECRET_ACCESS_KEY", environment)
+        self.assertNotIn("COINJOIN_S3_SECRET_NAME", environment)
+        self.assertNotIn("UNRELATED_VARIABLE", environment)
+
+    def test_computed_images_beat_inherited_values(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.dict(
+                "os.environ", {"COINJOIN_EMULATOR_IMAGE": "stale:from-shell"}, clear=True
+            ):
+                environment = self._runtime_environment(directory)
+        self.assertEqual(
+            environment["COINJOIN_EMULATOR_IMAGE"],
+            resolve_images("v1", {}).emulator,
+        )
+
+    def test_s3_full_run_needs_qsub_without_pbs_flags(self) -> None:
+        # run_full_run_s3 calls require_qsub() unconditionally, so the preflight
+        # must ask for it even when no --*Pbs flag is present.
+        capabilities = required_capabilities(
+            "full-run",
+            ["full-run", "--engine", "wasabi", "--artifact-backend", "s3"],
+        )
+        self.assertIn(Capability.QSUB, capabilities)
+        self.assertNotIn(Capability.CONTAINER_RUNTIME, capabilities)
 
     def test_s3_full_run_requires_no_local_images(self) -> None:
         from coinjoin_pipeline.host import required_image_components
@@ -566,7 +696,6 @@ pbs:
 
     def test_environment_image_overrides_preserve_legacy_workflows(self) -> None:
         environment = {
-            "WRAPPER_IMAGE": "wrapper:test",
             "BLOCKSCI_IMAGE": "blocksci:test",
             "COINJOIN_EMULATOR_IMAGE": "emulator:test",
             "COINJOIN_ANALYSIS_IMAGE": "analysis:test",
@@ -597,26 +726,6 @@ pbs:
         self.assertEqual(parsed.runtime, "podman")
         self.assertEqual(parsed.version, "v1")
         self.assertEqual(parsed.action, "full-run")
-
-    def test_pipeline_image_uses_socket_and_executes_wrapper_arguments(self) -> None:
-        config = Configuration(
-            runtime="docker",
-            image="coinjoin-pipeline:v1",
-            kubeconfig=Path("/tmp/kubeconfig"),
-            logs_dir=Path("/tmp/runs"),
-            build=False,
-            pipeline_arguments=("full-run", "--engine", "joinmarket"),
-            socket=Path("/var/run/docker.sock"),
-            source_root=None,
-        )
-        command = runtime_command(config)
-        self.assertIn("/var/run/docker.sock:/var/run/docker.sock", command)
-        self.assertNotIn("--privileged", command)
-        self.assertEqual(
-            command[-4:],
-            ["--driver", "kubernetes", "--kubeconfig", "/root/.kube/config"],
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

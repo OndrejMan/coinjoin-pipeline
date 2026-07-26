@@ -266,7 +266,6 @@ class ArtifactConfiguration:
 class ImageConfiguration:
     version: str | None = None
     local_build: bool = False
-    pipeline: str | None = None
     emulator: str | None = None
     coinjoin_analysis: str | None = None
     blocksci: str | None = None
@@ -281,7 +280,6 @@ class ImageConfiguration:
             {
                 "version",
                 "local_build",
-                "pipeline",
                 "emulator",
                 "coinjoin_analysis",
                 "blocksci",
@@ -293,7 +291,6 @@ class ImageConfiguration:
         return cls(
             version=_optional_string(data, "version", "images"),
             local_build=_boolean(data, "local_build", "images"),
-            pipeline=_optional_string(data, "pipeline", "images"),
             emulator=_optional_string(data, "emulator", "images"),
             coinjoin_analysis=_optional_string(
                 data, "coinjoin_analysis", "images"
@@ -306,7 +303,6 @@ class ImageConfiguration:
     def append_arguments(self, arguments: list[str]) -> None:
         _append_option(arguments, "--version", self.version)
         _append_flag(arguments, "--local-build", self.local_build)
-        _append_option(arguments, "--pipeline-image", self.pipeline)
         _append_option(arguments, "--emulator-image", self.emulator)
         _append_option(
             arguments, "--coinjoin-analysis-image", self.coinjoin_analysis

@@ -90,6 +90,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
                 "s3_access_preflight",
                 "ensure_empty_run_prefix",
                 "kubernetes_s3_auth_preflight",
+                "upload_exporters",
                 "run_kubernetes_s3_emulation",
                 "run_pbs_from_s3",
                 "wait_for_s3_marker",
@@ -294,6 +295,8 @@ class WrapperExportTest(unittest.TestCase):
             test_values=False,
         )
         with (
+            # The run prefix check before submission is covered in test_s3_backend.
+            mock.patch("client.wrapper.ensure_staged_exporters"),
             mock.patch(
                 "client.wrapper.submit_coinjoin_analysis_s3_pbs",
                 return_value="analysis.job",
@@ -340,17 +343,6 @@ class WrapperExportTest(unittest.TestCase):
                 container_path,
                 "/runs/emulation/logs/run-a/.pipeline/blocksci-script.py",
             )
-
-    def test_wrapper_image_includes_pbs_module(self):
-        dockerfile = (PROJECT_ROOT / "client" / "Dockerfile").read_text(encoding="utf-8")
-
-        self.assertIn("COPY client/pbs.py /app/client/pbs.py", dockerfile)
-
-    def test_wrapper_image_includes_refactored_client_modules(self):
-        dockerfile = (PROJECT_ROOT / "client" / "Dockerfile").read_text(encoding="utf-8")
-
-        for module in ("cli_options.py", "kubernetes.py", "pipeline_logging.py", "runtime.py"):
-            self.assertIn(f"COPY client/{module} /app/client/{module}", dockerfile)
 
     def test_terminal_colors_are_disabled_for_plain_streams(self):
         stream = io.StringIO()
@@ -778,6 +770,10 @@ class WrapperExportTest(unittest.TestCase):
              "--engine", "wasabi", "--driver", "kubernetes", "--artifact-backend", "s3",
              "--artifact-uri", "s3://bucket/runs", "--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz",
              "--s3-secret-name", "coinjoin-s3", "--run-id", "run-1",
+             # Otherwise the missing frontend credentials are rejected first and
+             # this stops testing the flag incompatibility it is named after.
+             "--s3-credentials-file", "/storage/user/.aws/credentials",
+             "--s3-profile", "coinjoin",
              "--reuse-namespace",
              "--copy-to-host", "--dry-run"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -904,6 +900,32 @@ class WrapperExportTest(unittest.TestCase):
         }
 
         self.assertNotIn("--test-values", export_command("run-a", env))
+
+    @unittest.skipIf(os.geteuid() == 0, "root can read every directory")
+    def test_blocksci_output_survives_a_root_only_parsed_directory(self):
+        # blocksci_parser creates parsed/ with mode 0700 while the container runs
+        # as root. The bare wrapper checks it as the invoking user, and is_file()
+        # reports EACCES as False — a finished run then looks like it never ran.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "2026-07-26_07-25_overactive-local"
+            (run_dir / "blocksci_data").mkdir(parents=True)
+            (run_dir / "blocksci_data" / "config.json").write_text("{}", encoding="utf-8")
+            parsed = run_dir / "blocksci_data" / "parsed" / "chain"
+            parsed.mkdir(parents=True)
+            (parsed / "block.dat").write_bytes(b"chain")
+            parsed.parent.chmod(0o000)
+            try:
+                self.assertTrue(blocksci_output_exists(run_dir))
+            finally:
+                parsed.parent.chmod(0o700)
+
+    def test_blocksci_output_still_missing_when_the_stage_never_ran(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run-1"
+            (run_dir / "blocksci_data").mkdir(parents=True)
+            (run_dir / "blocksci_data" / "config.json").write_text("{}", encoding="utf-8")
+
+            self.assertFalse(blocksci_output_exists(run_dir))
 
     def test_export_preflight_all_ready(self):
         error = export_preflight_error(

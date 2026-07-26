@@ -90,7 +90,7 @@ class CommandBuilderTests(unittest.TestCase):
     def test_leading_env_assignments_round_trip_through_render(self) -> None:
         source = (
             "CONTAINER_SOCKET=/run/podman/podman.sock "
-            "WRAPPER_IMAGE=ghcr.io/ondrejman/coinjoin-pipeline:latest "
+            "BLOCKSCI_IMAGE=ghcr.io/ondrejman/blocksci-complete:latest "
             "./runIt.sh container podman full-run \\\n"
             "  --engine joinmarket \\\n"
             "  --analysisPbs"
@@ -100,14 +100,14 @@ class CommandBuilderTests(unittest.TestCase):
             command.env,
             [
                 ("CONTAINER_SOCKET", "/run/podman/podman.sock"),
-                ("WRAPPER_IMAGE", "ghcr.io/ondrejman/coinjoin-pipeline:latest"),
+                ("BLOCKSCI_IMAGE", "ghcr.io/ondrejman/blocksci-complete:latest"),
             ],
         )
         rendered = MODULE.render_command(command)
         self.assertTrue(
             rendered.startswith(
                 "CONTAINER_SOCKET=/run/podman/podman.sock "
-                "WRAPPER_IMAGE=ghcr.io/ondrejman/coinjoin-pipeline:latest "
+                "BLOCKSCI_IMAGE=ghcr.io/ondrejman/blocksci-complete:latest "
                 "coinjoin-pipeline --runtime podman full-run"
             ),
             rendered,
@@ -707,7 +707,7 @@ class CommandBuilderTests(unittest.TestCase):
         command = MODULE.Command(
             action="full-run",
             options=[("--engine", "joinmarket")],
-            env=[("WRAPPER_IMAGE", "example/wrapper:test")],
+            env=[("BLOCKSCI_IMAGE", "example/blocksci:test")],
         )
         completed = mock.Mock(returncode=0)
         with mock.patch.object(MODULE.subprocess, "run", return_value=completed) as run:
@@ -715,7 +715,7 @@ class CommandBuilderTests(unittest.TestCase):
         argv = run.call_args.args[0]
         self.assertEqual(argv[-1], "--dry-run")
         self.assertNotIn("shell", run.call_args.kwargs)
-        self.assertEqual(run.call_args.kwargs["env"]["WRAPPER_IMAGE"], "example/wrapper:test")
+        self.assertEqual(run.call_args.kwargs["env"]["BLOCKSCI_IMAGE"], "example/blocksci:test")
 
     def test_completion_discovers_run_ids_kubeconfig_and_images(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+import sys
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -20,6 +21,8 @@ from exporters.common import (
 )
 from exporters.emulator_data import wallet_address_labels
 
+BLOCKSCI_REQUIRED_ATTRIBUTES = ("Blockchain", "heuristics")
+
 
 def prepare_blocksci_import() -> None:
     """Keep legacy pycrypto imports working in Python 3 BlockSci images."""
@@ -27,11 +30,37 @@ def prepare_blocksci_import() -> None:
         setattr(builtins, "xrange", range)
 
 
+def assert_real_blocksci(module: object) -> None:
+    """Fail loudly when ``import blocksci`` resolved to a shadowing directory.
+
+    BlockSci is installed editable in the image, and its import hook sits behind
+    the regular ``sys.path`` lookup. Any directory named ``blocksci`` earlier on
+    the path therefore wins silently: the exporters package itself when a script
+    is run from ``/mnt/exporters``, or ``/mnt/blocksci`` when the CWD is ``/mnt``.
+    Without this check the wrong module binds fine and only explodes much later
+    on the first attribute access.
+    """
+    if module is None:
+        return
+    missing = [name for name in BLOCKSCI_REQUIRED_ATTRIBUTES if not hasattr(module, name)]
+    if not missing:
+        return
+    location = getattr(module, "__file__", None) or list(getattr(module, "__path__", []) or [])
+    raise ImportError(
+        f"'import blocksci' resolved to {location or '<unknown location>'}, which is missing "
+        f"{', '.join(missing)}. A directory named 'blocksci' earlier on sys.path is shadowing "
+        f"the installed BlockSci bindings (sys.path[0]={sys.path[0]!r}). Run the exporter from "
+        "a location whose sys.path entries contain no 'blocksci' directory."
+    )
+
+
 try:
     prepare_blocksci_import()
     import blocksci
 except ImportError:  # pragma: no cover - exercised in environments without BlockSci.
     blocksci = None
+else:
+    assert_real_blocksci(blocksci)
 
 
 def _iter_attr(obj: object, name: str) -> Iterable[object]:

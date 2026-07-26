@@ -138,9 +138,8 @@ services:
         - COINJOIN_EMULATOR_IMAGE=${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}
         - COINJOIN_EMULATOR_IMAGE_ID=${COINJOIN_EMULATOR_IMAGE_ID:-}
         - COINJOIN_EMULATOR_IMAGE_DIGEST=${COINJOIN_EMULATOR_IMAGE_DIGEST:-}
-        - WRAPPER_IMAGE=${WRAPPER_IMAGE:-}
-        - WRAPPER_IMAGE_ID=${WRAPPER_IMAGE_ID:-}
-        - WRAPPER_IMAGE_DIGEST=${WRAPPER_IMAGE_DIGEST:-}
+        - COINJOIN_UPLOADER_IMAGE=${COINJOIN_UPLOADER_IMAGE:-}
+        - COINJOIN_UNIFIED_REPORT_IMAGE=${COINJOIN_UNIFIED_REPORT_IMAGE:-}
         - COINJOIN_EMULATOR_GIT_COMMIT=${COINJOIN_EMULATOR_GIT_COMMIT:-}
         - REPRODUCTION_COMMAND=${REPRODUCTION_COMMAND:-}
         - SCENARIO_FALLBACK_PATH=${SCENARIO_FALLBACK_PATH:-/mnt/scenarios/overactive-local.json}
@@ -167,6 +166,12 @@ services:
           BLOCKSCI_MAX_BLOCK="$$((EXPORTED_MAX_BLOCK + 1))" &&
           blocksci_parser "/runs/emulation/logs/${ACTIVE_RUN_ID}/blocksci_data/config.json" generate-config bitcoin_regtest "/runs/emulation/logs/${ACTIVE_RUN_ID}/blocksci_data/parsed" --disk /mnt/data/regtest --max-block "$$BLOCKSCI_MAX_BLOCK" &&
           blocksci_parser "/runs/emulation/logs/${ACTIVE_RUN_ID}/blocksci_data/config.json" update &&
+
+          # blocksci_parser creates parsed/ with mode 0700 and this container runs
+          # as root. The wrapper now runs as the invoking user, who would not be
+          # able to read its own run's parsed chain (nor stat it, which reads as
+          # "BlockSci never ran"). Hand the artifacts back before going on.
+          chmod -R a+rX "/runs/emulation/logs/${ACTIVE_RUN_ID}/blocksci_data" &&
 
           # Run an optional user-supplied Python analysis staged inside this run.
           if [ -n "${BLOCKSCI_SCRIPT:-}" ]; then

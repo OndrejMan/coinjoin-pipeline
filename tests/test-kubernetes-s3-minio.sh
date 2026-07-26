@@ -46,7 +46,7 @@ PBS_CONTAINER_NAME="${PBS_CONTAINER_NAME:-pbs-s3-itest-${RESOURCE_ID}}"
 MINIO_CONTAINER_NAME="${MINIO_CONTAINER_NAME:-minio-s3-itest-${RESOURCE_ID}}"
 HOST_KUBECONFIG="${WORK_ROOT}/kubeconfig-host.yaml"
 IMAGE_PREFIX="${IMAGE_PREFIX:-ghcr.io/ondrejman/}"
-WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/coinjoin-pipeline:latest}"
+UPLOADER_IMAGE="${UPLOADER_IMAGE:-}"
 COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
 MINIO_IMAGE="${MINIO_IMAGE:-minio/minio:latest}"
 RESULT_DIR="${TEST_RESULT_DIR:-}"
@@ -55,14 +55,18 @@ KUBERNETES_S3_TIMEOUT="${KUBERNETES_S3_TIMEOUT:-85m}"
 KUBERNETES_DIAGNOSTICS_FILE="${WORK_ROOT}/kubernetes-diagnostics.txt"
 PIPELINE_OUTPUT_FILE="${WORK_ROOT}/pipeline-output.log"
 S3_ENDPOINT_URL=""
-WRAPPER_SOURCE_IMAGE="${WRAPPER_IMAGE}"
 COINJOIN_EMULATOR_SOURCE_IMAGE="${COINJOIN_EMULATOR_IMAGE}"
-K3D_WRAPPER_IMAGE="coinjoin-pipeline-s3-e2e:${RUN_TOKEN}"
+K3D_UPLOADER_IMAGE="coinjoin-pipeline-uploader-s3-e2e:${RUN_TOKEN}"
 K3D_COINJOIN_EMULATOR_IMAGE="coinjoin-emulator-s3-e2e:${RUN_TOKEN}"
 # Optional offline mode for analyzer images. Apptainer cannot see Docker's
 # local tag store, so local images are exported into the PBS shared workspace.
 PBS_BLOCKSCI_LOCAL_IMAGE="${PBS_BLOCKSCI_LOCAL_IMAGE:-}"
 PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE="${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE:-}"
+# The report job runs in a stock public Python image. Unlike the two analyzers
+# it has no local build here, so pull it once on the host and hand Apptainer a
+# docker-archive: otherwise every run of this test depends on a Docker Hub pull
+# from inside the PBS container, rate limits included.
+PBS_UNIFIED_REPORT_LOCAL_IMAGE="${PBS_UNIFIED_REPORT_LOCAL_IMAGE:-$(tr -d '[:space:]' <"${PROJECT_DIR}/container/unified-report.image")}"
 PBS_IMAGE_ARGS=()
 
 SCENARIO="${SCENARIO:-overactive-local.json}"
@@ -157,7 +161,7 @@ cleanup() {
   if [[ "${KEEP_CLUSTER:-0}" != 1 ]]; then
     k3d cluster delete "${CLUSTER_NAME}" >/dev/null 2>&1 || true
   fi
-  docker image rm "${K3D_WRAPPER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}" \
+  docker image rm "${K3D_UPLOADER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}" \
     >/dev/null 2>&1 || true
   if [[ "${KEEP_WORK}" != 1 ]]; then
     rm -rf "${WORK_ROOT}"
@@ -175,9 +179,18 @@ docker rm -f "${PBS_CONTAINER_NAME}" "${MINIO_CONTAINER_NAME}" >/dev/null 2>&1 |
 mkdir -p "${LOGS_ROOT}" "${WORK_ROOT}/bin" "${WORK_ROOT}/results"
 chmod 0777 "${WORK_ROOT}" "${LOGS_ROOT}"
 
-ensure_source_image "${WRAPPER_SOURCE_IMAGE}"
+# The uploader image replaces the retired wrapper image in the cluster: it
+# backs both the prefix-preflight and uploader containers of the emulation Job.
+if [[ -z "${UPLOADER_IMAGE}" ]]; then
+  UPLOADER_IMAGE="coinjoin-pipeline-uploader:${RUN_TOKEN}"
+  echo "Building the uploader image ${UPLOADER_IMAGE}..."
+  docker build -t "${UPLOADER_IMAGE}" \
+    -f "${PROJECT_DIR}/container/uploader.Dockerfile" "${PROJECT_DIR}/container"
+else
+  ensure_source_image "${UPLOADER_IMAGE}"
+fi
 ensure_source_image "${COINJOIN_EMULATOR_SOURCE_IMAGE}"
-docker tag "${WRAPPER_SOURCE_IMAGE}" "${K3D_WRAPPER_IMAGE}"
+docker tag "${UPLOADER_IMAGE}" "${K3D_UPLOADER_IMAGE}"
 docker tag "${COINJOIN_EMULATOR_SOURCE_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"
 
 if [[ -n "${PBS_BLOCKSCI_LOCAL_IMAGE}" ]]; then
@@ -187,9 +200,15 @@ if [[ -n "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" ]]; then
   export_pbs_docker_archive \
     "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" coinjoin-analysis --pbs-coinjoin-analysis-image
 fi
+if [[ -n "${PBS_UNIFIED_REPORT_LOCAL_IMAGE}" ]]; then
+  docker image inspect "${PBS_UNIFIED_REPORT_LOCAL_IMAGE}" >/dev/null 2>&1 \
+    || docker pull "${PBS_UNIFIED_REPORT_LOCAL_IMAGE}"
+  export_pbs_docker_archive \
+    "${PBS_UNIFIED_REPORT_LOCAL_IMAGE}" unified-report --unified-report-image
+fi
 
-echo "Extracting s5cmd from ${WRAPPER_SOURCE_IMAGE} for the host and the PBS container..."
-S5CMD_SOURCE_CONTAINER="$(docker create "${WRAPPER_SOURCE_IMAGE}")"
+echo "Extracting s5cmd from ${UPLOADER_IMAGE} for the host and the PBS container..."
+S5CMD_SOURCE_CONTAINER="$(docker create "${UPLOADER_IMAGE}")"
 docker cp "${S5CMD_SOURCE_CONTAINER}:/usr/local/bin/s5cmd" "${WORK_ROOT}/bin/s5cmd"
 docker rm -f "${S5CMD_SOURCE_CONTAINER}" >/dev/null
 chmod 0755 "${WORK_ROOT}/bin/s5cmd"
@@ -223,13 +242,13 @@ k3d cluster create "${CLUSTER_NAME}" \
   --servers 1 --agents "${K3D_AGENTS:-2}" --wait --timeout "${K3D_WAIT_TIMEOUT:-240s}"
 echo "Importing wrapper and emulator images into ${CLUSTER_NAME}..."
 k3d image import --cluster "${CLUSTER_NAME}" \
-  "${K3D_WRAPPER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"
+  "${K3D_UPLOADER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"
 # k3d exits 0 even when containerd rejects the tarball (e.g. "content digest
 # ... not found" when Docker's containerd image store is enabled). Verify the
 # images actually landed on a node, otherwise the job pod would hang in
 # Init:ImagePullBackOff until the outer timeout fires ~90 min later.
 SERVER_NODE="k3d-${CLUSTER_NAME}-server-0"
-for image in "${K3D_WRAPPER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"; do
+for image in "${K3D_UPLOADER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"; do
   if ! docker exec "${SERVER_NODE}" crictl images 2>/dev/null | grep -qF "${image%:*}"; then
     echo "FAIL: image ${image} was not imported into ${CLUSTER_NAME} (k3d import silently failed)." >&2
     echo "      If Docker uses the containerd image store, disable it: set" >&2
@@ -237,7 +256,7 @@ for image in "${K3D_WRAPPER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"; do
     exit 1
   fi
 done
-WRAPPER_IMAGE="${K3D_WRAPPER_IMAGE}"
+UPLOADER_IMAGE="${K3D_UPLOADER_IMAGE}"
 COINJOIN_EMULATOR_IMAGE="${K3D_COINJOIN_EMULATOR_IMAGE}"
 k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
 kubectl --kubeconfig "${HOST_KUBECONFIG}" wait node --all --for=condition=Ready --timeout=240s
@@ -258,9 +277,8 @@ docker cp "${WORK_ROOT}/bin/s5cmd" "${PBS_CONTAINER_NAME}:/usr/bin/s5cmd"
 docker exec -u root "${PBS_CONTAINER_NAME}" chmod 0755 /usr/bin/s5cmd
 
 export PBS_CLIENT_WORKDIR="${WORK_ROOT}"
-export PBS_FRONTEND_DIRECT=1
 export EMULATION_LOGS_DIR="${LOGS_ROOT}"
-export WRAPPER_IMAGE COINJOIN_EMULATOR_IMAGE
+export COINJOIN_EMULATOR_IMAGE
 
 echo "Running the S3-compatible full-run for run ${RUN_ID}..."
 set +e
@@ -281,6 +299,7 @@ set +e
     --s3-secret-name "${S3_SECRET_NAME}" \
     --s3-credentials-file "${CREDENTIALS_FILE}" \
     --s3-profile "${S3_PROFILE}" \
+    --uploader-image "${UPLOADER_IMAGE}" \
     --analysisPbs \
     --blocksciPbs \
     --test-values \

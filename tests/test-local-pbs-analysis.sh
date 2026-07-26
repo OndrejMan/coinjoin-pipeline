@@ -123,7 +123,6 @@ export PBS_CONTAINER_NAME PBS_WORKDIR_HOST="${WORK_DIR}" PBS_WORKDIR_CONTAINER="
 source "${PBS_ENV}"
 export PBS_CLIENT_WORKDIR="${WORK_DIR}"
 export EMULATION_LOGS_DIR="${WORK_DIR}"
-export PBS_FRONTEND_DIRECT=1
 
 echo "Running coinjoin-analysis through the documented runIt.sh PBS interface..."
 (cd "${PROJECT_DIR}" && ./runIt.sh coinjoin-analysis \

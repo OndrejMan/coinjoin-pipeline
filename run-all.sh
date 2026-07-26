@@ -5,13 +5,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 LOCAL_TAG="${LOCAL_TAG:-local}"
-LOCAL_WRAPPER_IMAGE="${LOCAL_WRAPPER_IMAGE:-coinjoin-pipeline:${LOCAL_TAG}}"
 LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE:-blocksci-cj:${LOCAL_TAG}}"
 LOCAL_BLOCKSCI_IMAGE="${LOCAL_BLOCKSCI_IMAGE:-blocksci-complete:${LOCAL_TAG}}"
 LOCAL_COINJOIN_EMULATOR_IMAGE="${LOCAL_COINJOIN_EMULATOR_IMAGE:-coinjoin-emulator:${LOCAL_TAG}}"
 LOCAL_COINJOIN_ANALYSIS_IMAGE="${LOCAL_COINJOIN_ANALYSIS_IMAGE:-coinjoin-analysis:${LOCAL_TAG}}"
 
-UPSTREAM_WRAPPER_IMAGE="${UPSTREAM_WRAPPER_IMAGE:-ghcr.io/ondrejman/coinjoin-pipeline:latest}"
 UPSTREAM_BLOCKSCI_IMAGE="${UPSTREAM_BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-complete:latest}"
 UPSTREAM_COINJOIN_EMULATOR_IMAGE="${UPSTREAM_COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
 UPSTREAM_COINJOIN_ANALYSIS_IMAGE="${UPSTREAM_COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}"
@@ -42,14 +40,14 @@ Options:
 
 Environment overrides:
   LOCAL_TAG                                  Local image tag suffix.
-  WRAPPER_IMAGE, BLOCKSCI_IMAGE,            Selected image refs for either mode.
+  BLOCKSCI_IMAGE,
     COINJOIN_EMULATOR_IMAGE,
-    COINJOIN_ANALYSIS_IMAGE
-  LOCAL_WRAPPER_IMAGE, LOCAL_BLOCKSCI_IMAGE,
+    COINJOIN_ANALYSIS_IMAGE                 Selected image refs for either mode.
+  LOCAL_BLOCKSCI_IMAGE,
     LOCAL_BLOCKSCI_BASE_IMAGE,
     LOCAL_COINJOIN_EMULATOR_IMAGE,
     LOCAL_COINJOIN_ANALYSIS_IMAGE           Local-mode defaults.
-  UPSTREAM_WRAPPER_IMAGE, UPSTREAM_BLOCKSCI_IMAGE,
+  UPSTREAM_BLOCKSCI_IMAGE,
     UPSTREAM_COINJOIN_EMULATOR_IMAGE,
     UPSTREAM_COINJOIN_ANALYSIS_IMAGE        Github-mode defaults.
   UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX   Image prefix for emulator pod images.
@@ -142,7 +140,6 @@ if [[ "${IMAGE_MODE}" == "local" ]]; then
     echo "ERROR: --pull-only is only valid in github mode" >&2
     exit 2
   fi
-  WRAPPER_IMAGE="${WRAPPER_IMAGE:-${LOCAL_WRAPPER_IMAGE}}"
   BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE:-${LOCAL_BLOCKSCI_IMAGE}}"
   COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-${LOCAL_COINJOIN_EMULATOR_IMAGE}}"
   COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE:-${LOCAL_COINJOIN_ANALYSIS_IMAGE}}"
@@ -162,7 +159,6 @@ else
   if [[ "${BUILD_ONLY}" == "1" ]]; then
     PULL_ONLY=1
   fi
-  WRAPPER_IMAGE="${WRAPPER_IMAGE:-${UPSTREAM_WRAPPER_IMAGE}}"
   BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE:-${UPSTREAM_BLOCKSCI_IMAGE}}"
   COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-${UPSTREAM_COINJOIN_EMULATOR_IMAGE}}"
   COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE:-${UPSTREAM_COINJOIN_ANALYSIS_IMAGE}}"
@@ -239,7 +235,6 @@ run_with_selected_images_in_dir() {
   shift
   run_in_dir "${workdir}" env \
     EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
-    WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
     BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
     BLOCKSCI_PULL_POLICY="${BLOCKSCI_PULL_POLICY_VALUE}" \
     COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
@@ -248,7 +243,6 @@ run_with_selected_images_in_dir() {
     COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD_VALUE}" \
     COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
     COINJOIN_ANALYSIS_PULL_POLICY="${COINJOIN_ANALYSIS_PULL_POLICY_VALUE}" \
-    POST_WRAPPER_SHELL=0 \
     BLOCKSCI_LAUNCH_JUPYTER=0 \
     RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
     "$@"
@@ -335,9 +329,6 @@ if [[ "${BUILD_IMAGES}" == "1" ]]; then
   echo "Building local CoinJoin emulator image ${COINJOIN_EMULATOR_IMAGE}..."
   run_step docker build -t "${COINJOIN_EMULATOR_IMAGE}" "${REPO_ROOT}/coinjoin-emulator"
 
-  echo "Building local wrapper image ${WRAPPER_IMAGE}..."
-  run_step docker build -t "${WRAPPER_IMAGE}" "${SCRIPT_DIR}"
-
   echo "Building local coinjoin-analysis image ${COINJOIN_ANALYSIS_IMAGE}..."
   run_step docker build -t "${COINJOIN_ANALYSIS_IMAGE}" -f "${REPO_ROOT}/coinjoin-analysis/docker/analysis.Dockerfile" "${REPO_ROOT}/coinjoin-analysis"
 fi
@@ -347,7 +338,6 @@ if [[ "${IMAGE_MODE}" == "local" ]]; then
 fi
 
 if [[ "${PULL_IMAGES}" == "1" ]]; then
-  pull_image "${WRAPPER_IMAGE}"
   pull_image "${BLOCKSCI_IMAGE}"
   pull_image "${COINJOIN_EMULATOR_IMAGE}"
   pull_image "${COINJOIN_ANALYSIS_IMAGE}"
@@ -386,6 +376,7 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
     "tests/pipeline/test_emulate_exit_status.sh"
     "tests/pipeline/test_emulate_interrupt_cleanup.sh"
     "tests/test-runIt-overactive-local.sh"
+    "tests/test-wrapper-signal-cleanup.sh"
     "tests/test-podman-no-host-docker.sh"
     "tests/test-runIt-overactive-local-docker.sh"
     "tests/test-runIt-joinmarket-local-docker.sh"
@@ -406,17 +397,14 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
     if [[ "${test_script}" == "tests/test-runIt-joinmarket-local-docker.sh" ]]; then
       run_in_dir "${SCRIPT_DIR}" env \
         EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
-        LOCAL_WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
         LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE}" \
         LOCAL_BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
         LOCAL_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         LOCAL_COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
-        UPSTREAM_WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
         UPSTREAM_BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
         UPSTREAM_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         UPSTREAM_COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
         COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD_VALUE}" \
-        POST_WRAPPER_SHELL=0 \
         LOCAL_IMAGES_PREBUILT=1 \
         RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
         bash "${test_script}" "${CHILD_IMAGE_MODE}"
@@ -435,7 +423,6 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
       fi
       run_in_dir "${SCRIPT_DIR}" env \
         EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
-        WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
         COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         COINJOIN_EMULATOR_PULL_POLICY="${COINJOIN_EMULATOR_PULL_POLICY_VALUE}" \
         BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
@@ -457,7 +444,6 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
       fi
       run_in_dir "${SCRIPT_DIR}" env \
         EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
-        WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
         COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         COINJOIN_EMULATOR_PULL_POLICY="${COINJOIN_EMULATOR_PULL_POLICY_VALUE}" \
         BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
@@ -479,7 +465,6 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
         )
       fi
       run_in_dir "${SCRIPT_DIR}" env \
-        WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
         COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
         COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
@@ -488,28 +473,23 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
         bash "${test_script}" wasabi
     elif [[ "${test_script}" == "tests/test-kubernetes-k3d.sh" ]]; then
       run_in_dir "${SCRIPT_DIR}" env \
-        WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
         EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         IMAGE_PREFIX="${COINJOIN_EMULATOR_IMAGE_PREFIX_VALUE}" \
         EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
         COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD_VALUE}" \
-        POST_WRAPPER_SHELL=0 \
         RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
         bash "${test_script}"
     elif [[ "${test_script}" == "tests/test-runIt-overactive-local-docker.sh" ]]; then
       run_in_dir "${SCRIPT_DIR}" env \
         EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
         LOCAL_TAG="${LOCAL_TAG}" \
-        LOCAL_WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
         LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE}" \
         LOCAL_BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
         LOCAL_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         LOCAL_COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
-        WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
         BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
         COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
-        POST_WRAPPER_SHELL=0 \
         LOCAL_IMAGES_PREBUILT=1 \
         RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
         bash "${test_script}" "${CHILD_IMAGE_MODE}"
@@ -517,16 +497,13 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
       run_in_dir "${SCRIPT_DIR}" env \
         EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
         LOCAL_TAG="${LOCAL_TAG}" \
-        LOCAL_WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
         LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE}" \
         LOCAL_BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
         LOCAL_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         LOCAL_COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
-        WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
         BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
         COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
         COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
-        POST_WRAPPER_SHELL=0 \
         LOCAL_IMAGES_PREBUILT=1 \
         RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
         bash "${test_script}" "${CHILD_IMAGE_MODE}"

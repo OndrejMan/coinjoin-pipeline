@@ -12,7 +12,13 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "pipeline"))
 
-from client.artifacts import ArtifactTransportError  # noqa: E402
+from client.artifacts import (  # noqa: E402
+    ArtifactTransportError,
+    REQUIRED_EXPORTERS,
+    STAGED_EXPORTERS_COMPLETE,
+    STAGED_EXPORTERS_MISSING,
+    STAGED_EXPORTERS_PARTIAL,
+)
 from client.kubernetes import (  # noqa: E402
     render_s3_emulation_resources,
     s3_emulation_job_name,
@@ -36,6 +42,8 @@ from client.pbs import (  # noqa: E402
 )
 from client.wrapper import (  # noqa: E402
     build_parser,
+    ensure_staged_exporters,
+    pbs_stages_need_exporters,
     run_pbs_from_s3,
     validate_artifact_arguments,
 )
@@ -47,6 +55,17 @@ COMMON = dict(
     credentials_file="/storage/user/.aws/credentials",
     profile="coinjoin",
 )
+
+
+@pytest.fixture(autouse=True)
+def stub_exporter_staging():
+    """`run_pbs_from_s3` checks the run prefix for exporters before submitting.
+
+    The submission tests are about job wiring and must not reach a real bucket;
+    the staging decision itself is covered directly further down.
+    """
+    with mock.patch("client.wrapper.ensure_staged_exporters"):
+        yield
 
 
 def render_kubernetes_manifest(*, reuse_namespace: bool = False) -> dict:
@@ -193,7 +212,7 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     assert ".pbs/blocksci-parse.done" in parse
     assert "blocksci_parser" not in analyze
     assert "sha256sum -c blocksci_data.tar.gz.sha256" in analyze
-    assert "blocksci/analysis.py" in analyze
+    assert "blocksci_export/analysis.py" in analyze
     assert ".pbs/blocksci-analyze.done" in analyze
     assert '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"' not in analyze
 
@@ -290,17 +309,250 @@ def test_external_blocksci_import_repackages_index_without_parser() -> None:
     assert '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"' not in script
 
 
-def test_wrapper_images_package_unified_report_s3_template() -> None:
-    for dockerfile in (
-        PROJECT_ROOT / "Dockerfile",
-        PROJECT_ROOT / "pipeline" / "client" / "Dockerfile",
+STUB_S5CMD = """#!/usr/bin/env bash
+# Stand-in for s5cmd: the real binary is not installed on CI runners, and the
+# preflight only depends on `ls` exit status plus the shape of its output.
+target="${@: -1}"
+case "$target" in
+  */\\*)
+    printf '%s' "$STUB_LISTING"
+    exit "$STUB_LISTING_STATUS"
+    ;;
+  *)
+    if [ "$STUB_REQUIRED_STATUS" != "0" ]; then
+      echo "ERROR \\"ls $target\\": no object found" >&2
+    fi
+    exit "$STUB_REQUIRED_STATUS"
+    ;;
+esac
+"""
+
+STAGED_KEYS_LISTING = (
+    "2026/07/26 04:00:00     1024  .pipeline/exporters/unified_report.py\n"
+    "2026/07/26 04:00:00     2048  .pipeline/exporters/blocksci_export/analysis.py\n"
+)
+STAGED_DIR_LISTING = "                                  DIR  .pipeline/\n"
+
+
+def run_prefix_preflight(
+    listing: str, *, listing_status: int = 0, required_status: int = 0
+) -> subprocess.CompletedProcess:
+    manifest = render_kubernetes_manifest()
+    job = next(item for item in manifest["items"] if item["kind"] == "Job")
+    init_containers = job["spec"]["template"]["spec"]["initContainers"]
+    script = next(
+        container for container in init_containers if container["name"] == "prefix-preflight"
+    )["command"][-1]
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        binaries = root / "bin"
+        binaries.mkdir()
+        stub = binaries / "s5cmd"
+        stub.write_text(STUB_S5CMD, encoding="utf-8")
+        stub.chmod(0o755)
+        # The rendered script writes credentials to /credentials, which only
+        # exists inside the pod; everything else about it runs unchanged.
+        credentials = root / "credentials"
+        script = script.replace("/credentials/credentials", str(credentials / "credentials"))
+        script = script.replace("mkdir -p /credentials", f"mkdir -p {credentials}")
+        return subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            check=False,
+            env={
+                **os.environ,
+                "PATH": f"{binaries}:{os.environ['PATH']}",
+                "S3_ACCESS_KEY_ID": "key",
+                "S3_SECRET_ACCESS_KEY": "secret",
+                "S3_ENDPOINT_URL": "https://s3.cl4.du.cesnet.cz",
+                "ARTIFACT_URI": "s3://bucket/runs",
+                "RUN_ID": "run-1",
+                "STUB_LISTING": listing,
+                "STUB_LISTING_STATUS": str(listing_status),
+                "STUB_REQUIRED_STATUS": str(required_status),
+            },
+        )
+
+
+@pytest.mark.parametrize("listing", [STAGED_KEYS_LISTING, STAGED_DIR_LISTING])
+def test_prefix_preflight_accepts_both_listing_shapes(listing: str) -> None:
+    # Whether the wildcard expands across "/" (full keys) or collapses into a
+    # DIR row decides whether every staged S3 run fails its own preflight.
+    result = run_prefix_preflight(listing)
+    assert result.returncode == 0, result.stderr
+
+
+def test_prefix_preflight_rejects_a_reused_run_prefix() -> None:
+    result = run_prefix_preflight(
+        STAGED_KEYS_LISTING + "2026/07/26 04:00:00  512  .k8s/upload.done\n"
+    )
+    assert result.returncode == 1
+    assert "already contains artifacts" in result.stderr
+    assert ".k8s/upload.done" in result.stderr
+
+
+def test_prefix_preflight_rejects_incomplete_staging() -> None:
+    result = run_prefix_preflight(
+        'ERROR "ls s3://bucket/runs/run-1/*": no object found\n',
+        listing_status=1,
+        required_status=1,
+    )
+    assert result.returncode == 1
+    assert "staged exporters are incomplete" in result.stderr
+
+
+def exporter_staging_args() -> SimpleNamespace:
+    return SimpleNamespace(
+        artifact_uri="s3://bucket/runs",
+        run_id="run-9",
+        s3_endpoint_url="https://s3.cl4.du.cesnet.cz",
+        s3_credentials_file="/storage/user/.aws/credentials",
+        s3_profile="coinjoin",
+    )
+
+
+def test_standalone_s3_emulation_can_supply_frontend_credentials() -> None:
+    # stage_kubernetes_s3_run reads args.s3_credentials_file/s3_profile before
+    # creating the Job. The emulate parser used to define neither, so a live
+    # (non-dry) standalone S3 emulation died with AttributeError.
+    arguments = [
+        "emulate", "--engine", "wasabi", "--driver", "kubernetes",
+        "--artifact-backend", "s3", "--artifact-uri", "s3://bucket/runs",
+        "--s3-endpoint-url", "https://s3.example.invalid",
+        "--s3-secret-name", "coinjoin-s3", "--run-id", "run-1", "--reuse-namespace",
+        "--kubeconfig", "/dev/null",
+    ]
+    parser = build_parser()
+    args = parser.parse_args(
+        arguments + ["--s3-credentials-file", "/storage/user/.aws/credentials",
+                     "--s3-profile", "coinjoin"]
+    )
+    assert args.s3_credentials_file == "/storage/user/.aws/credentials"
+    assert args.s3_profile == "coinjoin"
+
+    with pytest.raises(SystemExit):
+        # And they are mandatory, not silently defaulted.
+        validate_artifact_arguments(parser, parser.parse_args(arguments))
+
+
+def test_pbs_from_s3_stages_exporters_into_a_prefix_without_them() -> None:
+    # A `--blocksci-task update` run starts from a fresh, empty prefix, but the
+    # analyze and report jobs download .pipeline/exporters/ from that same one.
+    with (
+        mock.patch(
+            "client.wrapper.staged_exporters_state",
+            return_value=(STAGED_EXPORTERS_MISSING, list(REQUIRED_EXPORTERS)),
+        ),
+        mock.patch("client.wrapper.compose_env", return_value={"EXPORTERS_DIR": "/checkout/exporters"}),
+        mock.patch("client.wrapper.upload_exporters") as upload,
     ):
-        content = dockerfile.read_text(encoding="utf-8")
-        assert "unified_report_s3_template.sh" in content
-        assert "blocksci_parse_s3_template.sh" in content
-        assert "blocksci_update_s3_template.sh" in content
-        assert "blocksci_analyze_s3_template.sh" in content
-        assert "mappings_s3_template.sh" in content
+        ensure_staged_exporters(exporter_staging_args())
+
+    upload.assert_called_once()
+    assert upload.call_args.args[1:3] == ("s3://bucket/runs", "run-9")
+
+
+def test_pbs_from_s3_keeps_exporters_an_earlier_stage_already_ran_with() -> None:
+    with (
+        mock.patch(
+            "client.wrapper.staged_exporters_state",
+            return_value=(STAGED_EXPORTERS_COMPLETE, []),
+        ),
+        mock.patch("client.wrapper.upload_exporters") as upload,
+    ):
+        ensure_staged_exporters(exporter_staging_args())
+
+    upload.assert_not_called()
+
+
+def test_pbs_from_s3_refuses_to_mix_exporter_versions_in_one_prefix() -> None:
+    # A prefix staged before the blocksci_export rename still has
+    # unified_report.py, so re-staging would leave the run's stages on different
+    # exporter trees.
+    with (
+        mock.patch(
+            "client.wrapper.staged_exporters_state",
+            return_value=(STAGED_EXPORTERS_PARTIAL, ["blocksci_export/analysis.py"]),
+        ),
+        mock.patch("client.wrapper.upload_exporters") as upload,
+    ):
+        with pytest.raises(ArtifactTransportError, match="fresh --run-id"):
+            ensure_staged_exporters(exporter_staging_args())
+
+    upload.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("reference", "expected"),
+    [
+        ("python:3.12-slim-bookworm", "docker://python:3.12-slim-bookworm"),
+        ("ghcr.io/ondrejman/x@sha256:abc", "docker://ghcr.io/ondrejman/x@sha256:abc"),
+        ("docker://python:3.12", "docker://python:3.12"),
+        # How the offline tests hand Apptainer a locally exported image; the
+        # naive "://" test used to glue a second scheme in front of it.
+        ("docker-archive:/storage/images/report.tar", "docker-archive:/storage/images/report.tar"),
+        ("oras://registry.example/x:1", "oras://registry.example/x:1"),
+    ],
+)
+def test_unified_report_image_keeps_existing_uri_schemes(reference: str, expected: str) -> None:
+    from client.wrapper import resolve_unified_report_pbs_image
+
+    args = SimpleNamespace(unified_report_image=reference)
+    assert resolve_unified_report_pbs_image(args) == expected
+
+
+def test_frontend_rejects_an_s5cmd_without_exclude_support() -> None:
+    from client.artifacts import require_s5cmd_version
+
+    with mock.patch("client.artifacts.s5cmd_version", return_value=(2, 0, 0)):
+        with pytest.raises(ArtifactTransportError, match="too old"):
+            require_s5cmd_version()
+    # New enough, and an unparsable version must not block a run.
+    with mock.patch("client.artifacts.s5cmd_version", return_value=(2, 3, 0)):
+        require_s5cmd_version()
+    with mock.patch("client.artifacts.s5cmd_version", return_value=None):
+        require_s5cmd_version()
+
+
+def kubectl_results(job_status: dict, pods: list[dict]):
+    def fake_run(command, **_kwargs):
+        payload = {"status": job_status} if "job" in command else {"items": pods}
+        return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
+
+    return fake_run
+
+
+def waiting_pod(container_key: str, name: str, reason: str) -> dict:
+    return {"status": {container_key: [{"name": name, "state": {"waiting": {"reason": reason}}}]}}
+
+
+def test_job_probe_stops_waiting_when_a_container_cannot_start() -> None:
+    # An unpullable uploader image leaves the Job active forever: the in-pod
+    # watchdog runs inside that very image, so only the frontend can notice.
+    from client.kubernetes import kubernetes_job_probe
+
+    probe = kubernetes_job_probe(Path("/kube/config"), "coinjoin", "coinjoin-s3-run-1")
+    for container_key, name in (
+        ("initContainerStatuses", "prefix-preflight"),
+        ("containerStatuses", "uploader"),
+    ):
+        with mock.patch(
+            "client.kubernetes.subprocess.run",
+            side_effect=kubectl_results({}, [waiting_pod(container_key, name, "ImagePullBackOff")]),
+        ):
+            assert probe() == "terminal", name
+
+
+def test_job_probe_keeps_waiting_while_containers_are_merely_pending() -> None:
+    from client.kubernetes import kubernetes_job_probe
+
+    probe = kubernetes_job_probe(Path("/kube/config"), "coinjoin", "coinjoin-s3-run-1")
+    with mock.patch(
+        "client.kubernetes.subprocess.run",
+        side_effect=kubectl_results({}, [waiting_pod("containerStatuses", "controller", "PodInitializing")]),
+    ):
+        assert probe() == "running"
 
 
 def test_s3_emulation_job_name_is_unique_and_dns_safe() -> None:
@@ -435,7 +687,7 @@ def test_pbs_from_s3_submits_parallel_analyzers_then_dependent_report() -> None:
     assert blocksci.call_args.kwargs["include_report"] is False
     assert blocksci.call_args.kwargs["export_analysis"] is True
     assert "unified_report.py" not in blocksci.call_args.kwargs["command"]
-    assert "blocksci/analysis.py" in blocksci.call_args.kwargs["command"]
+    assert "blocksci_export/analysis.py" in blocksci.call_args.kwargs["command"]
     assert report.call_args.kwargs["dependency_job_ids"] == (
         "analysis.server",
         "blocksci.server",
@@ -444,9 +696,9 @@ def test_pbs_from_s3_submits_parallel_analyzers_then_dependent_report() -> None:
     assert report.call_args.kwargs["mem"] == "8gb"
     assert report.call_args.kwargs["scratch"] == "10gb"
     assert report.call_args.kwargs["walltime"] == "01:00:00"
-    assert report.call_args.kwargs["image"] == (
-        "docker://ghcr.io/ondrejman/coinjoin-pipeline:latest"
-    )
+    # Pinned public Python image from container/unified-report.image; the
+    # scheme is added by the Singularity caller, not stored in the lock file.
+    assert report.call_args.kwargs["image"] == "docker://python:3.12-slim-bookworm"
     assert report.call_args.kwargs["command"] == blocksci_export_pbs_command(
         run_id="run-1",
         coinjoin_type="wasabi2",
@@ -456,7 +708,15 @@ def test_pbs_from_s3_submits_parallel_analyzers_then_dependent_report() -> None:
         joinmarket_percentage_fee=0.00004,
         joinmarket_max_depth=200000,
         test_values=True,
+        uploader_image="ghcr.io/ondrejman/coinjoin-pipeline-uploader:latest",
+        unified_report_image="python:3.12-slim-bookworm",
     )
+    # This job is the only channel through which the report learns the two
+    # images that never touch a daemon it could inspect; without them both
+    # manifest fields stay null, which is what images.wrapper used to hold.
+    command = report.call_args.kwargs["command"]
+    assert "--uploader-image ghcr.io/ondrejman/coinjoin-pipeline-uploader:latest" in command
+    assert "--unified-report-image python:3.12-slim-bookworm" in command
 
 
 def test_pbs_from_s3_mappings_depend_on_analysis_and_gate_report() -> None:
@@ -988,3 +1248,62 @@ def test_kubernetes_manifest_reuses_existing_namespace() -> None:
     assert all(
         item["metadata"].get("namespace") == "coinjoin" for item in manifest["items"]
     )
+
+
+def exporter_need_args(**overrides) -> SimpleNamespace:
+    defaults = dict(
+        analysisPbs=False,
+        blocksciPbs=True,
+        mappingsPbs=False,
+        blocksci_workflow="reusable",
+        blocksci_task="detect",
+    )
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+def test_only_stages_that_run_the_exporters_require_them() -> None:
+    # Baseline, mappings, parse, update, script and notebook jobs bind an empty
+    # exporters directory at most; staging for them would let a local exporter
+    # problem block a job that cannot use one.
+    assert pbs_stages_need_exporters(exporter_need_args()) is True
+    assert pbs_stages_need_exporters(exporter_need_args(blocksci_workflow="combined")) is True
+    assert (
+        pbs_stages_need_exporters(
+            exporter_need_args(blocksci_workflow="combined", blocksci_task="notebook")
+        )
+        is True
+    )
+    for overrides in (
+        dict(blocksciPbs=False, analysisPbs=True),
+        dict(blocksciPbs=False, mappingsPbs=True),
+        dict(blocksci_task="parse"),
+        dict(blocksci_task="script"),
+        dict(blocksci_task="notebook"),
+        dict(blocksci_workflow="cached", blocksci_task="update"),
+    ):
+        assert pbs_stages_need_exporters(exporter_need_args(**overrides)) is False, overrides
+
+
+def test_pbs_from_s3_skips_staging_for_stages_that_never_run_exporters() -> None:
+    args = s3_pbs_args(analysis=True, blocksci=False)
+    args.stage_exporters = False
+    with (
+        mock.patch("client.wrapper.ensure_staged_exporters") as staging,
+        mock.patch("client.wrapper.submit_coinjoin_analysis_s3_pbs", return_value="1.job"),
+    ):
+        run_pbs_from_s3(args)
+
+    staging.assert_not_called()
+
+
+def test_stage_exporters_flag_pre_stages_for_a_later_detect_run() -> None:
+    args = s3_pbs_args(analysis=True, blocksci=False)
+    args.stage_exporters = True
+    with (
+        mock.patch("client.wrapper.ensure_staged_exporters") as staging,
+        mock.patch("client.wrapper.submit_coinjoin_analysis_s3_pbs", return_value="1.job"),
+    ):
+        run_pbs_from_s3(args)
+
+    staging.assert_called_once()

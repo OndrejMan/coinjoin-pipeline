@@ -12,7 +12,7 @@ PROJECT_NAME="blocksci-emulator"
 if [[ -z "${HOST_CLIENT_DIR:-}" ]]; then
   HOST_CLIENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/client" && pwd)"
 fi
-export SCENARIOS_DIR="${HOST_CLIENT_DIR}/scenarios"
+export SCENARIOS_DIR="${SCENARIOS_DIR:-${HOST_CLIENT_DIR}/scenarios}"
 HOST_ROOT_DIR="$(dirname "${HOST_CLIENT_DIR}")"
 export EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR:-${HOST_ROOT_DIR}/emulation_logs}"
 if [[ -z "${COMPOSE_FILE}" ]]; then

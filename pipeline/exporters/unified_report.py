@@ -14,18 +14,24 @@ from pathlib import Path
 if not hasattr(builtins, "xrange"):
     setattr(builtins, "xrange", range)
 
+# Import BlockSci before the exporters' parent directory joins sys.path: the
+# editable install is served by a meta-path finder that loses to every sys.path
+# entry, and the image keeps a bare 'blocksci' source tree next to the mounted
+# exporters (/mnt/blocksci). Resolving it here pins the real module in
+# sys.modules for every later 'import blocksci'.
 try:
-    import blocksci
+    import blocksci  # noqa: F401
 except ImportError:
     pass
 
 if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from exporters.blocksci import detector as _blocksci_export
 from exporters import cli as _cli
 from exporters import integration_diagnostics as _integration_diagnostics
-from exporters.blocksci.detector import *  # noqa: F403
+from exporters.blocksci_export import detector as _blocksci_export
+from exporters.blocksci_export.detector import *  # noqa: F403
+from exporters.blocksci_export.detector import assert_real_blocksci
 from exporters.cli import *  # noqa: F403
 from exporters.common import *  # noqa: F403
 from exporters.common import (
@@ -46,6 +52,9 @@ from exporters.scenario import *  # noqa: F403
 from exporters.script_metadata import *  # noqa: F403
 
 blocksci = _blocksci_export.blocksci
+# Run as a script the exporters directory is sys.path[0]; a module named blocksci
+# there would shadow the editable BlockSci install and only fail on first use.
+assert_real_blocksci(blocksci)
 build_chain_diagnostics = _integration_diagnostics.build_chain_diagnostics
 build_image_diagnostics = _integration_diagnostics.build_image_diagnostics
 build_integration_diagnostics = _integration_diagnostics.build_integration_diagnostics

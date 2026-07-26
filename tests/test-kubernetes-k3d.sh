@@ -17,7 +17,6 @@ EMULATION_TIMEOUT="${EMULATION_TIMEOUT:-90m}"
 SCENARIO="${SCENARIO:-overactive-local.json}"
 ACTION="${ACTION:-emulate}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
-WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/coinjoin-pipeline:latest}"
 EMULATOR_IMAGE="${EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
 # The wrapper reads COINJOIN_EMULATOR_IMAGE. Keep it aligned with the image
 # selected for this test so local-image validation does not fall back to GHCR.
@@ -36,7 +35,6 @@ if [[ -z "${CONTAINER_KUBE_HOST:-}" ]]; then
     CONTAINER_KUBE_HOST="host.containers.internal"
   fi
 fi
-export WRAPPER_IMAGE
 export COINJOIN_EMULATOR_IMAGE
 export KUBERNETES_CONTROL_IP="${CONTAINER_KUBE_HOST}"
 export KUBERNETES_COPY_TO_HOST_DIR="${KUBERNETES_COPY_TO_HOST_DIR:-${TMP_DIR}/btc-data}"
@@ -263,9 +261,6 @@ else:
 PY
 )
 
-if [[ "${WRAPPER_PULL_POLICY:-}" != never ]]; then
-  pull_image "${WRAPPER_IMAGE}"
-fi
 pull_image "${EMULATOR_IMAGE}"
 for image in "${ARTIFACT_IMAGES[@]}"; do
   pull_image "${image}"

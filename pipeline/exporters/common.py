@@ -76,6 +76,65 @@ def git_commit_for_path(path: Path) -> str | None:
     return commit or None
 
 
+def git_tree_is_dirty(path: Path) -> bool | None:
+    """Report uncommitted changes, or None where the checkout is unavailable.
+
+    The PBS/S3 node runs a downloaded exporter tree with no ``.git``, so this is
+    None there and the tree hash carries the provenance instead.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "status", "--porcelain"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return bool(result.stdout.strip())
+
+
+# Bytecode and caches are excluded from the staged upload, so hashing them would
+# make the frontend and node hashes disagree over noise.
+TREE_HASH_SKIPPED_DIRECTORIES = {"__pycache__", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache"}
+TREE_HASH_SKIPPED_SUFFIXES = {".pyc", ".pyo"}
+
+
+def tree_sha256(root: Path) -> str | None:
+    """Hash a source tree as sorted ``<file sha256> <relative path>`` lines.
+
+    Informational provenance: it names the exact exporter code a report was
+    produced by, which ``git rev-parse`` cannot do for a staged tree (no
+    ``.git``) or for an uncommitted checkout. It never gates execution.
+    """
+    root = Path(root)
+    if not root.is_dir():
+        return None
+    lines = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root)
+        if set(relative.parts[:-1]) & TREE_HASH_SKIPPED_DIRECTORIES:
+            continue
+        if path.suffix in TREE_HASH_SKIPPED_SUFFIXES:
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        lines.append(f"{digest} {relative.as_posix()}")
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+
+
+def digest_from_reference(image: str | None) -> str | None:
+    """Read the digest straight out of a pinned reference, without Docker.
+
+    The MetaCentrum frontend has no Docker daemon, so image provenance for the
+    pinned uploader/report references has to come from the reference itself.
+    """
+    if image and "@sha256:" in image:
+        return f"sha256:{image.rsplit('@sha256:', 1)[1]}"
+    return None
+
+
 def docker_image_digest(image: str | None) -> str | None:
     if not image:
         return None

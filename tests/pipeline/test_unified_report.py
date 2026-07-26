@@ -287,7 +287,6 @@ def complete_image_ids():
         "blocksci": "sha256:blocksci-id",
         "coinjoin_analysis": "sha256:analysis-id",
         "coinjoin_emulator": "sha256:emulator-id",
-        "wrapper": "sha256:wrapper-id",
     }
 
 
@@ -296,7 +295,7 @@ def complete_image_digests():
         "blocksci": "ghcr.io/ondrejman/blocksci-complete@sha256:blocksci",
         "coinjoin_analysis": "ghcr.io/ondrejman/coinjoin-analysis@sha256:analysis",
         "coinjoin_emulator": "ghcr.io/ondrejman/coinjoin-emulator@sha256:emulator",
-        "wrapper": "ghcr.io/ondrejman/coinjoin-pipeline@sha256:wrapper",
+        "uploader": "ghcr.io/ondrejman/coinjoin-pipeline-uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     }
 
 
@@ -305,7 +304,8 @@ def complete_image_refs():
         "blocksci": "blocksci:test",
         "coinjoin_analysis": "coinjoin-analysis:test",
         "coinjoin_emulator": "coinjoin-emulator:test",
-        "wrapper": "wrapper:test",
+        "uploader": "uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "unified_report": "python:3.12-slim-bookworm",
     }
 
 
@@ -406,8 +406,10 @@ class UnifiedReportTest(unittest.TestCase):
             "coinjoin-analysis:test",
             "--coinjoin-emulator-image",
             "coinjoin-emulator:test",
-            "--wrapper-image",
-            "wrapper:test",
+            "--uploader-image",
+            "uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--unified-report-image",
+            "python:3.12-slim-bookworm",
             "--emulator-git-commit",
             "abc123",
         ])
@@ -415,7 +417,8 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(args.blocksci_image, "blocksci:test")
         self.assertEqual(args.coinjoin_analysis_image, "coinjoin-analysis:test")
         self.assertEqual(args.coinjoin_emulator_image, "coinjoin-emulator:test")
-        self.assertEqual(args.wrapper_image, "wrapper:test")
+        self.assertEqual(args.uploader_image, "uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        self.assertEqual(args.unified_report_image, "python:3.12-slim-bookworm")
         self.assertEqual(args.emulator_git_commit, "abc123")
 
     def test_run_manifest_comparison_reports_changed_provenance(self):
@@ -434,7 +437,7 @@ class UnifiedReportTest(unittest.TestCase):
             blocksci_image="blocksci:old",
             coinjoin_analysis_image="coinjoin-analysis:old",
             coinjoin_emulator_image="coinjoin-emulator:old",
-            wrapper_image="wrapper:old",
+            uploader_image="uploader:old",
             emulator_git_commit="old-commit",
         )
         current = build_run_manifest(
@@ -452,7 +455,7 @@ class UnifiedReportTest(unittest.TestCase):
             blocksci_image="blocksci:new",
             coinjoin_analysis_image="coinjoin-analysis:old",
             coinjoin_emulator_image="coinjoin-emulator:old",
-            wrapper_image="wrapper:old",
+            uploader_image="uploader:old",
             emulator_git_commit="old-commit",
         )
 
@@ -617,13 +620,13 @@ class UnifiedReportTest(unittest.TestCase):
                 blocksci_image_digest="sha256:blocksci",
                 coinjoin_analysis_image_digest="sha256:analysis",
                 coinjoin_emulator_image_digest="sha256:emulator",
-                wrapper_image_digest="sha256:wrapper",
+                uploader_image_digest="sha256:uploader",
             )
 
         self.assertEqual(report["run_manifest"]["image_digests"]["blocksci"], "sha256:blocksci")
         self.assertEqual(report["run_manifest"]["image_digests"]["coinjoin_analysis"], "sha256:analysis")
         self.assertEqual(report["run_manifest"]["image_digests"]["coinjoin_emulator"], "sha256:emulator")
-        self.assertEqual(report["run_manifest"]["image_digests"]["wrapper"], "sha256:wrapper")
+        self.assertEqual(report["run_manifest"]["image_digests"]["uploader"], "sha256:uploader")
 
     def test_build_report_includes_integration_diagnostics(self):
         diagnostics = {"status": "ok", "problems": [], "images": {}, "chain": {}, "target_txids": {}, "detector": {}}
@@ -1945,7 +1948,6 @@ class UnifiedReportTest(unittest.TestCase):
                 "blocksci": {"status": "ok"},
                 "coinjoin_analysis": {"status": "ok"},
                 "coinjoin_emulator": {"status": "ok"},
-                "wrapper": {"status": "ok"},
             },
             "chain": {
                 "status": "ok",
@@ -1990,7 +1992,6 @@ class UnifiedReportTest(unittest.TestCase):
                 "blocksci": {"status": "ok"},
                 "coinjoin_analysis": {"status": "ok"},
                 "coinjoin_emulator": {"status": "ok"},
-                "wrapper": {"status": "ok"},
             },
             "chain": {
                 "status": "not_ok",

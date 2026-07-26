@@ -22,7 +22,6 @@ dev = ["ruff>=0.6"]
 coinjoin-pipeline = "coinjoin_pipeline.cli:main"
 cjp = "coinjoin_pipeline.cli:main"
 coinjoin-command-builder = "coinjoin_pipeline.builder:main"
-coinjoin-pipeline-image = "coinjoin_pipeline.pipeline_image:main"
 lint = "coinjoin_pipeline.lint:main"
 
 [tool.setuptools]
@@ -30,21 +29,15 @@ packages = [
   "coinjoin_pipeline",
   "coinjoin_pipeline.metadata",
   "coinjoin_pipeline.resources",
-  "coinjoin_pipeline.resources.container",
   "coinjoin_pipeline.resources.scenarios",
-  "coinjoin_pipeline._runtime",
-  "coinjoin_pipeline._runtime.client",
-  "coinjoin_pipeline._runtime.exporters",
 ]
-package-dir = {coinjoin_pipeline = "src/coinjoin_pipeline", "coinjoin_pipeline._runtime" = "src/coinjoin_pipeline/_runtime", "coinjoin_pipeline._runtime.client" = "pipeline/client", "coinjoin_pipeline._runtime.exporters" = "pipeline/exporters"}
+package-dir = {coinjoin_pipeline = "src/coinjoin_pipeline"}
 
 [tool.setuptools.package-data]
 coinjoin_pipeline = [
   "metadata/*.json",
-  "resources/container/*.sh",
   "resources/scenarios/*.json",
 ]
-"coinjoin_pipeline._runtime.client" = ["*.sh", "*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/pipeline"]

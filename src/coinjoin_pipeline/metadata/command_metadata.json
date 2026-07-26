@@ -1206,6 +1206,18 @@
           "required": false,
           "takes_value": true
         },
+        "--s3-credentials-file": {
+          "aliases": [
+            "--s3-credentials-file"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--s3-credentials-file",
+          "help": "Absolute s5cmd credentials-file path for PBS jobs.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
         "--s3-endpoint-url": {
           "aliases": [
             "--s3-endpoint-url"
@@ -1214,6 +1226,18 @@
           "default": null,
           "flag": "--s3-endpoint-url",
           "help": "CESNET/MetaCentrum S3-compatible endpoint URL.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--s3-profile": {
+          "aliases": [
+            "--s3-profile"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--s3-profile",
+          "help": "Named profile in the s5cmd credentials file.",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -1238,6 +1262,30 @@
           "default": null,
           "flag": "--scenario",
           "help": "JSON scenario path.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--unified-report-image": {
+          "aliases": [
+            "--unified-report-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--unified-report-image",
+          "help": "Override the pinned Python image for the PBS unified-report step (default: container/unified-report.image).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--uploader-image": {
+          "aliases": [
+            "--uploader-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--uploader-image",
+          "help": "Override the in-cluster uploader/preflight image (default: container/uploader.image).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -2440,6 +2488,30 @@
           "metavar": null,
           "required": false,
           "takes_value": false
+        },
+        "--unified-report-image": {
+          "aliases": [
+            "--unified-report-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--unified-report-image",
+          "help": "Override the pinned Python image for the PBS unified-report step (default: container/unified-report.image).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--uploader-image": {
+          "aliases": [
+            "--uploader-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--uploader-image",
+          "help": "Override the in-cluster uploader/preflight image (default: container/uploader.image).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
         }
       }
     },
@@ -3656,6 +3728,18 @@
           "required": false,
           "takes_value": true
         },
+        "--stage-exporters": {
+          "aliases": [
+            "--stage-exporters"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--stage-exporters",
+          "help": "Upload the checkout's exporters into the run prefix even when the selected stages do not run them, so a later detect or report stage finds the tree this invocation was launched from.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
         "--test-values": {
           "aliases": [
             "--test-values"
@@ -3667,6 +3751,30 @@
           "metavar": null,
           "required": false,
           "takes_value": false
+        },
+        "--unified-report-image": {
+          "aliases": [
+            "--unified-report-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--unified-report-image",
+          "help": "Override the pinned Python image for the PBS unified-report step (default: container/unified-report.image).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--uploader-image": {
+          "aliases": [
+            "--uploader-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--uploader-image",
+          "help": "Override the in-cluster uploader/preflight image (default: container/uploader.image).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
         }
       }
     },

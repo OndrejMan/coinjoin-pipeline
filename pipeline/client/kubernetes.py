@@ -136,12 +136,57 @@ def s3_emulation_job_name(run_id: str) -> str:
     return f"{slug}-{digest}"
 
 
+# A pod that cannot start its containers keeps the Job "active" forever, so the
+# Job conditions alone never end the wait. The in-pod watchdog covers the
+# controller, but it cannot cover the image it runs in itself: an unpullable
+# uploader image would otherwise block the frontend until --emulation-timeout.
+UNSTARTABLE_WAITING_REASONS = frozenset(
+    {"ErrImagePull", "ImagePullBackOff", "InvalidImageName", "CreateContainerConfigError"}
+)
+
+
+def unstartable_pod_reason(pod: dict) -> str | None:
+    """Return the fatal waiting reason of any container in ``pod``, if present."""
+    status = pod.get("status") or {}
+    for key in ("initContainerStatuses", "containerStatuses"):
+        for container in status.get(key) or []:
+            reason = ((container.get("state") or {}).get("waiting") or {}).get("reason")
+            if reason in UNSTARTABLE_WAITING_REASONS:
+                return f"{container.get('name')}: {reason}"
+    return None
+
+
 def kubernetes_job_probe(kubeconfig_path: Path, namespace: str, job_name: str) -> Callable[[], str]:
     """Build a kubectl-backed liveness probe for ``wait_for_s3_marker``.
 
     kubectl errors are inconclusive so polling continues on ``PROBE_UNKNOWN``.
     """
     job_seen = False
+
+    def unstartable() -> bool:
+        command = [
+            "kubectl", "--kubeconfig", str(kubeconfig_path), "get", "pods",
+            "--namespace", namespace, "--selector", f"job-name={job_name}", "-o", "json",
+        ]
+        try:
+            result = subprocess.run(command, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except FileNotFoundError:
+            return False
+        if result.returncode != 0:
+            return False
+        try:
+            pods = json.loads(result.stdout).get("items") or []
+        except json.JSONDecodeError:
+            return False
+        for pod in pods:
+            reason = unstartable_pod_reason(pod)
+            if reason:
+                print(
+                    f"[kubernetes] Job {job_name} cannot start its containers ({reason})",
+                    file=sys.stderr,
+                )
+                return True
+        return False
 
     def probe() -> str:
         nonlocal job_seen
@@ -174,7 +219,7 @@ def kubernetes_job_probe(kubeconfig_path: Path, namespace: str, job_name: str) -
         for condition in status.get("conditions") or []:
             if condition.get("type") in {"Complete", "Failed"} and condition.get("status") == "True":
                 return PROBE_TERMINAL
-        return PROBE_RUNNING
+        return PROBE_TERMINAL if unstartable() else PROBE_RUNNING
 
     return probe
 
@@ -243,28 +288,48 @@ s5() {
     s5cmd --credentials-file /credentials/credentials \
     --profile coinjoin --endpoint-url "$S3_ENDPOINT_URL" "$@"
 }
+# The frontend stages .pipeline/exporters/ into this prefix before creating the
+# Job, so that path is expected here; anything else still means a reused run id.
+# The filter must survive both `s5cmd ls` output shapes: a recursive listing of
+# full keys (.pipeline/exporters/...) if the wildcard crosses "/", and a plain
+# "DIR .pipeline/" row if it does not. Matching on `.pipeline` alone covers both;
+# nothing else the pipeline writes carries that string, and a genuinely reused
+# prefix still shows its own rows.
 set +e
 listing="$(s5 ls "$ARTIFACT_URI/$RUN_ID/*" 2>&1)"
 status=$?
 set -e
-rm -f /credentials/credentials
 if [ "$status" -eq 0 ]; then
-  echo "run prefix $ARTIFACT_URI/$RUN_ID/ already contains artifacts; choose a fresh --run-id" >&2
-  exit 1
+  unexpected="$(printf '%s\n' "$listing" | grep -v '\.pipeline' || true)"
+  if [ -n "$unexpected" ]; then
+    echo "run prefix $ARTIFACT_URI/$RUN_ID/ already contains artifacts; choose a fresh --run-id" >&2
+    printf '%s\n' "$unexpected" >&2
+    rm -f /credentials/credentials
+    exit 1
+  fi
+elif ! printf '%s\n' "$listing" | grep -qi 'no object found'; then
+  printf '%s\n' "$listing" >&2
+  rm -f /credentials/credentials
+  exit "$status"
 fi
-if printf '%s\n' "$listing" | grep -qi 'no object found'; then
-  exit 0
-fi
-printf '%s\n' "$listing" >&2
-exit "$status"
+# Ignoring the exporters is only half the check: an empty or partial staging
+# step would pass it just as well, so verify both entry points are present.
+for required in unified_report.py blocksci_export/analysis.py; do
+  if ! s5 ls "$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/$required" >/dev/null 2>&1; then
+    echo "staged exporters are incomplete: missing $required" >&2
+    rm -f /credentials/credentials
+    exit 1
+  fi
+done
+rm -f /credentials/credentials
+exit 0
 """
     uploader = r"""set -euo pipefail
 command -v s5cmd >/dev/null || { echo "s5cmd is required" >&2; exit 1; }
-mkdir -p /credentials "/artifacts/$RUN_ID/.k8s" "/artifacts/$RUN_ID/.pipeline"
+mkdir -p /credentials "/artifacts/$RUN_ID/.k8s"
 umask 077
 printf '[coinjoin]\naws_access_key_id = %s\naws_secret_access_key = %s\n' \
   "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" > /credentials/credentials
-cp -R /app/exporters "/artifacts/$RUN_ID/.pipeline/exporters"
 s5() {
   env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
     -u AWS_PROFILE -u AWS_DEFAULT_PROFILE -u AWS_REGION -u AWS_DEFAULT_REGION \

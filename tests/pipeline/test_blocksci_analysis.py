@@ -2,6 +2,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import types
 from unittest import mock
 
 import pytest
@@ -9,7 +10,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "pipeline"))
 
-from exporters.blocksci.analysis import (  # noqa: E402
+from exporters.blocksci_export.analysis import (  # noqa: E402
     SCHEMA_VERSION,
     detector_parameters,
     exported_addresses,
@@ -17,6 +18,7 @@ from exporters.blocksci.analysis import (  # noqa: E402
     write_analysis,
 )
 from exporters import cli as report_cli  # noqa: E402
+from exporters.blocksci_export.detector import assert_real_blocksci  # noqa: E402
 
 
 def parameters() -> dict:
@@ -105,29 +107,30 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
         blocksci_image="blocksci:test",
         coinjoin_analysis_image="analysis:test",
         coinjoin_emulator_image="emulator:test",
-        wrapper_image="pipeline:test",
+        uploader_image="uploader@sha256:" + "a"*64,
+        unified_report_image="python:3.12-slim-bookworm",
     )
     fake_blocksci = mock.Mock()
     with (
-        mock.patch("exporters.blocksci.analysis.blocksci", fake_blocksci),
+        mock.patch("exporters.blocksci_export.analysis.blocksci", fake_blocksci),
         mock.patch(
-            "exporters.blocksci.analysis.export_blocksci_records",
+            "exporters.blocksci_export.analysis.export_blocksci_records",
             return_value=({"tx": {"txid": "tx"}}, ["skipped"]),
         ),
         mock.patch(
-            "exporters.blocksci.analysis.build_integration_diagnostics",
+            "exporters.blocksci_export.analysis.build_integration_diagnostics",
             return_value={"status": "ok"},
         ),
         mock.patch(
-            "exporters.blocksci.analysis.exported_addresses",
+            "exporters.blocksci_export.analysis.exported_addresses",
             return_value={"bcrt1-address"},
         ),
         mock.patch(
-            "exporters.blocksci.analysis.export_blocksci_cluster_assignments_for_addresses",
+            "exporters.blocksci_export.analysis.export_blocksci_cluster_assignments_for_addresses",
             return_value=({"bcrt1-address": "7"}, None),
         ),
         mock.patch(
-            "exporters.blocksci.analysis.load_first_wasabi2_block",
+            "exporters.blocksci_export.analysis.load_first_wasabi2_block",
             return_value=850237,
         ),
     ):
@@ -195,3 +198,26 @@ def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:
 
     assert code == 0
     assert (run_dir / "coinjoinPipeline_data" / "unified_report.json").is_file()
+
+
+def test_assert_real_blocksci_accepts_the_real_bindings() -> None:
+    module = types.SimpleNamespace(Blockchain=object, heuristics=object())
+    assert assert_real_blocksci(module) is None
+
+
+def test_assert_real_blocksci_ignores_a_missing_installation() -> None:
+    assert assert_real_blocksci(None) is None
+
+
+def test_assert_real_blocksci_rejects_a_shadowing_directory() -> None:
+    shadow = types.ModuleType("blocksci")
+    shadow.__file__ = None
+    shadow.__path__ = ["/mnt/exporters/blocksci"]  # type: ignore[attr-defined]
+
+    with pytest.raises(ImportError) as excinfo:
+        assert_real_blocksci(shadow)
+
+    message = str(excinfo.value)
+    assert "/mnt/exporters/blocksci" in message
+    assert "Blockchain" in message
+    assert "heuristics" in message

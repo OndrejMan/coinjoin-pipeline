@@ -111,6 +111,9 @@ RuntimeCommand(
         # runtime_root == <checkout>/pipeline, scénáře jsou o úroveň výš
         "SCENARIOS_DIR": str(runtime_root.parent / "scenarios"),
         "NOTEBOOKS_DIR": str(runs_root / ".notebooks"),
+        # dnešní efektivní default z launcher.sh:300 — bez něj compose
+        # spadne na `true` a spustí interaktivní prostředí
+        "BLOCKSCI_LAUNCH_JUPYTER": environment.get("BLOCKSCI_LAUNCH_JUPYTER", "0"),
     },
 )
 ```
@@ -174,6 +177,41 @@ Zastaralý `pipeline/client/scenarios/` a prázdný `pipeline/client/notebooks/`
 se v rámci tohohle plánu **nemažou** (mimo rozsah), ale nesmí se na ně
 nikdo spolehnout — akceptační test níže ověřuje, že mountovaný scénářový
 strom obsahuje `overactive-local.json`.
+
+**`BLOCKSCI_LAUNCH_JUPYTER` — bez převzetí defaultu se každý běh na konci
+zasekne v interaktivním prostředí.** Druhý případ téhož vzorce jako výše,
+a s horším dopadem. `launcher.sh:300` počítá default, který **nikde jinde
+v repozitáři neexistuje**:
+```bash
+POST_WRAPPER_SHELL="${POST_WRAPPER_SHELL:-0}"
+BLOCKSCI_LAUNCH_JUPYTER="${BLOCKSCI_LAUNCH_JUPYTER:-${POST_WRAPPER_SHELL}}"
+```
+a posílá ho do prostředí wrapperu (`launcher.sh:320`). Konzument je
+`compose.yaml:147` (`${BLOCKSCI_LAUNCH_JUPYTER:-true}`) a větev na
+`compose.yaml:203`:
+```yaml
+if [ "${BLOCKSCI_LAUNCH_JUPYTER:-true}" = "0" ] || [ ... = "false" ]; then
+  echo 'Parsing complete. Skipping interactive BlockSci environment.'
+else
+  cd /mnt/blocksci && ./build.sh    # interaktivní notebook prostředí
+fi
+```
+Dnes tedy neinteraktivní `full-run` dostane `0` a BlockSci po
+deterministických exportech skončí. Po smazání `launcher.sh` proměnná
+nebude nastavená vůbec, compose spadne na svůj vlastní default `true`, a
+**každý běh na konci spustí interaktivní BlockSci/Jupyter prostředí, které
+neskončí** — tedy zaseknutá analýza lokálně i v CI. Komentář přímo nad tou
+větví to říká výslovně: „Noninteractive runIt.sh workflows stop here after
+deterministic exports."
+
+Řešení: `BLOCKSCI_LAUNCH_JUPYTER` patří do explicitního prostředí v
+`RuntimeCommand` výše, s výchozí hodnotou `0` (dnešní efektivní chování).
+`POST_WRAPPER_SHELL` naproti tomu **zaniká bez náhrady** — jeho jediný
+efekt byl `exec /bin/bash` uvnitř wrapperova kontejneru
+(`launcher.sh:323`), což bez toho kontejneru nedává smysl; kdo chce shell,
+spustí si ho sám. Vazba „`POST_WRAPPER_SHELL=1` implikuje Jupyter" tím
+mizí a `BLOCKSCI_LAUNCH_JUPYTER` se stává samostatným, přímo nastavitelným
+přepínačem.
 
 `runtime_root()` se zjednoduší na jedinou větev — kontrolu checkoutu
 (`Path(__file__).resolve().parents[2] / "pipeline"`). Druhá větev
@@ -258,6 +296,15 @@ v testech (`tests/test-runIt-overactive-local.sh:39/71/91/95/98`,
 `tests/test-kubernetes-k3d.sh:266`) — smazat i tam, ne jen v
 `launcher.sh:65/79-82`.
 
+**`tests/test-runIt-overactive-local.sh` se rozbije ještě druhým způsobem.**
+Kromě `WRAPPER_PULL_POLICY` dělá na řádku 326
+```bash
+cp "${PROJECT_DIR}/container/launcher.sh" "${ISOLATED_PROJECT}/container/launcher.sh"
+```
+— tedy kopíruje soubor, který tenhle plán maže, do izolovaného projektu.
+Ten `cp` selže, ne jen zbytečně vykoná práci. Upravit ve stejném kroku
+jako smazání `container/launcher.sh`.
+
 **`commands.py:launcher_command` se odstraňuje explicitně, ne jen
 nahrazuje mlčky.** `cli.py` dnes importuje `launcher_command` z
 `.commands` a volá ho k sestavení `docker/podman run ... launcher.sh`
@@ -296,10 +343,10 @@ build+propagační mechanismus se maže; kde testy dnes potřebují
 (řádky 35-47) dnes obsahují `coinjoin_pipeline._runtime`,
 `._runtime.client` (→ `pipeline/client`), `._runtime.exporters`
 (→ `pipeline/exporters`) — částečný, neúplný pokus o standalone-wheel
-packaging (chybí `exporters.blocksci`, kořenové skripty). Tyhle mappings
+packaging (chybí `exporters.blocksci_export`, kořenové skripty). Tyhle mappings
 se **odstraní úplně**, ne jen doplní — jinak by obyčejné `pip install .`
 mohlo vyprodukovat wheel, který ČÁSTEČNĚ obsahuje runtime (bez
-`exporters.blocksci`, bez kořenových skriptů) a tiše maskuje chybějící
+`exporters.blocksci_export`, bez kořenových skriptů) a tiše maskuje chybějící
 checkout, místo aby jasně selhal. Zůstávají jen skutečné balíčky pod
 `src/coinjoin_pipeline`. Editable instalace (`pip install -e .`) funguje
 dál beze změny, protože `cli.py.__file__` pořád odkazuje do checkoutu.
@@ -364,10 +411,35 @@ souborů, které v tu chvíli už dávno neběží. Fyzické smazání
 nepotřebuje — jen potvrzuje, že na ně už nic needukazuje (viz akceptační
 grep).
 
+**Test se ale nesmí spouštět přes `cjp` — před cutoverem by testoval starý
+launcher, ne nový handler.** Tohle je past, do které dřívější verze týhle
+sekce spadla: gate má sedět *před* přepnutím `cli.py`, jenže dokud k
+přepnutí nedošlo, `cjp --local-build full-run ...` pořád renderuje volání
+`launcher.sh`. Test by tedy prošel díky launcherovu `cleanup()` trapu a o
+novém handleru ve `wrapper.py` by neřekl vůbec nic — přesně opačně, než k
+čemu je.
+
+**Řešení: `cli.py` dostane sestavení příkazu jako samostatnou funkci a test
+volá tutéž funkci.** Místo aby test skládal prostředí ručně (a tím zavedl
+druhou, rozcházející se definici kontraktu), vznikne v `cli.py`
+```python
+def runtime_command(runtime_root: Path, passthrough: list[str], ...) -> RuntimeCommand:
+    ...
+```
+která se použije **jak** v budoucí produkční cestě `cli.py`, **tak** v
+integračním testu před cutoverem. Test tím ověřuje přesně ten příkaz,
+který se za chvíli stane výchozím, a nemůže se od něj odchýlit.
+
 Test (integrační, spouští se **před** přepnutím `cli.py` na
 `runtime_root()`, ne před fyzickým smazáním launcheru):
 ```bash
-cjp --local-build full-run --driver docker ... &
+# pozor: NE `cjp ...` — to by před cutoverem šlo pořád přes launcher.sh.
+# Příkaz se vyrenderuje z cli.py:runtime_command(), tedy z téže funkce,
+# kterou bude po cutoveru používat produkční cesta.
+python3 -c 'from coinjoin_pipeline.cli import runtime_command, runtime_root; \
+  print(runtime_command(runtime_root(), ["full-run", "--driver", "docker", ...]).rendered())' \
+  > /tmp/bare-command.sh
+bash /tmp/bare-command.sh &
 pid=$!
 sleep 20
 kill -INT "$pid"
@@ -377,6 +449,17 @@ docker ps --format '{{.Names}}' \
   && exit 1
 exit 0
 ```
+(`RuntimeCommand.rendered()` už existuje — `commands.py:336-339` skládá
+`env … argv` řetězec, takže tenhle mezikrok nevyžaduje nic nového.
+Druhý průchod testu s `kill -TERM` místo `kill -INT`, viz Testy.)
+
+**Totéž platí pro `test-kubernetes-k3d.sh`.** Ten je v kroku 2 druhým
+pre-cutover gate (shared-storage driver bez launcherového `--add-host`,
+sekce 5) a naráží na stejný problém: dokud `cli.py` není přepnuté,
+`cjp` v něm pořád spouští launcher, který `--add-host` přidá — tedy přesně
+tu podmínku, kterou má test vyloučit. Musí proto dostat režim (env
+přepínač nebo argument), ve kterém místo `cjp` spustí připravený bare
+runtime command ze stejné funkce.
 
 ### 3. `WRAPPER_IMAGE` má tři konzumenty mimo spouštění wrapperu — ověřeno v kódu
 
@@ -493,7 +576,7 @@ jí prošel stejně dobře jako kompletní. Preflight proto kromě ignorování
 zkontroluje oba vstupní body přímo:
 ```bash
 s5 ls "$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/unified_report.py" >/dev/null
-s5 ls "$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/blocksci/analysis.py" >/dev/null
+s5 ls "$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/blocksci_export/analysis.py" >/dev/null
 ```
 Jsou to tytéž dva soubory, které kontroluje frontend před uploadem (bod 4
 níž) — jednou na zdroji, podruhé na cíli.
@@ -674,6 +757,38 @@ změní pinned `kubectl`/`s5cmd`/shell logika. Místo toho:
 explicitní `--uploader-image` → `COINJOIN_UPLOADER_IMAGE` env → obsah
 `container/uploader.image`.
 
+**Do které vrstvy oba nové flagy patří — musí být určeno, jsou to dvě
+různé cesty kódu.** `coinjoin-pipeline` má dva oddělené systémy pro
+image flagy a plán zatím neřekl, do kterého `--uploader-image`/
+`--unified-report-image` spadají:
+
+- **hostitelské options** — `HOST_VALUE_OPTIONS` (`host.py`), `Images`,
+  `images.py`, `configuration.py`, `usage()` v `cli.py:80`; sem patří
+  rušený `--pipeline-image` a celá `--version`-koordinovaná sada;
+- **wrapper passthrough** — `pipeline/client/cli_options.py` +
+  `command_metadata.json`; sem patří například `--blocksci-image`.
+
+**Rozhodnutí: oba nové flagy jsou wrapper passthrough, ne hostitelské
+options.** Plyne to přímo z lifecycle rozhodnutí o pár odstavců výš —
+hostitelská vrstva `Images` je právě ta `--version`-koordinovaná sada, a
+uploader ani pinnutý Python image se s `--version` **záměrně nekoordinují**
+(mají vlastní lock soubory a nezávislý lifecycle). Zařadit je do `Images`
+by ten závěr přímo popřelo. Konzumenti jsou navíc oba uvnitř wrapperu
+(`kubernetes.py` pod spec, `wrapper.py` PBS report krok), ne v hostitelském
+CLI, které tyhle images nikdy samo nespouští.
+
+Praktický důsledek, na který se nesmí zapomenout: passthrough flag musí
+být v `command_metadata.json`, protože `tests/test-command-builder-contract.sh`
+vynucuje paritu metadat a parseru — bez toho ten test spadne. Do
+`HOST_VALUE_OPTIONS` se naopak **nepřidávají**.
+
+Ještě jedna vazba, ať se nezdvojí: `host.py:123 add_effective_image_arguments`
+existuje proto, aby se do wrapperu nevrátily plovoucí `latest` tagy tím, že
+se flag vynechá. U těchhle dvou images plní tutéž roli lock soubor
+(`container/*.image` + CI regex na `@sha256:`), takže se do
+`add_effective_image_arguments` **nedoplňují** — jinak by tentýž problém
+řešily dva mechanismy najednou a nebylo by jasné, který vyhrává.
+
 **Konkrétní proces aktualizace lock souboru — dřívější verze plánu
 popsala jen mechanismus, ne workflow.**
 1. Ruční/na-vyžádání workflow (`.github/workflows/publish-uploader-image.yaml`
@@ -734,7 +849,7 @@ flagy i env mapping se odstraní, a to na všech čtyřech místech, kde ten
 - `pipeline/client/wrapper.py:330` — položka v `IMAGE_PROVENANCE_ENV`.
 - `pipeline/client/wrapper.py:1182-1184` — tři `--wrapper-image*` argumenty
   v `export_command`.
-- `pipeline/exporters/cli.py:132/148` a `pipeline/exporters/blocksci/analysis.py:181`
+- `pipeline/exporters/cli.py:132/148` a `pipeline/exporters/blocksci_export/analysis.py:181`
   — `parser.add_argument("--wrapper-image", default=os.environ.get("WRAPPER_IMAGE"))`
   a jeho `--wrapper-image-digest` protějšek.
 - `pipeline/compose.yaml:141-143` — `WRAPPER_IMAGE`/`_ID`/`_DIGEST`
@@ -1037,7 +1152,7 @@ starých run adresářích.
   docker run --rm -v "$PWD/pipeline:/runtime:ro" -e PYTHONPATH=/runtime \
     "$BLOCKSCI_IMAGE" python3 -m compileall -q /runtime/exporters
   docker run --rm -v "$PWD/pipeline:/runtime:ro" -e PYTHONPATH=/runtime \
-    "$BLOCKSCI_IMAGE" python3 /runtime/exporters/blocksci/analysis.py --help
+    "$BLOCKSCI_IMAGE" python3 /runtime/exporters/blocksci_export/analysis.py --help
   docker run --rm -v "$PWD/pipeline:/runtime:ro" -e PYTHONPATH=/runtime \
     "$BLOCKSCI_IMAGE" python3 /runtime/exporters/unified_report.py --help
   ```
@@ -1054,6 +1169,18 @@ starých run adresářích.
   respektují: spustit je s předem nastaveným `SCENARIOS_DIR`/`NOTEBOOKS_DIR`
   a ověřit, že ji nepřepíšou (dnes přepíšou — `analysis.sh:8-9`,
   `emulate.sh:15`).
+- **Lokální `full-run` skončí sám a nespustí Jupyter.** `full-run --driver
+  docker` musí doběhnout bez zásahu a `blocksci_analyzer` po
+  deterministických exportech skončit — ne zůstat běžet v interaktivním
+  prostředí. Nejlevnější assert: v logu stage se objeví `Skipping
+  interactive BlockSci environment`, a `docker ps` po doběhnutí neobsahuje
+  `blocksci_analyzer`. Bez převzetí `BLOCKSCI_LAUNCH_JUPYTER` (sekce 1)
+  tenhle test **zatuhne**, což je přesně ta regrese, kterou má chytit;
+  proto ho spouštět s timeoutem, ne bez něj.
+- **`tests/test-command-builder-contract.sh` prochází s novými flagy.**
+  `--uploader-image`/`--unified-report-image` jsou v `command_metadata.json`
+  (wrapper passthrough vrstva) a **nejsou** v `HOST_VALUE_OPTIONS` —
+  parita metadat a parseru je přesně to, co tenhle test hlídá.
 - **Pracovní adresář se nemění.** `cjp full-run --dry-run --scenario
   ./relativni/cesta.json` a `cjp runs list` spuštěné z jiného adresáře než
   checkout musí relativní cestu vyhodnotit vůči adresáři uživatele, ne
@@ -1144,10 +1271,17 @@ starých run adresářích.
   strom, ne jen dokázat, že `python3` existuje.** `python3 -c
   'print("ok")'` neověří nic o `unified_report.py`'s závislostech
   (`report_builder.py`, `markdown_report.py`, `comparison.py`,
-  `heuristics.py`, `manifest.py`, `common.py`, ...). Správně:
+  `heuristics.py`, `manifest.py`, `common.py`, ...). **A musí jít přes
+  `bash -c`, ne volat `python3` přímo** — sekce 3(b) tvrdí, že image
+  potřebuje `python3` **i** `bash -c`, a produkční šablona
+  (`unified_report_s3_template.sh:59-63`) skutečně volá
+  `... "$IMAGE" bash -c 'cd "…" && {command}'`. Přímé volání `python3` by
+  přítomnost `bash` v image vůbec neověřilo a testovalo by jinou strukturu
+  invokace, než jaká na PBS poběží. Správně:
   ```
   docker run --rm -v "$PWD/pipeline/exporters:/mnt/exporters:ro" -w /mnt \
-    <pinned-python-image> python3 /mnt/exporters/unified_report.py --help
+    <pinned-python-image> \
+    bash -c 'python3 /mnt/exporters/unified_report.py --help'
   ```
   a pro PBS navíc přes stejný mechanismus, co skutečně používá Singularity —
   **doslova `singularity exec`, ne `apptainer exec`**, protože
@@ -1156,8 +1290,12 @@ starých run adresářích.
   neověřuje produkční cestu:
   ```
   singularity exec --bind "$PWD/pipeline/exporters:/mnt/exporters:ro" \
-    docker://<pinned-python-image> python3 /mnt/exporters/unified_report.py --help
+    "docker://<pinned-python-image>" \
+    bash -c 'python3 /mnt/exporters/unified_report.py --help'
   ```
+  Nejpřesnější je strukturu příkazu zkopírovat rovnou z
+  `unified_report_s3_template.sh` (včetně `cd` do pracovního adresáře uvnitř
+  `bash -c`), ať se smoke test a produkční šablona nemůžou rozejít.
 - **K8s S3 test musí ověřit přesné pořadí, ne jen že exportéry
   dorazí:** upload exportérů proběhne a doběhne **předtím**, než se
   Kubernetes Job vůbec vytvoří; `prefix_preflight` uvnitř podu ignoruje
@@ -1174,12 +1312,35 @@ starých run adresářích.
 Bezpečné pořadí drží `main` funkční po každém kroku — pozdější kroky
 záměrně nezačínají, dokud dřívější hard gates neprojdou:
 
+**Nultý úkol kroku 2: řádkový audit `launcher.sh`.** Opakovaně se ukazuje,
+že `resources/container/launcher.sh` (332 řádků) nedělá jen mechaniku
+kontejneru — **počítá defaulty a normalizuje argumenty**, a každá revize
+tohohle plánu našla další takový případ (nejdřív `NOTEBOOKS_DIR`/
+`SCENARIOS_DIR`, pak `BLOCKSCI_LAUNCH_JUPYTER`). Hledat je ad hoc je
+neohraničená úloha; projít soubor řádek po řádku je ohraničená. Každou
+proměnnou, kterou launcher nastavuje nebo odvozuje, proto zařaď do jedné
+ze dvou kategorií a výsledek zapiš:
+
+- **mechanika kontejneru** — zaniká se souborem (socket setup,
+  `--add-host`, `docker cp` extrakce, `WRAPPER_PULL_ARGS`,
+  `INNER_CONTAINER_RUNTIME`, `POST_WRAPPER_SHELL`, `EXPORTERS_FROM_IMAGE`,
+  `WRAPPER_SCRIPT`, …);
+- **default nebo normalizace, kterou musí převzít env kontrakt v sekci 1**
+  (`NOTEBOOKS_DIR`, `SCENARIOS_DIR`, `BLOCKSCI_LAUNCH_JUPYTER`, …).
+
+Je to levné teď a drahé po smazání souboru — jakmile `launcher.sh`
+zmizí, chybějící default se projeví až chybou za běhu, bez místa, kde ho
+dohledat.
+
 1. **Hard gates** (baseline, nic se zatím neodstraňuje): Python 3.8
    exporter test proti skutečnému `blocksci-complete`, smoke test pinned
    `--unified-report-image` kandidáta (Docker i Singularity).
-2. **Checkout runtime**: `pyproject.toml` `_runtime` mappings pryč,
+2. **Checkout runtime**: **nejdřív úplný audit `launcher.sh`** (viz
+   níže — bez něj se do dalších kroků protáhne další nezachycený default),
+   pak `pyproject.toml` `_runtime` mappings pryč,
    `runtime_root()` implementace + přejmenování, explicitní
-   `PYTHONPATH`/env-var invokace, `SCENARIOS_DIR`/`NOTEBOOKS_DIR` kontrakt
+   `PYTHONPATH`/env-var invokace, `SCENARIOS_DIR`/`NOTEBOOKS_DIR` a
+   `BLOCKSCI_LAUNCH_JUPYTER` kontrakt
    (`${VAR:-}` v `analysis.sh`/`emulate.sh` + explicitní hodnoty z CLI,
    sekce 1), research routing přes `-m client.research`, kapacitní
    preflight model včetně smazání tvrdé `PBS_FRONTEND_DIRECT` validace v
@@ -1283,7 +1444,10 @@ se nepřepne na bezpodmínečné `runtime_root()`+přímý exec (a shell
 launcher se fyzicky nesmaže), dokud SIGINT integrační test nepotvrdí, že
 žádný pojmenovaný peer kontejner nepřežije Ctrl-C uprostřed lokálního
 běhu — gate sedí na přepnutí chování, ne až na pozdějším smazání
-souborů.
+souborů. Oba pre-cutover gaty (SIGINT/SIGTERM i `test-kubernetes-k3d.sh`)
+spouštějí **bare runtime command vyrenderovaný z `cli.py:runtime_command()`**,
+ne `cjp` — přes `cjp` by před cutoverem pořád běžel launcher a testy by
+ověřovaly jeho `cleanup()`/`--add-host`, ne nové chování.
 `blocksci-complete` a `blocksci` repo jsou zcela nedotčené. Staré
 `images.wrapper`/`image_digests.wrapper` provenance zůstávají čitelné,
 nové běhy je mají `null`; unified report nově obsahuje
@@ -1296,7 +1460,7 @@ bez Docker daemonu a použitelně i na MetaCentrum frontendu. Pinned Python imag
 úspěšném `unified_report.py --help` smoke testu (Docker i Singularity), ne
 předpokládaný. Akceptační grep nenajde nic mimo `MIGRATION.md`/historickou
 provenance — což znamená, že `--wrapper-image*` flagy a `WRAPPER_IMAGE`
-env mizí i z `pipeline/exporters/cli.py`, `pipeline/exporters/blocksci/analysis.py`
+env mizí i z `pipeline/exporters/cli.py`, `pipeline/exporters/blocksci_export/analysis.py`
 a `pipeline/compose.yaml`, ne jen z `wrapper.py` (varianta "nechat flagy a
 plnit je `null`" je tím vyloučená). `research_manifest.json` nově obsahuje git commit a dirty
 stav checkoutu **plus verze skutečně použitých hostitelských nástrojů**
@@ -1306,7 +1470,16 @@ zajišťoval wrapper image (`S5CMD_VERSION=2.3.0`, Alpine `kubectl`) a který
 bare běh ruší. `SCENARIOS_DIR`/`NOTEBOOKS_DIR` posílá hostitelské CLI
 explicitně a `analysis.sh`/`emulate.sh` je respektují (`${VAR:-}`), takže
 mountovaný scénářový strom zůstává ten kořenový (`overactive-local.json`
-přítomný), ne zastaralý `pipeline/client/scenarios/`. Reálný lokální `full-run --driver docker`, Podman bez
+přítomný), ne zastaralý `pipeline/client/scenarios/`.
+`BLOCKSCI_LAUNCH_JUPYTER` posílá hostitelské CLI s výchozí hodnotou `0`,
+takže neinteraktivní běh po deterministických exportech skončí a nespustí
+interaktivní BlockSci prostředí (`POST_WRAPPER_SHELL` zaniká bez náhrady).
+`--uploader-image`/`--unified-report-image` jsou wrapper passthrough flagy
+v `command_metadata.json`, ne hostitelské options v `HOST_VALUE_OPTIONS`, a
+nedoplňují se do `add_effective_image_arguments` — plovoucí tagy u nich
+hlídá lock soubor. Před smazáním `launcher.sh` proběhl řádkový audit, který
+každou jím nastavovanou proměnnou zařadil buď do „mechanika kontejneru,
+zaniká", nebo do „default, který přebírá env kontrakt". Reálný lokální `full-run --driver docker`, Podman bez
 socket forwarding, a finální Kubernetes S3/MinIO test (s ověřeným
 pořadím upload→Job a bez prefix-preflight regrese na `.pipeline/exporters/**`)
 projdou.

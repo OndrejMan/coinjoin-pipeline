@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
-from importlib.resources import as_file, files
 import os
 from pathlib import Path
 import shlex
 import sys
 
 from . import MANIFEST_SCHEMA_VERSION, __version__
-from .commands import action_from, launcher_command, option_value, validate_passthrough
+from .commands import (
+    action_from,
+    option_value,
+    research_command,
+    runtime_command,
+    validate_passthrough,
+)
 from .configuration import ConfigurationError, expand_configuration
-from .doctor import check as doctor_check, validate_arguments
+from .doctor import check as doctor_check, required_capabilities, validate_arguments
 from .host import (
     add_effective_image_arguments,
     image_overrides,
@@ -25,9 +30,20 @@ from .process import run
 from .runs import manifest_target, run_id_for, store_host_manifest, valid_run_id
 
 
+RESEARCH_ACTIONS = {"runs", "external", "scenarios"}
+
+
 def fail(message: str, code: int = 2) -> int:
     print(f"ERROR: {message}", file=sys.stderr)
     return code
+
+
+def prepare_runtime_directories(environment: dict[str, str]) -> None:
+    """Create the host directories the launcher used to mkdir before running."""
+    for key in ("EMULATION_LOGS_DIR", "NOTEBOOKS_DIR", "KUBERNETES_COPY_TO_HOST_DIR"):
+        value = environment.get(key)
+        if value:
+            Path(value).mkdir(parents=True, exist_ok=True)
 
 
 def print_version() -> None:
@@ -46,23 +62,21 @@ def pull(runtime: str, images: Images) -> int:
     return 0
 
 
-def direct_wrapper_root() -> Path | None:
-    """Locate the source-tree or wheel-bundled frontend wrapper runtime."""
-    source_root = Path(__file__).resolve().parents[2] / "pipeline"
-    if (source_root / "client/wrapper.py").is_file():
-        return source_root
+def runtime_root() -> Path:
+    """Locate the wrapper runtime inside the source checkout.
 
-    try:
-        packaged_client = files("coinjoin_pipeline._runtime.client")
-    except ModuleNotFoundError:
-        return None
-    packaged_root = Path(str(packaged_client)).parent
-    if (
-        (packaged_root / "client/wrapper.py").is_file()
-        and (packaged_root / "exporters/unified_report.py").is_file()
-    ):
-        return packaged_root
-    return None
+    The checkout is the only supported source of truth, so a missing tree is a
+    hard error with an actionable message rather than a silent fallback.
+    """
+    source_root = Path(__file__).resolve().parents[2] / "pipeline"
+    if (source_root / "client" / "wrapper.py").is_file():
+        return source_root
+    raise RuntimeError(
+        "coinjoin-pipeline requires an editable installation from a source "
+        f"checkout; no wrapper runtime at {source_root / 'client' / 'wrapper.py'}. "
+        "Install with `pip install -e .` (or `pipx install --editable .`) "
+        "from the checkout."
+    )
 
 
 def usage() -> None:
@@ -77,8 +91,7 @@ Host options:
   --runtime docker|podman       host container runtime
   --runs-root PATH              output root (default: ./coinjoin-runs)
   --local-build                 use local development image tags
-  --pipeline-image IMAGE        override an individual image
-  --emulator-image IMAGE
+  --emulator-image IMAGE        override an individual image
   --coinjoin-analysis-image IMAGE
   --blocksci-image IMAGE
   --mappings-image IMAGE
@@ -152,71 +165,63 @@ def main(argv: list[str] | None = None) -> int:
     required_images = required_image_components(action, passthrough)
     errors = validate_passthrough(passthrough, action)
     errors.extend(validate_arguments(passthrough, runs_root))
-    if (
-        action == "full-run"
-        and option_value(passthrough, "--artifact-backend") == "s3"
-        and os.environ.get("PBS_FRONTEND_DIRECT") != "1"
-    ):
-        errors.append(
-            "full-run --artifact-backend s3 runs qsub and s5cmd directly on the "
-            "frontend; set PBS_FRONTEND_DIRECT=1"
-        )
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 2
     reproduction = shlex.join(["coinjoin-pipeline", *original_raw])
-    launcher_resource = files("coinjoin_pipeline").joinpath("resources/container/launcher.sh")
-    with as_file(launcher_resource) as launcher:
-        command = launcher_command(launcher, runtime, passthrough, images, runs_root, reproduction)
-        pipeline_run_id: str | None = None
-        if action in {"full-run", "emulate"} and not option_value(passthrough, "--run-dir"):
-            candidate_run_id = run_id_for(passthrough)
-            if valid_run_id(candidate_run_id):
-                pipeline_run_id = candidate_run_id
-                command.environment["PIPELINE_RUN_ID"] = candidate_run_id
-        if os.environ.get("PBS_FRONTEND_DIRECT") == "1":
-            wrapper_root = direct_wrapper_root()
-            if wrapper_root is not None:
-                command.environment["PBS_FRONTEND_WRAPPER_ROOT"] = str(wrapper_root)
-        print(f"Generated runtime command:\n{command.rendered()}")
-        direct_pbs = os.environ.get("PBS_FRONTEND_DIRECT") == "1" and not required_images
-        preflight = [] if direct_pbs else doctor_check(
-            runtime, runs_root, images, image_components=required_images,
-        )
-        if preflight:
-            for error in preflight:
-                print(f"ERROR: {error}", file=sys.stderr)
-            return 2
-        stage_pbs_dry_run = (
-            (action == "analyze" and "--blocksciPbs" in passthrough)
-            or (action == "coinjoin-analysis" and "--analysisPbs" in passthrough)
-            or (action == "mappings" and "--mappingsPbs" in passthrough)
-            or action == "pbs-from-s3"
-            or (action in {"emulate", "full-run"} and option_value(passthrough, "--artifact-backend") == "s3")
-        )
-        if "--dry-run" in passthrough and not stage_pbs_dry_run:
-            print("[dry-run] validation passed; command was not executed")
-            return 0
-        target = manifest_target(action, passthrough, runs_root, pipeline_run_id)
-        manifest = initial_manifest(
-            action=action,
-            requested_version=("local" if host["local_build"] else host.get("version") or DEFAULT_VERSION),
-            effective_images=images.as_dict(),
-            runtime=runtime,
-            user_arguments=original_raw,
-            pipeline_arguments=passthrough,
-            user_command=reproduction,
-            generated_runtime_command=command.rendered(),
-            working_directory=str(Path.cwd()),
-        )
-        if target:
-            store_host_manifest(target, manifest)
-        exit_code = run(command.argv(), environment=command.environment)
-        if target:
-            mark_finished(manifest, exit_code)
-            store_host_manifest(target, manifest)
-        return exit_code if exit_code in {0, 2, 3, 4, 5, 130} else 5
+    try:
+        wrapper_root = runtime_root()
+    except RuntimeError as exc:
+        return fail(str(exc))
+    build = research_command if action.split(" ")[0] in RESEARCH_ACTIONS else runtime_command
+    command = build(wrapper_root, runtime, passthrough, images, runs_root, reproduction)
+    pipeline_run_id: str | None = None
+    if action in {"full-run", "emulate"} and not option_value(passthrough, "--run-dir"):
+        candidate_run_id = run_id_for(passthrough)
+        if valid_run_id(candidate_run_id):
+            pipeline_run_id = candidate_run_id
+            command.environment["PIPELINE_RUN_ID"] = candidate_run_id
+    print(f"Generated runtime command:\n{command.rendered()}")
+    preflight = doctor_check(
+        runtime, runs_root, images,
+        image_components=required_images,
+        capabilities=required_capabilities(action, passthrough),
+    )
+    if preflight:
+        for error in preflight:
+            print(f"ERROR: {error}", file=sys.stderr)
+        return 2
+    stage_pbs_dry_run = (
+        (action == "analyze" and "--blocksciPbs" in passthrough)
+        or (action == "coinjoin-analysis" and "--analysisPbs" in passthrough)
+        or (action == "mappings" and "--mappingsPbs" in passthrough)
+        or action == "pbs-from-s3"
+        or (action in {"emulate", "full-run"} and option_value(passthrough, "--artifact-backend") == "s3")
+    )
+    if "--dry-run" in passthrough and not stage_pbs_dry_run:
+        print("[dry-run] validation passed; command was not executed")
+        return 0
+    prepare_runtime_directories(command.environment)
+    target = manifest_target(action, passthrough, runs_root, pipeline_run_id)
+    manifest = initial_manifest(
+        action=action,
+        requested_version=("local" if host["local_build"] else host.get("version") or DEFAULT_VERSION),
+        effective_images=images.as_dict(),
+        runtime=runtime,
+        user_arguments=original_raw,
+        pipeline_arguments=passthrough,
+        user_command=reproduction,
+        generated_runtime_command=command.rendered(),
+        working_directory=str(Path.cwd()),
+    )
+    if target:
+        store_host_manifest(target, manifest)
+    exit_code = run(command.argv(), environment=command.environment)
+    if target:
+        mark_finished(manifest, exit_code)
+        store_host_manifest(target, manifest)
+    return exit_code if exit_code in {0, 2, 3, 4, 5, 130} else 5
 
 
 if __name__ == "__main__":

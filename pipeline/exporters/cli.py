@@ -9,18 +9,19 @@ import sys
 from pathlib import Path
 
 from exporters.artifact_paths import coinjoin_analysis_dir, mappings_dir, report_dir
-from exporters.blocksci.analysis import (
+from exporters.blocksci_export.analysis import (
     detector_parameters as blocksci_detector_parameters,
 )
-from exporters.blocksci.analysis import (
+from exporters.blocksci_export.analysis import (
     load_analysis as load_blocksci_analysis,
 )
-from exporters.blocksci.detector import blocksci, export_blocksci_cluster_assignments, export_blocksci_records
+from exporters.blocksci_export.detector import blocksci, export_blocksci_cluster_assignments, export_blocksci_records
 from exporters.common import (
     DEFAULT_JOINMARKET_DETECTOR,
     DEFAULT_JOINMARKET_MAX_DEPTH,
     DEFAULT_JOINMARKET_MIN_BASE_FEE,
     DEFAULT_JOINMARKET_PERCENTAGE_FEE,
+    digest_from_reference,
     load_json,
     save_json,
 )
@@ -129,7 +130,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--coinjoin-emulator-image",
         default=os.environ.get("COINJOIN_EMULATOR_IMAGE") or os.environ.get("EMULATOR_IMAGE"),
     )
-    parser.add_argument("--wrapper-image", default=os.environ.get("WRAPPER_IMAGE"))
+    parser.add_argument("--uploader-image", default=os.environ.get("COINJOIN_UPLOADER_IMAGE"))
+    parser.add_argument(
+        "--unified-report-image", default=os.environ.get("COINJOIN_UNIFIED_REPORT_IMAGE")
+    )
     parser.add_argument("--blocksci-image-digest", default=os.environ.get("BLOCKSCI_IMAGE_DIGEST"))
     parser.add_argument("--blocksci-image-id", default=os.environ.get("BLOCKSCI_IMAGE_ID"))
     parser.add_argument(
@@ -145,8 +149,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--coinjoin-emulator-image-id",
         default=os.environ.get("COINJOIN_EMULATOR_IMAGE_ID") or os.environ.get("EMULATOR_IMAGE_ID"),
     )
-    parser.add_argument("--wrapper-image-digest", default=os.environ.get("WRAPPER_IMAGE_DIGEST"))
-    parser.add_argument("--wrapper-image-id", default=os.environ.get("WRAPPER_IMAGE_ID"))
     parser.add_argument("--emulator-git-commit", default=os.environ.get("COINJOIN_EMULATOR_GIT_COMMIT"))
     parser.add_argument(
         "--cluster-output-dir",
@@ -253,19 +255,20 @@ def main(argv: list[str] | None = None) -> int:
                     "blocksci": args.blocksci_image,
                     "coinjoin_analysis": args.coinjoin_analysis_image,
                     "coinjoin_emulator": args.coinjoin_emulator_image,
-                    "wrapper": args.wrapper_image,
+                    "uploader": args.uploader_image,
+                    "unified_report": args.unified_report_image,
                 },
                 image_ids={
                     "blocksci": args.blocksci_image_id,
                     "coinjoin_analysis": args.coinjoin_analysis_image_id,
                     "coinjoin_emulator": args.coinjoin_emulator_image_id,
-                    "wrapper": args.wrapper_image_id,
                 },
                 image_digests={
                     "blocksci": args.blocksci_image_digest,
                     "coinjoin_analysis": args.coinjoin_analysis_image_digest,
                     "coinjoin_emulator": args.coinjoin_emulator_image_digest,
-                    "wrapper": args.wrapper_image_digest,
+                    "uploader": digest_from_reference(args.uploader_image),
+                    "unified_report": digest_from_reference(args.unified_report_image),
                 },
                 joinmarket_detector=args.joinmarket_detector,
                 joinmarket_min_base_fee=args.joinmarket_min_base_fee,
@@ -312,11 +315,16 @@ def main(argv: list[str] | None = None) -> int:
         blocksci_image=args.blocksci_image,
         coinjoin_analysis_image=args.coinjoin_analysis_image,
         coinjoin_emulator_image=args.coinjoin_emulator_image,
-        wrapper_image=args.wrapper_image,
+        uploader_image=args.uploader_image,
+        unified_report_image=args.unified_report_image,
         blocksci_image_digest=args.blocksci_image_digest,
         coinjoin_analysis_image_digest=args.coinjoin_analysis_image_digest,
         coinjoin_emulator_image_digest=args.coinjoin_emulator_image_digest,
-        wrapper_image_digest=args.wrapper_image_digest,
+        # Same derivation as the diagnostics block above; passing it explicitly
+        # keeps both call sites in one place instead of relying on the manifest
+        # builder repeating the fallback.
+        uploader_image_digest=digest_from_reference(args.uploader_image),
+        unified_report_image_digest=digest_from_reference(args.unified_report_image),
         emulator_git_commit=args.emulator_git_commit,
         previous_run_manifest=previous_run_manifest,
         integration_diagnostics=integration_diagnostics,

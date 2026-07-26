@@ -712,7 +712,7 @@ def completion_values(flag: str) -> list[str]:
             if help_default:
                 values.add(help_default.group(1).strip())
         for variable in (
-            "WRAPPER_IMAGE", "BLOCKSCI_IMAGE", "COINJOIN_ANALYSIS_IMAGE",
+            "BLOCKSCI_IMAGE", "COINJOIN_ANALYSIS_IMAGE",
             "COINJOIN_EMULATOR_IMAGE",
         ):
             if os.environ.get(variable):

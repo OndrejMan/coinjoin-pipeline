@@ -37,31 +37,38 @@ chmod +x "${FAKE_BIN}/docker"
 
 export DOCKER_LOG="${FAKE_LOG}"
 
+RUN_OUT="${TMP_DIR}/run.out"
+
 run_it() {
   : >"${FAKE_LOG}"
   (
   cd "${PROJECT_DIR}"
     EMULATION_LOGS_DIR="${FAKE_LOGS}" \
-    WRAPPER_IMAGE="ghcr.io/ondrejman/coinjoin-pipeline:latest" \
     BLOCKSCI_IMAGE="ghcr.io/ondrejman/blocksci-complete:latest" \
     COINJOIN_EMULATOR_IMAGE="ghcr.io/ondrejman/coinjoin-emulator:latest" \
     COINJOIN_ANALYSIS_IMAGE="ghcr.io/ondrejman/coinjoin-analysis:latest" \
     PATH="${FAKE_BIN}:${PATH}" \
     "$@"
-  )
+  ) >"${RUN_OUT}" 2>&1
+  RUN_STATUS=$?
+  cat "${RUN_OUT}"
+  return "${RUN_STATUS}"
 }
 
-# A successful normal run executes doctor first and then launches the wrapper.
-run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/overactive-local.json
-grep -q '^info ' "${FAKE_LOG}"
-grep -q '^manifest inspect ghcr.io/ondrejman/coinjoin-pipeline:latest ' "${FAKE_LOG}"
-grep -q '^run ' "${FAKE_LOG}"
+# The wrapper is no longer started through `docker run`, so "did the CLI get
+# past its gates" is now the dry-run confirmation it prints just before exec.
+launched() {
+  grep -q 'validation passed' "${RUN_OUT}"
+}
 
-# Dry runs perform the same checks but never launch the wrapper container.
+# A run that passes every gate probes the runtime and the workload images.
 run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/overactive-local.json --dry-run
-grep -q '^manifest inspect ghcr.io/ondrejman/coinjoin-pipeline:latest ' "${FAKE_LOG}"
-if grep -q '^run ' "${FAKE_LOG}"; then
-  echo "FAIL: doctor-only dry run launched the wrapper" >&2
+grep -q '^info ' "${FAKE_LOG}"
+grep -q '^manifest inspect ghcr.io/ondrejman/blocksci-complete:latest ' "${FAKE_LOG}"
+launched
+# The retired wrapper image must not be probed any more.
+if grep -q 'coinjoin-pipeline:latest' "${FAKE_LOG}"; then
+  echo "FAIL: the wrapper image is gone and must not be preflighted" >&2
   exit 1
 fi
 
@@ -76,54 +83,56 @@ fi
 
 # A runtime failure and a strict scenario failure both prevent launch.
 set +e
-FAIL_INFO=1 run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/overactive-local.json >"${TMP_DIR}/daemon.out" 2>&1
+FAIL_INFO=1 run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/overactive-local.json --dry-run >"${TMP_DIR}/daemon.out" 2>&1
 daemon_exit=$?
 set -e
 [[ "${daemon_exit}" -ne 0 ]]
 grep -q 'daemon/API is not reachable' "${TMP_DIR}/daemon.out"
-if grep -q '^run ' "${FAKE_LOG}"; then
+if launched; then
   echo "FAIL: daemon failure launched the wrapper" >&2
   exit 1
 fi
 
 set +e
-run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/missing.json >"${TMP_DIR}/scenario.out" 2>&1
+run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/missing.json --dry-run >"${TMP_DIR}/scenario.out" 2>&1
 scenario_exit=$?
 set -e
 [[ "${scenario_exit}" -ne 0 ]]
-if grep -q '^run ' "${FAKE_LOG}"; then
+if launched; then
   echo "FAIL: invalid scenario launched the wrapper" >&2
   exit 1
 fi
 
 # Images may be supplied locally; otherwise an inaccessible registry blocks execution.
 mkdir -p "${FAKE_LOGS}/existing-run"
-run_it env LOCAL_IMAGES=1 bash "${LAUNCHER}" export --engine wasabi --run-dir existing-run
-grep -q '^image inspect ghcr.io/ondrejman/coinjoin-pipeline:latest ' "${FAKE_LOG}"
+run_it env LOCAL_IMAGES=1 bash "${LAUNCHER}" export --engine wasabi --run-dir existing-run --dry-run
+grep -q '^image inspect ghcr.io/ondrejman/blocksci-complete:latest ' "${FAKE_LOG}"
 if grep -q '^manifest inspect ' "${FAKE_LOG}"; then
   echo "FAIL: locally available image was unnecessarily resolved from registry" >&2
   exit 1
 fi
 
 set +e
-FAIL_MANIFEST=1 run_it bash "${LAUNCHER}" export --engine wasabi --run-dir existing-run >"${TMP_DIR}/image.out" 2>&1
+FAIL_MANIFEST=1 run_it bash "${LAUNCHER}" export --engine wasabi --run-dir existing-run --dry-run >"${TMP_DIR}/image.out" 2>&1
 image_exit=$?
 set -e
 [[ "${image_exit}" -ne 0 ]]
 grep -q 'image is unavailable locally and from its registry' "${TMP_DIR}/image.out"
-if grep -q '^run ' "${FAKE_LOG}"; then
+if launched; then
   echo "FAIL: inaccessible image launched the wrapper" >&2
   exit 1
 fi
 
 # Kubernetes preflight fails before launch when the kubeconfig is missing.
 set +e
+# Not a dry run: the kubeconfig gate only applies to live runs, and it fails
+# before anything is executed.
 run_it bash "${LAUNCHER}" emulate --engine wasabi --scenario scenarios/overactive-local.json --driver kubernetes --kubeconfig "${TMP_DIR}/missing-kubeconfig" >"${TMP_DIR}/kube.out" 2>&1
 kube_exit=$?
 set -e
 [[ "${kube_exit}" -ne 0 ]]
 grep -q 'kubeconfig not found' "${TMP_DIR}/kube.out"
-if grep -q '^run ' "${FAKE_LOG}"; then
+if launched; then
   echo "FAIL: Kubernetes preflight failure launched the wrapper" >&2
   exit 1
 fi

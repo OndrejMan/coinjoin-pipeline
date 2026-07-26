@@ -72,7 +72,6 @@ artifacts:
 
 images:
   version: thesis-2026-07
-  pipeline: registry/pipeline:test
   emulator: registry/emulator:test
   coinjoin_analysis: registry/analysis:test
   blocksci: registry/blocksci:test

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from .commands import has_option
+from .commands import DOCKERLESS_RESEARCH_ACTIONS, has_option
 from .images import IMAGE_NAMES, Images
 
 
@@ -12,7 +12,6 @@ HOST_VALUE_OPTIONS = {
     "--version": "version",
     "--runtime": "runtime",
     "--runs-root": "runs_root",
-    "--pipeline-image": "pipeline",
     "--emulator-image": "emulator",
     "--coinjoin-analysis-image": "coinjoin_analysis",
     "--blocksci-image": "blocksci",
@@ -53,7 +52,6 @@ def parse_host_options(argv: list[str]) -> tuple[list[str], dict[str, object]]:
 
 def image_overrides(host: dict[str, object]) -> dict[str, str | None]:
     environment_names = {
-        "pipeline": "WRAPPER_IMAGE",
         "emulator": "COINJOIN_EMULATOR_IMAGE",
         "coinjoin_analysis": "COINJOIN_ANALYSIS_IMAGE",
         "blocksci": "BLOCKSCI_IMAGE",
@@ -71,7 +69,6 @@ def image_overrides(host: dict[str, object]) -> dict[str, str | None]:
 
 def local_images() -> Images:
     return Images(
-        pipeline="coinjoin-pipeline:local",
         emulator="coinjoin-emulator:local",
         coinjoin_analysis="coinjoin-analysis:local",
         blocksci="blocksci-complete:local",
@@ -89,19 +86,28 @@ def _artifact_backend(arguments: list[str]) -> str:
     return "shared-storage"
 
 
+# The frontend submits Singularity references to PBS, so a stage delegated by
+# one of these flags never touches the local Docker/Podman daemon. Only the
+# delegated stage disappears, though: a shared-storage `full-run --analysisPbs`
+# still emulates locally and must keep preflighting the emulator image.
+PBS_DELEGATED_COMPONENTS = {
+    "--analysisPbs": ("coinjoin_analysis",),
+    "--blocksciPbs": ("blocksci",),
+    "--mappingsPbs": ("mappings", "sake"),
+}
+
+
+def pbs_delegated_components(arguments: list[str]) -> set[str]:
+    delegated: set[str] = set()
+    for flag, components in PBS_DELEGATED_COMPONENTS.items():
+        if has_option(arguments, flag):
+            delegated.update(components)
+    return delegated
+
+
 def required_image_components(action: str, arguments: list[str]) -> set[str]:
-    if os.environ.get("PBS_FRONTEND_DIRECT") == "1" and any(
-        flag in arguments for flag in ("--analysisPbs", "--blocksciPbs", "--mappingsPbs")
-    ):
-        # The frontend submits Singularity references to PBS. It does not run
-        # these images through its local Docker/Podman daemon.
+    if action in DOCKERLESS_RESEARCH_ACTIONS:
         return set()
-    if action.startswith(("runs ", "scenarios ")):
-        return {"pipeline"}
-    if action == "external analyze":
-        return {"pipeline", "blocksci"}
-    if action == "emulate":
-        return {"pipeline", "emulator"}
     if action == "pbs-from-s3":
         return set()
     if action == "full-run" and _artifact_backend(arguments) == "s3":
@@ -109,15 +115,27 @@ def required_image_components(action: str, arguments: list[str]) -> set[str]:
         # local Docker/Podman daemon.
         return set()
     if action == "clean":
-        return {"pipeline"}
-    if action == "coinjoin-analysis":
-        return {"pipeline", "coinjoin_analysis"}
-    if action in {"analyze", "export"}:
-        return {"pipeline", "blocksci", "coinjoin_analysis"}
-    required = {"pipeline", "emulator", "coinjoin_analysis", "blocksci"}
-    if "--mappingsPbs" in arguments or action == "mappings":
-        required.update(("mappings", "sake"))
-    return required
+        return set()
+    delegated = pbs_delegated_components(arguments)
+    if delegated and action not in {"full-run", "emulate"}:
+        # A stage action with a PBS flag runs entirely on the compute node —
+        # `analyze --blocksciPbs` never starts the local analysis pair. Only
+        # full-run/emulate keep local work alongside a delegated stage.
+        return set()
+    if action in {"external analyze", "runs validate"}:
+        # Both reopen a parsed chain with the BlockSci image.
+        required = {"blocksci"}
+    elif action == "emulate":
+        required = {"emulator"}
+    elif action == "coinjoin-analysis":
+        required = {"coinjoin_analysis"}
+    elif action in {"analyze", "export"}:
+        required = {"blocksci", "coinjoin_analysis"}
+    else:
+        required = {"emulator", "coinjoin_analysis", "blocksci"}
+        if has_option(arguments, "--mappingsPbs") or action == "mappings":
+            required.update(("mappings", "sake"))
+    return required - delegated
 
 
 def add_effective_image_arguments(action: str, arguments: list[str], images: Images) -> list[str]:

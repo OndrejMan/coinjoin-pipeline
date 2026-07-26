@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 import json
 from importlib.resources import files
+import os
 from pathlib import Path
+import platform
 import shlex
+import sys
 from typing import Any
 
 from .images import Images
@@ -19,6 +23,13 @@ MUTATING_ACTIONS = {
     "pbs-from-s3",
 }
 RESEARCH_PREFIXES = {"runs", "scenarios", "external"}
+# Research actions that stay in-process and may therefore skip the container
+# runtime and image preflight. `runs validate` is deliberately absent: it starts
+# the BlockSci image to reopen the parsed chain (research.py:validate_existing_run),
+# so exempting it turns a clear preflight error into a late runtime failure.
+DOCKERLESS_RESEARCH_ACTIONS = frozenset(
+    {"runs list", "runs inspect", "scenarios list", "scenarios show", "scenarios validate"}
+)
 # Alias -> canonical action. Aliases are accepted but never named in error text.
 ACTION_ALIASES = {"coinjoin": "coinjoin-analysis"}
 # Actions each PBS offload flag may accompany; also the source of the error text.
@@ -339,15 +350,59 @@ class RuntimeCommand:
         return f"{env} {command}" if env else command
 
 
-def launcher_command(
-    launcher: Path, runtime: str, passthrough: list[str], images: Images,
-    runs_root: Path, reproduction_command: str,
-) -> RuntimeCommand:
-    arguments = tuple(["container", runtime, *passthrough])
+def prepend_path(entry: Path, existing: str | None) -> str:
+    """Put ``entry`` first on a ``PATH``-style variable without dropping the rest."""
+    return f"{entry}{os.pathsep}{existing}" if existing else str(entry)
+
+
+# Variables the wrapper and the pipeline shell scripts read straight from the
+# environment. The launcher container only ever saw what it was handed with -e;
+# the bare wrapper inherits the whole shell, so these are folded into the
+# rendered command instead — otherwise a run could be steered by a variable that
+# neither the printed command nor the manifest mentions.
+INHERITED_ENVIRONMENT_PREFIXES = (
+    "BLOCKSCI_", "COINJOIN_", "KUBERNETES_", "MAPPINGS_", "SAKE_", "PBS_",
+)
+# Never render or store a value that can carry a credential.
+SECRET_ENVIRONMENT_MARKERS = ("SECRET", "TOKEN", "PASSWORD", "ACCESS_KEY", "CREDENTIAL")
+
+
+def inherited_environment(source: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Pipeline-relevant variables the caller exported, minus anything secret."""
+    items = os.environ if source is None else source
+    return {
+        name: value
+        for name, value in items.items()
+        if name.startswith(INHERITED_ENVIRONMENT_PREFIXES)
+        and not any(marker in name for marker in SECRET_ENVIRONMENT_MARKERS)
+    }
+
+
+def runtime_environment(
+    runtime_root: Path, runtime: str, images: Images,
+    runs_root: Path, reproduction_command: str, engine: str | None = None,
+) -> dict[str, str]:
+    """Environment contract between the host CLI and the bare wrapper.
+
+    Everything here was previously computed by the in-image launcher. Values the
+    user exported are inherited by the subprocess anyway; the pipeline-relevant
+    ones are restated here so the rendered command reproduces the run, while
+    computed values still win over whatever the shell happened to hold.
+    """
+    checkout_root = runtime_root.parent
     environment = {
         "CONTAINER_RUNTIME": runtime,
+        "PYTHONPATH": prepend_path(runtime_root, os.environ.get("PYTHONPATH")),
+        # The wrapper now runs straight out of the checkout; without this it
+        # would litter pipeline/ with __pycache__ that later ships to S3.
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "HOST_CLIENT_DIR": str(runtime_root / "client"),
+        "EXPORTERS_DIR": str(runtime_root / "exporters"),
+        "SCENARIOS_DIR": str(checkout_root / "scenarios"),
+        "NOTEBOOKS_DIR": str(runs_root / ".notebooks"),
         "EMULATION_LOGS_DIR": str(runs_root),
-        "WRAPPER_IMAGE": images.pipeline,
+        # compose.yaml defaults this to "true"; the launcher effectively sent 0.
+        "BLOCKSCI_LAUNCH_JUPYTER": os.environ.get("BLOCKSCI_LAUNCH_JUPYTER") or "0",
         "COINJOIN_EMULATOR_IMAGE": images.emulator,
         "COINJOIN_ANALYSIS_IMAGE": images.coinjoin_analysis,
         "BLOCKSCI_IMAGE": images.blocksci,
@@ -355,4 +410,49 @@ def launcher_command(
         "SAKE_IMAGE": images.sake,
         "REPRODUCTION_COMMAND": reproduction_command,
     }
-    return RuntimeCommand(str(launcher), arguments, environment)
+    if engine == "joinmarket" and not os.environ.get("COINJOIN_EMULATOR_DOCKER_PLATFORM"):
+        if platform.machine() in {"arm64", "aarch64"}:
+            environment["COINJOIN_EMULATOR_DOCKER_PLATFORM"] = "linux/amd64"
+    return {**inherited_environment(), **environment}
+
+
+def runtime_command(
+    runtime_root: Path, runtime: str, passthrough: list[str], images: Images,
+    runs_root: Path, reproduction_command: str,
+) -> RuntimeCommand:
+    """Build the bare wrapper invocation that replaced the launcher container."""
+    environment = runtime_environment(
+        runtime_root, runtime, images, runs_root, reproduction_command,
+        engine=option_value(passthrough, "--engine"),
+    )
+    # wrapper.py rejects --copy-to-host without an explicit host directory; the
+    # launcher supplied this default before handing over.
+    if has_option(passthrough, "--copy-to-host") and not os.environ.get(
+        "KUBERNETES_COPY_TO_HOST_DIR"
+    ):
+        environment["KUBERNETES_COPY_TO_HOST_DIR"] = str(runs_root / ".kubernetes-btc-data")
+    arguments = (str(runtime_root / "client" / "wrapper.py"), *passthrough)
+    return RuntimeCommand(sys.executable, arguments, environment)
+
+
+def research_command(
+    runtime_root: Path, runtime: str, passthrough: list[str], images: Images,
+    runs_root: Path, reproduction_command: str,
+) -> RuntimeCommand:
+    """``runs``/``external``/``scenarios`` run the same way, as a module.
+
+    ``-m client.research`` keeps ``__package__ == "client"`` exactly as the
+    launcher's ``python3 -m client.research`` did, so absolute ``from client.X``
+    imports resolve without relying on research.py's own sys.path fallback.
+    """
+    environment = runtime_environment(
+        runtime_root, runtime, images, runs_root, reproduction_command,
+    )
+    # research.py takes --runs-root/--runtime as global options, so they must
+    # precede the subcommand exactly as the launcher passed them.
+    arguments = (
+        "-m", "client.research",
+        "--runs-root", str(runs_root), "--runtime", runtime,
+        *passthrough,
+    )
+    return RuntimeCommand(sys.executable, arguments, environment)

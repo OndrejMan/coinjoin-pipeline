@@ -4,15 +4,26 @@
 from __future__ import annotations
 
 import argparse
+import builtins
 import os
 import sys
 from pathlib import Path
+
+if not hasattr(builtins, "xrange"):
+    setattr(builtins, "xrange", range)
+
+# Import BlockSci before the exporters' parent directory joins sys.path; see the
+# same guard in unified_report.py and assert_real_blocksci() in detector.py.
+try:
+    import blocksci  # noqa: F401
+except ImportError:
+    pass
 
 if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from exporters.artifact_paths import blocksci_analysis_dir, emulator_dir
-from exporters.blocksci.detector import (
+from exporters.blocksci_export.detector import (
     blocksci,
     export_blocksci_cluster_assignments_for_addresses,
     export_blocksci_records,
@@ -129,7 +140,8 @@ def write_analysis(args: argparse.Namespace) -> Path:
             "blocksci": args.blocksci_image,
             "coinjoin_analysis": args.coinjoin_analysis_image,
             "coinjoin_emulator": args.coinjoin_emulator_image,
-            "wrapper": args.wrapper_image,
+            "uploader": args.uploader_image,
+            "unified_report": args.unified_report_image,
         },
         joinmarket_detector=args.joinmarket_detector,
         joinmarket_min_base_fee=args.joinmarket_min_base_fee,
@@ -178,7 +190,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--blocksci-image", default=os.environ.get("BLOCKSCI_IMAGE"))
     parser.add_argument("--coinjoin-analysis-image", default=os.environ.get("COINJOIN_ANALYSIS_IMAGE"))
     parser.add_argument("--coinjoin-emulator-image", default=os.environ.get("COINJOIN_EMULATOR_IMAGE"))
-    parser.add_argument("--wrapper-image", default=os.environ.get("WRAPPER_IMAGE"))
+    parser.add_argument("--uploader-image", default=os.environ.get("COINJOIN_UPLOADER_IMAGE"))
+    parser.add_argument(
+        "--unified-report-image", default=os.environ.get("COINJOIN_UNIFIED_REPORT_IMAGE")
+    )
     return parser.parse_args(argv)
 
 

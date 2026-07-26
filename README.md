@@ -59,15 +59,27 @@ legacy BlockSci confusion-matrix field.
 Outputs default to `./coinjoin-runs`; override this with `--runs-root`. Images
 default to the explicit `latest` tag. Use `--version TAG` to apply one coordinated
 tag to every default image, or `--local-build` for local development tags.
-Individual overrides (`--pipeline-image`, `--emulator-image`,
-`--coinjoin-analysis-image`, `--blocksci-image`, `--mappings-image`, and
-`--sake-image`) take precedence over the coordinated tag.
+Individual overrides (`--emulator-image`, `--coinjoin-analysis-image`,
+`--blocksci-image`, `--mappings-image`, and `--sake-image`) take precedence
+over the coordinated tag. The in-cluster uploader and the pinned Python image
+for the PBS report step are not part of that coordinated set: they carry their
+own immutable references in `container/uploader.image` and
+`container/unified-report.image`, overridable per run with `--uploader-image`
+and `--unified-report-image`.
+
+The uploader image is published by the manual `Publish Uploader Image`
+workflow, not by the test pipeline, so **it has to exist in the registry before
+the first S3 run**: the Kubernetes Job pulls it for both its preflight and its
+uploader container. Run the workflow, put the digest it prints into
+`container/uploader.image`, and only then start an S3 run — otherwise the Job
+sits in `ImagePullBackOff` (the frontend now aborts on that instead of waiting
+out `--emulation-timeout`, but the run is still lost).
 
 When publishing component images separately, publish and verify the BlockSci
-and coinjoin-emulator images before the coinjoin-pipeline image. The pipeline
-requires BlockSci's raw CoinJoin binding and the emulator's in-cluster
-networking plus producer-label manifest contract. A coordinated `--version`
-tag avoids mixing incompatible generations.
+and coinjoin-emulator images together. The pipeline requires BlockSci's raw
+CoinJoin binding and the emulator's in-cluster networking plus producer-label
+manifest contract. A coordinated `--version` tag avoids mixing incompatible
+generations.
 
 Developer compatibility entrypoints use the same CLI:
 
@@ -76,12 +88,13 @@ Developer compatibility entrypoints use the same CLI:
 ./run-all.sh local --build-only
 ```
 
-`run-pipeline-image.sh` is also a compatibility shim. Its argument parsing,
-validation, environment forwarding, and Docker/Podman command construction live
-in the testable `coinjoin_pipeline.pipeline_image` module and are exposed as the
-`coinjoin-pipeline-image` console command. It uses the selected host runtime
-socket; `--build` requires a source checkout (use `--source-root` when running
-from an installed wheel).
+The wrapper runs directly from the checkout under the interpreter that runs
+`cjp` itself (`sys.executable`), not inside a published wrapper image. Install
+it as an editable checkout — `pip install -e .` or `pipx install --editable .`
+— because `coinjoin-pipeline` resolves `pipeline/client/wrapper.py`,
+`pipeline/exporters/`, and `scenarios/` relative to that checkout. There is no
+standalone, relocatable wheel: a non-editable `pip install .` gives a working
+`cjp version` but fails with a clear error on the first pipeline action.
 
 ## Commands and contracts
 
@@ -169,12 +182,12 @@ emulation Job, polls the bucket for `.k8s/upload.done`, submits both PBS
 analyzers in parallel followed by a report job dependent on both, and polls
 all three `.pbs/*.done` markers until the results land in the bucket.
 Requirements: kubeconfig + `qsub` + `s5cmd` on
-the frontend, `PBS_FRONTEND_DIRECT=1`, and a pre-created namespace with the
+the frontend, and a pre-created namespace with the
 Secret (`--reuse-namespace` is required). Run it inside `screen`/`tmux` —
 the process blocks for the whole emulation and analysis.
 
 ```bash
-PBS_FRONTEND_DIRECT=1 coinjoin-pipeline full-run \
+coinjoin-pipeline full-run \
   --engine wasabi \
   --coinjoin-type wasabi2 \
   --driver kubernetes \
@@ -213,7 +226,7 @@ missing `run_id` is generated automatically; `pbs.analysis`, `pbs.blocksci`,
 and `pbs.mappings` enable their corresponding PBS stages.
 
 ```bash
-PBS_FRONTEND_DIRECT=1 ./runIt.sh \
+./runIt.sh \
   --fromConfiguration examples/metacentrum-regtest-s3.yaml
 ```
 
@@ -223,11 +236,11 @@ predecessor. Mainnet is deliberately split into two submissions:
 
 ```bash
 # Produces a checksummed reusable BlockSci cache from the external mainnet datadir.
-PBS_FRONTEND_DIRECT=1 ./runIt.sh \
+./runIt.sh \
   --from-configuration examples/metacentrum-mainnet-parse.yaml
 
 # Reuses that run ID and cache to produce joinmarket-mainnet-summary.json.
-PBS_FRONTEND_DIRECT=1 ./runIt.sh \
+./runIt.sh \
   --from-configuration examples/metacentrum-mainnet-analyze.yaml
 ```
 
@@ -296,7 +309,7 @@ coinjoin-pipeline emulate \
 Submit PBS analysis for the existing run:
 
 ```bash
-PBS_FRONTEND_DIRECT=1 coinjoin-pipeline pbs-from-s3 \
+coinjoin-pipeline pbs-from-s3 \
   --run-id '<id>' \
   --artifact-uri s3://coinjoin-thesis/runs \
   --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
@@ -332,7 +345,7 @@ and becomes a third dependency of the report job. To run mappings later against
 an existing baseline without rerunning either analyzer:
 
 ```bash
-PBS_FRONTEND_DIRECT=1 ./runIt.sh pbs-from-s3 \
+./runIt.sh pbs-from-s3 \
   --run-id '<id>' \
   --artifact-uri s3://coinjoin-thesis/runs \
   --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
@@ -370,7 +383,7 @@ Use the split graph in a complete run:
 Or publish only the parsed cache for an existing S3 run:
 
 ```bash
-PBS_FRONTEND_DIRECT=1 ./runIt.sh pbs-from-s3 \
+./runIt.sh pbs-from-s3 \
   --run-id '<id>' \
   --artifact-uri s3://coinjoin-thesis/runs \
   --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
@@ -388,7 +401,7 @@ directory that directly contains `blocks/`), provide the network and an
 inclusive maximum block height:
 
 ```bash
-PBS_FRONTEND_DIRECT=1 ./runIt.sh pbs-from-s3 \
+./runIt.sh pbs-from-s3 \
   ... \
   --run-id '<id>' \
   --engine wasabi \
@@ -406,7 +419,7 @@ layout, rewrites the parsed-data path, verifies the expected files, and
 publishes the same checksummed cache:
 
 ```bash
-PBS_FRONTEND_DIRECT=1 ./runIt.sh pbs-from-s3 \
+./runIt.sh pbs-from-s3 \
   ... \
   --run-id '<id>' \
   --engine wasabi \
@@ -421,7 +434,7 @@ received newer blocks, use the existing cache run as the source and a fresh
 run ID as the target:
 
 ```bash
-PBS_FRONTEND_DIRECT=1 ./runIt.sh pbs-from-s3 \
+./runIt.sh pbs-from-s3 \
   --run-id 'mainnet-850100' \
   --artifact-uri s3://coinjoin-thesis/runs \
   --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
@@ -454,7 +467,7 @@ custom-script analysis rather than the unified emulator comparison report.
 Run the default detector later without invoking `blocksci_parser`:
 
 ```bash
-PBS_FRONTEND_DIRECT=1 ./runIt.sh pbs-from-s3 \
+./runIt.sh pbs-from-s3 \
   ... \
   --run-id '<id>' \
   --engine wasabi \
@@ -470,7 +483,7 @@ them read-only. They receive `ACTIVE_RUN_ID`, `BLOCKSCI_CONFIG`,
 uploaded to `blocksci-custom-analysis_data/`:
 
 ```bash
-PBS_FRONTEND_DIRECT=1 ./runIt.sh pbs-from-s3 \
+./runIt.sh pbs-from-s3 \
   ... \
   --run-id '<id>' \
   --engine wasabi \
@@ -485,7 +498,7 @@ unified report. The current BlockSci image installs Jupyter at image-build
 time, so this task does not call `build.sh`, compile BlockSci, or parse again:
 
 ```bash
-PBS_FRONTEND_DIRECT=1 ./runIt.sh pbs-from-s3 \
+./runIt.sh pbs-from-s3 \
   ... \
   --run-id '<id>' \
   --engine wasabi \
@@ -580,7 +593,8 @@ Kubernetes and PBS options retain their current wrapper semantics.
 - `src/coinjoin_pipeline/`: installed CLI, metadata, builder, and runtime logic.
 - `pipeline/client/`: wrapper, PBS, research, and run-catalog implementation.
 - `pipeline/exporters/`: unified JSON/Markdown report implementation.
-- `container/`: compatibility launcher and pipeline-image entrypoint.
+- `container/`: uploader image build plus the committed image references
+  (`uploader.image`, `unified-report.image`).
 - `scenarios/`: canonical scenarios.
 - `tests/`: host, wrapper/report, PBS, Podman, and Kubernetes coverage.
 

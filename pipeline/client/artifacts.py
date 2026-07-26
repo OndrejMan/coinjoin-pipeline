@@ -14,6 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
+# The exporters ship to the compute node on their own, so the tree hash they
+# record in the report has to come from the same implementation the frontend
+# logs here — otherwise the two provenance values are not comparable.
+from exporters.common import tree_sha256
+
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -151,10 +156,46 @@ def s3_object_exists(access: S3Access, object_uri: str) -> bool:
     raise ArtifactTransportError(f"s5cmd ls {object_uri} failed (exit {result.returncode}): {stderr}")
 
 
+# `sync --exclude` (used when staging the exporters) landed in s5cmd 2.1.
+MINIMUM_S5CMD_VERSION = (2, 1)
+S5CMD_VERSION_RE = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
+
+
+def s5cmd_version() -> tuple[int, ...] | None:
+    """Best-effort frontend s5cmd version; None when it cannot be determined."""
+    try:
+        result = subprocess.run(
+            ["s5cmd", "version"], check=False, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+    except OSError:
+        return None
+    match = S5CMD_VERSION_RE.search(result.stdout or "")
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def require_s5cmd_version(minimum: tuple[int, ...] = MINIMUM_S5CMD_VERSION) -> None:
+    """Reject an s5cmd too old for the flags this client relies on.
+
+    Only the frontend binary is a variable — the in-cluster and PBS sides use
+    pinned images — and an unparsable version is not treated as a failure, so a
+    vendored build cannot block a run it would have handled fine.
+    """
+    version = s5cmd_version()
+    if version is not None and version < minimum:
+        raise ArtifactTransportError(
+            "s5cmd on the frontend is too old for this pipeline: "
+            f"found {'.'.join(str(part) for part in version)}, "
+            f"need {'.'.join(str(part) for part in minimum)} or newer "
+            "(sync --exclude support)"
+        )
+
+
 def s3_access_preflight(access: S3Access, artifact_uri: str) -> None:
     """Fail fast when s5cmd, the credentials file, or the endpoint is unusable."""
     if shutil.which("s5cmd") is None:
         raise ArtifactTransportError("s5cmd is required on the frontend PATH for S3-compatible full-run")
+    require_s5cmd_version()
     if not Path(access.credentials_file).is_file():
         raise ArtifactTransportError(f"S3 credentials file not found: {access.credentials_file}")
     result = run_s5cmd(access, "ls", f"{artifact_uri}/*")
@@ -172,6 +213,83 @@ def ensure_empty_run_prefix(access: S3Access, artifact_uri: str, run_id: str) ->
         raise ArtifactTransportError(
             f"run prefix {run_prefix}/ already contains artifacts; choose a fresh --run-id"
         )
+
+
+# Entry points of the report and BlockSci analysis paths. Both are bind-mounted
+# and executed on the compute node, so a staging step that uploads neither is
+# useless; checking them turns a late node-side failure into a frontend error.
+REQUIRED_EXPORTERS = ("unified_report.py", "blocksci_export/analysis.py")
+
+
+def ensure_local_exporters(exporters_dir: Path) -> None:
+    """Reject an exporter tree that is missing either entry point."""
+    for relative in REQUIRED_EXPORTERS:
+        candidate = exporters_dir / relative
+        if not candidate.is_file():
+            raise ArtifactTransportError(f"Required exporter is missing: {candidate}")
+
+
+STAGED_EXPORTERS_COMPLETE = "complete"
+STAGED_EXPORTERS_MISSING = "missing"
+STAGED_EXPORTERS_PARTIAL = "partial"
+
+
+def staged_exporters_state(
+    access: S3Access, artifact_uri: str, run_id: str
+) -> tuple[str, list[str]]:
+    """Classify the exporter tree already staged under a run prefix.
+
+    One entry point is not proof of a usable tree. A prefix staged before the
+    ``blocksci/`` → ``blocksci_export/`` rename still carries
+    ``unified_report.py``, so a resumed run would clear the frontend check and
+    only fail on the compute node, which runs the renamed analysis path. The
+    same holds for an upload that died halfway through.
+    """
+    prefix = f"{artifact_uri}/{run_id}/.pipeline/exporters/"
+    missing = [
+        relative
+        for relative in REQUIRED_EXPORTERS
+        if not s3_object_exists(access, f"{prefix}{relative}")
+    ]
+    if not missing:
+        return STAGED_EXPORTERS_COMPLETE, []
+    if len(missing) == len(REQUIRED_EXPORTERS):
+        return STAGED_EXPORTERS_MISSING, missing
+    return STAGED_EXPORTERS_PARTIAL, missing
+
+
+def upload_exporters(access: S3Access, artifact_uri: str, run_id: str, exporters_dir: Path) -> None:
+    """Stage the checkout's exporters into the run prefix before the Job starts.
+
+    Running bare from a checkout means the tree can hold host bytecode; shipping
+    a 3.14 ``__pycache__`` into BlockSci's Python 3.8 is at best noise, so the
+    sync filters it out rather than snapshotting the tree somewhere first.
+    """
+    ensure_local_exporters(exporters_dir)
+    # Informational provenance for "what exactly was staged": the upload takes
+    # the live checkout, uncommitted changes included, and the node has no .git
+    # to resolve a commit from. The unified report recomputes this hash from the
+    # tree it actually ran, so the two can be compared after the fact.
+    print(f"[stage] exporters tree sha256={tree_sha256(exporters_dir)}")
+    destination = f"{artifact_uri}/{run_id}/.pipeline/exporters/"
+    result = run_s5cmd(
+        access,
+        "sync",
+        "--exclude", "*__pycache__*",
+        "--exclude", "*.pyc",
+        f"{exporters_dir}/",
+        destination,
+    )
+    if result.returncode != 0:
+        raise ArtifactTransportError(
+            f"failed to upload exporters to {destination} "
+            f"(exit {result.returncode}): {(result.stderr or '').strip()}"
+        )
+    for relative in REQUIRED_EXPORTERS:
+        if not s3_object_exists(access, f"{destination}{relative}"):
+            raise ArtifactTransportError(
+                f"exporter upload did not produce {destination}{relative}"
+            )
 
 
 def wait_for_s3_marker(
