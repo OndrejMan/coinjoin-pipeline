@@ -24,8 +24,12 @@ ALL_COMPONENTS = {"controller", "uploader", "engine"}
 VALID_COMPONENTS = ALL_COMPONENTS | {"coordinator"}
 ENGINE_SELECTORS = {
     "wasabi": "app=wasabi-coordinator",
-    "joinmarket": "app=joinmarket-client-server",
+    # coinjoin-emulator labels pods with their runtime resource name, not
+    # their image/component name. The distributor is the one stable
+    # JoinMarket pod across scenarios; clients are dynamically named jcs-*.
+    "joinmarket": "app=joinmarket-distributor",
 }
+OUTER_POD_SELECTOR = "app.kubernetes.io/name=coinjoin-s3"
 PBS_SUBMISSION_RE = re.compile(
     r"\[pbs\] Submitted (?P<stage>[a-z0-9-]+)(?: S3-compatible)? PBS job: (?P<job_id>\S+)"
 )
@@ -464,7 +468,7 @@ def main(
         try:
             outer_pod = _discover_pod(
                 kubectl,
-                f"coinjoin.run-id={args.run_id}",
+                f"{OUTER_POD_SELECTOR},coinjoin.run-id={args.run_id}",
                 wait_seconds=args.wait_seconds,
                 description=f"outer pod for run {args.run_id}",
             )

@@ -101,6 +101,9 @@ def test_main_builds_unified_all_component_sources() -> None:
     assert set(sources) == {"controller", "uploader", "engine"}
     assert sources["controller"][-1] == "--timestamps=true"
     assert "--follow=true" not in sources["controller"]
+    assert discover.call_args_list[0].args[1] == (
+        "app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1"
+    )
     assert discover.call_args_list[1].args[1] == (
         "app=wasabi-coordinator,coinjoin.run-id=run-1"
     )
@@ -136,8 +139,11 @@ def test_main_all_discovers_joinmarket_engine_service() -> None:
 
     assert code == 0
     assert set(stream.call_args.args[0]) == {"controller", "uploader", "engine"}
+    assert discover.call_args_list[0].args[1] == (
+        "app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1"
+    )
     assert discover.call_args_list[1].args[1] == (
-        "app=joinmarket-client-server,coinjoin.run-id=run-1"
+        "app=joinmarket-distributor,coinjoin.run-id=run-1"
     )
 
 

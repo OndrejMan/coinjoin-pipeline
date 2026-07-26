@@ -29,7 +29,7 @@ coinjoin-pipeline full-run --engine wasabi \
 # CI-style live output for a Kubernetes run.
 RUN_ID='<run-id>'
 coinjoin-pipeline watch --run-id "$RUN_ID"
-# Multiplex controller, uploader, coordinator, and an existing frontend tee log.
+# Multiplex controller, uploader, selected engine service, and a frontend log.
 coinjoin-pipeline watch --run-id "$RUN_ID" --all \
   --frontend-log "$HOME/$RUN_ID-full-run.log" \
   --save "$HOME/$RUN_ID-unified.log"
@@ -107,7 +107,8 @@ and scheduler contract is documented in
 Host commands are `doctor`, `pull`, `version`, `builder`, `watch`, and
 `download-report`. `watch` discovers the outer Kubernetes pod from `--run-id`
 and streams prefixed controller output without starting a container. Pass
-`--all` to multiplex the controller, S3 uploader, and Wasabi coordinator;
+`--all` to multiplex the controller, S3 uploader, and the selected engine
+service (Wasabi coordinator or the stable JoinMarket distributor);
 the namespace defaults to the pipeline default `coinjoin` (pass
 `--namespace man5-ns` for the remote examples below). The host-level
 `--runs-root` is also used when discovering `.pbs/*.jobid` files.
@@ -303,6 +304,8 @@ coinjoin-pipeline emulate \
   --artifact-uri s3://coinjoin-thesis/runs \
   --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
   --s3-secret-name coinjoin-s3-credentials \
+  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
+  --s3-profile coinjoin \
   --run-id '<id>' \
   --engine wasabi
 ```
@@ -325,8 +328,11 @@ coinjoin-pipeline pbs-from-s3 \
 `s5cmd` must be available on PBS compute nodes and is included in the pipeline
 image used by the Kubernetes uploader; the single-command full run additionally
 needs it on the frontend PATH for marker polling. In the two-command workflow
-nothing waits — monitor the jobs
-with `qstat` and check markers in the bucket yourself.
+nothing waits — monitor the jobs with `qstat` and check markers in the bucket
+yourself. Submission is serialized per run under
+`<runs-root>/<run-id>/.pbs-submit.lock`; every obtained job ID is persisted
+under `.pbs/`, and a later invocation refuses to overlap jobs that are still
+queued/running or whose state cannot be verified.
 
 When both PBS stages are selected, coinjoin-analysis and BlockSci analysis run
 independently. The BlockSci job persists detector, diagnostics, and clustering

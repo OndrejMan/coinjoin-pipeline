@@ -8,6 +8,8 @@ from argparse import ArgumentTypeError, Namespace
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2] / "pipeline"
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -25,6 +27,7 @@ from client.wrapper import (
     captured_pipeline_stage,
     compose_command,
     compose_env,
+    command_lock_path,
     container_command,
     container_run_pull_args,
     container_runtime,
@@ -32,6 +35,7 @@ from client.wrapper import (
     export_command,
     host_scenario_path,
     export_preflight_error,
+    ensure_no_active_s3_pbs_submission,
     kubernetes_auth_preflight,
     kubernetes_emulator_command,
     normalize_argv,
@@ -57,6 +61,31 @@ from client.artifacts import ArtifactTransportError
 
 def _kubectl_cmd(*parts: str) -> list[str]:
     return ["kubectl", "--kubeconfig", "/kube/config", *parts]
+
+
+def test_pbs_from_s3_uses_a_run_specific_submission_lock(tmp_path: Path) -> None:
+    args = Namespace(action="pbs-from-s3", run_id="run-1")
+
+    assert command_lock_path(args, tmp_path) == (
+        tmp_path / "run-1" / ".pbs-submit.lock"
+    )
+
+
+def test_pbs_from_s3_refuses_a_recorded_active_graph(tmp_path: Path) -> None:
+    marker_dir = tmp_path / ".pbs"
+    marker_dir.mkdir()
+    (marker_dir / "blocksci.jobid").write_text(
+        "blocksci.server\n", encoding="utf-8"
+    )
+
+    with (
+        mock.patch(
+            "client.wrapper.pbs_job_probe",
+            return_value=lambda: "running",
+        ),
+        pytest.raises(RuntimeError, match="still active"),
+    ):
+        ensure_no_active_s3_pbs_submission(tmp_path)
 
 
 def _full_run_s3_args(**overrides) -> Namespace:

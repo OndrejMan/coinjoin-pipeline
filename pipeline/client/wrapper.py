@@ -22,6 +22,9 @@ if __package__ in (None, ""):
 # Explicit self-aliases preserve wrapper's historical re-export surface.
 # pylint: disable=useless-import-alias,unused-import
 from client.artifacts import (
+    PROBE_QUEUED,
+    PROBE_RUNNING,
+    PROBE_UNKNOWN,
     STAGED_EXPORTERS_COMPLETE,
     STAGED_EXPORTERS_PARTIAL,
     ArtifactTransportError,
@@ -146,6 +149,7 @@ try:
         blocksci_update_pbs_command,
         coinjoin_analysis_pbs_command,
         pbs_job_probe,
+        persist_pbs_job_id,
         qdel_pbs_job,
         qdel_pbs_stage,
         require_qsub,
@@ -194,6 +198,7 @@ except ImportError:
         blocksci_update_pbs_command,
         coinjoin_analysis_pbs_command,
         pbs_job_probe,
+        persist_pbs_job_id,
         qdel_pbs_job,
         qdel_pbs_stage,
         require_qsub,
@@ -368,6 +373,41 @@ def acquire_lock(path: Path) -> object:
     atexit.register(handle.close)
     _LOCK_HANDLES.append(handle)
     return handle
+
+
+def command_lock_path(args: argparse.Namespace, logs_root: Path) -> Path:
+    """Return the local/shared advisory lock that protects this command."""
+    if args.action == "pbs-from-s3":
+        return logs_root / args.run_id / ".pbs-submit.lock"
+    requested_run = getattr(args, "run_dir", None)
+    if requested_run and args.action in (
+        "analyze",
+        "export",
+        "coinjoin-analysis",
+        "coinjoin",
+        "mappings",
+    ):
+        # Resolve and validate before acquire_lock creates missing parents.
+        return run_dir_under_root(requested_run, logs_root) / ".research.lock"
+    return logs_root / ".pipeline.lock"
+
+
+def ensure_no_active_s3_pbs_submission(run_dir: Path) -> None:
+    """Refuse to overlap a decomposed S3 graph recorded on shared storage."""
+    active: list[str] = []
+    marker_dir = run_dir / ".pbs"
+    for jobid_path in sorted(marker_dir.glob("*.jobid")):
+        job_id = jobid_path.read_text(encoding="utf-8").strip()
+        if not job_id:
+            continue
+        state = pbs_job_probe(job_id)()
+        if state in {PROBE_QUEUED, PROBE_RUNNING, PROBE_UNKNOWN}:
+            active.append(f"{jobid_path.stem}={job_id} ({state})")
+    if active:
+        raise RuntimeError(
+            "An earlier pbs-from-s3 graph for this run is still active or "
+            f"cannot be verified: {', '.join(active)}"
+        )
 
 
 # Peer containers started through docker/podman compose. The removed in-image
@@ -2463,7 +2503,37 @@ class PBSResources(TypedDict):
     walltime: str
 
 
+def rollback_s3_pbs_submissions(
+    submitted_jobs: list[tuple[str, str]],
+) -> None:
+    """Cancel every job obtained before an S3 PBS graph submission failed."""
+    for stage, job_id in reversed(submitted_jobs):
+        print(
+            f"[pbs] Rolling back submitted {stage} job {job_id}",
+            file=sys.stderr,
+        )
+        try:
+            qdel_pbs_job(job_id)
+        except (OSError, PBSError, RuntimeError) as error:
+            print(
+                f"[pbs] Could not roll back {stage} job {job_id}: {error}",
+                file=sys.stderr,
+            )
+
+
 def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
+    submitted_jobs: list[tuple[str, str]] = []
+    try:
+        return _run_pbs_from_s3(args, submitted_jobs)
+    except BaseException:
+        rollback_s3_pbs_submissions(submitted_jobs)
+        raise
+
+
+def _run_pbs_from_s3(
+    args: argparse.Namespace,
+    submitted_jobs: list[tuple[str, str]],
+) -> S3PBSJobs:
     access = S3Access(
         endpoint_url=args.s3_endpoint_url,
         credentials_file=args.s3_credentials_file,
@@ -2475,6 +2545,14 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
             print(f"[dry-run] Would clear stale .pbs/{stage}.done|failed markers")
             return
         clear_s3_stage_markers(access, args.artifact_uri, args.run_id, stage)
+
+    def record_job(stage: str, job_id: str | None) -> None:
+        if not job_id:
+            return
+        submitted_jobs.append((stage, job_id))
+        submission_dir = getattr(args, "pbs_submission_dir", None)
+        if submission_dir is not None:
+            persist_pbs_job_id(Path(submission_dir), stage, job_id)
 
     common = dict(
         artifact_uri=args.artifact_uri,
@@ -2549,6 +2627,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
                 args, "analysis", "walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
             ),
         )
+        record_job("coinjoin-analysis", analysis_job_id)
     if mappings_pbs:
         prepare_stage("coinjoin-mappings")
         mappings_job_id = submit_mappings_s3_pbs(
@@ -2586,6 +2665,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
             ),
             dependency_job_id=analysis_job_id,
         )
+        record_job("coinjoin-mappings", mappings_job_id)
     if args.blocksciPbs:
         blocksci_resources: PBSResources = dict(
             ncpus=resolve_stage_pbs_resource(
@@ -2616,6 +2696,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
                 external_max_block=args.blocksci_max_block,
                 **blocksci_resources,
             )
+            record_job("blocksci-update", blocksci_update_job_id)
         elif workflow == "combined":
             prepare_stage("blocksci")
             blocksci_work_job_id = submit_blocksci_s3_pbs(
@@ -2637,6 +2718,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
                 include_report=not separate_combined_report,
                 export_analysis=separate_combined_report,
             )
+            record_job("blocksci", blocksci_work_job_id)
         else:
             if workflow == "reusable":
                 external_bitcoin = getattr(
@@ -2668,6 +2750,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
                     external_max_block=getattr(args, "blocksci_max_block", None),
                     **blocksci_resources,
                 )
+                record_job("blocksci-parse", blocksci_parse_job_id)
             if task != "parse":
                 mode = f"blocksci-{task if task != 'detect' else 'analyze'}"
                 if task == "detect":
@@ -2713,6 +2796,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
                     dependency_job_id=blocksci_parse_job_id,
                     **blocksci_resources,
                 )
+                record_job(mode, blocksci_work_job_id)
     report_job_id = None
     needs_decoupled_report = task == "detect" and args.blocksciPbs and (
         separate_combined_report or workflow != "combined"
@@ -2765,6 +2849,7 @@ def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
             dependency_job_ids=dependency_job_ids,
             include_mappings=mappings_pbs,
         )
+        record_job("unified-report", report_job_id)
     return S3PBSJobs(
         coinjoin_analysis=analysis_job_id,
         coinjoin_mappings=mappings_job_id,
@@ -3293,18 +3378,27 @@ def main() -> None:
             return
 
     logs_root = Path(compose_env().get("EMULATION_LOGS_DIR", ".")).expanduser().resolve()
-    lock_path = logs_root / ".pipeline.lock"
-    requested_run = getattr(args, "run_dir", None)
-    if requested_run and args.action in ("analyze", "export", "coinjoin-analysis", "coinjoin", "mappings"):
-        # Validate before locking: acquire_lock creates missing parents, which
-        # would turn a typo'd run id into a junk directory that then looks valid.
-        lock_path = run_dir_under_root(requested_run, logs_root) / ".research.lock"
-    if args.action != "pbs-from-s3":
+    lock_path = command_lock_path(args, logs_root)
+    # A dry-run of the decomposed S3 submission must remain side-effect free.
+    if not (args.action == "pbs-from-s3" and args.dry_run):
         try:
             _lock = acquire_lock(lock_path)
         except RuntimeError as error:
             print(f"[ERROR] {error}", file=sys.stderr)
             sys.exit(2)
+    if args.action == "pbs-from-s3" and not args.dry_run:
+        try:
+            ensure_no_active_s3_pbs_submission(lock_path.parent)
+        except (RuntimeError, PBSError) as error:
+            print(f"[ERROR] {error}", file=sys.stderr)
+            sys.exit(2)
+        args.pbs_submission_dir = lock_path.parent
+    elif (
+        args.action == "full-run"
+        and getattr(args, "artifact_backend", "shared-storage") == "s3"
+        and not args.dry_run
+    ):
+        args.pbs_submission_dir = logs_root / args.run_id
 
     coinjoin_infrastructure_local_build = getattr(
         args,
@@ -3320,7 +3414,7 @@ def main() -> None:
     if args.action == "pbs-from-s3":
         try:
             run_pbs_from_s3(args)
-        except (ArtifactTransportError, PBSError) as error:
+        except (ArtifactTransportError, OSError, PBSError, RuntimeError) as error:
             print(f"[ERROR] {error}", file=sys.stderr)
             sys.exit(2)
     elif args.action == "emulate":

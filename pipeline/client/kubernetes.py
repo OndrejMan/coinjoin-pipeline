@@ -19,6 +19,12 @@ S3_UPLOADER_RESOURCE_LIMITS = {"cpu": "500m", "memory": "512Mi"}
 S3_JOB_TTL_SECONDS_AFTER_FINISHED = 3600
 S3_JOB_START_TIMEOUT_SECONDS = 1800
 S3_JOB_DEADLINE_GRACE_SECONDS = 60
+S3_JOB_OWNED_RESOURCE_TYPES = (
+    "serviceaccount",
+    "configmap",
+    "role.rbac.authorization.k8s.io",
+    "rolebinding.rbac.authorization.k8s.io",
+)
 CONTROLLER_LOG_TAIL_LINES = 100
 CONTROLLER_FATAL_SUMMARY_MARKERS = ("Kubernetes CPU quota exhausted",)
 
@@ -107,6 +113,14 @@ def kubernetes_s3_auth_preflight(
         ("create", "serviceaccounts"),
         ("create", "roles.rbac.authorization.k8s.io"),
         ("create", "rolebindings.rbac.authorization.k8s.io"),
+        ("patch", "serviceaccounts"),
+        ("patch", "configmaps"),
+        ("patch", "roles.rbac.authorization.k8s.io"),
+        ("patch", "rolebindings.rbac.authorization.k8s.io"),
+        ("delete", "serviceaccounts"),
+        ("delete", "configmaps"),
+        ("delete", "roles.rbac.authorization.k8s.io"),
+        ("delete", "rolebindings.rbac.authorization.k8s.io"),
         ("get", "jobs.batch"),
         ("delete", "jobs.batch"),
     ):
@@ -297,6 +311,48 @@ def delete_s3_emulation_job(kubeconfig_path: Path, namespace: str, job_name: str
         )
 
 
+def delete_s3_emulation_support_resources(
+    kubeconfig_path: Path,
+    namespace: str,
+    resource_name: str,
+) -> None:
+    """Best-effort rollback when owner references could not be installed."""
+    for resource_type in S3_JOB_OWNED_RESOURCE_TYPES:
+        command = [
+            "kubectl",
+            "--kubeconfig",
+            str(kubeconfig_path),
+            "--namespace",
+            namespace,
+            "delete",
+            resource_type,
+            resource_name,
+            "--ignore-not-found",
+            "--wait=false",
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except FileNotFoundError:
+            print(
+                f"[WARN] kubectl unavailable; could not delete "
+                f"{resource_type}/{resource_name}",
+                file=sys.stderr,
+            )
+            return
+        if result.returncode != 0:
+            print(
+                f"[WARN] failed to delete {resource_type}/{resource_name}: "
+                f"{(result.stderr or result.stdout or '').strip()}",
+                file=sys.stderr,
+            )
+
+
 def render_s3_emulation_resources(
     *,
     namespace: str,
@@ -421,7 +477,6 @@ if [ -f /artifacts/.controller.failed ]; then
   s5 cp "/artifacts/$RUN_ID/.k8s/upload.failed" "$ARTIFACT_URI/$RUN_ID/.k8s/upload.failed" || true
   s5 sync "/artifacts/$RUN_ID/" "$ARTIFACT_URI/$RUN_ID/" || true
   rm -f /credentials/credentials
-  kubectl --namespace "$NAMESPACE" delete job "$JOB_NAME" --wait=false || true
   exit 1
 fi
 s5 sync "/artifacts/$RUN_ID/" "$ARTIFACT_URI/$RUN_ID/"
@@ -450,7 +505,6 @@ rm -f /credentials/credentials"""
     ]
     uploader_env = [
         {"name": "NAMESPACE", "value": namespace},
-        {"name": "JOB_NAME", "value": name},
         {
             "name": "EMULATION_TIMEOUT_SECONDS",
             "value": str(emulation_timeout_seconds),
@@ -490,12 +544,6 @@ rm -f /credentials/credentials"""
                 },
                 {"apiGroups": [""], "resources": ["pods/exec"], "verbs": ["create", "get"]},
                 {"apiGroups": [""], "resources": ["events"], "verbs": ["get", "list", "watch"]},
-                {
-                    "apiGroups": ["batch"],
-                    "resources": ["jobs"],
-                    "resourceNames": [name],
-                    "verbs": ["get", "delete"],
-                },
             ],
         },
         {
@@ -602,7 +650,94 @@ rm -f /credentials/credentials"""
 
 
 def apply_s3_emulation_resources(manifest: str, kubeconfig_path: Path) -> None:
+    payload = json.loads(manifest)
+    jobs = [item for item in payload.get("items", []) if item.get("kind") == "Job"]
+    if len(jobs) != 1:
+        raise RuntimeError("S3 Kubernetes manifest must contain exactly one Job")
+    metadata = jobs[0].get("metadata") or {}
+    job_name = metadata.get("name")
+    namespace = metadata.get("namespace")
+    if not job_name or not namespace:
+        raise RuntimeError("S3 Kubernetes Job must declare metadata.name and namespace")
+
     command = ["kubectl", "--kubeconfig", str(kubeconfig_path), "apply", "-f", "-"]
     completed = subprocess.run(command, input=manifest, text=True, check=False)
     if completed.returncode:
         raise RuntimeError(f"kubectl apply failed with exit {completed.returncode}")
+
+    uid_command = [
+        "kubectl",
+        "--kubeconfig",
+        str(kubeconfig_path),
+        "--namespace",
+        namespace,
+        "get",
+        "job",
+        job_name,
+        "-o",
+        "jsonpath={.metadata.uid}",
+    ]
+    uid_result = subprocess.run(
+        uid_command,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    job_uid = (uid_result.stdout or "").strip()
+    if uid_result.returncode or not job_uid:
+        delete_s3_emulation_job(kubeconfig_path, namespace, job_name)
+        delete_s3_emulation_support_resources(
+            kubeconfig_path, namespace, job_name
+        )
+        raise RuntimeError(
+            f"could not read Kubernetes Job UID for lifecycle ownership: "
+            f"{(uid_result.stderr or uid_result.stdout or '').strip()}"
+        )
+
+    owner_patch = json.dumps(
+        {
+            "metadata": {
+                "ownerReferences": [
+                    {
+                        "apiVersion": "batch/v1",
+                        "kind": "Job",
+                        "name": job_name,
+                        "uid": job_uid,
+                        "controller": True,
+                        "blockOwnerDeletion": False,
+                    }
+                ]
+            }
+        }
+    )
+    for resource_type in S3_JOB_OWNED_RESOURCE_TYPES:
+        patch_command = [
+            "kubectl",
+            "--kubeconfig",
+            str(kubeconfig_path),
+            "--namespace",
+            namespace,
+            "patch",
+            resource_type,
+            job_name,
+            "--type=merge",
+            "-p",
+            owner_patch,
+        ]
+        patch_result = subprocess.run(
+            patch_command,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if patch_result.returncode:
+            delete_s3_emulation_job(kubeconfig_path, namespace, job_name)
+            delete_s3_emulation_support_resources(
+                kubeconfig_path, namespace, job_name
+            )
+            raise RuntimeError(
+                f"could not attach Job ownership to {resource_type}/{job_name}: "
+                f"{(patch_result.stderr or patch_result.stdout or '').strip()}"
+            )

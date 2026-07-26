@@ -30,11 +30,12 @@ All coordination state lives in the run directory under `.pbs/`:
 - `.pbs/<stage>.failed` — written by the trap on any non-zero exit status.
 
 Shared-storage scripts remove stale local `done`/`failed` markers at startup.
-Reusable/cached S3 BlockSci jobs remove only their two exact remote stage
-marker keys before starting, so repeated work over one cache starts clean.
-The original S3 full-run still relies on its enforced empty, unique run prefix.
-S3 jobs upload markers to `<artifact-uri>/<run-id>/.pbs/` instead of writing
-them locally.
+For S3 submissions, the frontend strictly removes each stage's two exact
+remote marker keys immediately before `qsub`; a missing object is accepted,
+but permission, endpoint, or failed-deletion errors abort submission. PBS
+compute jobs never remove remote markers, avoiding a queued old attempt
+deleting a newer attempt's marker. S3 jobs upload markers to
+`<artifact-uri>/<run-id>/.pbs/` instead of writing them locally.
 
 For `pbs-from-s3 --analysisPbs --blocksciPbs`, the analyzer jobs have no
 dependency on each other. The report-only job uses
@@ -170,14 +171,25 @@ Extra rules for the S3 chain:
 - Full S3 runs require both analyzer stages and an existing namespace selected
   with `--reuse-namespace`; the S3 credentials Secret must predate the Job.
 - S3 job scripts are submitted to `qsub` via **stdin**
-  (`submit_pbs_text`) — there is no shared run directory to hold a script
-  file, and no `.jobid` file is persisted; job ids live in orchestrator
-  memory and are printed at submission.
+  (`submit_pbs_text`). Job IDs live in orchestrator memory and are also
+  persisted under the frontend's shared
+  `<runs-root>/<run-id>/.pbs/*.jobid` directory for watching and overlap
+  detection.
+- `pbs-from-s3` holds
+  `<runs-root>/<run-id>/.pbs-submit.lock` while preparing and submitting the
+  graph. A later invocation refuses to overlap recorded queued/running jobs
+  or jobs whose state is inconclusive. If marker cleanup or a later `qsub`
+  fails, every job ID already obtained in that invocation is `qdel`ed in
+  reverse submission order.
 - When either analyzer wait fails, the orchestrator `qdel`s the dependent
   unified-report job so it does not stay held forever.
 - When the emulation wait fails, PBS is never submitted; `kubectl describe`
-  and container logs are printed and the Kubernetes resources stay in place
-  for inspection.
+  and container logs are printed before the frontend requests Job deletion.
+  The per-run ServiceAccount, ConfigMap, Role, and RoleBinding carry Job owner
+  references, so explicit deletion or the Job TTL garbage-collects them too.
+  The uploader does not self-delete the Job and therefore cannot race
+  frontend diagnostic collection; `activeDeadlineSeconds` remains the
+  disconnected-frontend fallback.
 
 ## Requirements checked before submission
 

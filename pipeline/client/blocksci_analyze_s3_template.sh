@@ -68,6 +68,7 @@ singularity exec \
   --bind "$RUNS_ROOT:/runs/emulation/logs:rw" \
   --bind "$RUN_WORK/.pipeline/exporters:/mnt/exporters:ro" \
   "${{EXTRA_BINDS[@]}}" \
+  --env PYTHONPATH=/mnt/blocksci/blockscipy \
   --env PBS_RUN_ID="$RUN_ID" \
   --env ACTIVE_RUN_ID="$RUN_ID" \
   --env BLOCKSCI_CONFIG="/runs/emulation/logs/$RUN_ID/blocksci_data/config.json" \

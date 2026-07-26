@@ -20,6 +20,8 @@ from client.artifacts import (  # noqa: E402
     STAGED_EXPORTERS_PARTIAL,
 )
 from client.kubernetes import (  # noqa: E402
+    S3_JOB_OWNED_RESOURCE_TYPES,
+    apply_s3_emulation_resources,
     render_s3_emulation_resources,
     s3_emulation_job_name,
 )
@@ -196,6 +198,7 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
     assert 'BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"' in blocksci
     assert 'BITCOIN_DATADIR="$BITCOIN_DATADIR/data"' in blocksci
     assert '"$BITCOIN_DATADIR:/mnt/data:ro"' in blocksci
+    assert "--env PYTHONPATH=/mnt/blocksci/blockscipy" in blocksci
     assert "requires a Bitcoin datadir containing regtest/blocks" in blocksci
     assert "requires coinjoin-analysis_data/coinjoin_tx_info.json" in blocksci
     assert "Unified S3 report requires blocksci-analysis_data/blocksci_analysis.json" in report
@@ -242,6 +245,7 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     assert "blocksci_parser" not in analyze
     assert "sha256sum -c blocksci_data.tar.gz.sha256" in analyze
     assert "blocksci_export/analysis.py" in analyze
+    assert "--env PYTHONPATH=/mnt/blocksci/blockscipy" in analyze
     assert ".pbs/blocksci-analyze.done" in analyze
     assert '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"' not in analyze
 
@@ -833,6 +837,53 @@ def test_pbs_from_s3_clears_each_marker_immediately_before_submission() -> None:
     ]
 
 
+def test_pbs_from_s3_rolls_back_jobs_when_later_preparation_fails() -> None:
+    args = s3_pbs_args()
+
+    def clear(_access, _uri, _run_id, stage):
+        if stage == "unified-report":
+            raise ArtifactTransportError("S3 unavailable")
+
+    with (
+        mock.patch("client.wrapper.clear_s3_stage_markers", side_effect=clear),
+        mock.patch(
+            "client.wrapper.submit_coinjoin_analysis_s3_pbs",
+            return_value="analysis.server",
+        ),
+        mock.patch(
+            "client.wrapper.submit_blocksci_s3_pbs",
+            return_value="blocksci.server",
+        ),
+        mock.patch("client.wrapper.submit_unified_report_s3_pbs") as report,
+        mock.patch("client.wrapper.qdel_pbs_job") as qdel,
+        pytest.raises(ArtifactTransportError, match="S3 unavailable"),
+    ):
+        run_pbs_from_s3(args)
+
+    report.assert_not_called()
+    assert qdel.call_args_list == [
+        mock.call("blocksci.server"),
+        mock.call("analysis.server"),
+    ]
+
+
+def test_pbs_from_s3_persists_each_job_id_for_overlap_detection(
+    tmp_path: Path,
+) -> None:
+    args = s3_pbs_args(analysis=True, blocksci=False)
+    args.pbs_submission_dir = tmp_path
+
+    with mock.patch(
+        "client.wrapper.submit_coinjoin_analysis_s3_pbs",
+        return_value="analysis.server",
+    ):
+        run_pbs_from_s3(args)
+
+    assert (tmp_path / ".pbs" / "coinjoin-analysis.jobid").read_text(
+        encoding="utf-8"
+    ) == "analysis.server\n"
+
+
 def test_pbs_from_s3_mappings_depend_on_analysis_and_gate_report() -> None:
     args = s3_pbs_args(mappings=True)
     with (
@@ -1287,7 +1338,7 @@ def test_kubernetes_manifest_has_controller_uploader_secret_and_rbac() -> None:
     }
     assert permissions["pods/status"] == {"get"}
     assert {"get", "list", "watch"}.issubset(permissions["events"])
-    assert permissions["jobs"] == {"get", "delete"}
+    assert "jobs" not in permissions
 
     job = next(item for item in manifest["items"] if item["kind"] == "Job")
     assert job["spec"]["ttlSecondsAfterFinished"] == 3600
@@ -1346,15 +1397,12 @@ def test_kubernetes_manifest_has_controller_uploader_secret_and_rbac() -> None:
         item["name"]: item for item in containers["uploader"]["env"]
     }
     assert uploader_env["EMULATION_TIMEOUT_SECONDS"]["value"] == "21600"
-    assert uploader_env["JOB_NAME"]["value"] == job["metadata"]["name"]
+    assert "JOB_NAME" not in uploader_env
     assert (
         "controller exceeded emulation timeout"
         in containers["uploader"]["command"][-1]
     )
-    assert (
-        'delete job "$JOB_NAME" --wait=false'
-        in containers["uploader"]["command"][-1]
-    )
+    assert 'delete job "$JOB_NAME"' not in containers["uploader"]["command"][-1]
     rendered = json.dumps(manifest)
     assert (
         "s5cmd" in rendered
@@ -1368,6 +1416,72 @@ def test_kubernetes_manifest_has_controller_uploader_secret_and_rbac() -> None:
     assert "state.terminated.exitCode" in rendered
     assert "ImagePullBackOff" in rendered
     assert 's5 cp \\"/artifacts/$RUN_ID/.k8s/upload.failed\\"' in rendered
+
+
+def test_apply_s3_resources_attaches_job_ownership_to_support_objects(
+    tmp_path: Path,
+) -> None:
+    manifest = json.dumps(render_kubernetes_manifest())
+    completed = subprocess.CompletedProcess([], 0, "", "")
+    uid_result = subprocess.CompletedProcess([], 0, "job-uid-1", "")
+
+    with mock.patch(
+        "client.kubernetes.subprocess.run",
+        side_effect=[
+            completed,
+            uid_result,
+            *[completed for _ in S3_JOB_OWNED_RESOURCE_TYPES],
+        ],
+    ) as run:
+        apply_s3_emulation_resources(manifest, tmp_path / "kubeconfig")
+
+    patch_calls = run.call_args_list[2:]
+    assert len(patch_calls) == len(S3_JOB_OWNED_RESOURCE_TYPES)
+    assert [call.args[0][6] for call in patch_calls] == list(
+        S3_JOB_OWNED_RESOURCE_TYPES
+    )
+    for call in patch_calls:
+        command = call.args[0]
+        owner_patch = json.loads(command[command.index("-p") + 1])
+        owner = owner_patch["metadata"]["ownerReferences"][0]
+        assert owner == {
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "name": s3_emulation_job_name("run-1"),
+            "uid": "job-uid-1",
+            "controller": True,
+            "blockOwnerDeletion": False,
+        }
+
+
+def test_apply_s3_resources_rolls_back_when_owner_patch_fails(
+    tmp_path: Path,
+) -> None:
+    manifest = json.dumps(render_kubernetes_manifest())
+    completed = subprocess.CompletedProcess([], 0, "", "")
+    uid_result = subprocess.CompletedProcess([], 0, "job-uid-1", "")
+    patch_failure = subprocess.CompletedProcess([], 1, "", "forbidden")
+
+    with (
+        mock.patch(
+            "client.kubernetes.subprocess.run",
+            side_effect=[completed, uid_result, patch_failure],
+        ),
+        mock.patch("client.kubernetes.delete_s3_emulation_job") as delete_job,
+        mock.patch(
+            "client.kubernetes.delete_s3_emulation_support_resources"
+        ) as delete_support,
+        pytest.raises(RuntimeError, match="could not attach Job ownership"),
+    ):
+        apply_s3_emulation_resources(manifest, tmp_path / "kubeconfig")
+
+    resource_name = s3_emulation_job_name("run-1")
+    delete_job.assert_called_once_with(
+        tmp_path / "kubeconfig", "coinjoin", resource_name
+    )
+    delete_support.assert_called_once_with(
+        tmp_path / "kubeconfig", "coinjoin", resource_name
+    )
 
 
 def test_kubernetes_manifest_reuses_existing_namespace() -> None:
