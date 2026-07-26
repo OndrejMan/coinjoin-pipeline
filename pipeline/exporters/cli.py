@@ -233,6 +233,11 @@ def main(argv: list[str] | None = None) -> int:
             cluster_export_error = "Clustering was explicitly skipped during report assembly."
     else:
         first_wasabi2_block = load_first_wasabi2_block(config_path)
+        if blocksci is None:
+            raise RuntimeError(
+                "BlockSci Python module is required when no precomputed "
+                "--blocksci-analysis artifact is provided."
+            )
         blocksci.heuristics.set_test_values_enabled(args.test_values)
         blocksci_records, blocksci_skipped_txids = export_blocksci_records(
             config_path,

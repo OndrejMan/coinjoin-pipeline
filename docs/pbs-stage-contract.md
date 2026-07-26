@@ -195,6 +195,11 @@ Extra rules for the S3 chain:
 
 - The run directory, logs root, Bitcoin datadir, and exporters directory must
   resolve under `/storage/` (MetaCentrum shared storage).
+- Before a shared-storage BlockSci submission, the frontend snapshots the
+  checkout exporter tree into `<run>/.pipeline/exporters/` and binds that
+  shared path on the compute node. A complete existing snapshot is reused so
+  retries execute the same exporter code; an incomplete snapshot is rejected
+  rather than mixed with a newer checkout. Python bytecode caches are excluded.
 - The BlockSci stage requires the Bitcoin datadir to contain `regtest/blocks`.
 - The mappings stage requires
   `coinjoin-analysis_data/coinjoin_tx_info.json` to already exist.

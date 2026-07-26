@@ -198,7 +198,7 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
     assert 'BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"' in blocksci
     assert 'BITCOIN_DATADIR="$BITCOIN_DATADIR/data"' in blocksci
     assert '"$BITCOIN_DATADIR:/mnt/data:ro"' in blocksci
-    assert "--env PYTHONPATH=/mnt/blocksci/blockscipy" in blocksci
+    assert "--env PYTHONPATH=" not in blocksci
     assert "requires a Bitcoin datadir containing regtest/blocks" in blocksci
     assert "requires coinjoin-analysis_data/coinjoin_tx_info.json" in blocksci
     assert "Unified S3 report requires blocksci-analysis_data/blocksci_analysis.json" in report
@@ -245,7 +245,7 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     assert "blocksci_parser" not in analyze
     assert "sha256sum -c blocksci_data.tar.gz.sha256" in analyze
     assert "blocksci_export/analysis.py" in analyze
-    assert "--env PYTHONPATH=/mnt/blocksci/blockscipy" in analyze
+    assert "--env PYTHONPATH=" not in analyze
     assert ".pbs/blocksci-analyze.done" in analyze
     assert '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"' not in analyze
 

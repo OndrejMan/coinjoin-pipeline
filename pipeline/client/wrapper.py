@@ -31,9 +31,11 @@ from client.artifacts import (
     S3Access,
     clear_s3_stage_markers,
     ensure_empty_run_prefix,
+    ensure_local_exporters,
     s3_access_preflight,
     s3_object_exists,
     staged_exporters_state,
+    tree_sha256,
     upload_exporters,
     validate_artifact_uri,
     validate_credentials_file,
@@ -1251,6 +1253,32 @@ def stage_blocksci_script(script: str | None, run_dir: Path) -> str | None:
     return f"{RUNS_ROOT_CONTAINER}/{run_dir.name}/.pipeline/blocksci-script.py"
 
 
+def stage_pbs_exporters(run_dir: Path, exporters_dir: Path) -> Path:
+    """Snapshot exporters into the shared run directory for PBS compute nodes.
+
+    The bare wrapper executes from a checkout that need not be visible on the
+    compute node. Keep the first complete snapshot so retries use the same code
+    as the original submission, matching the S3 staged-exporters contract.
+    """
+    staged = run_dir / ".pipeline" / "exporters"
+    try:
+        ensure_local_exporters(exporters_dir)
+        if staged.exists():
+            ensure_local_exporters(staged)
+            return staged
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(
+            exporters_dir,
+            staged,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+        ensure_local_exporters(staged)
+    except (ArtifactTransportError, OSError) as error:
+        raise PBSError(f"Failed to stage PBS exporters in {staged}: {error}") from error
+    print(f"[stage] PBS exporters staged at {staged} (sha256={tree_sha256(staged)})")
+    return staged
+
+
 def export_preflight_error(
     coinjoin_ready: bool,
     blocksci_ready: bool,
@@ -1992,11 +2020,15 @@ def run_blocksci_pbs_stage(
     walltime = resolve_stage_pbs_resource(
         args, "blocksci", "walltime", DEFAULT_BLOCKSCI_WALLTIME
     )
+    exporters_dir = stage_pbs_exporters(
+        run_dir,
+        Path(env["EXPORTERS_DIR"]).expanduser().resolve(),
+    )
     submit_blocksci_pbs(
         run_dir=run_dir,
         logs_root=Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve(),
         bitcoin_datadir=Path(args.pbs_bitcoin_datadir).expanduser().resolve(),
-        exporters_dir=Path(env["EXPORTERS_DIR"]).expanduser().resolve(),
+        exporters_dir=exporters_dir,
         image=image,
         command=command,
         ncpus=resolve_stage_pbs_resource(
@@ -2101,11 +2133,15 @@ def run_blocksci_export_pbs_stage(args: argparse.Namespace, run_dir: Path) -> No
         test_values=args.test_values,
     )
     walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME)
+    exporters_dir = stage_pbs_exporters(
+        run_dir,
+        Path(env["EXPORTERS_DIR"]).expanduser().resolve(),
+    )
     submit_blocksci_pbs(
         run_dir=run_dir,
         logs_root=Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve(),
         bitcoin_datadir=Path(args.pbs_bitcoin_datadir).expanduser().resolve(),
-        exporters_dir=Path(env["EXPORTERS_DIR"]).expanduser().resolve(),
+        exporters_dir=exporters_dir,
         image=resolve_pbs_image(args, DEFAULT_PBS_BLOCKSCI_IMAGE, "pbs_blocksci_image"),
         command=command,
         ncpus=resolve_pbs_resource(args, "pbs_ncpus", DEFAULT_BLOCKSCI_NCPUS),

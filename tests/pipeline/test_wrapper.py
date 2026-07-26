@@ -41,6 +41,7 @@ from client.wrapper import (
     normalize_argv,
     pipeline_stage,
     run_blocksci_docker_stage,
+    run_blocksci_pbs_stage,
     run_coinjoin_analysis,
     run_command,
     run_dir_under_root,
@@ -51,12 +52,101 @@ from client.wrapper import (
     run_pbs_from_s3,
     run_timezone,
     stage_blocksci_script,
+    stage_pbs_exporters,
     stage_separator,
     terminal_supports_color,
 )
 
 
 from client.artifacts import ArtifactTransportError
+from client.pbs import PBSError
+
+
+def _write_required_exporters(root: Path) -> None:
+    (root / "blocksci_export").mkdir(parents=True)
+    (root / "unified_report.py").write_text("report\n", encoding="utf-8")
+    (root / "blocksci_export" / "analysis.py").write_text(
+        "analysis\n", encoding="utf-8"
+    )
+
+
+def test_stage_pbs_exporters_snapshots_checkout_under_shared_run(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "checkout-exporters"
+    run_dir = tmp_path / "run-a"
+    _write_required_exporters(source)
+    (source / "__pycache__").mkdir()
+    (source / "__pycache__" / "module.pyc").write_bytes(b"bytecode")
+
+    staged = stage_pbs_exporters(run_dir, source)
+
+    assert staged == run_dir / ".pipeline" / "exporters"
+    assert (staged / "unified_report.py").read_text(encoding="utf-8") == "report\n"
+    assert (staged / "blocksci_export" / "analysis.py").is_file()
+    assert not (staged / "__pycache__").exists()
+
+    (source / "newer.py").write_text("newer\n", encoding="utf-8")
+    assert stage_pbs_exporters(run_dir, source) == staged
+    assert not (staged / "newer.py").exists()
+
+
+def test_stage_pbs_exporters_rejects_partial_existing_snapshot(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "checkout-exporters"
+    run_dir = tmp_path / "run-a"
+    _write_required_exporters(source)
+    partial = run_dir / ".pipeline" / "exporters"
+    partial.mkdir(parents=True)
+    (partial / "unified_report.py").write_text("report\n", encoding="utf-8")
+
+    with pytest.raises(PBSError, match="Failed to stage PBS exporters"):
+        stage_pbs_exporters(run_dir, source)
+
+
+def test_blocksci_pbs_stage_submits_shared_staged_exporters(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-a"
+    run_dir.mkdir(parents=True)
+    bitcoin_datadir = tmp_path / "bitcoin"
+    args = build_parser().parse_args(
+        [
+            "analyze",
+            "--engine",
+            "wasabi",
+            "--run-dir",
+            "run-a",
+            "--blocksciPbs",
+            "--pbs-bitcoin-datadir",
+            str(bitcoin_datadir),
+        ]
+    )
+    staged = run_dir / ".pipeline" / "exporters"
+
+    with (
+        mock.patch(
+            "client.wrapper.compose_env",
+            return_value={
+                "EMULATION_LOGS_DIR": str(run_dir.parent),
+                "EXPORTERS_DIR": str(tmp_path / "checkout-exporters"),
+            },
+        ),
+        mock.patch(
+            "client.wrapper.stage_pbs_exporters",
+            return_value=staged,
+        ) as stage_mock,
+        mock.patch("client.wrapper.submit_blocksci_pbs") as submit_mock,
+        mock.patch("client.wrapper.wait_for_pbs_marker"),
+    ):
+        run_blocksci_pbs_stage(args, run_dir)
+
+    stage_mock.assert_called_once_with(
+        run_dir,
+        (tmp_path / "checkout-exporters").resolve(),
+    )
+    assert submit_mock.call_args.kwargs["exporters_dir"] == staged
 
 
 def _kubectl_cmd(*parts: str) -> list[str]:

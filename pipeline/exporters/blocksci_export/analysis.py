@@ -12,13 +12,6 @@ from pathlib import Path
 if not hasattr(builtins, "xrange"):
     setattr(builtins, "xrange", range)
 
-# Import BlockSci before the exporters' parent directory joins sys.path; see the
-# same guard in unified_report.py and assert_real_blocksci() in detector.py.
-try:
-    import blocksci  # noqa: F401
-except ImportError:
-    pass
-
 if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 

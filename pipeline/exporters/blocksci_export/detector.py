@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import builtins
+import importlib
+import os
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -30,6 +32,38 @@ def prepare_blocksci_import() -> None:
         setattr(builtins, "xrange", range)
 
 
+def import_blocksci_bindings() -> object:
+    """Import the editable BlockSci binding without source-root shadowing.
+
+    The complete image keeps the BlockSci checkout at ``/mnt/blocksci`` and
+    installs ``blockscipy`` editable.  If ``/mnt`` is on ``sys.path``, Python's
+    normal path finder treats that checkout as a namespace package named
+    ``blocksci`` before the editable-install finder gets a chance to resolve
+    the compiled binding.  Temporarily omit only paths with that repository
+    layout; restoring the original path after import keeps the rest of the
+    exporter runtime unchanged.
+    """
+    prepare_blocksci_import()
+    original_path = sys.path[:]
+
+    def is_blocksci_source_parent(entry: str) -> bool:
+        parent = Path(entry or os.getcwd())
+        candidate = parent / "blocksci"
+        return (
+            candidate.is_dir()
+            and not (candidate / "__init__.py").is_file()
+            and (candidate / "blockscipy" / "blocksci" / "__init__.py").is_file()
+        )
+
+    sys.path[:] = [
+        entry for entry in original_path if not is_blocksci_source_parent(entry)
+    ]
+    try:
+        return importlib.import_module("blocksci")
+    finally:
+        sys.path[:] = original_path
+
+
 def assert_real_blocksci(module: object) -> None:
     """Fail loudly when ``import blocksci`` resolved to a shadowing directory.
 
@@ -55,8 +89,7 @@ def assert_real_blocksci(module: object) -> None:
 
 
 try:
-    prepare_blocksci_import()
-    import blocksci
+    blocksci = import_blocksci_bindings()
 except ImportError:  # pragma: no cover - exercised in environments without BlockSci.
     blocksci = None
 else:

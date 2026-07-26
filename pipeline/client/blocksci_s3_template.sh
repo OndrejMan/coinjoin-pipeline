@@ -52,7 +52,6 @@ singularity exec \
   --bind "$RUNS_ROOT:/runs/emulation/logs:rw" \
   --bind "$BITCOIN_DATADIR:/mnt/data:ro" \
   --bind "$RUN_WORK/.pipeline/exporters:/mnt/exporters:ro" \
-  --env PYTHONPATH=/mnt/blocksci/blockscipy \
   --env PBS_RUN_ID="$RUN_ID" --env PBS_EXPORTED_MAX_BLOCK="$EXPORTED_MAX_BLOCK" "$IMAGE" \
   bash -c 'cd "/runs/emulation/logs/$PBS_RUN_ID" && EXPORTED_MAX_BLOCK="$PBS_EXPORTED_MAX_BLOCK" && {command}'
 {report_output_check}

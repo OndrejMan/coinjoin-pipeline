@@ -14,16 +14,6 @@ from pathlib import Path
 if not hasattr(builtins, "xrange"):
     setattr(builtins, "xrange", range)
 
-# Import BlockSci before the exporters' parent directory joins sys.path: the
-# editable install is served by a meta-path finder that loses to every sys.path
-# entry, and the image keeps a bare 'blocksci' source tree next to the mounted
-# exporters (/mnt/blocksci). Resolving it here pins the real module in
-# sys.modules for every later 'import blocksci'.
-try:
-    import blocksci  # noqa: F401
-except ImportError:
-    pass
-
 if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 

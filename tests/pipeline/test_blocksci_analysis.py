@@ -19,6 +19,7 @@ from exporters.blocksci_export.analysis import (  # noqa: E402
 )
 from exporters import cli as report_cli  # noqa: E402
 from exporters.blocksci_export.detector import assert_real_blocksci  # noqa: E402
+from exporters.blocksci_export.detector import import_blocksci_bindings  # noqa: E402
 
 
 def parameters() -> dict:
@@ -203,6 +204,32 @@ def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:
 def test_assert_real_blocksci_accepts_the_real_bindings() -> None:
     module = types.SimpleNamespace(Blockchain=object, heuristics=object())
     assert assert_real_blocksci(module) is None
+
+
+def test_import_blocksci_bindings_ignores_checkout_namespace(
+    tmp_path: Path,
+) -> None:
+    source_package = tmp_path / "blocksci" / "blockscipy" / "blocksci"
+    source_package.mkdir(parents=True)
+    (source_package / "__init__.py").touch()
+    original_path = sys.path[:]
+    fake_blocksci = types.SimpleNamespace(Blockchain=object, heuristics=object())
+
+    def import_module(name: str) -> object:
+        assert name == "blocksci"
+        assert str(tmp_path) not in sys.path
+        return fake_blocksci
+
+    try:
+        sys.path.insert(0, str(tmp_path))
+        with mock.patch(
+            "exporters.blocksci_export.detector.importlib.import_module",
+            side_effect=import_module,
+        ):
+            assert import_blocksci_bindings() is fake_blocksci
+        assert sys.path[0] == str(tmp_path)
+    finally:
+        sys.path[:] = original_path
 
 
 def test_assert_real_blocksci_ignores_a_missing_installation() -> None:
