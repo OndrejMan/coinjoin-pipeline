@@ -212,7 +212,11 @@ class PBSTemplateTest(unittest.TestCase):
         )
         self.assertIn("blocksci_parser", command)
         self.assertIn("unified_report.py", command)
-        self.assertIn("/blocksci/.venv/bin/python", command)
+        self.assertIn(
+            "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:"
+            "/mnt/blocksci/blockscipy /usr/bin/python3",
+            command,
+        )
         self.assertIn("--disk /mnt/data/regtest", command)
         self.assertIn("--coinjoin-type joinmarket", command)
 
@@ -230,11 +234,12 @@ class PBSTemplateTest(unittest.TestCase):
         )
 
         script_index = command.index(
-            "/blocksci/.venv/bin/python "
+            "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:"
+            "/mnt/blocksci/blockscipy /usr/bin/python3 "
             "/runs/emulation/logs/run-a/.pipeline/blocksci-script.py"
         )
         report_index = command.index(
-            "/blocksci/.venv/bin/python /mnt/exporters/unified_report.py"
+            "/usr/bin/python3 /mnt/exporters/unified_report.py"
         )
         self.assertLess(script_index, report_index)
         self.assertIn(
@@ -274,7 +279,7 @@ class PBSTemplateTest(unittest.TestCase):
 
         self.assertIn("blocksci_parser", command)
         self.assertIn(
-            "/blocksci/.venv/bin/python /mnt/exporters/blocksci_export/analysis.py",
+            "/usr/bin/python3 /mnt/exporters/blocksci_export/analysis.py",
             command,
         )
         self.assertIn("--min-input-count default", command)
@@ -318,7 +323,7 @@ class PBSTemplateTest(unittest.TestCase):
         self.assertIn("JOINMARKET_MAX_DEPTH=150000", command)
         self.assertNotIn("MIN_INPUT_COUNT=", command)
         self.assertTrue(
-            command.endswith("/blocksci/.venv/bin/python /mnt/user-analysis.py")
+            command.endswith("/usr/bin/python3 /mnt/user-analysis.py")
         )
 
     def test_coinjoin_analysis_pbs_command_supports_analyze_only(self):
