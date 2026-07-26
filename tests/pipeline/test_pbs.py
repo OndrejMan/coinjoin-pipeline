@@ -212,6 +212,7 @@ class PBSTemplateTest(unittest.TestCase):
         )
         self.assertIn("blocksci_parser", command)
         self.assertIn("unified_report.py", command)
+        self.assertIn("/blocksci/.venv/bin/python", command)
         self.assertIn("--disk /mnt/data/regtest", command)
         self.assertIn("--coinjoin-type joinmarket", command)
 
@@ -229,9 +230,12 @@ class PBSTemplateTest(unittest.TestCase):
         )
 
         script_index = command.index(
-            "python3 /runs/emulation/logs/run-a/.pipeline/blocksci-script.py"
+            "/blocksci/.venv/bin/python "
+            "/runs/emulation/logs/run-a/.pipeline/blocksci-script.py"
         )
-        report_index = command.index("python3 /mnt/exporters/unified_report.py")
+        report_index = command.index(
+            "/blocksci/.venv/bin/python /mnt/exporters/unified_report.py"
+        )
         self.assertLess(script_index, report_index)
         self.assertIn(
             "BLOCKSCI_CONFIG=/runs/emulation/logs/run-a/blocksci_data/config.json",
@@ -269,7 +273,10 @@ class PBSTemplateTest(unittest.TestCase):
         )
 
         self.assertIn("blocksci_parser", command)
-        self.assertIn("python3 /mnt/exporters/blocksci_export/analysis.py", command)
+        self.assertIn(
+            "/blocksci/.venv/bin/python /mnt/exporters/blocksci_export/analysis.py",
+            command,
+        )
         self.assertIn("--min-input-count default", command)
         self.assertIn("--test-values", command)
         self.assertNotIn("unified_report.py", command)
@@ -310,7 +317,9 @@ class PBSTemplateTest(unittest.TestCase):
         self.assertIn("JOINMARKET_PERCENTAGE_FEE=5e-05", command)
         self.assertIn("JOINMARKET_MAX_DEPTH=150000", command)
         self.assertNotIn("MIN_INPUT_COUNT=", command)
-        self.assertTrue(command.endswith("python3 /mnt/user-analysis.py"))
+        self.assertTrue(
+            command.endswith("/blocksci/.venv/bin/python /mnt/user-analysis.py")
+        )
 
     def test_coinjoin_analysis_pbs_command_supports_analyze_only(self):
         command = coinjoin_analysis_pbs_command("analyze_only")

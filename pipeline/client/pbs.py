@@ -56,6 +56,7 @@ DEFAULT_BLOCKSCI_IMAGE = "docker://ghcr.io/ondrejman/blocksci-complete:latest"
 DEFAULT_COINJOIN_ANALYSIS_IMAGE = "docker://ghcr.io/ondrejman/coinjoin-analysis:latest"
 DEFAULT_MAPPINGS_ENUMERATOR_IMAGE = "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:latest"
 DEFAULT_SAKE_IMAGE = "docker://ghcr.io/ondrejman/coinjoin-mappings-sake:latest"
+BLOCKSCI_IMAGE_PYTHON = "/blocksci/.venv/bin/python"
 
 POLL_INTERVAL_SECONDS = 30
 PBS_TERMINAL_STATES = {"C", "F"}
@@ -1608,11 +1609,13 @@ def blocksci_pbs_command(
     if blocksci_script:
         parts.append(
             "ACTIVE_RUN_ID={run_id} BLOCKSCI_CONFIG={config} "
-            "BLOCKSCI_RUN_DIR={run_dir_container} python3 {blocksci_script}"
+            "BLOCKSCI_RUN_DIR={run_dir_container} "
+            f"{BLOCKSCI_IMAGE_PYTHON} "
+            "{blocksci_script}"
         )
     if export_analysis:
         parts.append(
-            "python3 /mnt/exporters/blocksci_export/analysis.py "
+            f"{BLOCKSCI_IMAGE_PYTHON} /mnt/exporters/blocksci_export/analysis.py "
             "--config {config} "
             "--run-dir {run_dir_container} "
             "--coinjoin-type {coinjoin_type} "
@@ -1626,7 +1629,7 @@ def blocksci_pbs_command(
             parts[-1] += " --test-values"
     if include_report:
         parts.append(
-            "python3 /mnt/exporters/unified_report.py "
+            f"{BLOCKSCI_IMAGE_PYTHON} /mnt/exporters/unified_report.py "
             "--config {config} "
             "--runs-root /runs/emulation/logs "
             "--run-dir {run_dir_container} "
@@ -1695,7 +1698,7 @@ def blocksci_analysis_pbs_command(
     config = f"/runs/emulation/logs/{run_id}/blocksci_data/config.json"
     run_dir = f"/runs/emulation/logs/{run_id}"
     command = (
-        "python3 /mnt/exporters/blocksci_export/analysis.py "
+        f"{BLOCKSCI_IMAGE_PYTHON} /mnt/exporters/blocksci_export/analysis.py "
         f"--config {config} --run-dir {run_dir} "
         f"--coinjoin-type {coinjoin_type} "
         f"--min-input-count {min_input_count if min_input_count is not None else 'default'} "
@@ -1738,7 +1741,7 @@ def blocksci_script_pbs_command(
     assignments = " ".join(
         shell_assignment(name, value) for name, value in environment.items()
     )
-    return f"{assignments} python3 /mnt/user-analysis.py"
+    return f"{assignments} {BLOCKSCI_IMAGE_PYTHON} /mnt/user-analysis.py"
 
 
 def blocksci_notebook_pbs_command(notebook_port: int) -> str:
