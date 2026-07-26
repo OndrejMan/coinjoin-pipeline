@@ -50,6 +50,8 @@ EXPORTED_MAX_BLOCK="$(find "$RUN_WORK/coinjoin_emulator_data/data/btc-node" -max
 test -n "$EXPORTED_MAX_BLOCK"
 singularity exec \
   --cleanenv \
+  --env VIRTUAL_ENV="/blocksci/.venv" \
+  --env PATH="/blocksci/.venv/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   --bind "$RUNS_ROOT:/runs/emulation/logs:rw" \
   --bind "$BITCOIN_DATADIR:/mnt/data:ro" \
   --bind "$RUN_WORK/.pipeline/exporters:/mnt/exporters:ro" \
