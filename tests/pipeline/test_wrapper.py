@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -41,6 +42,7 @@ from client.wrapper import (
     normalize_argv,
     pipeline_stage,
     run_blocksci_docker_stage,
+    run_blocksci_export_pbs_stage,
     run_blocksci_pbs_stage,
     run_coinjoin_analysis,
     run_command,
@@ -60,6 +62,8 @@ from client.wrapper import (
 
 from client.artifacts import ArtifactTransportError
 from client.pbs import PBSError
+from exporters.artifact_paths import BLOCKSCI_ANALYSIS_DIR
+from exporters.blocksci_export.analysis import ARTIFACT_NAME
 
 
 def _write_required_exporters(root: Path) -> None:
@@ -147,6 +151,96 @@ def test_blocksci_pbs_stage_submits_shared_staged_exporters(
         (tmp_path / "checkout-exporters").resolve(),
     )
     assert submit_mock.call_args.kwargs["exporters_dir"] == staged
+
+
+def _blocksci_pbs_commands(
+    args: Namespace, run_dir: Path, tmp_path: Path, *, include_report: bool
+) -> tuple[str, str]:
+    """Return the (BlockSci, unified-report) commands the parallel pair submits."""
+    with (
+        mock.patch(
+            "client.wrapper.compose_env",
+            return_value={
+                "EMULATION_LOGS_DIR": str(run_dir.parent),
+                "EXPORTERS_DIR": str(tmp_path / "checkout-exporters"),
+            },
+        ),
+        mock.patch(
+            "client.wrapper.stage_pbs_exporters",
+            return_value=run_dir / ".pipeline" / "exporters",
+        ),
+        mock.patch("client.wrapper.submit_blocksci_pbs") as submit_mock,
+        mock.patch("client.wrapper.wait_for_pbs_marker"),
+    ):
+        run_blocksci_pbs_stage(
+            args, run_dir, wait=False, include_report=include_report
+        )
+        blocksci_command = submit_mock.call_args.kwargs["command"]
+        submit_mock.reset_mock()
+        run_blocksci_export_pbs_stage(args, run_dir)
+        report_command = submit_mock.call_args.kwargs["command"]
+    return blocksci_command, report_command
+
+
+def _parallel_pbs_args(run_dir: Path, tmp_path: Path) -> Namespace:
+    return build_parser().parse_args(
+        [
+            "analyze",
+            "--engine",
+            "wasabi",
+            "--run-dir",
+            run_dir.name,
+            "--blocksciPbs",
+            "--pbs-bitcoin-datadir",
+            str(tmp_path / "bitcoin"),
+        ]
+    )
+
+
+def test_deferred_report_pbs_pair_agrees_on_the_analysis_artifact(
+    tmp_path: Path,
+) -> None:
+    """The BlockSci job must write the artifact the unified-report job reads.
+
+    With --parallel --blocksciPbs the report is deferred to its own PBS job,
+    which consumes blocksci_analysis.json instead of querying BlockSci. Nothing
+    else produces that file, so a BlockSci job that only parses leaves the
+    report job to die on a missing path.
+    """
+    run_dir = tmp_path / "runs" / "run-a"
+    run_dir.mkdir(parents=True)
+    args = _parallel_pbs_args(run_dir, tmp_path)
+
+    blocksci_command, report_command = _blocksci_pbs_commands(
+        args, run_dir, tmp_path, include_report=False
+    )
+
+    consumed = re.search(r"--blocksci-analysis (\S+)", report_command)
+    assert consumed is not None, report_command
+    produced_run_dir = re.search(
+        r"blocksci_export/analysis\.py --config \S+ --run-dir (\S+)", blocksci_command
+    )
+    assert produced_run_dir is not None, blocksci_command
+    assert consumed.group(1) == (
+        f"{produced_run_dir.group(1)}/{BLOCKSCI_ANALYSIS_DIR}/{ARTIFACT_NAME}"
+    )
+    assert "unified_report.py" not in blocksci_command
+
+
+def test_self_contained_blocksci_pbs_stage_skips_the_analysis_artifact(
+    tmp_path: Path,
+) -> None:
+    """Serial mode reports from the same job, so it must not export the artifact."""
+    run_dir = tmp_path / "runs" / "run-a"
+    run_dir.mkdir(parents=True)
+    args = _parallel_pbs_args(run_dir, tmp_path)
+
+    blocksci_command, _ = _blocksci_pbs_commands(
+        args, run_dir, tmp_path, include_report=True
+    )
+
+    assert "blocksci_export/analysis.py" not in blocksci_command
+    assert "unified_report.py" in blocksci_command
 
 
 def _kubectl_cmd(*parts: str) -> list[str]:

@@ -8,3 +8,5 @@ src/coinjoin_pipeline/btc-data/
 __pycache__/
 build/
 *.egg-info/
+
+.vscode/

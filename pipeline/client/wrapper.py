@@ -2037,6 +2037,10 @@ def run_blocksci_pbs_stage(
         joinmarket_max_depth=args.joinmarket_max_depth,
         test_values=args.test_values,
         include_report=include_report,
+        # When the report is deferred to the separate unified-report job, that
+        # job consumes blocksci-analysis_data/blocksci_analysis.json instead of
+        # querying BlockSci, so this job must be the one that writes it.
+        export_analysis=not include_report,
         blocksci_script=staged_script,
     )
     walltime = resolve_stage_pbs_resource(
