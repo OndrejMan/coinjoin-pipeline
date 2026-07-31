@@ -1,0 +1,49 @@
+action: full-run
+engine: wasabi
+coinjoin_type: wasabi2
+driver: kubernetes
+scenario: scenarios/overactive-k8s-small.json
+run_id: 2026-07-28-wasabi-k8s-s3-06
+test_values: true
+emulation_timeout: 43200
+
+kubernetes:
+  namespace: man5-ns
+  reuse_namespace: true
+  kubeconfig: /storage/brno2/home/xman/.kube/kuba-cluster.yaml
+
+artifacts:
+  backend: s3
+  uri: s3://xman-coinjoin/runs
+  endpoint_url: https://s3.cl4.du.cesnet.cz
+  secret_name: coinjoin-s3-credentials
+  credentials_file: /storage/brno2/home/xman/.aws/credentials
+  profile: coinjoin
+
+stages:
+  analysis: true
+  blocksci: true
+  mappings: false
+
+blocksci:
+  workflow: combined
+  task: detect
+
+pbs:
+  analysis:
+    ncpus: 2
+    mem: 8gb
+    scratch: 50gb
+    walltime: "08:00:00"
+
+  blocksci:
+    ncpus: 8
+    mem: 64gb
+    scratch: 100gb
+    walltime: "24:00:00"
+
+  unified_report:
+    ncpus: 2
+    mem: 8gb
+    scratch: 10gb
+    walltime: "01:00:00"
