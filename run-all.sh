@@ -79,6 +79,7 @@ RUN_TESTS=1
 SCENARIOS=()
 CURRENT_CHILD_PID=""
 CURRENT_CHILD_PGID=""
+CURRENT_STEP_LABEL=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -221,6 +222,10 @@ run_step() {
   CURRENT_CHILD_PGID=""
   set -e
 
+  if [[ "${status}" -ne 0 ]]; then
+    echo "FAILED: ${CURRENT_STEP_LABEL:-workflow step} (exit code ${status}). Logs: ${EMULATION_LOGS_DIR}" >&2
+  fi
+
   return "${status}"
 }
 
@@ -285,12 +290,14 @@ pull_image() {
   fi
 
   echo "Pulling published image ${image}..."
+  CURRENT_STEP_LABEL="pulling image ${image}"
   run_step docker pull "${image}"
 }
 
 verify_blocksci_image() {
   local image="$1"
   echo "Verifying BlockSci runtime in ${image}..."
+  CURRENT_STEP_LABEL="verifying BlockSci runtime in ${image}"
   run_step docker run --rm --entrypoint /bin/bash "${image}" -lc \
     'command -v blocksci_parser >/dev/null && python3 -c "import blocksci"'
 }
@@ -315,10 +322,12 @@ trap handle_interrupt INT TERM
 
 if [[ "${BUILD_IMAGES}" == "1" ]]; then
   echo "Building local BlockSci base image ${LOCAL_BLOCKSCI_BASE_IMAGE}..."
+  CURRENT_STEP_LABEL="building local BlockSci base image ${LOCAL_BLOCKSCI_BASE_IMAGE}"
   run_step docker build -t "${LOCAL_BLOCKSCI_BASE_IMAGE}" \
     -f "${REPO_ROOT}/blocksci/Dockerfile" "${REPO_ROOT}/blocksci"
 
   echo "Building local BlockSci complete image ${BLOCKSCI_IMAGE}..."
+  CURRENT_STEP_LABEL="building local BlockSci complete image ${BLOCKSCI_IMAGE}"
   run_step docker build \
     --build-arg "BLOCKSCI_BASE_IMAGE=${LOCAL_BLOCKSCI_BASE_IMAGE}" \
     --build-arg NTHREADS=10 \
@@ -327,9 +336,11 @@ if [[ "${BUILD_IMAGES}" == "1" ]]; then
     "${REPO_ROOT}/blocksci"
 
   echo "Building local CoinJoin emulator image ${COINJOIN_EMULATOR_IMAGE}..."
+  CURRENT_STEP_LABEL="building local CoinJoin emulator image ${COINJOIN_EMULATOR_IMAGE}"
   run_step docker build -t "${COINJOIN_EMULATOR_IMAGE}" "${REPO_ROOT}/coinjoin-emulator"
 
   echo "Building local coinjoin-analysis image ${COINJOIN_ANALYSIS_IMAGE}..."
+  CURRENT_STEP_LABEL="building local coinjoin-analysis image ${COINJOIN_ANALYSIS_IMAGE}"
   run_step docker build -t "${COINJOIN_ANALYSIS_IMAGE}" -f "${REPO_ROOT}/coinjoin-analysis/docker/analysis.Dockerfile" "${REPO_ROOT}/coinjoin-analysis"
 fi
 
@@ -366,6 +377,7 @@ if [[ "${RUN_SCENARIOS}" == "1" ]]; then
     run_args=(full-run --scenario "${resolved_scenario}" --engine "${scenario_engine}")
 
     echo "Running ${resolved_scenario} with ${IMAGE_MODE} images..."
+    CURRENT_STEP_LABEL="scenario workflow ${resolved_scenario}"
     run_with_selected_images_in_dir "${SCRIPT_DIR}" bash runIt.sh "${run_args[@]}"
   done
 fi
@@ -375,6 +387,7 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
     "tests/test-command-builder-contract.sh"
     "tests/pipeline/test_emulate_exit_status.sh"
     "tests/pipeline/test_emulate_interrupt_cleanup.sh"
+    "tests/test-run-all-local-failure-report.sh"
     "tests/test-runIt-overactive-local.sh"
     "tests/test-wrapper-signal-cleanup.sh"
     "tests/test-podman-no-host-docker.sh"
@@ -394,6 +407,7 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
     fi
 
     echo "Running ${test_script} with ${IMAGE_MODE} images..."
+    CURRENT_STEP_LABEL="test ${test_script}"
     if [[ "${test_script}" == "tests/test-runIt-joinmarket-local-docker.sh" ]]; then
       run_in_dir "${SCRIPT_DIR}" env \
         EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \

@@ -1675,6 +1675,37 @@ class WrapperExportTest(unittest.TestCase):
             populate_mock.assert_called_once_with((root / "btc-data" / "data").resolve())
             self.assertNotIn(f"{scenarios_dir.resolve()}:/app/scenarios:ro", docker_cmd)
 
+    def test_kubernetes_emulation_uses_requested_container_network(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            host_client_dir = root / "client"
+            scenarios_dir = host_client_dir / "scenarios"
+            kubeconfig = root / "kubeconfig.yaml"
+            scenarios_dir.mkdir(parents=True)
+            kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+
+            env = {
+                "HOST_CLIENT_DIR": str(host_client_dir),
+                "CONTAINER_RUNTIME": "docker",
+                "COINJOIN_EMULATOR_IMAGE": "coinjoin-emulator:test",
+                "KUBERNETES_EMULATOR_CONTAINER_NETWORK": "k3d-coinjoin-test",
+            }
+            with mock.patch.dict(os.environ, env, clear=False), \
+                mock.patch("client.wrapper.run_command") as run_mock, \
+                mock.patch("client.wrapper.populate_btc_data_volume"), \
+                mock.patch("client.wrapper.kubernetes_auth_preflight"):
+                run_kubernetes_emulation(
+                    scenario="overactive-local.json",
+                    namespace="coinjoin-test",
+                    kubeconfig=str(kubeconfig),
+                )
+
+            docker_cmd = run_mock.call_args.args[0]
+            self.assertEqual(
+                docker_cmd[docker_cmd.index("--network") + 1],
+                "k3d-coinjoin-test",
+            )
+
     def test_kubernetes_emulation_copy_to_host_preserves_download_flow(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

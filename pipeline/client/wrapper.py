@@ -1063,6 +1063,7 @@ def run_kubernetes_emulation(
     emulator_image = os.environ.get("COINJOIN_EMULATOR_IMAGE", DEFAULT_EMULATOR_IMAGE)
     storage_uid = os.environ.get("KUBERNETES_STORAGE_UID", str(os.getuid()))
     storage_gid = os.environ.get("KUBERNETES_STORAGE_GID", str(os.getgid()))
+    emulator_network = os.environ.get("KUBERNETES_EMULATOR_CONTAINER_NETWORK", "").strip()
     docker_cmd = [
         runtime,
         "run",
@@ -1083,6 +1084,8 @@ def run_kubernetes_emulation(
         "-e",
         "KUBECONFIG=/tmp/coinjoin-kubeconfig",
     ]
+    if emulator_network:
+        docker_cmd.extend(["--network", emulator_network])
     if copy_to_host:
         docker_cmd.extend(["-v", f"{local_btc_data_dir}:/btc-data:rw"])
     else:
@@ -1097,6 +1100,8 @@ def run_kubernetes_emulation(
     print(f"[kubernetes] BTC data mode: {transfer_mode}")
     print(f"[kubernetes] BTC data output: {local_download_path if copy_to_host else shared_btc_data_path}")
     print(f"[kubernetes] Control IP: {os.environ.get('KUBERNETES_CONTROL_IP', DEFAULT_K8S_CONTROL_IP)}")
+    if emulator_network:
+        print(f"[kubernetes] Emulator container network: {emulator_network}")
 
     try:
         run_command(docker_cmd, env=os.environ.copy())

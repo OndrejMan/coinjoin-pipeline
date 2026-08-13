@@ -57,6 +57,7 @@ KEEP_WORK="${KEEP_TEST_WORK:-0}"
 KUBERNETES_PBS_TIMEOUT="${KUBERNETES_PBS_TIMEOUT:-85m}"
 KUBERNETES_DIAGNOSTICS_FILE="${WORK_ROOT}/kubernetes-diagnostics.txt"
 PIPELINE_OUTPUT_FILE="${WORK_ROOT}/pipeline-output.log"
+FAILED_LOGS_DIR="${EMULATION_LOGS_DIR}/_failed"
 INJECT_KUBERNETES_CLIENT_FAILURE="${INJECT_KUBERNETES_CLIENT_FAILURE:-0}"
 INJECT_KUBERNETES_CLIENT_NAME="${INJECT_KUBERNETES_CLIENT_NAME:-wasabi-client-002}"
 FAILURE_INJECTOR_PID=""
@@ -103,13 +104,30 @@ dump_kubernetes_diagnostics() {
         kubectl --kubeconfig "${HOST_KUBECONFIG}" logs -n "${NAMESPACE}" \
           "${pod}" --all-containers --tail=200 --timestamps || true
         echo "===== previous final 200 log lines: ${pod} ====="
-        kubectl --kubeconfig "${HOST_KUBECONFIG}" logs -n "${NAMESPACE}" \
-          "${pod}" --all-containers --tail=200 --timestamps --previous || true
+        local previous_log="${WORK_ROOT}/$(basename "${pod}")-previous.log"
+        if kubectl --kubeconfig "${HOST_KUBECONFIG}" logs -n "${NAMESPACE}" \
+          "${pod}" --all-containers --tail=200 --timestamps --previous \
+          >"${previous_log}" 2>&1
+        then
+          cat "${previous_log}"
+        else
+          echo "No previous terminated container logs are available."
+        fi
       done < <(kubectl --kubeconfig "${HOST_KUBECONFIG}" get pods -n "${NAMESPACE}" \
         -o name 2>/dev/null || true)
     fi
   } >"${KUBERNETES_DIAGNOSTICS_FILE}" 2>&1
   cat "${KUBERNETES_DIAGNOSTICS_FILE}" >&2
+}
+
+archive_failure_artifacts() {
+  local timestamp
+  timestamp="$(TZ=UTC date +%Y%m%dT%H%M%S.%NZ)"
+  mkdir -p "${FAILED_LOGS_DIR}"
+  [[ -s "${PIPELINE_OUTPUT_FILE}" ]] && cp "${PIPELINE_OUTPUT_FILE}" \
+    "${FAILED_LOGS_DIR}/${timestamp}-kubernetes-pbs-pipeline.log"
+  [[ -s "${KUBERNETES_DIAGNOSTICS_FILE}" ]] && cp "${KUBERNETES_DIAGNOSTICS_FILE}" \
+    "${FAILED_LOGS_DIR}/${timestamp}-kubernetes-pbs-diagnostics.log"
 }
 
 inject_kubernetes_client_failure() {
@@ -181,6 +199,7 @@ cleanup() {
   fi
   if (( status != 0 )); then
     dump_kubernetes_diagnostics
+    archive_failure_artifacts
   fi
   if [[ -n "${RESULT_DIR}" ]]; then
     mkdir -p "${RESULT_DIR}/${ENGINE}/pbs-logs"
