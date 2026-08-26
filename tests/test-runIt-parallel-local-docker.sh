@@ -121,7 +121,7 @@ echo "Using BlockSci image ${BLOCKSCI_IMAGE}, emulator image ${COINJOIN_EMULATOR
     COINJOIN_EMULATOR_IMAGE_PREFIX="${COINJOIN_EMULATOR_IMAGE_PREFIX}" \
     COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD}" \
     bash runIt.sh --engine wasabi --scenario scenarios/overactive-local.json \
-      --test-values --min-input-count 15 --parallel
+      --min-input-count 15 --parallel
   ) 2>&1 | tee "${RUN_LOG}"
 ) &
 RUN_PID=$!
@@ -232,8 +232,15 @@ if run.get("coinjoin_type") != "wasabi2":
     raise SystemExit(f"FAIL: expected report coinjoin_type wasabi2, got {run.get('coinjoin_type')!r}")
 
 summary = report.get("summary") or {}
-if not baseline:
-    raise SystemExit("FAIL: coinjoin-analysis produced no records")
+baseline_coinjoins = baseline.get("coinjoins") or {}
+if not baseline_coinjoins:
+    raise SystemExit("FAIL: coinjoin-analysis produced no CoinJoin transactions")
+if summary.get("coinjoin_analysis_coinjoins") != len(baseline_coinjoins):
+    raise SystemExit(
+        "FAIL: report baseline count "
+        f"{summary.get('coinjoin_analysis_coinjoins')!r} != "
+        f"{len(baseline_coinjoins)} CoinJoins in coinjoin_tx_info.json"
+    )
 if summary.get("blocksci_detected_coinjoins", 0) < 1:
     raise SystemExit("FAIL: BlockSci detected no CoinJoin transactions")
 if "blocksci_agreement_rate" not in summary:

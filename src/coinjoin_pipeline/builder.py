@@ -891,7 +891,6 @@ def collect_command() -> Command:
         choices = [
             advanced_choice(result, "CoinJoin heuristic type", "--coinjoin-type"),
             advanced_choice(result, "Minimum input count", "--min-input-count"),
-            advanced_choice(result, "BlockSci test thresholds", "--test-values"),
         ]
         if engine == "joinmarket":
             choices.extend(
@@ -915,7 +914,6 @@ def collect_command() -> Command:
             result.options.append(("--coinjoin-type", value))
         if "min-input-count" in selected:
             add_value(result, "--min-input-count", "Minimum input count")
-        add_flag(result, "--test-values", "test-values" in selected)
         if "joinmarket-detector" in selected:
             result.options.append(
                 (

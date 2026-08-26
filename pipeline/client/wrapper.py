@@ -313,7 +313,6 @@ OPTIONS_WITH_VALUES = (
     "--blocksci-cache-source-run-id",
 )
 OPTIONS_WITHOUT_VALUES = (
-    "--test-values",
     "--coinjoin-infrastructure-local-build",
     "--analysisPbs",
     "--blocksciPbs",
@@ -584,7 +583,6 @@ def compose_env(
     coinjoin_type: str = DEFAULT_COINJOIN_TYPE,
     min_input_count: int | None = DEFAULT_MIN_INPUT_COUNT,
     scenario: str | None = None,
-    test_values: bool = False,
     joinmarket_detector: str = DEFAULT_JOINMARKET_DETECTOR,
     joinmarket_min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE,
     joinmarket_percentage_fee: float = DEFAULT_JOINMARKET_PERCENTAGE_FEE,
@@ -620,7 +618,6 @@ def compose_env(
     env["COINJOIN_ENGINE"] = engine
     env["BLOCKSCI_COINJOIN_TYPE"] = coinjoin_type
     env["BLOCKSCI_MIN_INPUT_COUNT"] = "default" if min_input_count is None else str(min_input_count)
-    env["BLOCKSCI_TEST_VALUES"] = "true" if test_values else "false"
     env["BLOCKSCI_JOINMARKET_DETECTOR"] = joinmarket_detector
     env["BLOCKSCI_JOINMARKET_MIN_BASE_FEE"] = str(joinmarket_min_base_fee)
     env["BLOCKSCI_JOINMARKET_PERCENTAGE_FEE"] = str(joinmarket_percentage_fee)
@@ -821,7 +818,6 @@ def run_script(
     coinjoin_type: str = DEFAULT_COINJOIN_TYPE,
     min_input_count: int | None = DEFAULT_MIN_INPUT_COUNT,
     scenario: str | None = None,
-    test_values: bool = False,
     joinmarket_detector: str = DEFAULT_JOINMARKET_DETECTOR,
     joinmarket_min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE,
     joinmarket_percentage_fee: float = DEFAULT_JOINMARKET_PERCENTAGE_FEE,
@@ -838,7 +834,6 @@ def run_script(
         coinjoin_type,
         min_input_count,
         scenario,
-        test_values,
         joinmarket_detector,
         joinmarket_min_base_fee,
         joinmarket_percentage_fee,
@@ -955,7 +950,6 @@ def run_blocksci_docker_stage(args: argparse.Namespace, run_dir: Path, *, includ
         args.coinjoin_type,
         args.min_input_count,
         args.scenario,
-        args.test_values,
         args.joinmarket_detector,
         args.joinmarket_min_base_fee,
         args.joinmarket_percentage_fee,
@@ -1387,8 +1381,6 @@ def export_command(active_run_id: str, env: dict[str, str]) -> str:
     for flag, value in optional_args:
         if value:
             command.extend([flag, value])
-    if env.get("BLOCKSCI_TEST_VALUES") == "true":
-        command.append("--test-values")
     return " ".join(shlex.quote(part) for part in command)
 
 
@@ -1399,7 +1391,6 @@ def run_export_only(args: argparse.Namespace) -> None:
         args.coinjoin_type,
         args.min_input_count,
         args.scenario,
-        args.test_values,
         args.joinmarket_detector,
         args.joinmarket_min_base_fee,
         args.joinmarket_percentage_fee,
@@ -1419,7 +1410,6 @@ def run_export_only(args: argparse.Namespace) -> None:
         args.coinjoin_type,
         args.min_input_count,
         args.scenario,
-        args.test_values,
         args.joinmarket_detector,
         args.joinmarket_min_base_fee,
         args.joinmarket_percentage_fee,
@@ -2024,7 +2014,6 @@ def run_blocksci_pbs_stage(
         args.coinjoin_type,
         args.min_input_count,
         args.scenario,
-        args.test_values,
         args.joinmarket_detector,
         args.joinmarket_min_base_fee,
         args.joinmarket_percentage_fee,
@@ -2040,7 +2029,6 @@ def run_blocksci_pbs_stage(
         joinmarket_min_base_fee=args.joinmarket_min_base_fee,
         joinmarket_percentage_fee=args.joinmarket_percentage_fee,
         joinmarket_max_depth=args.joinmarket_max_depth,
-        test_values=args.test_values,
         include_report=include_report,
         # When the report is deferred to the separate unified-report job, that
         # job consumes blocksci-analysis_data/blocksci_analysis.json instead of
@@ -2161,7 +2149,6 @@ def run_blocksci_export_pbs_stage(args: argparse.Namespace, run_dir: Path) -> No
         joinmarket_min_base_fee=args.joinmarket_min_base_fee,
         joinmarket_percentage_fee=args.joinmarket_percentage_fee,
         joinmarket_max_depth=args.joinmarket_max_depth,
-        test_values=args.test_values,
     )
     walltime = resolve_pbs_resource(args, "pbs_walltime", DEFAULT_BLOCKSCI_WALLTIME)
     exporters_dir = stage_pbs_exporters(
@@ -2316,7 +2303,6 @@ def run_serial_analysis(args: argparse.Namespace, run_dir: Path, logs_root: Path
             coinjoin_type=args.coinjoin_type,
             min_input_count=args.min_input_count,
             scenario=args.scenario,
-            test_values=args.test_values,
             joinmarket_detector=args.joinmarket_detector,
             joinmarket_min_base_fee=args.joinmarket_min_base_fee,
             joinmarket_percentage_fee=args.joinmarket_percentage_fee,
@@ -2845,7 +2831,6 @@ def _run_pbs_from_s3(
                     args.joinmarket_min_base_fee,
                     args.joinmarket_percentage_fee,
                     args.joinmarket_max_depth,
-                    args.test_values,
                     include_report=not separate_combined_report,
                     export_analysis=separate_combined_report,
                 ),
@@ -2897,7 +2882,6 @@ def _run_pbs_from_s3(
                         args.joinmarket_min_base_fee,
                         args.joinmarket_percentage_fee,
                         args.joinmarket_max_depth,
-                        args.test_values,
                     )
                 elif task == "script":
                     work_command = blocksci_script_pbs_command(
@@ -2963,7 +2947,6 @@ def _run_pbs_from_s3(
                 args.joinmarket_min_base_fee,
                 args.joinmarket_percentage_fee,
                 args.joinmarket_max_depth,
-                args.test_values,
                 # Only this job can tell the report which uploader produced the
                 # artifacts and which image assembles them.
                 uploader_image=resolve_uploader_image(args),
@@ -3288,9 +3271,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-input-count",
         type=positive_int,
         default=DEFAULT_MIN_INPUT_COUNT,
-        help="Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
+        help="Minimum transaction input count considered by detection (default: BlockSci height-aware threshold).",
     )
-    analyze_parser.add_argument("--test-values", action="store_true", help="Use BlockSci test heuristic thresholds.")
     add_joinmarket_detector_arguments(analyze_parser)
     add_blocksci_script_argument(analyze_parser)
     add_pbs_arguments(analyze_parser)
@@ -3315,9 +3297,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-input-count",
         type=positive_int,
         default=DEFAULT_MIN_INPUT_COUNT,
-        help="Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
+        help="Minimum transaction input count considered by detection (default: BlockSci height-aware threshold).",
     )
-    export_parser.add_argument("--test-values", action="store_true", help="Use BlockSci test heuristic thresholds.")
     add_joinmarket_detector_arguments(export_parser)
     coinjoin_parser = subparsers.add_parser(
         "coinjoin-analysis",
@@ -3359,7 +3340,6 @@ def build_parser() -> argparse.ArgumentParser:
     add_artifact_arguments(s3_pbs_parser, pbs_credentials=True)
     add_coinjoin_type_argument(s3_pbs_parser)
     s3_pbs_parser.add_argument("--min-input-count", type=positive_int, default=DEFAULT_MIN_INPUT_COUNT)
-    s3_pbs_parser.add_argument("--test-values", action="store_true")
     add_joinmarket_detector_arguments(s3_pbs_parser)
     add_blocksci_script_argument(s3_pbs_parser)
     add_blocksci_reusable_arguments(s3_pbs_parser)
@@ -3388,9 +3368,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-input-count",
         type=positive_int,
         default=DEFAULT_MIN_INPUT_COUNT,
-        help="Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
+        help="Minimum transaction input count considered by detection (default: BlockSci height-aware threshold).",
     )
-    full_parser.add_argument("--test-values", action="store_true", help="Use BlockSci test heuristic thresholds.")
     add_joinmarket_detector_arguments(full_parser)
     add_blocksci_script_argument(full_parser)
     add_blocksci_reusable_arguments(full_parser)
@@ -3615,7 +3594,6 @@ def main() -> None:
             args.engine,
             args.coinjoin_type,
             args.min_input_count,
-            test_values=args.test_values,
             joinmarket_detector=args.joinmarket_detector,
             joinmarket_min_base_fee=args.joinmarket_min_base_fee,
             joinmarket_percentage_fee=args.joinmarket_percentage_fee,
@@ -3646,7 +3624,6 @@ def main() -> None:
                     coinjoin_type=args.coinjoin_type,
                     min_input_count=args.min_input_count,
                     scenario=args.scenario,
-                    test_values=args.test_values,
                     joinmarket_detector=args.joinmarket_detector,
                     joinmarket_min_base_fee=args.joinmarket_min_base_fee,
                     joinmarket_percentage_fee=args.joinmarket_percentage_fee,
@@ -3686,7 +3663,6 @@ def main() -> None:
             args.coinjoin_type,
             args.min_input_count,
             args.scenario,
-            args.test_values,
             args.joinmarket_detector,
             args.joinmarket_min_base_fee,
             args.joinmarket_percentage_fee,

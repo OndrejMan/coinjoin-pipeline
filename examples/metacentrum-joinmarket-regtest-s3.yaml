@@ -3,7 +3,6 @@ engine: joinmarket
 coinjoin_type: joinmarket
 driver: kubernetes
 scenario: scenarios/defaultJoinMarket.json
-test_values: true
 emulation_timeout: 21600
 
 images:

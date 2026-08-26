@@ -135,7 +135,7 @@ code, with the call sites counted.
 
 | # | Duplication | Sites | Fix | Est. saved |
 | --- | --- | --- | --- | --- |
-| A | `compose_env(run_dir.name, args.engine, args.coinjoin_type, args.min_input_count, args.scenario, args.test_values, args.joinmarket_detector, args.joinmarket_min_base_fee, args.joinmarket_percentage_fee, args.joinmarket_max_depth)` — a 10-positional-argument call | 6 | `compose_env_from_args(args, run_id=None)` in `compose.py` | ~110 |
+| A | `compose_env(run_dir.name, args.engine, args.coinjoin_type, args.min_input_count, args.scenario, args.joinmarket_detector, args.joinmarket_min_base_fee, args.joinmarket_percentage_fee, args.joinmarket_max_depth)` — a 9-positional-argument call | 6 | `compose_env_from_args(args, run_id=None)` in `compose.py` | ~110 |
 | B | `[*compose_command(env), "-f", str(COMPOSE_FILE), "-p", COMPOSE_PROJECT]` | 4 | `compose_base_command(env)` | ~20 |
 | C | The seven detector arguments threaded into `blocksci_*_pbs_command(...)` | 4 | frozen `DetectionSettings` dataclass with `from_args`, consumed by the command builders | ~60 |
 | D | Four `resolve_stage_pbs_resource(args, stage, name, DEFAULT_*)` calls in a row to fill `ncpus/mem/scratch/walltime` | 6 | `stage_pbs_resources(args, stage) -> PBSResources`, plus `unified_report_pbs_resources(args)` | ~90 |
@@ -213,8 +213,8 @@ mixes a move with a behaviour change.
   altered marker or template text. This is a structural refactor; the generated
   PBS scripts and CLI surface must be identical before and after.
 - The pre-existing `test_publish_workflow` failure (constraint 4).
-- `deprecated/blocksciEmulatorAnalysis/client/{wrapper,pbs}.py` and
-  `build/lib/coinjoin_pipeline/_runtime/` — historical/generated copies, left
+- The `client/{wrapper,pbs}.py` copies under `deprecated/blocksciEmulatorAnalysis`
+  and `build/lib/coinjoin_pipeline/_runtime/` — historical/generated copies, left
   untouched.
 
 ## 7. Risks

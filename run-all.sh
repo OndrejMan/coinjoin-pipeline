@@ -323,16 +323,24 @@ trap handle_interrupt INT TERM
 if [[ "${BUILD_IMAGES}" == "1" ]]; then
   echo "Building local BlockSci base image ${LOCAL_BLOCKSCI_BASE_IMAGE}..."
   CURRENT_STEP_LABEL="building local BlockSci base image ${LOCAL_BLOCKSCI_BASE_IMAGE}"
-  run_step docker build -t "${LOCAL_BLOCKSCI_BASE_IMAGE}" \
+  # Always name the target: blocksci/Dockerfile carries the dependency stage,
+  # the shipped `complete` stage and a validation-only `test` stage, and an
+  # untargeted build would take the last one.
+  run_step docker build --target dependencies -t "${LOCAL_BLOCKSCI_BASE_IMAGE}" \
     -f "${REPO_ROOT}/blocksci/Dockerfile" "${REPO_ROOT}/blocksci"
 
   echo "Building local BlockSci complete image ${BLOCKSCI_IMAGE}..."
   CURRENT_STEP_LABEL="building local BlockSci complete image ${BLOCKSCI_IMAGE}"
-  run_step docker build \
-    --build-arg "BLOCKSCI_BASE_IMAGE=${LOCAL_BLOCKSCI_BASE_IMAGE}" \
+  # `complete` is the same stage the publishing workflow ships, so local mode
+  # exercises the image shape that reaches MetaCentrum. DEPS_IMAGE reuses the
+  # base built above instead of recompiling the toolchain. BlockSci's own suites
+  # live in the `test` stage and in blocksci CI, not in this pipeline suite --
+  # building them in would add ~2.5GB and break the PBS Apptainer conversion.
+  run_step docker build --target complete \
+    --build-arg "DEPS_IMAGE=${LOCAL_BLOCKSCI_BASE_IMAGE}" \
     --build-arg NTHREADS=10 \
     -t "${BLOCKSCI_IMAGE}" \
-    -f "${REPO_ROOT}/blocksci/Dockerfile_complete" \
+    -f "${REPO_ROOT}/blocksci/Dockerfile" \
     "${REPO_ROOT}/blocksci"
 
   echo "Building local CoinJoin emulator image ${COINJOIN_EMULATOR_IMAGE}..."

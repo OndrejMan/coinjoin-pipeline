@@ -1,3 +1,4 @@
+import io
 import subprocess
 import sys
 import tempfile
@@ -35,6 +36,8 @@ from client.pbs import (  # noqa: E402
     submit_pbs,
     submit_pbs_text,
     submit_blocksci_pbs,
+    report_stage_log,
+    stage_log_path,
     submit_coinjoin_analysis_pbs,
     wait_for_pbs_marker,
 )
@@ -371,7 +374,6 @@ class PBSTemplateTest(unittest.TestCase):
             joinmarket_min_base_fee=5000,
             joinmarket_percentage_fee=0.00004,
             joinmarket_max_depth=200000,
-            test_values=False,
         )
         self.assertIn("blocksci_parser", command)
         self.assertIn("unified_report.py", command)
@@ -392,7 +394,6 @@ class PBSTemplateTest(unittest.TestCase):
             joinmarket_min_base_fee=5000,
             joinmarket_percentage_fee=0.00004,
             joinmarket_max_depth=200000,
-            test_values=False,
             blocksci_script="/runs/emulation/logs/run-a/.pipeline/blocksci-script.py",
         )
 
@@ -419,7 +420,6 @@ class PBSTemplateTest(unittest.TestCase):
             joinmarket_min_base_fee=5000,
             joinmarket_percentage_fee=0.00004,
             joinmarket_max_depth=200000,
-            test_values=False,
             include_report=False,
         )
 
@@ -435,7 +435,6 @@ class PBSTemplateTest(unittest.TestCase):
             joinmarket_min_base_fee=5000,
             joinmarket_percentage_fee=0.00004,
             joinmarket_max_depth=200000,
-            test_values=True,
             include_report=False,
             export_analysis=True,
         )
@@ -446,7 +445,6 @@ class PBSTemplateTest(unittest.TestCase):
             command,
         )
         self.assertIn("--min-input-count default", command)
-        self.assertIn("--test-values", command)
         self.assertNotIn("unified_report.py", command)
 
     def test_blocksci_export_pbs_command_is_report_only(self):
@@ -458,12 +456,10 @@ class PBSTemplateTest(unittest.TestCase):
             joinmarket_min_base_fee=5000,
             joinmarket_percentage_fee=0.00004,
             joinmarket_max_depth=200000,
-            test_values=True,
         )
 
         self.assertIn("unified_report.py", command)
         self.assertIn("--blocksci-analysis", command)
-        self.assertIn("--test-values", command)
         self.assertNotIn("blocksci_parser", command)
 
     def test_blocksci_script_command_exports_typed_detector_settings(self):
@@ -816,6 +812,92 @@ class PBSMarkerWaitTest(unittest.TestCase):
                     job_id="7.server", timeout_seconds=0,
                 )
             self.assertGreaterEqual(call_count[0], 3)
+
+
+class PBSStageLogReportTest(unittest.TestCase):
+    """The job log is the only record of *why* a PBS stage failed."""
+
+    def test_report_stage_log_prints_tail_and_returns_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run-a"
+            log_path = stage_log_path(run_dir, "blocksci")
+            log_path.parent.mkdir(parents=True)
+            log_path.write_text(
+                "\n".join(f"line-{index}" for index in range(10)) + "\n",
+                encoding="utf-8",
+            )
+            with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                reported = report_stage_log(run_dir, "blocksci", tail_lines=3)
+            output = stderr.getvalue()
+            self.assertEqual(reported, log_path)
+            self.assertIn(str(log_path), output)
+            self.assertIn("line-9", output)
+            self.assertNotIn("line-6", output)
+            self.assertIn("7 earlier lines omitted", output)
+
+    def test_report_stage_log_without_log_does_not_wait(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run-a"
+            run_dir.mkdir()
+            with (
+                mock.patch("client.pbs.time.sleep") as sleep,
+                mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
+            ):
+                reported = report_stage_log(run_dir, "blocksci")
+            # Nothing was ever written, so there is no copy-back to wait for.
+            sleep.assert_not_called()
+            self.assertIsNone(reported)
+            self.assertIn("No blocksci job log available", stderr.getvalue())
+
+    def test_report_stage_log_waits_for_copy_back(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run-a"
+            log_path = stage_log_path(run_dir, "blocksci")
+            log_path.parent.mkdir(parents=True)
+
+            def fake_sleep(_seconds):
+                log_path.write_text("late arrival\n", encoding="utf-8")
+
+            with (
+                mock.patch("client.pbs.time.sleep", side_effect=fake_sleep),
+                mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
+            ):
+                reported = report_stage_log(run_dir, "blocksci")
+            self.assertEqual(reported, log_path)
+            self.assertIn("late arrival", stderr.getvalue())
+
+    def test_wait_for_pbs_marker_reports_log_on_failure(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run-a"
+            log_path = stage_log_path(run_dir, "blocksci")
+            log_path.parent.mkdir(parents=True)
+            log_path.write_text("blocksci_parser: fatal error\n", encoding="utf-8")
+            failed = run_dir / ".pbs" / "blocksci.failed"
+            failed.parent.mkdir(parents=True)
+            failed.write_text("failed", encoding="utf-8")
+            with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                with self.assertRaises(PBSError) as raised:
+                    wait_for_pbs_marker(run_dir, "blocksci", poll_interval=0)
+            self.assertIn("blocksci_parser: fatal error", stderr.getvalue())
+            self.assertIn(str(log_path), str(raised.exception))
+
+    def test_wait_for_pbs_marker_reports_log_when_marker_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run-a"
+            log_path = stage_log_path(run_dir, "blocksci")
+            log_path.parent.mkdir(parents=True)
+            log_path.write_text("killed by the scheduler\n", encoding="utf-8")
+            with (
+                mock.patch("client.pbs._qstat_job_state", return_value="F"),
+                mock.patch("client.pbs.time.sleep"),
+                mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
+            ):
+                with self.assertRaises(PBSError) as raised:
+                    wait_for_pbs_marker(
+                        run_dir, "blocksci", poll_interval=0, job_id="7.server"
+                    )
+            self.assertIn("killed by the scheduler", stderr.getvalue())
+            self.assertIn("ended without marker", str(raised.exception))
 
 
 if __name__ == "__main__":

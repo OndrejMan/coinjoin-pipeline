@@ -103,7 +103,7 @@ refute "EXPORTERS_FROM_IMAGE" \
 expect "--engine wasabi --scenario scenarios/overactive-local.json" \
   "expected the scenario path to be forwarded verbatim"
 refute "--test-values" \
-  "BlockSci test values must require an explicit --test-values option"
+  "removed BlockSci test-values option must not be rendered"
 refute "wrapper.py full-run" \
   "the default action is wrapper.py's job, not the host CLI's"
 

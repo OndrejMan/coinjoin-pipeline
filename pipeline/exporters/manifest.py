@@ -44,7 +44,6 @@ MANIFEST_COMPARE_FIELDS = (
 def build_detector_manifest(
     coinjoin_type: str,
     min_input_count: int | None,
-    test_values: bool,
     first_wasabi2_block: int,
     joinmarket_detector: str,
     joinmarket_min_base_fee: int,
@@ -54,7 +53,6 @@ def build_detector_manifest(
     detector: JsonObject = {
         "coinjoin_type": coinjoin_type,
         "blocksci_min_input_count": min_input_count,
-        "blocksci_test_values": test_values,
     }
     if coinjoin_type == "wasabi2":
         detector["first_wasabi2_block"] = first_wasabi2_block
@@ -76,7 +74,6 @@ def build_run_manifest(
     coinjoin_type: str,
     engine: str | None,
     min_input_count: int | None,
-    test_values: bool,
     first_wasabi2_block: int,
     joinmarket_detector: str,
     joinmarket_min_base_fee: int,
@@ -129,7 +126,6 @@ def build_run_manifest(
         "detector": build_detector_manifest(
             coinjoin_type,
             min_input_count,
-            test_values,
             first_wasabi2_block,
             joinmarket_detector,
             joinmarket_min_base_fee,

@@ -27,7 +27,6 @@ def parameters() -> dict:
         argparse.Namespace(
             coinjoin_type="wasabi2",
             min_input_count=None,
-            test_values=True,
             joinmarket_detector="definite",
             joinmarket_min_base_fee=5000,
             joinmarket_percentage_fee=0.00004,
@@ -81,7 +80,7 @@ def test_load_analysis_rejects_parameter_mismatch(tmp_path: Path) -> None:
     )
     assert loaded["records"] == {}
 
-    mismatched = {**parameters(), "test_values": False}
+    mismatched = {**parameters(), "min_input_count": 1}
     with pytest.raises(ValueError, match="parameters do not match"):
         load_analysis(
             artifact,
@@ -100,7 +99,6 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
         config=config,
         coinjoin_type="wasabi2",
         min_input_count=None,
-        test_values=True,
         joinmarket_detector="definite",
         joinmarket_min_base_fee=5000,
         joinmarket_percentage_fee=0.00004,
@@ -141,7 +139,6 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
     assert artifact["records"] == {"tx": {"txid": "tx"}}
     assert artifact["predicted_address_clusters"] == {"bcrt1-address": "7"}
     assert artifact["integration_diagnostics"] == {"status": "ok"}
-    fake_blocksci.heuristics.set_test_values_enabled.assert_called_once_with(True)
 
 
 def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:
@@ -193,7 +190,6 @@ def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:
                 str(artifact),
                 "--coinjoin-type",
                 "wasabi2",
-                "--test-values",
             ]
         )
 

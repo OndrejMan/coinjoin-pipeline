@@ -103,7 +103,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Override BlockSci detector min input count; use 'default' for BlockSci's default.",
     )
-    parser.add_argument("--test-values", action="store_true", help="Use BlockSci test heuristic thresholds.")
     parser.add_argument(
         "--joinmarket-detector",
         choices=("possible", "definite"),
@@ -216,7 +215,6 @@ def main(argv: list[str] | None = None) -> int:
         analysis_args = argparse.Namespace(
             coinjoin_type=args.coinjoin_type,
             min_input_count=min_input_count,
-            test_values=args.test_values,
             joinmarket_detector=args.joinmarket_detector,
             joinmarket_min_base_fee=args.joinmarket_min_base_fee,
             joinmarket_percentage_fee=args.joinmarket_percentage_fee,
@@ -248,7 +246,6 @@ def main(argv: list[str] | None = None) -> int:
                 "BlockSci Python module is required when no precomputed "
                 f"--blocksci-analysis artifact is provided.{detail}"
             ) from BLOCKSCI_IMPORT_ERROR
-        blocksci.heuristics.set_test_values_enabled(args.test_values)
         blocksci_records, blocksci_skipped_txids = export_blocksci_records(
             config_path,
             args.coinjoin_type,
@@ -316,7 +313,6 @@ def main(argv: list[str] | None = None) -> int:
         args.coinjoin_type,
         scenario,
         min_input_count=min_input_count,
-        test_values=args.test_values,
         first_wasabi2_block=first_wasabi2_block,
         emulator_data=emulator_data,
         predicted_address_clusters=predicted_address_clusters,

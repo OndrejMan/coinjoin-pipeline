@@ -187,24 +187,9 @@ class CliTests(unittest.TestCase):
         self.assertIn("pbs-from-s3", message)
         self.assertNotIn("coinjoin,", message)
 
-    def test_test_values_are_explicit_opt_in(self) -> None:
-        for enabled in (False, True):
-            arguments = ["full-run", "--engine", "wasabi", "--dry-run"]
-            if enabled:
-                arguments.append("--test-values")
-            output = io.StringIO()
-            with (
-                redirect_stdout(output),
-                mock.patch("coinjoin_pipeline.cli.doctor_check", return_value=[]),
-            ):
-                code = main(arguments)
-
-            self.assertEqual(code, 0)
-            rendered_command = output.getvalue()
-            if enabled:
-                self.assertIn("--test-values", rendered_command)
-            else:
-                self.assertNotIn("--test-values", rendered_command)
+    def test_test_values_option_is_rejected(self) -> None:
+        errors = validate_passthrough(["full-run", "--test-values"], "full-run")
+        self.assertTrue(any("--test-values" in error for error in errors))
 
     def test_cleanup_requires_confirmation(self) -> None:
         self.assertIn(

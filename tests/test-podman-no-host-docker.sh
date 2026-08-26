@@ -107,7 +107,7 @@ if grep -Fq -- "--pull" "${RENDERED}"; then
   fail_with "wrapper-image pull policy flags no longer exist"
 fi
 if grep -Fq -- "--test-values" "${RENDERED}"; then
-  fail_with "BlockSci test values must require an explicit --test-values option"
+  fail_with "Removed BlockSci test-values option was rendered"
 fi
 
 # --- Kubernetes driver still probes the selected API -------------------------

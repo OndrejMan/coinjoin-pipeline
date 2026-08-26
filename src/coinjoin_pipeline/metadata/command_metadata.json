@@ -226,7 +226,7 @@
           "choices": [],
           "default": null,
           "flag": "--min-input-count",
-          "help": "Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
+          "help": "Minimum transaction input count considered by detection (default: BlockSci height-aware threshold).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -530,18 +530,6 @@
           "metavar": null,
           "required": false,
           "takes_value": true
-        },
-        "--test-values": {
-          "aliases": [
-            "--test-values"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--test-values",
-          "help": "Use BlockSci test heuristic thresholds.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
         }
       }
     },
@@ -1394,7 +1382,7 @@
           "choices": [],
           "default": null,
           "flag": "--min-input-count",
-          "help": "Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
+          "help": "Minimum transaction input count considered by detection (default: BlockSci height-aware threshold).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -1422,18 +1410,6 @@
           "metavar": null,
           "required": false,
           "takes_value": true
-        },
-        "--test-values": {
-          "aliases": [
-            "--test-values"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--test-values",
-          "help": "Use BlockSci test heuristic thresholds.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
         }
       }
     },
@@ -2028,7 +2004,7 @@
           "choices": [],
           "default": null,
           "flag": "--min-input-count",
-          "help": "Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
+          "help": "Minimum transaction input count considered by detection (default: BlockSci height-aware threshold).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -2476,18 +2452,6 @@
           "metavar": null,
           "required": false,
           "takes_value": true
-        },
-        "--test-values": {
-          "aliases": [
-            "--test-values"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--test-values",
-          "help": "Use BlockSci test heuristic thresholds.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
         },
         "--unified-report-image": {
           "aliases": [
@@ -3736,18 +3700,6 @@
           "default": false,
           "flag": "--stage-exporters",
           "help": "Upload the checkout's exporters into the run prefix even when the selected stages do not run them, so a later detect or report stage finds the tree this invocation was launched from.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--test-values": {
-          "aliases": [
-            "--test-values"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--test-values",
-          "help": "",
           "metavar": null,
           "required": false,
           "takes_value": false

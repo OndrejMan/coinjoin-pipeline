@@ -146,7 +146,7 @@ def test_joinmarket_regtest_example_uses_measured_pbs_resources() -> None:
     assert arguments[arguments.index("--scenario") + 1] == (
         "scenarios/defaultJoinMarket.json"
     )
-    assert "--test-values" in arguments
+    assert "--test-values" not in arguments
     assert "--analysisPbs" in arguments
     assert "--blocksciPbs" in arguments
     assert arguments[arguments.index("--pbs-blocksci-ncpus") + 1] == "2"

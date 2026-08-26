@@ -742,7 +742,6 @@ class PipelineConfiguration:
     run_id: str | None = None
     run_timezone: str | None = None
     min_input_count: int | None = None
-    test_values: bool = False
     dry_run: bool = False
     parallel: bool = False
     all_runs: bool = False
@@ -778,7 +777,6 @@ class PipelineConfiguration:
                 "run_id",
                 "run_timezone",
                 "min_input_count",
-                "test_values",
                 "dry_run",
                 "parallel",
                 "all_runs",
@@ -837,7 +835,6 @@ class PipelineConfiguration:
             run_id=_optional_string(data, "run_id", "configuration"),
             run_timezone=_optional_string(data, "run_timezone", "configuration"),
             min_input_count=_optional_positive_int(data, "min_input_count", "configuration"),
-            test_values=_boolean(data, "test_values", "configuration"),
             dry_run=_boolean(data, "dry_run", "configuration"),
             parallel=_boolean(data, "parallel", "configuration"),
             all_runs=_boolean(data, "all_runs", "configuration"),
@@ -928,7 +925,6 @@ class PipelineConfiguration:
         _append_option(arguments, "--run-id", self.run_id)
         _append_option(arguments, "--run-timezone", self.run_timezone)
         _append_option(arguments, "--min-input-count", self.min_input_count)
-        _append_flag(arguments, "--test-values", self.test_values)
         _append_flag(arguments, "--dry-run", self.dry_run)
         _append_flag(arguments, "--parallel", self.parallel)
         _append_flag(arguments, "--all-runs", self.all_runs)

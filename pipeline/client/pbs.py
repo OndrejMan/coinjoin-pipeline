@@ -63,6 +63,10 @@ BLOCKSCI_IMAGE_PYTHON_COMMAND = (
 )
 
 POLL_INTERVAL_SECONDS = 30
+# How much of a failed stage's job log to echo, and how long to wait for PBS
+# to copy that log back after the marker appears.
+STAGE_LOG_TAIL_LINES = 80
+STAGE_LOG_SETTLE_SECONDS = 15
 # Single source of truth for qstat job_state handling. "X" is emitted for
 # finished subjobs (and by some PBS Pro builds for expired jobs), so it is
 # terminal here as well as in the watcher -- previously the watcher treated it
@@ -160,7 +164,18 @@ def require_existing_path(path: Path, description: str) -> None:
 def require_bitcoin_datadir(path: Path) -> None:
     """Ensure the supplied Bitcoin Core datadir has the shape BlockSci expects."""
     require_existing_path(path, "PBS Bitcoin datadir")
-    if not (path / "regtest" / "blocks").is_dir():
+    regtest_dir = path / "regtest"
+    if regtest_dir.is_dir() and not os.access(regtest_dir, os.R_OK | os.X_OK):
+        # bitcoind creates regtest/ as 0700, so a node that ran under a
+        # different uid leaves the datadir present but unreadable here - and
+        # unreadable for the BlockSci job too.
+        raise PBSError(
+            f"PBS Bitcoin datadir is not readable by the current user (uid {os.getuid()}): "
+            f"{regtest_dir} is owned by uid {regtest_dir.stat().st_uid} with mode "
+            f"{regtest_dir.stat().st_mode & 0o777:o}. The btc-node must run as the storage "
+            "identity (KUBERNETES_STORAGE_UID/KUBERNETES_STORAGE_GID)."
+        )
+    if not (regtest_dir / "blocks").is_dir():
         raise PBSError(f"PBS Bitcoin datadir must contain regtest/blocks so BlockSci can read it: {path}")
 
 
@@ -1448,6 +1463,51 @@ def submit_unified_report_s3_pbs(
     )
 
 
+def stage_log_path(run_dir: Path, stage: str) -> Path:
+    """Path the shared-storage PBS templates point ``#PBS -o`` at."""
+    return run_dir / "logs" / f"{stage}.pbs.log"
+
+
+def report_stage_log(
+    run_dir: Path,
+    stage: str,
+    *,
+    tail_lines: int = STAGE_LOG_TAIL_LINES,
+    settle_seconds: int = STAGE_LOG_SETTLE_SECONDS,
+) -> Path | None:
+    """Print the tail of a finished stage's job log and return its path.
+
+    A marker only says *that* a stage ended; the reason lives in the job's own
+    output, which nothing else reads -- so a failed PBS stage used to be
+    reported as a bare "PBS stage failed: <stage>" with the evidence left on a
+    compute node. PBS copies the spooled log back around the same time the
+    marker lands, so wait briefly for it to appear before giving up.
+    """
+    log_path = stage_log_path(run_dir, stage)
+    if not log_path.exists() and log_path.parent.is_dir():
+        deadline = time.monotonic() + settle_seconds
+        while not log_path.exists() and time.monotonic() < deadline:
+            time.sleep(1)
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as error:
+        print(
+            f"[pbs] No {stage} job log available at {log_path} ({error}); "
+            "the compute node may not have copied it back.",
+            file=sys.stderr,
+        )
+        return None
+    shown = lines[-tail_lines:]
+    skipped = len(lines) - len(shown)
+    print(f"===== {stage} PBS job log: {log_path} =====", file=sys.stderr)
+    if skipped > 0:
+        print(f"[... {skipped} earlier lines omitted ...]", file=sys.stderr)
+    for line in shown:
+        print(line, file=sys.stderr)
+    print(f"===== end {stage} PBS job log =====", file=sys.stderr)
+    return log_path
+
+
 def wait_for_pbs_marker(
     run_dir: Path,
     stage: str,
@@ -1465,7 +1525,10 @@ def wait_for_pbs_marker(
 
     while True:
         if failed.exists():
-            raise PBSError(f"PBS stage failed: {stage}")
+            report_stage_log(run_dir, stage)
+            raise PBSError(
+                f"PBS stage failed: {stage} (job log: {stage_log_path(run_dir, stage)})"
+            )
         if done.exists():
             return
         # Not polled during the grace cycle: the terminal state already landed.
@@ -1484,6 +1547,7 @@ def wait_for_pbs_marker(
         if terminal_state_seen is not None:
             # The compute node writes the marker over shared storage, which can
             # lag behind qstat; one extra poll cycle already passed without it.
+            report_stage_log(run_dir, stage)
             raise PBSError(
                 f"PBS stage ended without marker: {stage} (job {job_id}, state {terminal_state_seen})"
             )
@@ -1647,7 +1711,6 @@ def blocksci_pbs_command(
     joinmarket_min_base_fee: int,
     joinmarket_percentage_fee: float,
     joinmarket_max_depth: int,
-    test_values: bool,
     markdown: bool = True,
     include_report: bool = True,
     export_analysis: bool = False,
@@ -1685,8 +1748,6 @@ def blocksci_pbs_command(
             "--joinmarket-percentage-fee {joinmarket_percentage_fee} "
             "--joinmarket-max-depth {joinmarket_max_depth}"
         )
-        if test_values:
-            parts[-1] += " --test-values"
     if include_report:
         parts.append(
             f"{BLOCKSCI_IMAGE_PYTHON_COMMAND} /mnt/exporters/unified_report.py "
@@ -1700,8 +1761,6 @@ def blocksci_pbs_command(
             "--joinmarket-percentage-fee {joinmarket_percentage_fee} "
             "--joinmarket-max-depth {joinmarket_max_depth}",
         )
-    if include_report and test_values:
-        parts[-1] += " --test-values"
     if include_report and markdown:
         parts[-1] += " --markdown"
     return " && ".join(parts).format(
@@ -1752,7 +1811,6 @@ def blocksci_analysis_pbs_command(
     joinmarket_min_base_fee: int,
     joinmarket_percentage_fee: float,
     joinmarket_max_depth: int,
-    test_values: bool,
 ) -> str:
     """Build detector analysis over an already parsed BlockSci index."""
     config = f"/runs/emulation/logs/{run_id}/blocksci_data/config.json"
@@ -1767,8 +1825,6 @@ def blocksci_analysis_pbs_command(
         f"--joinmarket-percentage-fee {joinmarket_percentage_fee} "
         f"--joinmarket-max-depth {joinmarket_max_depth}"
     )
-    if test_values:
-        command += " --test-values"
     return command
 
 
@@ -1822,7 +1878,6 @@ def blocksci_export_pbs_command(
     joinmarket_min_base_fee: int,
     joinmarket_percentage_fee: float,
     joinmarket_max_depth: int,
-    test_values: bool,
     uploader_image: str | None = None,
     unified_report_image: str | None = None,
 ) -> str:
@@ -1840,8 +1895,6 @@ def blocksci_export_pbs_command(
         f"--joinmarket-percentage-fee {joinmarket_percentage_fee} "
         f"--joinmarket-max-depth {joinmarket_max_depth} --markdown"
     )
-    if test_values:
-        command += " --test-values"
     # Provenance of the two images that have no environment channel into this
     # job: the uploader that produced the S3 artifacts and the image the report
     # itself runs in. Without them images.uploader/images.unified_report are

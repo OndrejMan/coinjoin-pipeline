@@ -19,7 +19,7 @@ except ImportError:
         Blockchain=lambda *_args, **_kwargs: (_ for _ in ()).throw(
             RuntimeError("BlockSci is required for export_blocksci_records integration tests.")
         ),
-        heuristics=types.SimpleNamespace(set_test_values_enabled=lambda *_args, **_kwargs: None),
+        heuristics=types.SimpleNamespace(),
     )
 else:
     _ = _blocksci
@@ -354,15 +354,14 @@ class UnifiedReportTest(unittest.TestCase):
     def test_run_manifest_records_reproduction_command(self):
         with mock.patch.dict(os.environ, {"REPRODUCTION_COMMAND": "./runIt.sh full-run --engine joinmarket"}):
             manifest = build_run_manifest(
-                Path("/tmp/run"), None, "joinmarket", "joinmarket", 1, False, 0,
+                Path("/tmp/run"), None, "joinmarket", "joinmarket", 1, 0,
                 "definite", 5000, 0.00004, 200000,
             )
         self.assertEqual(manifest["execution"]["reproduction_command"], "./runIt.sh full-run --engine joinmarket")
 
-    def test_parse_args_accepts_test_values(self):
-        args = parse_args(["--test-values"])
-
-        self.assertTrue(args.test_values)
+    def test_parse_args_rejects_removed_test_values(self):
+        with self.assertRaises(SystemExit):
+            parse_args(["--test-values"])
 
     def test_min_input_count_requires_a_positive_integer_or_default(self):
         self.assertIsNone(parse_min_input_count("default"))
@@ -428,7 +427,6 @@ class UnifiedReportTest(unittest.TestCase):
             "joinmarket",
             "joinmarket",
             1,
-            True,
             0,
             "definite",
             5000,
@@ -446,7 +444,6 @@ class UnifiedReportTest(unittest.TestCase):
             "joinmarket",
             "joinmarket",
             1,
-            True,
             0,
             "possible",
             5000,
@@ -477,7 +474,6 @@ class UnifiedReportTest(unittest.TestCase):
                 "wasabi2",
                 "wasabi",
                 1,
-                False,
                 0,
                 "definite",
                 5000,
@@ -1623,7 +1619,7 @@ class UnifiedReportTest(unittest.TestCase):
 
     def test_wasabi2_default_threshold_fails_small_current_missed_shape(self):
         records = normalize_coinjoin_analysis(coinjoin_analysis_fixture_with_block_height(226))
-        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=None, test_values=True)
+        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=None)
 
         input_count_rule = next(rule for rule in explanation["rules"] if rule["name"] == "input_count")
         self.assertFalse(input_count_rule["passed"])
@@ -1631,7 +1627,7 @@ class UnifiedReportTest(unittest.TestCase):
 
     def test_wasabi2_low_min_input_count_can_pass_input_count_rule(self):
         records = normalize_coinjoin_analysis(coinjoin_analysis_fixture_with_block_height(226))
-        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=1, test_values=True)
+        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=1)
 
         input_count_rule = next(rule for rule in explanation["rules"] if rule["name"] == "input_count")
         self.assertTrue(input_count_rule["passed"])
@@ -1660,7 +1656,7 @@ class UnifiedReportTest(unittest.TestCase):
             ],
         }
 
-        explanation = explain_wasabi2_heuristic(record, min_input_count=1, test_values=True)
+        explanation = explain_wasabi2_heuristic(record, min_input_count=1)
 
         denom_rule = next(rule for rule in explanation["rules"] if rule["name"] == "wasabi2_denominations")
         self.assertIn(5_000_000, WASABI2_BLOCKSCI_DENOMINATIONS)
@@ -1674,14 +1670,14 @@ class UnifiedReportTest(unittest.TestCase):
         record["inputs"][1]["value"] = 6000
         record["outputs"][1]["value"] = 2000
 
-        explanation = explain_wasabi2_heuristic(record, min_input_count=1, test_values=True)
+        explanation = explain_wasabi2_heuristic(record, min_input_count=1)
 
         self.assertIn("input_values_descending", explanation["failed_rules"])
         self.assertIn("output_values_descending", explanation["failed_rules"])
 
     def test_wasabi2_fewer_than_five_unique_addresses_fail(self):
         records = normalize_coinjoin_analysis(coinjoin_analysis_fixture_with_block_height(226))
-        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=1, test_values=True)
+        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=1)
 
         self.assertIn("unique_input_addresses", explanation["failed_rules"])
         self.assertIn("unique_output_addresses", explanation["failed_rules"])
@@ -1869,7 +1865,6 @@ class UnifiedReportTest(unittest.TestCase):
                 blocksci_fixture("txB"),
                 "wasabi2",
                 min_input_count=1,
-                test_values=True,
             )
 
         tx_record = report["transactions"]["txA"]["coinjoin_analysis"]
@@ -2039,7 +2034,6 @@ class UnifiedReportTest(unittest.TestCase):
                 blocksci_fixture("txB"),
                 "wasabi2",
                 min_input_count=1,
-                test_values=True,
             )
 
         markdown = render_report(report)

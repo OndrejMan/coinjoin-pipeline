@@ -823,7 +823,6 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
                 ["scenario wallets", scenario.get("wallet_count")],
                 ["coinjoin type", run.get("coinjoin_type")],
                 ["BlockSci min input count", run.get("blocksci_min_input_count")],
-                ["BlockSci test values", run.get("blocksci_test_values")],
                 ["FirstWasabi2Block", run.get("first_wasabi2_block")],
                 ["JoinMarket detector", run.get("joinmarket_detector")],
                 ["JoinMarket min base fee", run.get("joinmarket_min_base_fee")],

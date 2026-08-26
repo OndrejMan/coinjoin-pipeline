@@ -67,7 +67,6 @@ def detector_parameters(args: argparse.Namespace) -> JsonObject:
     return {
         "coinjoin_type": args.coinjoin_type,
         "min_input_count": args.min_input_count,
-        "test_values": args.test_values,
         "joinmarket_detector": args.joinmarket_detector,
         "joinmarket_min_base_fee": args.joinmarket_min_base_fee,
         "joinmarket_percentage_fee": args.joinmarket_percentage_fee,
@@ -121,7 +120,6 @@ def write_analysis(args: argparse.Namespace) -> Path:
             f"BlockSci Python module is required to export BlockSci analysis.{detail}"
         ) from BLOCKSCI_IMPORT_ERROR
 
-    blocksci.heuristics.set_test_values_enabled(args.test_values)
     records, skipped_txids = export_blocksci_records(
         config_path,
         args.coinjoin_type,
@@ -181,7 +179,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--coinjoin-type", default="wasabi2")
     parser.add_argument("--min-input-count", type=parse_min_input_count, default=None)
-    parser.add_argument("--test-values", action="store_true")
     parser.add_argument("--joinmarket-detector", default=DEFAULT_JOINMARKET_DETECTOR)
     parser.add_argument("--joinmarket-min-base-fee", type=int, default=DEFAULT_JOINMARKET_MIN_BASE_FEE)
     parser.add_argument(

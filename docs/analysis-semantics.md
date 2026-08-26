@@ -71,20 +71,18 @@ External mode has no emulator labels and retains
 
 The Wasabi 2 heuristic chooses an internal minimum input count when its
 optional `inputCount` argument is absent. For pre-height-850237 transactions,
-that internal minimum is 50 in production mode and 20 with test values; newer
-transactions use 20.
+that internal minimum is 50; newer transactions use 20.
 
-The wrapper and exporter now leave the option unset by default. Thus
-`--test-values` affects the internal threshold as designed. An explicit
-`--min-input-count N` still overrides the internal height/test-mode threshold,
-and the run manifest records that override as `N`; no override is recorded as
-`null`. Overrides must be positive integers; zero, negative, and non-numeric
-values are command-line errors.
+The wrapper and exporter leave the option unset by default, so BlockSci uses
+the height-aware production threshold. An explicit `--min-input-count N`
+overrides that threshold, and the run manifest records that override as `N`;
+no override is recorded as `null`. Overrides must be positive integers; zero,
+negative, and non-numeric values are command-line errors.
 
-Small regtest Wasabi rounds generally need an explicit `--test-values`. When
-production thresholds are used on pre-850237 emulator blocks and BlockSci
-detects zero transactions, the JSON and Markdown reports carry a
-`wasabi_production_threshold_zero_detections` warning.
+Small regtest Wasabi rounds generally need an explicit
+`--min-input-count`. When production thresholds are used on pre-850237
+emulator blocks and BlockSci detects zero transactions, the JSON and Markdown
+reports carry a `wasabi_production_threshold_zero_detections` warning.
 
 ## BlockSci bulk detector APIs
 

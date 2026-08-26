@@ -512,7 +512,6 @@ class WrapperExportTest(unittest.TestCase):
             joinmarket_min_base_fee=5000,
             joinmarket_percentage_fee=0.00004,
             joinmarket_max_depth=200000,
-            test_values=False,
         )
         with (
             # The run prefix check before submission is covered in test_s3_backend.
@@ -660,12 +659,6 @@ class WrapperExportTest(unittest.TestCase):
             ["full-run", "--scenario", "overactive-local.json"],
         )
 
-    def test_normalize_argv_defaults_to_full_run_with_test_values(self):
-        self.assertEqual(
-            normalize_argv(["--test-values", "--scenario", "overactive-local.json"]),
-            ["full-run", "--test-values", "--scenario", "overactive-local.json"],
-        )
-
     def test_normalize_argv_defaults_to_full_run_with_parallel(self):
         self.assertEqual(
             normalize_argv(["--parallel", "--engine", "joinmarket"]),
@@ -712,7 +705,6 @@ class WrapperExportTest(unittest.TestCase):
                 coinjoin_type="joinmarket",
                 min_input_count=1,
                 scenario=None,
-                test_values=False,
                 joinmarket_detector="definite",
                 joinmarket_min_base_fee=5000,
                 joinmarket_percentage_fee=0.00004,
@@ -1030,11 +1022,6 @@ class WrapperExportTest(unittest.TestCase):
 
         self.assertEqual(compose_command(env), ["podman-compose"])
 
-    def test_compose_env_sets_test_values_flag(self):
-        env = compose_env(test_values=True)
-
-        self.assertEqual(env["BLOCKSCI_TEST_VALUES"], "true")
-
     def test_compose_env_uses_blocksci_detector_default_input_count(self):
         self.assertEqual(compose_env()["BLOCKSCI_MIN_INPUT_COUNT"], "default")
 
@@ -1088,12 +1075,11 @@ class WrapperExportTest(unittest.TestCase):
         self.assertNotIn(COINJOIN_ANALYSIS_TARGET_PATH_ENV, env)
         self.assertNotIn(COINJOIN_ANALYSIS_INPUT_DATA_PATH_ENV, env)
 
-    def test_export_command_includes_test_values_when_enabled(self):
+    def test_export_command_uses_explicit_minimum_input_count(self):
         env = {
             "SCENARIO_FALLBACK_PATH": "/mnt/scenarios/defaultCoinJoin.json",
             "BLOCKSCI_COINJOIN_TYPE": "wasabi2",
             "BLOCKSCI_MIN_INPUT_COUNT": "1",
-            "BLOCKSCI_TEST_VALUES": "true",
             "BLOCKSCI_JOINMARKET_DETECTOR": "definite",
             "BLOCKSCI_JOINMARKET_MIN_BASE_FEE": "5000",
             "BLOCKSCI_JOINMARKET_PERCENTAGE_FEE": "0.00004",
@@ -1102,18 +1088,18 @@ class WrapperExportTest(unittest.TestCase):
 
         command = export_command("run-a", env)
 
-        self.assertIn("--test-values", command)
+        self.assertIn("--min-input-count 1", command)
         self.assertIn("--markdown", command)
         self.assertIn("--joinmarket-detector", command)
         self.assertIn(f"{RUNS_ROOT_CONTAINER}/run-a/blocksci_data/config.json", command)
         self.assertIn(f"{RUNS_ROOT_CONTAINER}/run-a", command)
 
-    def test_export_command_omits_test_values_by_default(self):
+    def test_export_command_does_not_accept_test_value_environment(self):
         env = {
             "SCENARIO_FALLBACK_PATH": "/mnt/scenarios/defaultCoinJoin.json",
             "BLOCKSCI_COINJOIN_TYPE": "wasabi2",
             "BLOCKSCI_MIN_INPUT_COUNT": "1",
-            "BLOCKSCI_TEST_VALUES": "false",
+            "BLOCKSCI_TEST_VALUES": "true",
             "BLOCKSCI_JOINMARKET_DETECTOR": "definite",
             "BLOCKSCI_JOINMARKET_MIN_BASE_FEE": "5000",
             "BLOCKSCI_JOINMARKET_PERCENTAGE_FEE": "0.00004",

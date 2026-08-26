@@ -49,11 +49,16 @@ IMAGE_PREFIX="${IMAGE_PREFIX:-ghcr.io/ondrejman/}"
 UPLOADER_IMAGE="${UPLOADER_IMAGE:-}"
 COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
 MINIO_IMAGE="${MINIO_IMAGE:-minio/minio:latest}"
-RESULT_DIR="${TEST_RESULT_DIR:-}"
+RESULT_DIR="${TEST_RESULT_DIR:-${PROJECT_DIR}/emulation_logs/_test-results/kubernetes-s3-minio-${RUN_TOKEN}}"
 KEEP_WORK="${KEEP_TEST_WORK:-0}"
 KUBERNETES_S3_TIMEOUT="${KUBERNETES_S3_TIMEOUT:-85m}"
 KUBERNETES_DIAGNOSTICS_FILE="${WORK_ROOT}/kubernetes-diagnostics.txt"
 PIPELINE_OUTPUT_FILE="${WORK_ROOT}/pipeline-output.log"
+# The work root is deleted on exit, so a failed run would otherwise leave no
+# trace of why the pipeline exited - the frontend's "[ERROR] ..." line lives in
+# the pipeline output, not in the Kubernetes diagnostics. Keep both outside it.
+# Resolved before EMULATION_LOGS_DIR is repointed at the run-local LOGS_ROOT.
+FAILED_LOGS_DIR="${TEST_FAILED_LOGS_DIR:-${EMULATION_LOGS_DIR:-${PROJECT_DIR}/emulation_logs}/_failed}"
 S3_ENDPOINT_URL=""
 COINJOIN_EMULATOR_SOURCE_IMAGE="${COINJOIN_EMULATOR_IMAGE}"
 K3D_UPLOADER_IMAGE="coinjoin-pipeline-uploader-s3-e2e:${RUN_TOKEN}"
@@ -139,11 +144,23 @@ dump_kubernetes_diagnostics() {
   cat "${KUBERNETES_DIAGNOSTICS_FILE}" >&2
 }
 
+archive_failure_artifacts() {
+  local timestamp
+  timestamp="$(TZ=UTC date +%Y%m%dT%H%M%S.%NZ)"
+  mkdir -p "${FAILED_LOGS_DIR}" || return 0
+  [[ -s "${PIPELINE_OUTPUT_FILE}" ]] && cp "${PIPELINE_OUTPUT_FILE}" \
+    "${FAILED_LOGS_DIR}/${timestamp}-kubernetes-s3-pipeline.log"
+  [[ -s "${KUBERNETES_DIAGNOSTICS_FILE}" ]] && cp "${KUBERNETES_DIAGNOSTICS_FILE}" \
+    "${FAILED_LOGS_DIR}/${timestamp}-kubernetes-s3-diagnostics.log"
+  return 0
+}
+
 cleanup() {
   local status=$?
   trap - EXIT
   if (( status != 0 )); then
     dump_kubernetes_diagnostics || true
+    archive_failure_artifacts || true
   fi
   if [[ -n "${RESULT_DIR}" ]]; then
     mkdir -p "${RESULT_DIR}/${ENGINE}"
@@ -155,6 +172,7 @@ cleanup() {
       && cp "${KUBERNETES_DIAGNOSTICS_FILE}" "${RESULT_DIR}/${ENGINE}/"
     [[ -s "${PIPELINE_OUTPUT_FILE}" ]] \
       && cp "${PIPELINE_OUTPUT_FILE}" "${RESULT_DIR}/${ENGINE}/"
+    find "${RESULT_DIR}" -type d -empty -delete 2>/dev/null || true
   fi
   docker rm -f "${PBS_CONTAINER_NAME}" >/dev/null 2>&1 || true
   docker rm -f "${MINIO_CONTAINER_NAME}" >/dev/null 2>&1 || true
@@ -302,7 +320,6 @@ set +e
     --uploader-image "${UPLOADER_IMAGE}" \
     --analysisPbs \
     --blocksciPbs \
-    --test-values \
     --min-input-count 15 \
     "${PBS_IMAGE_ARGS[@]}" \
     --pbs-ncpus 2 \
@@ -349,14 +366,21 @@ if run.get("scenario_name") != expected_scenario:
     raise SystemExit(f"FAIL: scenario {run.get('scenario_name')!r} != {expected_scenario!r}")
 if run.get("coinjoin_type") != expected_type:
     raise SystemExit(f"FAIL: coinjoin type {run.get('coinjoin_type')!r} != {expected_type!r}")
-if not baseline:
-    raise SystemExit("FAIL: coinjoin-analysis produced no records")
+baseline_coinjoins = baseline.get("coinjoins") or {}
+if not baseline_coinjoins:
+    raise SystemExit("FAIL: coinjoin-analysis produced no CoinJoin transactions")
+if summary.get("coinjoin_analysis_coinjoins") != len(baseline_coinjoins):
+    raise SystemExit(
+        "FAIL: report baseline count "
+        f"{summary.get('coinjoin_analysis_coinjoins')!r} != "
+        f"{len(baseline_coinjoins)} CoinJoins in coinjoin_tx_info.json"
+    )
 if summary.get("blocksci_detected_coinjoins", 0) < 1:
     raise SystemExit("FAIL: BlockSci detected no CoinJoin transactions")
 if "blocksci_agreement_rate" not in summary:
     raise SystemExit("FAIL: report has no analyzer agreement metrics")
 print(
     f"PASS: {expected_type} via Kubernetes→S3 (MinIO)→PBS full-run; "
-    f"baseline={len(baseline)}, blocksci={summary['blocksci_detected_coinjoins']}"
+    f"baseline={len(baseline_coinjoins)}, blocksci={summary['blocksci_detected_coinjoins']}"
 )
 PY

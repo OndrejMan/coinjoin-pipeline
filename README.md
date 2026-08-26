@@ -20,10 +20,9 @@ cjp doctor
 coinjoin-pipeline pull
 coinjoin-pipeline full-run --engine joinmarket --dry-run
 coinjoin-pipeline full-run --engine joinmarket
-# Small regtest Wasabi rounds need an explicit test-threshold opt-in.
+# Small regtest Wasabi rounds need an explicit input threshold.
 coinjoin-pipeline full-run --engine wasabi \
   --scenario scenarios/overactive-local.json \
-  --test-values \
   --min-input-count 15
 
 # CI-style live output for a Kubernetes run.
@@ -42,12 +41,11 @@ coinjoin-pipeline watch --run-id "$RUN_ID" --pbs-only \
 ```
 
 By default the wrapper leaves `--min-input-count` unset, so BlockSci applies
-its height-aware production threshold (or its test threshold when
-`--test-values` is explicitly selected). Pass `--min-input-count N` only for
-an intentional positive override. Values below 1 are rejected. Small Wasabi
-regtest scenarios normally require explicit `--test-values` and may need a
-scenario-appropriate `--min-input-count`; otherwise a zero-detection report
-includes a prominent production-threshold warning.
+its height-aware production threshold. Pass `--min-input-count N` for an
+intentional positive override. Values below 1 are rejected. Small Wasabi
+regtest scenarios normally need a scenario-appropriate explicit value;
+otherwise a zero-detection report includes a prominent production-threshold
+warning.
 Independent emulator labels, raw detector metrics,
 and provenance rules are defined in
 [Analysis semantics](docs/analysis-semantics.md).
@@ -200,7 +198,7 @@ coinjoin-pipeline full-run \
   --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
   --s3-profile coinjoin \
   --run-id '<id>' \
-  --test-values \
+  --min-input-count 15 \
   --analysisPbs \
   --blocksciPbs \
   --mappingsPbs \
@@ -332,7 +330,7 @@ coinjoin-pipeline pbs-from-s3 \
   --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
   --s3-profile coinjoin \
   --engine wasabi \
-  --test-values \
+  --min-input-count 15 \
   --analysisPbs \
   --blocksciPbs
 ```
@@ -493,7 +491,7 @@ Run the default detector later without invoking `blocksci_parser`:
   --blocksciPbs \
   --blocksci-workflow cached \
   --blocksci-task detect \
-  --test-values
+  --min-input-count 15
 ```
 
 Custom scripts must be on shared `/storage` so the PBS compute node can bind

@@ -157,7 +157,6 @@ def s3_pbs_args(
         joinmarket_min_base_fee=5000,
         joinmarket_percentage_fee=0.00004,
         joinmarket_max_depth=200000,
-        test_values=True,
         blocksci_workflow="combined",
         blocksci_task="detect",
         blocksci_script=None,
@@ -259,7 +258,7 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
         **COMMON,
         image="docker://blocksci",
         command=blocksci_analysis_pbs_command(
-            "run-1", "wasabi2", 2, "definite", 5000, 0.00004, 200000, True
+            "run-1", "wasabi2", 2, "definite", 5000, 0.00004, 200000
         ),
     )
 
@@ -818,7 +817,6 @@ def test_pbs_from_s3_submits_parallel_analyzers_then_dependent_report() -> None:
         joinmarket_min_base_fee=5000,
         joinmarket_percentage_fee=0.00004,
         joinmarket_max_depth=200000,
-        test_values=True,
         uploader_image="ghcr.io/ondrejman/coinjoin-pipeline-uploader:latest",
         unified_report_image="python:3.12-slim-bookworm",
     )
