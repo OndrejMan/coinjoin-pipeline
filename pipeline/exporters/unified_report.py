@@ -92,6 +92,7 @@ def export_blocksci_cluster_assignments(  # type: ignore[no-redef]
     coinjoin_type: str,
     output_dir: Path,
     max_distance: int = DEFAULT_CLUSTER_MAX_DISTANCE,
+    min_input_count: int | None = None,
 ) -> tuple[dict[str, str] | None, str | None]:
     _sync_blocksci()
     return _blocksci_export.export_blocksci_cluster_assignments(
@@ -100,6 +101,7 @@ def export_blocksci_cluster_assignments(  # type: ignore[no-redef]
         coinjoin_type,
         output_dir,
         max_distance,
+        min_input_count,
     )
 
 

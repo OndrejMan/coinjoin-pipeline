@@ -258,6 +258,7 @@ def export_blocksci_cluster_assignments(
     coinjoin_type: str,
     output_dir: Path,
     max_distance: int = DEFAULT_CLUSTER_MAX_DISTANCE,
+    min_input_count: int | None = None,
 ) -> tuple[dict[str, str] | None, str | None]:
     if blocksci is None:
         return None, "BlockSci Python module is required for clustering evaluation."
@@ -271,6 +272,7 @@ def export_blocksci_cluster_assignments(
         coinjoin_type,
         output_dir,
         max_distance,
+        min_input_count,
     )
 
 
@@ -279,18 +281,24 @@ def _run_coinjoin_clustering(
     output_dir: Path,
     coinjoin_type: str,
     max_distance: int,
+    min_input_count: int | None,
 ) -> object:
     """Build the CoinJoin cluster manager for the whole chain."""
     output_dir.parent.mkdir(parents=True, exist_ok=True)
+    options = {
+        "chain": chain,
+        "start": 0,
+        "stop": -1,
+        "heuristic_func": build_default_coinjoin_clustering_heuristic(),
+        "output_path": str(output_dir),
+        "overwrite": True,
+        "coinjoin_type": coinjoin_type,
+        "max_distance": max_distance,
+    }
+    if min_input_count is not None:
+        options["min_input_count"] = min_input_count
     return blocksci.cluster.CoinjoinClusterManager.create_clustering(
-        chain=chain,
-        start=0,
-        stop=-1,
-        heuristic_func=build_default_coinjoin_clustering_heuristic(),
-        output_path=str(output_dir),
-        overwrite=True,
-        coinjoin_type=coinjoin_type,
-        max_distance=max_distance,
+        **options,
     )
 
 
@@ -318,6 +326,7 @@ def export_blocksci_cluster_assignments_for_addresses(
     coinjoin_type: str,
     output_dir: Path,
     max_distance: int = DEFAULT_CLUSTER_MAX_DISTANCE,
+    min_input_count: int | None = None,
 ) -> tuple[dict[str, str] | None, str | None]:
     """Cluster the chain and return assignments for the requested addresses."""
     requested_addresses = sorted({str(address) for address in addresses if address})
@@ -326,7 +335,9 @@ def export_blocksci_cluster_assignments_for_addresses(
 
     try:
         chain = blocksci.Blockchain(str(config_path))
-        clusterer = _run_coinjoin_clustering(chain, output_dir, coinjoin_type, max_distance)
+        clusterer = _run_coinjoin_clustering(
+            chain, output_dir, coinjoin_type, max_distance, min_input_count
+        )
     except Exception as exc:
         return None, f"BlockSci cluster assignment export failed: {exc}"
 

@@ -298,6 +298,7 @@ def main(argv: list[str] | None = None) -> int:
                 emulator_data,
                 args.coinjoin_type,
                 cluster_output_dir,
+                min_input_count=args.min_input_count,
             )
     output_path = output_dir / args.output_name
     previous_run_manifest = None

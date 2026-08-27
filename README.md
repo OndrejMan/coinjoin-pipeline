@@ -54,6 +54,25 @@ evaluates both BlockSci and the filtered, normalized `coinjoin-analysis`
 baseline against the same exported transaction universe while preserving the
 legacy BlockSci confusion-matrix field.
 
+### BlockSci multi-chain caveat
+
+BlockSci currently stores its CoinJoin activation-height configuration in
+process-global state. Constructing a `blocksci.Blockchain` copies the
+configuration from that chain into global values used by the CoinJoin
+heuristics. Consequently, a custom Python program or notebook that opens two
+chains with different configurations (for example mainnet and regtest) and
+then reuses the first chain can evaluate it using the thresholds of the second
+chain.
+
+The normal pipeline workflow is unaffected: each analysis process works with
+one run configuration, and the record export, diagnostics, and clustering
+objects created during report assembly all receive that same `config.json`.
+Separate containers, Kubernetes Jobs, and PBS Jobs are also separate processes.
+For custom analysis, use one chain configuration per Python process; run
+cross-network comparisons in separate processes. A future in-process
+multi-chain workflow must first make these thresholds chain-specific in
+BlockSci.
+
 Outputs default to `./coinjoin-runs`; override this with `--runs-root`. Images
 default to the explicit `latest` tag. Use `--version TAG` to apply one coordinated
 tag to every default image, or `--local-build` for local development tags.

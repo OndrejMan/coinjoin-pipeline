@@ -1463,8 +1463,11 @@ class UnifiedReportTest(unittest.TestCase):
                 return FakeCluster(0, 0)
 
         class FakeCoinjoinClusterManager:
+            arguments = None
+
             @staticmethod
-            def create_clustering(**_kwargs):
+            def create_clustering(**kwargs):
+                FakeCoinjoinClusterManager.arguments = kwargs
                 return FakeClusterer()
 
         class FakeClusterBlockchain:
@@ -1493,12 +1496,14 @@ class UnifiedReportTest(unittest.TestCase):
                 },
                 "wasabi2",
                 Path("/tmp/clusters"),
+                min_input_count=10,
             )
         finally:
             unified_report.blocksci = previous_blocksci
 
         self.assertIsNone(error)
         self.assertEqual(predicted, {"known-a": "7"})
+        self.assertEqual(FakeCoinjoinClusterManager.arguments["min_input_count"], 10)
 
     def test_export_blocksci_cluster_assignments_creates_output_parent(self):
         class FakeHeuristic:

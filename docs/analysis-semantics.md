@@ -79,6 +79,10 @@ overrides that threshold, and the run manifest records that override as `N`;
 no override is recorded as `null`. Overrides must be positive integers; zero,
 negative, and non-numeric values are command-line errors.
 
+When supplied, the override is passed both to the raw BlockSci detector and to
+`CoinjoinClusterManager`, so report detection and clustering use the same
+Wasabi 2 input threshold.
+
 Small regtest Wasabi rounds generally need an explicit
 `--min-input-count`. When production thresholds are used on pre-850237
 emulator blocks and BlockSci detects zero transactions, the JSON and Markdown

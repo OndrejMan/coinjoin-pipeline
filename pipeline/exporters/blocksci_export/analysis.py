@@ -153,6 +153,7 @@ def write_analysis(args: argparse.Namespace) -> Path:
         exported_addresses(run_dir),
         args.coinjoin_type,
         cluster_dir,
+        min_input_count=args.min_input_count,
     )
     artifact: JsonObject = {
         "schema_version": SCHEMA_VERSION,

@@ -98,7 +98,7 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
         run_dir=run_dir,
         config=config,
         coinjoin_type="wasabi2",
-        min_input_count=None,
+        min_input_count=10,
         joinmarket_detector="definite",
         joinmarket_min_base_fee=5000,
         joinmarket_percentage_fee=0.00004,
@@ -127,7 +127,7 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
         mock.patch(
             "exporters.blocksci_export.analysis.export_blocksci_cluster_assignments_for_addresses",
             return_value=({"bcrt1-address": "7"}, None),
-        ),
+        ) as export_cluster_assignments,
         mock.patch(
             "exporters.blocksci_export.analysis.load_first_wasabi2_block",
             return_value=850237,
@@ -139,6 +139,7 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
     assert artifact["records"] == {"tx": {"txid": "tx"}}
     assert artifact["predicted_address_clusters"] == {"bcrt1-address": "7"}
     assert artifact["integration_diagnostics"] == {"status": "ok"}
+    assert export_cluster_assignments.call_args.kwargs["min_input_count"] == 10
 
 
 def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:
