@@ -58,6 +58,10 @@ KUBERNETES_S3_TIMEOUT="${KUBERNETES_S3_TIMEOUT:-85m}"
 # chain. A loaded k3d node can take longer than the emulator's 900-second
 # default, so give this intentionally heavyweight integration test headroom.
 COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT="${COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT:-1800}"
+# The locally-built bitcoin node normally mines every 30--90 seconds.  During
+# Wasabi's initial filter sync that can keep the distributor perpetually one
+# filter behind, so leave a five-minute gap for it to catch up in this test.
+COINJOIN_BTC_NODE_MINING_INTERVAL_SECONDS="${COINJOIN_BTC_NODE_MINING_INTERVAL_SECONDS:-300}"
 KUBERNETES_DIAGNOSTICS_FILE="${WORK_ROOT}/kubernetes-diagnostics.txt"
 PIPELINE_OUTPUT_FILE="${WORK_ROOT}/pipeline-output.log"
 # The work root is deleted on exit, so a failed run would otherwise leave no
@@ -320,6 +324,7 @@ export COINJOIN_EMULATOR_IMAGE
 export COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT
 export COINJOIN_BTC_NODE_IMAGE
 export KUBERNETES_IMAGE_PULL_POLICY
+export COINJOIN_BTC_NODE_MINING_INTERVAL_SECONDS
 
 echo "Running the S3-compatible full-run for run ${RUN_ID}..."
 set +e

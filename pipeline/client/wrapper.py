@@ -2534,6 +2534,9 @@ def run_kubernetes_s3_emulation(args: argparse.Namespace) -> None:
         distributor_startup_timeout=os.environ.get("COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT"),
         btc_node_image=os.environ.get("COINJOIN_BTC_NODE_IMAGE"),
         kubernetes_image_pull_policy=os.environ.get("KUBERNETES_IMAGE_PULL_POLICY"),
+        btc_node_mining_interval_seconds=os.environ.get(
+            "COINJOIN_BTC_NODE_MINING_INTERVAL_SECONDS"
+        ),
     )
     if args.dry_run:
         print(f"[dry-run] Kubernetes S3-compatible resources:\n{manifest}")
