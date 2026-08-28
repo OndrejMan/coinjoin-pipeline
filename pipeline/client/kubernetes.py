@@ -372,6 +372,7 @@ def render_s3_emulation_resources(
     btc_node_image: str | None = None,
     kubernetes_image_pull_policy: str | None = None,
     btc_node_mining_interval_seconds: str | None = None,
+    btc_node_initial_block_count: str | None = None,
 ) -> str:
     """Render a kubectl-compatible JSON resource list for in-cluster emulation."""
     name = s3_emulation_job_name(run_id)
@@ -520,6 +521,13 @@ rm -f /credentials/credentials"""
             {
                 "name": "COINJOIN_BTC_NODE_MINING_INTERVAL_SECONDS",
                 "value": btc_node_mining_interval_seconds,
+            }
+        )
+    if btc_node_initial_block_count:
+        env.append(
+            {
+                "name": "COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT",
+                "value": btc_node_initial_block_count,
             }
         )
     artifact_env = [

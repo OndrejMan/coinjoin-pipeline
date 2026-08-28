@@ -178,6 +178,7 @@ def test_s3_controller_can_use_an_imported_btc_node_image() -> None:
             btc_node_image="btc-node:test",
             kubernetes_image_pull_policy="IfNotPresent",
             btc_node_mining_interval_seconds="300",
+            btc_node_initial_block_count="201",
         )
     )
     job = next(item for item in manifest["items"] if item["kind"] == "Job")
@@ -191,6 +192,7 @@ def test_s3_controller_can_use_an_imported_btc_node_image() -> None:
     assert environment["BTC_NODE_IMAGE"] == "btc-node:test"
     assert environment["KUBERNETES_IMAGE_PULL_POLICY"] == "IfNotPresent"
     assert environment["COINJOIN_BTC_NODE_MINING_INTERVAL_SECONDS"] == "300"
+    assert environment["COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT"] == "201"
     assert '--btc-node-image "$BTC_NODE_IMAGE"' in controller["command"][-1]
 
 

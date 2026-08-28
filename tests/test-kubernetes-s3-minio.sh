@@ -62,6 +62,11 @@ COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT="${COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT:-18
 # Wasabi's initial filter sync that can keep the distributor perpetually one
 # filter behind, so leave a five-minute gap for it to catch up in this test.
 COINJOIN_BTC_NODE_MINING_INTERVAL_SECONDS="${COINJOIN_BTC_NODE_MINING_INTERVAL_SECONDS:-300}"
+# Keep the test chain at the historical main-branch depth.  Wasabi downloads
+# its complete filter chain before creating the distributor wallet; 201 blocks
+# provide mature coinbases without consuming the distributor timeout on ~1000
+# initial filters.
+COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT="${COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT:-201}"
 KUBERNETES_DIAGNOSTICS_FILE="${WORK_ROOT}/kubernetes-diagnostics.txt"
 PIPELINE_OUTPUT_FILE="${WORK_ROOT}/pipeline-output.log"
 # The work root is deleted on exit, so a failed run would otherwise leave no
@@ -325,6 +330,7 @@ export COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT
 export COINJOIN_BTC_NODE_IMAGE
 export KUBERNETES_IMAGE_PULL_POLICY
 export COINJOIN_BTC_NODE_MINING_INTERVAL_SECONDS
+export COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT
 
 echo "Running the S3-compatible full-run for run ${RUN_ID}..."
 set +e
