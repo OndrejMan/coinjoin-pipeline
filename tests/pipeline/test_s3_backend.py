@@ -135,6 +135,63 @@ def test_s3_joinmarket_controller_enables_descriptor_regtest_fallback() -> None:
     assert "--joinmarket-descriptor-regtest-fallback" not in wasabi_controller["command"][-1]
 
 
+def test_s3_controller_receives_distributor_startup_timeout() -> None:
+    manifest = json.loads(
+        render_s3_emulation_resources(
+            namespace="coinjoin",
+            run_id="run-1",
+            scenario_json="{}",
+            engine="wasabi",
+            image_prefix="ghcr.io/ondrejman/",
+            emulator_image="emulator:latest",
+            uploader_image="pipeline:latest",
+            artifact_uri="s3://bucket/runs",
+            endpoint_url="https://s3.cl4.du.cesnet.cz",
+            secret_name="coinjoin-s3",
+            distributor_startup_timeout="1800",
+        )
+    )
+    job = next(item for item in manifest["items"] if item["kind"] == "Job")
+    controller = next(
+        container
+        for container in job["spec"]["template"]["spec"]["containers"]
+        if container["name"] == "controller"
+    )
+
+    environment = {item["name"]: item["value"] for item in controller["env"]}
+    assert environment["COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT"] == "1800"
+
+
+def test_s3_controller_can_use_an_imported_btc_node_image() -> None:
+    manifest = json.loads(
+        render_s3_emulation_resources(
+            namespace="coinjoin",
+            run_id="run-1",
+            scenario_json="{}",
+            engine="wasabi",
+            image_prefix="ghcr.io/ondrejman/",
+            emulator_image="emulator:latest",
+            uploader_image="pipeline:latest",
+            artifact_uri="s3://bucket/runs",
+            endpoint_url="https://s3.cl4.du.cesnet.cz",
+            secret_name="coinjoin-s3",
+            btc_node_image="btc-node:test",
+            kubernetes_image_pull_policy="IfNotPresent",
+        )
+    )
+    job = next(item for item in manifest["items"] if item["kind"] == "Job")
+    controller = next(
+        container
+        for container in job["spec"]["template"]["spec"]["containers"]
+        if container["name"] == "controller"
+    )
+
+    environment = {item["name"]: item["value"] for item in controller["env"]}
+    assert environment["BTC_NODE_IMAGE"] == "btc-node:test"
+    assert environment["KUBERNETES_IMAGE_PULL_POLICY"] == "IfNotPresent"
+    assert '--btc-node-image "$BTC_NODE_IMAGE"' in controller["command"][-1]
+
+
 def s3_pbs_args(
     *, analysis: bool = True, blocksci: bool = True, mappings: bool = False
 ) -> SimpleNamespace:

@@ -48,10 +48,16 @@ HOST_KUBECONFIG="${WORK_ROOT}/kubeconfig-host.yaml"
 IMAGE_PREFIX="${IMAGE_PREFIX:-ghcr.io/ondrejman/}"
 UPLOADER_IMAGE="${UPLOADER_IMAGE:-}"
 COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
+COINJOIN_EMULATOR_ROOT="${COINJOIN_EMULATOR_ROOT:-${PROJECT_DIR}/../coinjoin-emulator}"
+BTC_NODE_SOURCE_IMAGE="${BTC_NODE_IMAGE:-}"
 MINIO_IMAGE="${MINIO_IMAGE:-minio/minio:latest}"
 RESULT_DIR="${TEST_RESULT_DIR:-${PROJECT_DIR}/emulation_logs/_test-results/kubernetes-s3-minio-${RUN_TOKEN}}"
 KEEP_WORK="${KEEP_TEST_WORK:-0}"
 KUBERNETES_S3_TIMEOUT="${KUBERNETES_S3_TIMEOUT:-85m}"
+# A Wasabi wallet creates only after it has downloaded the complete filter
+# chain. A loaded k3d node can take longer than the emulator's 900-second
+# default, so give this intentionally heavyweight integration test headroom.
+COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT="${COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT:-1800}"
 KUBERNETES_DIAGNOSTICS_FILE="${WORK_ROOT}/kubernetes-diagnostics.txt"
 PIPELINE_OUTPUT_FILE="${WORK_ROOT}/pipeline-output.log"
 # The work root is deleted on exit, so a failed run would otherwise leave no
@@ -63,6 +69,7 @@ S3_ENDPOINT_URL=""
 COINJOIN_EMULATOR_SOURCE_IMAGE="${COINJOIN_EMULATOR_IMAGE}"
 K3D_UPLOADER_IMAGE="coinjoin-pipeline-uploader-s3-e2e:${RUN_TOKEN}"
 K3D_COINJOIN_EMULATOR_IMAGE="coinjoin-emulator-s3-e2e:${RUN_TOKEN}"
+K3D_BTC_NODE_IMAGE="coinjoin-btc-node-s3-e2e:${RUN_TOKEN}"
 # Optional offline mode for analyzer images. Apptainer cannot see Docker's
 # local tag store, so local images are exported into the PBS shared workspace.
 PBS_BLOCKSCI_LOCAL_IMAGE="${PBS_BLOCKSCI_LOCAL_IMAGE:-}"
@@ -179,7 +186,7 @@ cleanup() {
   if [[ "${KEEP_CLUSTER:-0}" != 1 ]]; then
     k3d cluster delete "${CLUSTER_NAME}" >/dev/null 2>&1 || true
   fi
-  docker image rm "${K3D_UPLOADER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}" \
+  docker image rm "${K3D_UPLOADER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}" "${K3D_BTC_NODE_IMAGE}" \
     >/dev/null 2>&1 || true
   if [[ "${KEEP_WORK}" != 1 ]]; then
     rm -rf "${WORK_ROOT}"
@@ -208,6 +215,17 @@ else
   ensure_source_image "${UPLOADER_IMAGE}"
 fi
 ensure_source_image "${COINJOIN_EMULATOR_SOURCE_IMAGE}"
+if [[ -n "${BTC_NODE_SOURCE_IMAGE}" ]]; then
+  ensure_source_image "${BTC_NODE_SOURCE_IMAGE}"
+  docker tag "${BTC_NODE_SOURCE_IMAGE}" "${K3D_BTC_NODE_IMAGE}"
+else
+  [[ -f "${COINJOIN_EMULATOR_ROOT}/containers/btc-node/Dockerfile" ]] || {
+    echo "FAIL: btc-node Dockerfile not found under ${COINJOIN_EMULATOR_ROOT}" >&2
+    exit 2
+  }
+  echo "Building the current local btc-node image ${K3D_BTC_NODE_IMAGE}..."
+  docker build -t "${K3D_BTC_NODE_IMAGE}" "${COINJOIN_EMULATOR_ROOT}/containers/btc-node"
+fi
 docker tag "${UPLOADER_IMAGE}" "${K3D_UPLOADER_IMAGE}"
 docker tag "${COINJOIN_EMULATOR_SOURCE_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"
 
@@ -258,15 +276,15 @@ s5 mb "s3://${BUCKET}" >/dev/null
 echo "Creating k3d cluster ${CLUSTER_NAME} (no shared storage needed in S3 mode)..."
 k3d cluster create "${CLUSTER_NAME}" \
   --servers 1 --agents "${K3D_AGENTS:-2}" --wait --timeout "${K3D_WAIT_TIMEOUT:-240s}"
-echo "Importing wrapper and emulator images into ${CLUSTER_NAME}..."
+echo "Importing wrapper, emulator, and btc-node images into ${CLUSTER_NAME}..."
 k3d image import --cluster "${CLUSTER_NAME}" \
-  "${K3D_UPLOADER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"
+  "${K3D_UPLOADER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}" "${K3D_BTC_NODE_IMAGE}"
 # k3d exits 0 even when containerd rejects the tarball (e.g. "content digest
 # ... not found" when Docker's containerd image store is enabled). Verify the
 # images actually landed on a node, otherwise the job pod would hang in
 # Init:ImagePullBackOff until the outer timeout fires ~90 min later.
 SERVER_NODE="k3d-${CLUSTER_NAME}-server-0"
-for image in "${K3D_UPLOADER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"; do
+for image in "${K3D_UPLOADER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}" "${K3D_BTC_NODE_IMAGE}"; do
   if ! docker exec "${SERVER_NODE}" crictl images 2>/dev/null | grep -qF "${image%:*}"; then
     echo "FAIL: image ${image} was not imported into ${CLUSTER_NAME} (k3d import silently failed)." >&2
     echo "      If Docker uses the containerd image store, disable it: set" >&2
@@ -276,6 +294,8 @@ for image in "${K3D_UPLOADER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"; do
 done
 UPLOADER_IMAGE="${K3D_UPLOADER_IMAGE}"
 COINJOIN_EMULATOR_IMAGE="${K3D_COINJOIN_EMULATOR_IMAGE}"
+COINJOIN_BTC_NODE_IMAGE="${K3D_BTC_NODE_IMAGE}"
+KUBERNETES_IMAGE_PULL_POLICY="${KUBERNETES_IMAGE_PULL_POLICY:-IfNotPresent}"
 k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
 kubectl --kubeconfig "${HOST_KUBECONFIG}" wait node --all --for=condition=Ready --timeout=240s
 
@@ -297,6 +317,9 @@ docker exec -u root "${PBS_CONTAINER_NAME}" chmod 0755 /usr/bin/s5cmd
 export PBS_CLIENT_WORKDIR="${WORK_ROOT}"
 export EMULATION_LOGS_DIR="${LOGS_ROOT}"
 export COINJOIN_EMULATOR_IMAGE
+export COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT
+export COINJOIN_BTC_NODE_IMAGE
+export KUBERNETES_IMAGE_PULL_POLICY
 
 echo "Running the S3-compatible full-run for run ${RUN_ID}..."
 set +e

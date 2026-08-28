@@ -368,6 +368,9 @@ def render_s3_emulation_resources(
     emulation_timeout_seconds: int = 21600,
     scheduling_timeout_seconds: int = S3_JOB_START_TIMEOUT_SECONDS,
     reuse_namespace: bool = False,
+    distributor_startup_timeout: str | None = None,
+    btc_node_image: str | None = None,
+    kubernetes_image_pull_policy: str | None = None,
 ) -> str:
     """Render a kubectl-compatible JSON resource list for in-cluster emulation."""
     name = s3_emulation_job_name(run_id)
@@ -375,6 +378,7 @@ def render_s3_emulation_resources(
     joinmarket_fallback = (
         " --joinmarket-descriptor-regtest-fallback" if engine == "joinmarket" else ""
     )
+    btc_node_image_arg = ' --btc-node-image "$BTC_NODE_IMAGE"' if btc_node_image else ""
     controller = (
         'python manager.py --driver kubernetes --engine "$ENGINE" run '
         '--scenario /config/scenario.json --namespace "$NAMESPACE" --reuse-namespace '
@@ -383,6 +387,7 @@ def render_s3_emulation_resources(
         '--btc-node-arg=-blocksxor=0 --download-btc-data "/app/logs/$RUN_ID/bitcoin_data" '
         "--controller-done-marker /app/logs/.controller.done "
         "--controller-failed-marker /app/logs/.controller.failed"
+        f"{btc_node_image_arg}"
     )
     prefix_preflight = r"""set -euo pipefail
 command -v s5cmd >/dev/null || { echo "s5cmd is required" >&2; exit 1; }
@@ -489,6 +494,26 @@ rm -f /credentials/credentials"""
         {"name": "ENGINE", "value": engine},
         {"name": "IMAGE_PREFIX", "value": image_prefix},
     ]
+    # The controller runs in a separate Kubernetes container, so an override
+    # set on the frontend must be included explicitly in its environment.
+    # The emulator validates this optional value and falls back to its default
+    # when it is absent or invalid.
+    if distributor_startup_timeout:
+        env.append(
+            {
+                "name": "COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT",
+                "value": distributor_startup_timeout,
+            }
+        )
+    if btc_node_image:
+        env.append({"name": "BTC_NODE_IMAGE", "value": btc_node_image})
+    if kubernetes_image_pull_policy:
+        env.append(
+            {
+                "name": "KUBERNETES_IMAGE_PULL_POLICY",
+                "value": kubernetes_image_pull_policy,
+            }
+        )
     artifact_env = [
         {"name": "RUN_ID", "value": run_id},
         {"name": "ARTIFACT_URI", "value": artifact_uri},
