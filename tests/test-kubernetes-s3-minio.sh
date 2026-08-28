@@ -211,7 +211,7 @@ chmod 0777 "${WORK_ROOT}" "${LOGS_ROOT}"
 
 ensure_source_image "${COINJOIN_EMULATOR_SOURCE_IMAGE}"
 if ! docker run --rm --entrypoint sh "${COINJOIN_EMULATOR_SOURCE_IMAGE}" -c \
-  'grep -q COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT /app/manager/engine/engine_base.py && grep -q KUBERNETES_IMAGE_PULL_POLICY /app/manager/driver/kubernetes.py'; then
+  'grep -q COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT /app/manager/engine/engine_base.py && grep -q "ports.get(container_port, container_port)" /app/manager/engine/engine_base.py && grep -q KUBERNETES_IMAGE_PULL_POLICY /app/manager/driver/kubernetes.py'; then
   echo "FAIL: emulator image ${COINJOIN_EMULATOR_SOURCE_IMAGE} is stale for this S3 test." >&2
   echo "      Rebuild it from ${COINJOIN_EMULATOR_ROOT}:" >&2
   echo "      docker build -t ${COINJOIN_EMULATOR_SOURCE_IMAGE} ${COINJOIN_EMULATOR_ROOT}" >&2
