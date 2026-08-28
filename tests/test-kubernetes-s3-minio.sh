@@ -58,10 +58,6 @@ KUBERNETES_S3_TIMEOUT="${KUBERNETES_S3_TIMEOUT:-85m}"
 # chain. A loaded k3d node can take longer than the emulator's 900-second
 # default, so give this intentionally heavyweight integration test headroom.
 COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT="${COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT:-1800}"
-# The locally-built bitcoin node normally mines every 30--90 seconds.  During
-# Wasabi's initial filter sync that can keep the distributor perpetually one
-# filter behind, so leave a five-minute gap for it to catch up in this test.
-COINJOIN_BTC_NODE_MINING_INTERVAL_SECONDS="${COINJOIN_BTC_NODE_MINING_INTERVAL_SECONDS:-300}"
 # Keep the test chain at the historical main-branch depth.  Wasabi downloads
 # its complete filter chain before creating the distributor wallet; 201 blocks
 # provide mature coinbases without consuming the distributor timeout on ~1000
@@ -213,6 +209,15 @@ docker rm -f "${PBS_CONTAINER_NAME}" "${MINIO_CONTAINER_NAME}" >/dev/null 2>&1 |
 mkdir -p "${LOGS_ROOT}" "${WORK_ROOT}/bin" "${WORK_ROOT}/results"
 chmod 0777 "${WORK_ROOT}" "${LOGS_ROOT}"
 
+ensure_source_image "${COINJOIN_EMULATOR_SOURCE_IMAGE}"
+if ! docker run --rm --entrypoint sh "${COINJOIN_EMULATOR_SOURCE_IMAGE}" -c \
+  'grep -q COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT /app/manager/engine/engine_base.py && grep -q KUBERNETES_IMAGE_PULL_POLICY /app/manager/driver/kubernetes.py'; then
+  echo "FAIL: emulator image ${COINJOIN_EMULATOR_SOURCE_IMAGE} is stale for this S3 test." >&2
+  echo "      Rebuild it from ${COINJOIN_EMULATOR_ROOT}:" >&2
+  echo "      docker build -t ${COINJOIN_EMULATOR_SOURCE_IMAGE} ${COINJOIN_EMULATOR_ROOT}" >&2
+  exit 2
+fi
+
 # The uploader image replaces the retired wrapper image in the cluster: it
 # backs both the prefix-preflight and uploader containers of the emulation Job.
 if [[ -z "${UPLOADER_IMAGE}" ]]; then
@@ -223,7 +228,6 @@ if [[ -z "${UPLOADER_IMAGE}" ]]; then
 else
   ensure_source_image "${UPLOADER_IMAGE}"
 fi
-ensure_source_image "${COINJOIN_EMULATOR_SOURCE_IMAGE}"
 if [[ -n "${BTC_NODE_SOURCE_IMAGE}" ]]; then
   ensure_source_image "${BTC_NODE_SOURCE_IMAGE}"
   docker tag "${BTC_NODE_SOURCE_IMAGE}" "${K3D_BTC_NODE_IMAGE}"
@@ -234,6 +238,11 @@ else
   }
   echo "Building the current local btc-node image ${K3D_BTC_NODE_IMAGE}..."
   docker build -t "${K3D_BTC_NODE_IMAGE}" "${COINJOIN_EMULATOR_ROOT}/containers/btc-node"
+fi
+if ! docker run --rm --entrypoint sh "${K3D_BTC_NODE_IMAGE}" -c \
+  'grep -q COINJOIN_INITIAL_BLOCK_COUNT /home/bitcoin/mine.sh'; then
+  echo "FAIL: btc-node image ${K3D_BTC_NODE_IMAGE} lacks the S3 test startup controls." >&2
+  exit 2
 fi
 docker tag "${UPLOADER_IMAGE}" "${K3D_UPLOADER_IMAGE}"
 docker tag "${COINJOIN_EMULATOR_SOURCE_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"
@@ -329,14 +338,15 @@ export COINJOIN_EMULATOR_IMAGE
 export COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT
 export COINJOIN_BTC_NODE_IMAGE
 export KUBERNETES_IMAGE_PULL_POLICY
-export COINJOIN_BTC_NODE_MINING_INTERVAL_SECONDS
 export COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT
 
 echo "Running the S3-compatible full-run for run ${RUN_ID}..."
 set +e
 (
   cd "${PROJECT_DIR}"
-  timeout --foreground "${KUBERNETES_S3_TIMEOUT}" ./runIt.sh full-run \
+  PYTHONPATH="${PROJECT_DIR}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+    timeout --foreground "${KUBERNETES_S3_TIMEOUT}" \
+    python3 -m coinjoin_pipeline.cli full-run \
     --engine "${ENGINE}" \
     --scenario "${SCENARIO}" \
     --driver kubernetes \
