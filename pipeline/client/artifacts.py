@@ -116,6 +116,11 @@ def shell_assignment(name: str, value: str) -> str:
     return f"{name}={shlex.quote(value)}"
 
 
+def shell_value(value: str) -> str:
+    """Quote one shell value without constructing a throwaway assignment."""
+    return shlex.quote(value)
+
+
 def scrubbed_s3_environment() -> dict[str, str]:
     return {key: value for key, value in os.environ.items() if key not in AWS_SCRUB_VARIABLES}
 

@@ -2,7 +2,6 @@
 
 import argparse
 import atexit
-import concurrent.futures
 import fcntl
 import json
 import os
@@ -11,9 +10,8 @@ import shutil
 import signal
 import subprocess
 import sys
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, TextIO, TypedDict, TypeVar, cast
+from typing import Mapping, TextIO
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 if __package__ in (None, ""):
@@ -25,8 +23,6 @@ from client.artifacts import (
     PROBE_QUEUED,
     PROBE_RUNNING,
     PROBE_UNKNOWN,
-    STAGED_EXPORTERS_COMPLETE,
-    STAGED_EXPORTERS_PARTIAL,
     ArtifactTransportError,
     S3Access,
     clear_s3_stage_markers,
@@ -43,6 +39,12 @@ from client.artifacts import (
     validate_s3_endpoint_url,
     validate_s3_profile,
     wait_for_s3_marker,
+)
+from client.artifacts import (
+    STAGED_EXPORTERS_COMPLETE as STAGED_EXPORTERS_COMPLETE,
+)
+from client.artifacts import (
+    STAGED_EXPORTERS_PARTIAL as STAGED_EXPORTERS_PARTIAL,
 )
 from client.cli_options import (
     DEFAULT_COINJOIN_TYPE,
@@ -67,6 +69,91 @@ from client.kubernetes import (
 )
 from client.kubernetes import (
     run_kubectl_preflight_command as run_kubectl_preflight_command,
+)
+
+# pylint: enable=useless-import-alias,unused-import
+from client.pbs import (
+    DEFAULT_BLOCKSCI_IMAGE as DEFAULT_PBS_BLOCKSCI_IMAGE,
+)
+from client.pbs import (
+    DEFAULT_BLOCKSCI_MEM,
+    DEFAULT_BLOCKSCI_NCPUS,
+    DEFAULT_BLOCKSCI_SCRATCH,
+    DEFAULT_BLOCKSCI_WALLTIME,
+    DEFAULT_COINJOIN_ANALYSIS_MEM,
+    DEFAULT_COINJOIN_ANALYSIS_NCPUS,
+    DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
+    DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+    DEFAULT_MAPPINGS_ENUMERATOR_IMAGE,
+    DEFAULT_SAKE_IMAGE,
+    DEFAULT_UNIFIED_REPORT_MEM,
+    DEFAULT_UNIFIED_REPORT_NCPUS,
+    DEFAULT_UNIFIED_REPORT_SCRATCH,
+    DEFAULT_UNIFIED_REPORT_WALLTIME,
+    PBSError,
+    blocksci_analysis_pbs_command,
+    blocksci_export_pbs_command,
+    blocksci_external_report_pbs_command,
+    blocksci_notebook_pbs_command,
+    blocksci_parse_pbs_command,
+    blocksci_pbs_command,
+    blocksci_script_pbs_command,
+    blocksci_update_pbs_command,
+    coinjoin_analysis_pbs_command,
+    pbs_job_probe,
+    persist_pbs_job_id,
+    qdel_pbs_job,
+    qdel_pbs_stage,
+    require_qsub,
+    submit_blocksci_analyze_s3_pbs,
+    submit_blocksci_parse_s3_pbs,
+    submit_blocksci_pbs,
+    submit_blocksci_s3_pbs,
+    submit_blocksci_update_s3_pbs,
+    submit_coinjoin_analysis_pbs,
+    submit_coinjoin_analysis_s3_pbs,
+    submit_mappings_pbs,
+    submit_mappings_s3_pbs,
+    submit_unified_report_s3_pbs,
+    wait_for_pbs_marker,
+)
+from client.pbs import (
+    DEFAULT_COINJOIN_ANALYSIS_IMAGE as DEFAULT_PBS_COINJOIN_ANALYSIS_IMAGE,
+)
+from client.pbs import (
+    walltime_to_seconds as walltime_to_seconds,
+)
+from client.pbs_settings import (
+    CONTAINER_LOCK_DIR as CONTAINER_LOCK_DIR,
+)
+from client.pbs_settings import (
+    IMAGE_URI_SCHEMES as IMAGE_URI_SCHEMES,
+)
+from client.pbs_settings import (
+    PBSResource as PBSResource,
+)
+from client.pbs_settings import (
+    PBSResources as PBSResources,
+)
+from client.pbs_settings import (
+    pbs_wait_timeout,
+    resolve_pbs_image,
+    resolve_pbs_resource,
+    resolve_unified_report_pbs_image,
+    resolve_unified_report_pbs_resource,
+    resolve_uploader_image,
+    stage_pbs_resources,
+    truthy_env,
+    unified_report_image_reference,
+)
+from client.pbs_settings import (
+    read_image_lock as read_image_lock,
+)
+from client.pbs_settings import (
+    resolve_stage_pbs_resource as resolve_stage_pbs_resource,
+)
+from client.pbs_settings import (
+    with_singularity_scheme as with_singularity_scheme,
 )
 from client.pipeline_logging import (
     STAGE_SEPARATOR_WIDTH as STAGE_SEPARATOR_WIDTH,
@@ -119,114 +206,45 @@ from client.runtime import (
 from client.runtime import (
     container_command as container_command,
 )
+from client.s3_markers import (
+    cancel_dependent_pbs_job as cancel_s3_dependent_pbs_job,
+)
+from client.s3_markers import (
+    rollback_s3_pbs_submissions as rollback_s3_submissions,
+)
+from client.s3_markers import (
+    wait_for_s3_pbs_marker,
+)
+from client.s3_staging import (
+    ensure_staged_exporters as stage_s3_exporters,
+)
+from client.s3_staging import (
+    pbs_stages_need_exporters as s3_pbs_stages_need_exporters,
+)
+from client.s3_staging import (
+    stage_kubernetes_s3_run as stage_s3_kubernetes_run,
+)
+from client.s3_submission import S3SubmissionOperations, S3SubmissionTracker
+from client.s3_workflow import (
+    S3FullRunOperations,
+    S3PBSJobs,
+    run_s3_full_run,
+)
+from client.stage_executor import (
+    execute_parallel_analysis,
+    execute_serial_analysis,
+)
+from client.workflow import (
+    SharedStorageOperations,
+    SharedStorageStageRunner,
+    shared_storage_analysis_plan,
+)
 
-# pylint: enable=useless-import-alias,unused-import
-
-try:
-    from client.pbs import (
-        DEFAULT_BLOCKSCI_IMAGE as DEFAULT_PBS_BLOCKSCI_IMAGE,
-    )
-    from client.pbs import (
-        DEFAULT_BLOCKSCI_MEM,
-        DEFAULT_BLOCKSCI_NCPUS,
-        DEFAULT_BLOCKSCI_SCRATCH,
-        DEFAULT_BLOCKSCI_WALLTIME,
-        DEFAULT_COINJOIN_ANALYSIS_MEM,
-        DEFAULT_COINJOIN_ANALYSIS_NCPUS,
-        DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
-        DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
-        DEFAULT_MAPPINGS_ENUMERATOR_IMAGE,
-        DEFAULT_SAKE_IMAGE,
-        DEFAULT_UNIFIED_REPORT_MEM,
-        DEFAULT_UNIFIED_REPORT_NCPUS,
-        DEFAULT_UNIFIED_REPORT_SCRATCH,
-        DEFAULT_UNIFIED_REPORT_WALLTIME,
-        PBSError,
-        blocksci_analysis_pbs_command,
-        blocksci_export_pbs_command,
-        blocksci_external_report_pbs_command,
-        blocksci_notebook_pbs_command,
-        blocksci_parse_pbs_command,
-        blocksci_pbs_command,
-        blocksci_script_pbs_command,
-        blocksci_update_pbs_command,
-        coinjoin_analysis_pbs_command,
-        pbs_job_probe,
-        persist_pbs_job_id,
-        qdel_pbs_job,
-        qdel_pbs_stage,
-        require_qsub,
-        submit_blocksci_analyze_s3_pbs,
-        submit_blocksci_parse_s3_pbs,
-        submit_blocksci_pbs,
-        submit_blocksci_s3_pbs,
-        submit_blocksci_update_s3_pbs,
-        submit_coinjoin_analysis_pbs,
-        submit_coinjoin_analysis_s3_pbs,
-        submit_mappings_pbs,
-        submit_mappings_s3_pbs,
-        submit_unified_report_s3_pbs,
-        wait_for_pbs_marker,
-        walltime_to_seconds,
-    )
-    from client.pbs import (
-        DEFAULT_COINJOIN_ANALYSIS_IMAGE as DEFAULT_PBS_COINJOIN_ANALYSIS_IMAGE,
-    )
-except ImportError:
-    from pbs import (  # type: ignore[import-not-found,no-redef]
-        DEFAULT_BLOCKSCI_IMAGE as DEFAULT_PBS_BLOCKSCI_IMAGE,
-    )
-    from pbs import (  # type: ignore[no-redef,assignment]
-        DEFAULT_BLOCKSCI_MEM,
-        DEFAULT_BLOCKSCI_NCPUS,
-        DEFAULT_BLOCKSCI_SCRATCH,
-        DEFAULT_BLOCKSCI_WALLTIME,
-        DEFAULT_COINJOIN_ANALYSIS_MEM,
-        DEFAULT_COINJOIN_ANALYSIS_NCPUS,
-        DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
-        DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
-        DEFAULT_MAPPINGS_ENUMERATOR_IMAGE,
-        DEFAULT_SAKE_IMAGE,
-        DEFAULT_UNIFIED_REPORT_MEM,
-        DEFAULT_UNIFIED_REPORT_NCPUS,
-        DEFAULT_UNIFIED_REPORT_SCRATCH,
-        DEFAULT_UNIFIED_REPORT_WALLTIME,
-        PBSError,
-        blocksci_analysis_pbs_command,
-        blocksci_export_pbs_command,
-        blocksci_external_report_pbs_command,
-        blocksci_notebook_pbs_command,
-        blocksci_parse_pbs_command,
-        blocksci_pbs_command,
-        blocksci_script_pbs_command,
-        blocksci_update_pbs_command,
-        coinjoin_analysis_pbs_command,
-        pbs_job_probe,
-        persist_pbs_job_id,
-        qdel_pbs_job,
-        qdel_pbs_stage,
-        require_qsub,
-        submit_blocksci_analyze_s3_pbs,
-        submit_blocksci_parse_s3_pbs,
-        submit_blocksci_pbs,
-        submit_blocksci_s3_pbs,
-        submit_blocksci_update_s3_pbs,
-        submit_coinjoin_analysis_pbs,
-        submit_coinjoin_analysis_s3_pbs,
-        submit_mappings_pbs,
-        submit_mappings_s3_pbs,
-        submit_unified_report_s3_pbs,
-        wait_for_pbs_marker,
-        walltime_to_seconds,
-    )
-    from pbs import (  # type: ignore[no-redef]
-        DEFAULT_COINJOIN_ANALYSIS_IMAGE as DEFAULT_PBS_COINJOIN_ANALYSIS_IMAGE,
-    )
 ROOT_DIR = Path(__file__).resolve().parent.parent
 CLIENT_DIR = Path(__file__).resolve().parent
 EMULATE_SCRIPT = ROOT_DIR / "emulate.sh"
-DELETE_SCRIPT = ROOT_DIR / "delete.sh"
 ANALYSIS_SCRIPT = ROOT_DIR / "analysis.sh"
+DELETE_SCRIPT = ROOT_DIR / "delete.sh"
 COMPOSE_FILE = ROOT_DIR / "compose.yaml"
 COMPOSE_PROJECT = "blocksci-emulator"
 COINJOIN_ANALYSIS_SOURCE_PATH_ENV = "COINJOIN_ANALYSIS_SOURCE_PATH"
@@ -648,6 +666,37 @@ def compose_env(
     return env
 
 
+def compose_env_from_args(
+    args: argparse.Namespace,
+    active_run_id: str | None = None,
+    *,
+    include_scenario: bool = True,
+) -> dict[str, str]:
+    """Build the shared Compose environment from one parsed pipeline request."""
+    return compose_env(
+        active_run_id,
+        args.engine,
+        args.coinjoin_type,
+        args.min_input_count,
+        args.scenario if include_scenario else None,
+        args.joinmarket_detector,
+        args.joinmarket_min_base_fee,
+        args.joinmarket_percentage_fee,
+        args.joinmarket_max_depth,
+    )
+
+
+def compose_base_command(env: Mapping[str, str]) -> list[str]:
+    """Return the common Compose invocation for this pipeline checkout."""
+    return [
+        *compose_command(env),
+        "-f",
+        str(COMPOSE_FILE),
+        "-p",
+        COMPOSE_PROJECT,
+    ]
+
+
 def inspect_image_provenance(image: str, runtime: str) -> tuple[str | None, str | None]:
     try:
         result = subprocess.run(
@@ -852,13 +901,7 @@ def run_script(
 
 def initialize_images() -> None:
     env = compose_env()
-    compose_cmd = [
-        *compose_command(env),
-        "-f",
-        str(COMPOSE_FILE),
-        "-p",
-        COMPOSE_PROJECT,
-    ]
+    compose_cmd = compose_base_command(env)
     try:
         # 1. Pull the outer compose images
         run_command(
@@ -929,13 +972,7 @@ def run_coinjoin_analysis_docker_stage(
     """Run only coinjoin-analysis through Compose, without starting BlockSci."""
     run_env = compose_env(active_run_id)
     run_env["COINJOIN_ANALYSIS_ACTION"] = analysis_action
-    compose_cmd = [
-        *compose_command(run_env),
-        "-f",
-        str(COMPOSE_FILE),
-        "-p",
-        COMPOSE_PROJECT,
-    ]
+    compose_cmd = compose_base_command(run_env)
     run_command(
         [*compose_cmd, "--profile", "analysis", "run", "--rm", "--no-deps", "coinjoin_analysis"],
         cwd=CLIENT_DIR,
@@ -946,26 +983,10 @@ def run_coinjoin_analysis_docker_stage(
 def run_blocksci_docker_stage(args: argparse.Namespace, run_dir: Path, *, include_report: bool) -> None:
     """Run only BlockSci through Compose, optionally deferring the unified report."""
     staged_script = stage_blocksci_script(getattr(args, "blocksci_script", None), run_dir)
-    env = compose_env(
-        run_dir.name,
-        args.engine,
-        args.coinjoin_type,
-        args.min_input_count,
-        args.scenario,
-        args.joinmarket_detector,
-        args.joinmarket_min_base_fee,
-        args.joinmarket_percentage_fee,
-        args.joinmarket_max_depth,
-    )
+    env = compose_env_from_args(args, run_dir.name)
     env["BLOCKSCI_SCRIPT"] = staged_script or ""
     env["BLOCKSCI_EXPORT_REPORT"] = "true" if include_report else "false"
-    compose_cmd = [
-        *compose_command(env),
-        "-f",
-        str(COMPOSE_FILE),
-        "-p",
-        COMPOSE_PROJECT,
-    ]
+    compose_cmd = compose_base_command(env)
     run_command(
         [*compose_cmd, "--profile", "analysis", "run", "--rm", "--no-deps", "blocksci"],
         cwd=CLIENT_DIR,
@@ -1387,17 +1408,7 @@ def export_command(active_run_id: str, env: dict[str, str]) -> str:
 
 
 def run_export_only(args: argparse.Namespace) -> None:
-    env = compose_env(
-        None,
-        args.engine,
-        args.coinjoin_type,
-        args.min_input_count,
-        args.scenario,
-        args.joinmarket_detector,
-        args.joinmarket_min_base_fee,
-        args.joinmarket_percentage_fee,
-        args.joinmarket_max_depth,
-    )
+    env = compose_env_from_args(args)
     active_run_id = resolve_run_id(args.run_dir, env)
     if not active_run_id:
         print(
@@ -1406,17 +1417,7 @@ def run_export_only(args: argparse.Namespace) -> None:
         )
         sys.exit(2)
 
-    env = compose_env(
-        active_run_id,
-        args.engine,
-        args.coinjoin_type,
-        args.min_input_count,
-        args.scenario,
-        args.joinmarket_detector,
-        args.joinmarket_min_base_fee,
-        args.joinmarket_percentage_fee,
-        args.joinmarket_max_depth,
-    )
+    env = compose_env_from_args(args, active_run_id)
     emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
     run_dir = emulation_logs_dir / active_run_id
     coinjoin_ready = exists_or_unreadable(
@@ -1433,13 +1434,7 @@ def run_export_only(args: argparse.Namespace) -> None:
         print(error, file=sys.stderr)
         sys.exit(2)
 
-    compose_cmd = [
-        *compose_command(env),
-        "-f",
-        str(COMPOSE_FILE),
-        "-p",
-        COMPOSE_PROJECT,
-    ]
+    compose_cmd = compose_base_command(env)
     try:
         run_command(
             [
@@ -1907,116 +1902,6 @@ def add_unified_report_pbs_arguments(arg_parser: argparse.ArgumentParser) -> Non
     )
 
 
-def truthy_env(name: str) -> bool:
-    return os.environ.get(name, "").lower() not in ("", "0", "false", "no")
-
-
-def resolve_pbs_image(args: argparse.Namespace, default_image: str, stage_option: str) -> str:
-    stage_image = getattr(args, stage_option, None)
-    if stage_image:
-        return str(stage_image)
-    if getattr(args, "pbs_image", None):
-        return str(args.pbs_image)
-    return default_image
-
-
-CONTAINER_LOCK_DIR = Path(__file__).resolve().parents[2] / "container"
-
-
-def read_image_lock(name: str) -> str:
-    """Read a committed image reference from the checkout's container/ dir."""
-    path = CONTAINER_LOCK_DIR / name
-    try:
-        reference = path.read_text(encoding="utf-8").strip()
-    except OSError as error:
-        raise RuntimeError(f"image lock file is unreadable: {path}") from error
-    if not reference:
-        raise RuntimeError(f"image lock file is empty: {path}")
-    return reference
-
-
-def resolve_uploader_image(args: argparse.Namespace | None = None) -> str:
-    """Explicit flag, then environment, then the committed lock file."""
-    explicit = getattr(args, "uploader_image", None) if args else None
-    return explicit or os.environ.get("COINJOIN_UPLOADER_IMAGE") or read_image_lock("uploader.image")
-
-
-# Singularity/Apptainer URI prefixes. Testing for "://" alone is not enough:
-# `docker-archive:/path.tar` (how the offline tests hand over a local image)
-# has no slashes after the colon and would get a second scheme glued in front,
-# while a plain `python:3.12-slim` must not be mistaken for a scheme.
-IMAGE_URI_SCHEMES = (
-    "docker://", "docker-archive:", "docker-daemon:", "oci:", "oci-archive:",
-    "library://", "shub://", "oras://", "http://", "https://", "file://",
-)
-
-
-def with_singularity_scheme(image: str) -> str:
-    """Prefix a bare registry reference with ``docker://``, leave URIs alone."""
-    return image if image.startswith(IMAGE_URI_SCHEMES) else f"docker://{image}"
-
-
-def unified_report_image_reference(args: argparse.Namespace | None = None) -> str:
-    """Neutral reference for the report image: explicit flag, env, lock file.
-
-    Kept separate from the PBS form because provenance records this reference as
-    written, while Singularity needs a scheme in front of it.
-    """
-    explicit = getattr(args, "unified_report_image", None) if args else None
-    return (
-        explicit
-        or os.environ.get("COINJOIN_UNIFIED_REPORT_IMAGE")
-        or read_image_lock("unified-report.image")
-    )
-
-
-def resolve_unified_report_pbs_image(args: argparse.Namespace | None = None) -> str:
-    """Pinned public Python image for JSON-only report assembly.
-
-    The lock file stores a neutral OCI reference usable directly as a
-    ``docker run`` argument; the ``docker://`` scheme belongs to the calling
-    runtime, so Singularity gets it added here instead.
-    """
-    return with_singularity_scheme(unified_report_image_reference(args))
-
-
-PBSResource = TypeVar("PBSResource", int, str)
-
-
-def resolve_pbs_resource(args: argparse.Namespace, name: str, default: PBSResource) -> PBSResource:
-    value = getattr(args, name, None)
-    return default if value is None else cast(PBSResource, value)
-
-
-def resolve_stage_pbs_resource(
-    args: argparse.Namespace,
-    stage: str,
-    name: str,
-    default: PBSResource,
-) -> PBSResource:
-    """Resolve a stage-specific value before the shared PBS fallback."""
-    stage_value = getattr(args, f"pbs_{stage}_{name}", None)
-    if stage_value is not None:
-        return cast(PBSResource, stage_value)
-    return resolve_pbs_resource(args, f"pbs_{name}", default)
-
-
-def resolve_unified_report_pbs_resource(
-    args: argparse.Namespace,
-    name: str,
-    default: PBSResource,
-) -> PBSResource:
-    """Resolve a report-specific override before the shared PBS override."""
-    report_value = getattr(args, f"pbs_unified_report_{name}", None)
-    if report_value is not None:
-        return cast(PBSResource, report_value)
-    return resolve_pbs_resource(args, f"pbs_{name}", default)
-
-
-def pbs_wait_timeout(walltime: str) -> int:
-    return walltime_to_seconds(walltime) + 60 * 60
-
-
 def run_blocksci_pbs_stage(
     args: argparse.Namespace,
     run_dir: Path,
@@ -2027,17 +1912,7 @@ def run_blocksci_pbs_stage(
     """Submit BlockSci through PBS, optionally returning before completion."""
     if not args.pbs_bitcoin_datadir:
         raise PBSError("--blocksciPbs requires --pbs-bitcoin-datadir or PBS_BITCOIN_DATADIR")
-    env = compose_env(
-        run_dir.name,
-        args.engine,
-        args.coinjoin_type,
-        args.min_input_count,
-        args.scenario,
-        args.joinmarket_detector,
-        args.joinmarket_min_base_fee,
-        args.joinmarket_percentage_fee,
-        args.joinmarket_max_depth,
-    )
+    env = compose_env_from_args(args, run_dir.name)
     image = resolve_pbs_image(args, DEFAULT_PBS_BLOCKSCI_IMAGE, "pbs_blocksci_image")
     staged_script = stage_blocksci_script(getattr(args, "blocksci_script", None), run_dir)
     command = blocksci_pbs_command(
@@ -2055,9 +1930,7 @@ def run_blocksci_pbs_stage(
         export_analysis=not include_report,
         blocksci_script=staged_script,
     )
-    walltime = resolve_stage_pbs_resource(
-        args, "blocksci", "walltime", DEFAULT_BLOCKSCI_WALLTIME
-    )
+    resources = stage_pbs_resources(args, "blocksci")
     exporters_dir = stage_pbs_exporters(
         run_dir,
         Path(env["EXPORTERS_DIR"]).expanduser().resolve(),
@@ -2069,18 +1942,13 @@ def run_blocksci_pbs_stage(
         exporters_dir=exporters_dir,
         image=image,
         command=command,
-        ncpus=resolve_stage_pbs_resource(
-            args, "blocksci", "ncpus", DEFAULT_BLOCKSCI_NCPUS
-        ),
-        mem=resolve_stage_pbs_resource(args, "blocksci", "mem", DEFAULT_BLOCKSCI_MEM),
-        scratch=resolve_stage_pbs_resource(
-            args, "blocksci", "scratch", DEFAULT_BLOCKSCI_SCRATCH
-        ),
-        walltime=walltime,
+        **resources,
         dry_run=args.dry_run,
     )
     if wait and not args.dry_run:
-        wait_for_pbs_marker(run_dir, "blocksci", timeout_seconds=pbs_wait_timeout(walltime))
+        wait_for_pbs_marker(
+            run_dir, "blocksci", timeout_seconds=pbs_wait_timeout(resources["walltime"])
+        )
 
 
 def run_coinjoin_analysis_pbs_stage(
@@ -2096,38 +1964,34 @@ def run_coinjoin_analysis_pbs_stage(
         raise PBSError(f"analyze_only requires an existing baseline: {baseline_path}")
     image = resolve_pbs_image(args, DEFAULT_PBS_COINJOIN_ANALYSIS_IMAGE, "pbs_coinjoin_analysis_image")
     command = coinjoin_analysis_pbs_command(analysis_action)
-    walltime = resolve_stage_pbs_resource(
-        args, "analysis", "walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
-    )
+    resources = stage_pbs_resources(args, "analysis")
     submit_coinjoin_analysis_pbs(
         run_dir=run_dir,
         output_dir=run_dir / "coinjoin-analysis_data",
         input_data_dir=run_dir / "coinjoin_emulator_data" / "data",
         image=image,
         command=command,
-        ncpus=resolve_stage_pbs_resource(
-            args, "analysis", "ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS
-        ),
-        mem=resolve_stage_pbs_resource(
-            args, "analysis", "mem", DEFAULT_COINJOIN_ANALYSIS_MEM
-        ),
-        scratch=resolve_stage_pbs_resource(
-            args, "analysis", "scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH
-        ),
-        walltime=walltime,
+        **resources,
         dry_run=args.dry_run,
     )
     if wait and not args.dry_run:
-        wait_for_pbs_marker(run_dir, "coinjoin-analysis", timeout_seconds=pbs_wait_timeout(walltime))
+        wait_for_pbs_marker(
+            run_dir,
+            "coinjoin-analysis",
+            timeout_seconds=pbs_wait_timeout(resources["walltime"]),
+        )
 
 
-def run_mappings_pbs_stage(args: argparse.Namespace, run_dir: Path) -> None:
+def run_mappings_pbs_stage(
+    args: argparse.Namespace,
+    run_dir: Path,
+    *,
+    wait: bool = True,
+) -> None:
     """Run both Wasabi mapping tools in one PBS allocation."""
     if args.engine != "wasabi" or args.coinjoin_type != "wasabi2":
         raise PBSError("CoinJoin mappings are supported only for Wasabi/wasabi2 runs")
-    walltime = resolve_stage_pbs_resource(
-        args, "mappings", "walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
-    )
+    resources = stage_pbs_resources(args, "mappings")
     submit_mappings_pbs(
         run_dir,
         args.pbs_mappings_enumerator_image,
@@ -2139,23 +2003,23 @@ def run_mappings_pbs_stage(args: argparse.Namespace, run_dir: Path) -> None:
         timeout=args.mapping_timeout,
         retry_timeout=args.mapping_retry_timeout,
         sake_seed=args.sake_seed,
-        ncpus=resolve_stage_pbs_resource(
-            args, "mappings", "ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS
-        ),
-        mem=resolve_stage_pbs_resource(
-            args, "mappings", "mem", DEFAULT_COINJOIN_ANALYSIS_MEM
-        ),
-        scratch=resolve_stage_pbs_resource(
-            args, "mappings", "scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH
-        ),
-        walltime=walltime,
+        **resources,
         dry_run=args.dry_run,
     )
-    if not args.dry_run:
-        wait_for_pbs_marker(run_dir, "coinjoin-mappings", timeout_seconds=pbs_wait_timeout(walltime))
+    if wait and not args.dry_run:
+        wait_for_pbs_marker(
+            run_dir,
+            "coinjoin-mappings",
+            timeout_seconds=pbs_wait_timeout(resources["walltime"]),
+        )
 
 
-def run_blocksci_export_pbs_stage(args: argparse.Namespace, run_dir: Path) -> None:
+def run_blocksci_export_pbs_stage(
+    args: argparse.Namespace,
+    run_dir: Path,
+    *,
+    wait: bool = True,
+) -> None:
     """Submit the report-only PBS job after both parallel analyzers succeed."""
     if not args.pbs_bitcoin_datadir:
         raise PBSError("--blocksciPbs requires --pbs-bitcoin-datadir or PBS_BITCOIN_DATADIR")
@@ -2189,91 +2053,42 @@ def run_blocksci_export_pbs_stage(args: argparse.Namespace, run_dir: Path) -> No
         stage="unified-report",
         job_name="blocksci_unified_report",
     )
-    if not args.dry_run:
+    if wait and not args.dry_run:
         wait_for_pbs_marker(run_dir, "unified-report", timeout_seconds=pbs_wait_timeout(walltime))
+
+
+def shared_storage_operations() -> SharedStorageOperations:
+    """Bind shared-storage workflow adapters to wrapper-level compatibility names."""
+    return SharedStorageOperations(
+        run_coinjoin_analysis=run_coinjoin_analysis,
+        run_coinjoin_analysis_docker=run_coinjoin_analysis_docker_stage,
+        run_coinjoin_analysis_pbs=run_coinjoin_analysis_pbs_stage,
+        run_mappings_pbs=run_mappings_pbs_stage,
+        run_blocksci_docker=run_blocksci_docker_stage,
+        run_blocksci_pbs=run_blocksci_pbs_stage,
+        wait_for_pbs_marker=wait_for_pbs_marker,
+        qdel_pbs_stage=qdel_pbs_stage,
+        stage_wait_timeout=lambda values, stage: pbs_wait_timeout(
+            stage_pbs_resources(values, stage)["walltime"]
+        ),
+        stage_blocksci_script=stage_blocksci_script,
+        run_script=run_script,
+        analysis_script=ANALYSIS_SCRIPT,
+    )
 
 
 def run_parallel_analysis(args: argparse.Namespace, run_dir: Path, logs_root: Path) -> None:
     """Launch both analyzers independently, join them, then export once."""
-    failures: dict[str, BaseException] = {}
-    futures: dict[concurrent.futures.Future[None], str] = {}
-    pbs_futures: dict[concurrent.futures.Future[None], str] = {}
+    plan = shared_storage_analysis_plan(args, parallel=True)
+    runner = SharedStorageStageRunner(
+        args, run_dir, parallel=True, operations=shared_storage_operations()
+    )
 
     with captured_pipeline_stage(logs_root, "Parallel analysis", run_dir):
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-            if getattr(args, "analysisPbs", False):
-                try:
-                    run_coinjoin_analysis_pbs_stage(args, run_dir, wait=False)
-                    walltime = resolve_stage_pbs_resource(
-                        args,
-                        "analysis",
-                        "walltime",
-                        DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
-                    )
-                    future = executor.submit(
-                        wait_for_pbs_marker,
-                        run_dir,
-                        "coinjoin-analysis",
-                        timeout_seconds=pbs_wait_timeout(walltime),
-                    )
-                    futures[future] = "coinjoin-analysis (PBS)"
-                    pbs_futures[future] = "coinjoin-analysis"
-                except Exception as error:
-                    failures["coinjoin-analysis (PBS)"] = error
-            else:
-                futures[executor.submit(run_coinjoin_analysis_docker_stage, run_dir.name)] = (
-                    "coinjoin-analysis (Docker)"
-                )
-
-            if getattr(args, "blocksciPbs", False):
-                try:
-                    run_blocksci_pbs_stage(args, run_dir, wait=False, include_report=False)
-                    walltime = resolve_stage_pbs_resource(
-                        args, "blocksci", "walltime", DEFAULT_BLOCKSCI_WALLTIME
-                    )
-                    future = executor.submit(
-                        wait_for_pbs_marker,
-                        run_dir,
-                        "blocksci",
-                        timeout_seconds=pbs_wait_timeout(walltime),
-                    )
-                    futures[future] = "BlockSci (PBS)"
-                    pbs_futures[future] = "blocksci"
-                except Exception as error:
-                    failures["BlockSci (PBS)"] = error
-            else:
-                futures[executor.submit(run_blocksci_docker_stage, args, run_dir, include_report=False)] = (
-                    "BlockSci (Docker)"
-                )
-
-            baseline_future = next(
-                (future for future, name in futures.items() if name.startswith("coinjoin-analysis")), None
-            )
-            if baseline_future is not None and getattr(args, "mappingsPbs", False):
-                baseline_name = futures.pop(baseline_future)
-                pbs_futures.pop(baseline_future, None)
-                try:
-                    baseline_future.result()
-                    futures[executor.submit(run_mappings_pbs_stage, args, run_dir)] = "CoinJoin mappings (PBS)"
-                except Exception as error:
-                    failures[baseline_name] = error
-
-            for future in concurrent.futures.as_completed(futures):
-                stage_name = futures[future]
-                try:
-                    future.result()
-                except Exception as error:
-                    failures[stage_name] = error
-                    for other_future, pbs_stage in pbs_futures.items():
-                        if other_future is not future and not other_future.done():
-                            qdel_pbs_stage(run_dir, pbs_stage)
-
-        if failures:
-            details = "; ".join(f"{stage}: {error}" for stage, error in failures.items())
-            raise RuntimeError(f"Parallel analysis failed: {details}")
+        execute_parallel_analysis(plan, runner)
 
     with captured_pipeline_stage(logs_root, "Unified report export", run_dir):
-        if getattr(args, "blocksciPbs", False):
+        if plan.report is not None and plan.report.runner == "pbs":
             run_blocksci_export_pbs_stage(args, run_dir)
         else:
             args.run_dir = str(run_dir)
@@ -2281,53 +2096,13 @@ def run_parallel_analysis(args: argparse.Namespace, run_dir: Path, logs_root: Pa
 
 
 def run_serial_analysis(args: argparse.Namespace, run_dir: Path, logs_root: Path) -> None:
-    """Preserve the established serial execution order and report behavior."""
-    if getattr(args, "mappingsPbs", False):
-        if getattr(args, "analysisPbs", False):
-            with captured_pipeline_stage(logs_root, "coinjoin-analysis (PBS)", run_dir):
-                run_coinjoin_analysis_pbs_stage(args, run_dir)
-        else:
-            run_coinjoin_analysis(run_dir.name)
-        with captured_pipeline_stage(logs_root, "CoinJoin mappings (PBS)", run_dir):
-            run_mappings_pbs_stage(args, run_dir)
-        with captured_pipeline_stage(logs_root, "BlockSci analysis", run_dir):
-            if getattr(args, "blocksciPbs", False):
-                run_blocksci_pbs_stage(args, run_dir)
-            else:
-                run_blocksci_docker_stage(args, run_dir, include_report=True)
-        return
-    if getattr(args, "blocksciPbs", False):
-        if getattr(args, "analysisPbs", False):
-            with captured_pipeline_stage(logs_root, "coinjoin-analysis (PBS)", run_dir):
-                run_coinjoin_analysis_pbs_stage(args, run_dir)
-        else:
-            run_coinjoin_analysis(run_dir.name)
-        with captured_pipeline_stage(logs_root, "BlockSci analysis (PBS)", run_dir):
-            run_blocksci_pbs_stage(args, run_dir)
-        return
-
-    if getattr(args, "analysisPbs", False):
-        with captured_pipeline_stage(logs_root, "coinjoin-analysis (PBS)", run_dir):
-            run_coinjoin_analysis_pbs_stage(args, run_dir)
-        with captured_pipeline_stage(logs_root, "BlockSci analysis", run_dir):
-            run_blocksci_docker_stage(args, run_dir, include_report=True)
-        return
-
-    staged_script = stage_blocksci_script(args.blocksci_script, run_dir)
-    with captured_pipeline_stage(logs_root, "BlockSci analysis", run_dir):
-        run_script(
-            ANALYSIS_SCRIPT,
-            active_run_id=run_dir.name,
-            engine=args.engine,
-            coinjoin_type=args.coinjoin_type,
-            min_input_count=args.min_input_count,
-            scenario=args.scenario,
-            joinmarket_detector=args.joinmarket_detector,
-            joinmarket_min_base_fee=args.joinmarket_min_base_fee,
-            joinmarket_percentage_fee=args.joinmarket_percentage_fee,
-            joinmarket_max_depth=args.joinmarket_max_depth,
-            blocksci_script=staged_script,
-        )
+    """Execute the serial form of the declared shared-storage analysis plan."""
+    plan = shared_storage_analysis_plan(args, parallel=False)
+    runner = SharedStorageStageRunner(
+        args, run_dir, parallel=False, operations=shared_storage_operations()
+    )
+    with captured_pipeline_stage(logs_root, "Serial analysis", run_dir):
+        execute_serial_analysis(plan, runner)
 
 
 def validate_artifact_arguments(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -2534,6 +2309,15 @@ def validate_artifact_arguments(parser: argparse.ArgumentParser, args: argparse.
         parser.error(str(error))
 
 
+def s3_access_from_args(args: argparse.Namespace) -> S3Access:
+    """Build the frontend S3 client from the validated public arguments."""
+    return S3Access(
+        endpoint_url=args.s3_endpoint_url,
+        credentials_file=args.s3_credentials_file,
+        profile=args.s3_profile,
+    )
+
+
 def run_kubernetes_s3_emulation(args: argparse.Namespace) -> None:
     env = compose_env(engine=args.engine, scenario=args.scenario, run_timezone_name=args.run_timezone)
     scenarios_dir = Path(env["SCENARIOS_DIR"]).expanduser().resolve()
@@ -2573,48 +2357,13 @@ def run_kubernetes_s3_emulation(args: argparse.Namespace) -> None:
     print(f"[kubernetes] Submitted S3-compatible emulation job for run {args.run_id}")
 
 
-@dataclass(frozen=True)
-class S3PBSJobs:
-    coinjoin_analysis: str | None = None
-    coinjoin_mappings: str | None = None
-    blocksci_parse: str | None = None
-    blocksci_update: str | None = None
-    blocksci_work: str | None = None
-    unified_report: str | None = None
-
-
-class PBSResources(TypedDict):
-    ncpus: int
-    mem: str
-    scratch: str
-    walltime: str
-
-
 def cancel_dependent_pbs_job(stage_name: str, job_id: str) -> bool:
     """Cancel a dependent stage after an upstream wait failed, and say so.
 
     Reports the recovery command when qdel is missing or refused, so the
     operator is never told a job was cancelled when it is still queued.
     """
-    print(
-        f"[full-run] Cancelling dependent {stage_name} PBS job {job_id}",
-        file=sys.stderr,
-    )
-    try:
-        cancelled = qdel_pbs_job(job_id)
-    except (OSError, PBSError, RuntimeError) as error:
-        print(
-            f"[full-run] Could not cancel {stage_name} job {job_id}: {error}",
-            file=sys.stderr,
-        )
-        cancelled = False
-    if not cancelled:
-        print(
-            f"[full-run] {stage_name} PBS job {job_id} may still be queued or "
-            f"running; cancel it with: qdel {job_id}",
-            file=sys.stderr,
-        )
-    return cancelled
+    return cancel_s3_dependent_pbs_job(stage_name, job_id, qdel_job=qdel_pbs_job)
 
 
 def rollback_s3_pbs_submissions(
@@ -2626,35 +2375,7 @@ def rollback_s3_pbs_submissions(
     running so the operator can finish the job, instead of implying the graph
     was fully withdrawn.
     """
-    failed: list[tuple[str, str]] = []
-    for stage, job_id in reversed(submitted_jobs):
-        print(
-            f"[pbs] Rolling back submitted {stage} job {job_id}",
-            file=sys.stderr,
-        )
-        try:
-            cancelled = qdel_pbs_job(job_id)
-        except (OSError, PBSError, RuntimeError) as error:
-            print(
-                f"[pbs] Could not roll back {stage} job {job_id}: {error}",
-                file=sys.stderr,
-            )
-            cancelled = False
-        if not cancelled:
-            failed.append((stage, job_id))
-    if failed:
-        print(
-            "[pbs] ROLLBACK INCOMPLETE: the following jobs may still be queued "
-            "or running and will consume allocation until cancelled manually:",
-            file=sys.stderr,
-        )
-        for stage, job_id in failed:
-            print(f"[pbs]   {stage}: qdel {job_id}", file=sys.stderr)
-    elif submitted_jobs:
-        print(
-            f"[pbs] Rolled back {len(submitted_jobs)} submitted job(s).",
-            file=sys.stderr,
-        )
+    rollback_s3_submissions(submitted_jobs, qdel_job=qdel_pbs_job)
 
 
 def run_pbs_from_s3(args: argparse.Namespace) -> S3PBSJobs:
@@ -2689,25 +2410,16 @@ def _run_pbs_from_s3(
     args: argparse.Namespace,
     submitted_jobs: list[tuple[str, str]],
 ) -> S3PBSJobs:
-    access = S3Access(
-        endpoint_url=args.s3_endpoint_url,
-        credentials_file=args.s3_credentials_file,
-        profile=args.s3_profile,
+    access = s3_access_from_args(args)
+    tracker = S3SubmissionTracker(
+        args,
+        access,
+        submitted_jobs,
+        S3SubmissionOperations(
+            clear_stage_markers=clear_s3_stage_markers,
+            persist_job_id=persist_pbs_job_id,
+        ),
     )
-
-    def prepare_stage(stage: str) -> None:
-        if args.dry_run:
-            print(f"[dry-run] Would clear stale .pbs/{stage}.done|failed markers")
-            return
-        clear_s3_stage_markers(access, args.artifact_uri, args.run_id, stage)
-
-    def record_job(stage: str, job_id: str | None) -> None:
-        if not job_id:
-            return
-        submitted_jobs.append((stage, job_id))
-        submission_dir = getattr(args, "pbs_submission_dir", None)
-        if submission_dir is not None:
-            persist_pbs_job_id(Path(submission_dir), stage, job_id)
 
     common = dict(
         artifact_uri=args.artifact_uri,
@@ -2717,6 +2429,8 @@ def _run_pbs_from_s3(
         profile=args.s3_profile,
         dry_run=args.dry_run,
     )
+    analysis_resources = stage_pbs_resources(args, "analysis")
+    mappings_resources = stage_pbs_resources(args, "mappings")
     workflow = getattr(args, "blocksci_workflow", "combined")
     task = getattr(args, "blocksci_task", "detect")
     if task == "update" and not args.dry_run:
@@ -2764,27 +2478,16 @@ def _run_pbs_from_s3(
     blocksci_update_job_id = None
     blocksci_work_job_id = None
     if args.analysisPbs:
-        prepare_stage("coinjoin-analysis")
+        tracker.prepare_stage("coinjoin-analysis")
         analysis_job_id = submit_coinjoin_analysis_s3_pbs(
             **common,
             image=resolve_pbs_image(args, DEFAULT_PBS_COINJOIN_ANALYSIS_IMAGE, "pbs_coinjoin_analysis_image"),
             command=coinjoin_analysis_pbs_command("collect_docker"),
-            ncpus=resolve_stage_pbs_resource(
-                args, "analysis", "ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS
-            ),
-            mem=resolve_stage_pbs_resource(
-                args, "analysis", "mem", DEFAULT_COINJOIN_ANALYSIS_MEM
-            ),
-            scratch=resolve_stage_pbs_resource(
-                args, "analysis", "scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH
-            ),
-            walltime=resolve_stage_pbs_resource(
-                args, "analysis", "walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
-            ),
+            **analysis_resources,
         )
-        record_job("coinjoin-analysis", analysis_job_id)
+        tracker.record_job("coinjoin-analysis", analysis_job_id)
     if mappings_pbs:
-        prepare_stage("coinjoin-mappings")
+        tracker.prepare_stage("coinjoin-mappings")
         mappings_job_id = submit_mappings_s3_pbs(
             **common,
             enumerator_image=resolve_pbs_image(
@@ -2806,41 +2509,17 @@ def _run_pbs_from_s3(
             timeout=getattr(args, "mapping_timeout", 60),
             retry_timeout=getattr(args, "mapping_retry_timeout", 600),
             sake_seed=getattr(args, "sake_seed", 20260704),
-            ncpus=resolve_stage_pbs_resource(
-                args, "mappings", "ncpus", DEFAULT_COINJOIN_ANALYSIS_NCPUS
-            ),
-            mem=resolve_stage_pbs_resource(
-                args, "mappings", "mem", DEFAULT_COINJOIN_ANALYSIS_MEM
-            ),
-            scratch=resolve_stage_pbs_resource(
-                args, "mappings", "scratch", DEFAULT_COINJOIN_ANALYSIS_SCRATCH
-            ),
-            walltime=resolve_stage_pbs_resource(
-                args, "mappings", "walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
-            ),
+            **mappings_resources,
             dependency_job_id=analysis_job_id,
         )
-        record_job("coinjoin-mappings", mappings_job_id)
+        tracker.record_job("coinjoin-mappings", mappings_job_id)
     if args.blocksciPbs:
-        blocksci_resources: PBSResources = dict(
-            ncpus=resolve_stage_pbs_resource(
-                args, "blocksci", "ncpus", DEFAULT_BLOCKSCI_NCPUS
-            ),
-            mem=resolve_stage_pbs_resource(
-                args, "blocksci", "mem", DEFAULT_BLOCKSCI_MEM
-            ),
-            scratch=resolve_stage_pbs_resource(
-                args, "blocksci", "scratch", DEFAULT_BLOCKSCI_SCRATCH
-            ),
-            walltime=resolve_stage_pbs_resource(
-                args, "blocksci", "walltime", DEFAULT_BLOCKSCI_WALLTIME
-            ),
-        )
+        blocksci_resources = stage_pbs_resources(args, "blocksci")
         blocksci_image = resolve_pbs_image(
             args, DEFAULT_PBS_BLOCKSCI_IMAGE, "pbs_blocksci_image"
         )
         if task == "update":
-            prepare_stage("blocksci-update")
+            tracker.prepare_stage("blocksci-update")
             blocksci_update_job_id = submit_blocksci_update_s3_pbs(
                 **common,
                 source_run_id=args.blocksci_cache_source_run_id,
@@ -2851,9 +2530,9 @@ def _run_pbs_from_s3(
                 external_max_block=args.blocksci_max_block,
                 **blocksci_resources,
             )
-            record_job("blocksci-update", blocksci_update_job_id)
+            tracker.record_job("blocksci-update", blocksci_update_job_id)
         elif workflow == "combined":
-            prepare_stage("blocksci")
+            tracker.prepare_stage("blocksci")
             blocksci_work_job_id = submit_blocksci_s3_pbs(
                 **common,
                 image=blocksci_image,
@@ -2872,7 +2551,7 @@ def _run_pbs_from_s3(
                 include_report=not separate_combined_report,
                 export_analysis=separate_combined_report,
             )
-            record_job("blocksci", blocksci_work_job_id)
+            tracker.record_job("blocksci", blocksci_work_job_id)
         else:
             if workflow == "reusable":
                 external_bitcoin = getattr(
@@ -2890,7 +2569,7 @@ def _run_pbs_from_s3(
                         disk_path="/mnt/data",
                         max_block_expression=str(args.blocksci_max_block + 1),
                     )
-                prepare_stage("blocksci-parse")
+                tracker.prepare_stage("blocksci-parse")
                 blocksci_parse_job_id = submit_blocksci_parse_s3_pbs(
                     **common,
                     image=blocksci_image,
@@ -2906,7 +2585,7 @@ def _run_pbs_from_s3(
                     external_max_block=getattr(args, "blocksci_max_block", None),
                     **blocksci_resources,
                 )
-                record_job("blocksci-parse", blocksci_parse_job_id)
+                tracker.record_job("blocksci-parse", blocksci_parse_job_id)
             if task != "parse":
                 mode = f"blocksci-{task if task != 'detect' else 'analyze'}"
                 if task == "detect":
@@ -2943,7 +2622,7 @@ def _run_pbs_from_s3(
                     work_command = blocksci_notebook_pbs_command(
                         getattr(args, "blocksci_notebook_port", None) or 8888
                     )
-                prepare_stage(mode)
+                tracker.prepare_stage(mode)
                 blocksci_work_job_id = submit_blocksci_analyze_s3_pbs(
                     **common,
                     image=blocksci_image,
@@ -2964,7 +2643,7 @@ def _run_pbs_from_s3(
                     dependency_job_id=blocksci_parse_job_id,
                     **blocksci_resources,
                 )
-                record_job(mode, blocksci_work_job_id)
+                tracker.record_job(mode, blocksci_work_job_id)
     report_job_id = None
     needs_decoupled_report = task == "detect" and args.blocksciPbs and (
         separate_combined_report or workflow != "combined"
@@ -2984,7 +2663,7 @@ def _run_pbs_from_s3(
         )
         if not args.dry_run and len(dependency_job_ids) != expected_dependencies:
             raise PBSError("Could not obtain analyzer job IDs for the unified report dependency")
-        prepare_stage("unified-report")
+        tracker.prepare_stage("unified-report")
         report_job_id = submit_unified_report_s3_pbs(
             **common,
             image=resolve_unified_report_pbs_image(args),
@@ -3016,7 +2695,7 @@ def _run_pbs_from_s3(
             dependency_job_ids=dependency_job_ids,
             include_mappings=mappings_pbs,
         )
-        record_job("unified-report", report_job_id)
+        tracker.record_job("unified-report", report_job_id)
     return S3PBSJobs(
         coinjoin_analysis=analysis_job_id,
         coinjoin_mappings=mappings_job_id,
@@ -3038,12 +2717,7 @@ def pbs_stages_need_exporters(args: argparse.Namespace) -> bool:
     directory, so staging for them would let a local exporter problem block a
     job that cannot use them anyway.
     """
-    if not args.blocksciPbs:
-        return False
-    task = getattr(args, "blocksci_task", "detect")
-    if task == "update":
-        return False
-    return getattr(args, "blocksci_workflow", "combined") == "combined" or task in {"detect", "external"}
+    return s3_pbs_stages_need_exporters(args)
 
 
 def ensure_staged_exporters(args: argparse.Namespace) -> None:
@@ -3056,25 +2730,13 @@ def ensure_staged_exporters(args: argparse.Namespace) -> None:
     a prefix that already carries exporters keeps the ones its earlier stages
     actually ran with.
     """
-    access = S3Access(
-        endpoint_url=args.s3_endpoint_url,
-        credentials_file=args.s3_credentials_file,
-        profile=args.s3_profile,
+    stage_s3_exporters(
+        args,
+        make_access=s3_access_from_args,
+        exporters_state=staged_exporters_state,
+        compose_environment=compose_env,
+        upload_exporter_tree=upload_exporters,
     )
-    state, missing = staged_exporters_state(access, args.artifact_uri, args.run_id)
-    if state == STAGED_EXPORTERS_COMPLETE:
-        return
-    if state == STAGED_EXPORTERS_PARTIAL:
-        prefix = f"{args.artifact_uri}/{args.run_id}/.pipeline/exporters/"
-        raise ArtifactTransportError(
-            f"run prefix {prefix} carries an exporter tree without {', '.join(missing)}; "
-            "it predates the blocksci_export rename or a previous upload died halfway. "
-            "Re-staging it here would mix exporter versions across the run's stages, so "
-            "start a fresh --run-id (or delete the prefix and restage it deliberately)"
-        )
-    exporters_dir = Path(compose_env()["EXPORTERS_DIR"]).expanduser().resolve()
-    print(f"[stage] Run prefix has no exporters; uploading from {exporters_dir}")
-    upload_exporters(access, args.artifact_uri, args.run_id, exporters_dir)
 
 
 def stage_kubernetes_s3_run(args: argparse.Namespace, access: S3Access) -> None:
@@ -3085,192 +2747,62 @@ def stage_kubernetes_s3_run(args: argparse.Namespace, access: S3Access) -> None:
     preflight runs first on purpose: a failed auth check must not leave staged
     exporters behind under a run id that then needs cleaning up.
     """
-    kubeconfig_path = (
-        Path(args.kubeconfig).expanduser().resolve() if args.kubeconfig
-        else Path.home() / ".kube/config"
+    stage_s3_kubernetes_run(
+        args,
+        access,
+        s3_preflight=s3_access_preflight,
+        kubernetes_preflight=kubernetes_s3_auth_preflight,
+        ensure_empty_prefix=ensure_empty_run_prefix,
+        compose_environment=compose_env,
+        upload_exporter_tree=upload_exporters,
     )
-    s3_access_preflight(access, args.artifact_uri)
-    kubernetes_s3_auth_preflight(
-        kubeconfig_path, args.namespace, args.reuse_namespace, args.s3_secret_name
+
+
+def wait_for_s3_pbs_stage(
+    *,
+    stage: str,
+    job_id: str,
+    run_prefix: str,
+    access: S3Access,
+    walltime: str,
+) -> None:
+    """Wait for one PBS stage using the common S3 marker/probe contract."""
+    wait_for_s3_pbs_marker(
+        stage=stage,
+        job_id=job_id,
+        run_prefix=run_prefix,
+        access=access,
+        walltime=walltime,
+        wait_for_marker=wait_for_s3_marker,
+        pbs_probe=pbs_job_probe,
+        wait_timeout=pbs_wait_timeout,
     )
-    ensure_empty_run_prefix(access, args.artifact_uri, args.run_id)
-    exporters_dir = Path(compose_env()["EXPORTERS_DIR"]).expanduser().resolve()
-    print(f"[stage] Uploading exporters from {exporters_dir}")
-    upload_exporters(access, args.artifact_uri, args.run_id, exporters_dir)
 
 
 def run_full_run_s3(args: argparse.Namespace) -> None:
-    """Orchestrate the full S3-compatible chain and wait for every stage.
-
-    Kubernetes emulation uploads artifacts and the `.k8s/upload.done` marker,
-    PBS stages download from the bucket and upload `.pbs/<stage>.done|failed`;
-    this function is the only frontend-side consumer of those markers.
-    """
-    access = S3Access(
-        endpoint_url=args.s3_endpoint_url,
-        credentials_file=args.s3_credentials_file,
-        profile=args.s3_profile,
+    """Run S3 orchestration while retaining wrapper-level patch targets."""
+    operations = S3FullRunOperations(
+        make_access=s3_access_from_args,
+        require_qsub=require_qsub,
+        stage_kubernetes_run=stage_kubernetes_s3_run,
+        run_kubernetes_emulation=run_kubernetes_s3_emulation,
+        wait_for_marker=wait_for_s3_marker,
+        kubernetes_probe=kubernetes_job_probe,
+        collect_kubernetes_diagnostics=collect_s3_emulation_diagnostics,
+        delete_kubernetes_job=delete_s3_emulation_job,
+        kubernetes_job_name=s3_emulation_job_name,
+        submit_pbs=run_pbs_from_s3,
+        wait_for_pbs_stage=wait_for_s3_pbs_stage,
+        cancel_dependent_pbs_job=cancel_dependent_pbs_job,
+        analysis_walltime=lambda values: stage_pbs_resources(values, "analysis")["walltime"],
+        mappings_walltime=lambda values: stage_pbs_resources(values, "mappings")["walltime"],
+        blocksci_walltime=lambda values: stage_pbs_resources(values, "blocksci")["walltime"],
+        report_walltime=lambda values: resolve_unified_report_pbs_resource(
+            values, "walltime", DEFAULT_UNIFIED_REPORT_WALLTIME
+        ),
+        emulation_start_timeout=S3_JOB_START_TIMEOUT_SECONDS,
     )
-    run_prefix = f"{args.artifact_uri}/{args.run_id}"
-    kubeconfig_path = Path(args.kubeconfig).expanduser().resolve() if args.kubeconfig else Path.home() / ".kube/config"
-    job_name = s3_emulation_job_name(args.run_id)
-
-    if args.dry_run:
-        run_kubernetes_s3_emulation(args)
-        print(f"[dry-run] Would wait for {run_prefix}/.k8s/upload.done (timeout {args.emulation_timeout}s)")
-        run_pbs_from_s3(args)
-        if args.analysisPbs:
-            print(f"[dry-run] Would wait for {run_prefix}/.pbs/coinjoin-analysis.done")
-        if getattr(args, "mappingsPbs", False):
-            print(f"[dry-run] Would wait for {run_prefix}/.pbs/coinjoin-mappings.done")
-        if args.blocksciPbs:
-            if getattr(args, "blocksci_workflow", "combined") == "reusable":
-                print(f"[dry-run] Would wait for {run_prefix}/.pbs/blocksci-parse.done")
-                print(f"[dry-run] Would wait for {run_prefix}/.pbs/blocksci-analyze.done")
-            else:
-                print(f"[dry-run] Would wait for {run_prefix}/.pbs/blocksci.done")
-        if args.blocksciPbs and (
-            args.analysisPbs or getattr(args, "mappingsPbs", False)
-        ):
-            print(f"[dry-run] Would wait for {run_prefix}/.pbs/unified-report.done")
-        return
-
-    require_qsub()
-    stage_kubernetes_s3_run(args, access)
-
-    run_kubernetes_s3_emulation(args)
-    print(f"[full-run] Waiting for emulation upload marker {run_prefix}/.k8s/upload.done")
-    try:
-        wait_for_s3_marker(
-            "kubernetes-emulation",
-            f"{run_prefix}/.k8s/upload.done",
-            f"{run_prefix}/.k8s/upload.failed",
-            access,
-            timeout_seconds=args.emulation_timeout,
-            start_timeout_seconds=S3_JOB_START_TIMEOUT_SECONDS,
-            probe=kubernetes_job_probe(kubeconfig_path, args.namespace, job_name),
-        )
-    except ArtifactTransportError:
-        print(collect_s3_emulation_diagnostics(kubeconfig_path, args.namespace, job_name), file=sys.stderr)
-        delete_s3_emulation_job(kubeconfig_path, args.namespace, job_name)
-        print(
-            f"[full-run] Requested deletion of failed Kubernetes Job {job_name} "
-            "after collecting diagnostics.",
-            file=sys.stderr,
-        )
-        raise
-
-    jobs = run_pbs_from_s3(args)
-    analysis_job_id = jobs.coinjoin_analysis
-    mappings_job_id = jobs.coinjoin_mappings
-    blocksci_parse_job_id = jobs.blocksci_parse
-    blocksci_job_id = jobs.blocksci_work
-    report_job_id = jobs.unified_report
-    analysis_walltime = resolve_stage_pbs_resource(
-        args, "analysis", "walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
-    )
-    mappings_walltime = resolve_stage_pbs_resource(
-        args, "mappings", "walltime", DEFAULT_COINJOIN_ANALYSIS_WALLTIME
-    )
-    blocksci_walltime = resolve_stage_pbs_resource(
-        args, "blocksci", "walltime", DEFAULT_BLOCKSCI_WALLTIME
-    )
-    report_walltime = resolve_unified_report_pbs_resource(
-        args, "walltime", DEFAULT_UNIFIED_REPORT_WALLTIME
-    )
-    if analysis_job_id:
-        print(f"[full-run] Waiting for coinjoin-analysis marker (PBS job {analysis_job_id})")
-        try:
-            wait_for_s3_marker(
-                "coinjoin-analysis",
-                f"{run_prefix}/.pbs/coinjoin-analysis.done",
-                f"{run_prefix}/.pbs/coinjoin-analysis.failed",
-                access,
-                timeout_seconds=pbs_wait_timeout(analysis_walltime),
-                probe=pbs_job_probe(analysis_job_id),
-            )
-        except (ArtifactTransportError, PBSError):
-            for stage_name, job_id in (
-                ("coinjoin-mappings", mappings_job_id),
-                ("unified-report", report_job_id),
-            ):
-                if job_id:
-                    cancel_dependent_pbs_job(stage_name, job_id)
-            if blocksci_job_id:
-                print(
-                    f"[full-run] BlockSci work PBS job {blocksci_job_id} is left running; "
-                    f"its results still upload to the bucket (cancel with: qdel {blocksci_job_id})",
-                    file=sys.stderr,
-                )
-            raise
-    if blocksci_parse_job_id:
-        print(f"[full-run] Waiting for blocksci-parse marker (PBS job {blocksci_parse_job_id})")
-        try:
-            wait_for_s3_marker(
-                "blocksci-parse",
-                f"{run_prefix}/.pbs/blocksci-parse.done",
-                f"{run_prefix}/.pbs/blocksci-parse.failed",
-                access,
-                timeout_seconds=pbs_wait_timeout(blocksci_walltime),
-                probe=pbs_job_probe(blocksci_parse_job_id),
-            )
-        except (ArtifactTransportError, PBSError):
-            for stage_name, job_id in (
-                ("BlockSci work", blocksci_job_id),
-                ("unified-report", report_job_id),
-            ):
-                if job_id:
-                    cancel_dependent_pbs_job(stage_name, job_id)
-            raise
-    if blocksci_job_id:
-        blocksci_stage = "blocksci-analyze" if blocksci_parse_job_id else "blocksci"
-        print(f"[full-run] Waiting for {blocksci_stage} marker (PBS job {blocksci_job_id})")
-        try:
-            wait_for_s3_marker(
-                blocksci_stage,
-                f"{run_prefix}/.pbs/{blocksci_stage}.done",
-                f"{run_prefix}/.pbs/{blocksci_stage}.failed",
-                access,
-                timeout_seconds=pbs_wait_timeout(blocksci_walltime),
-                probe=pbs_job_probe(blocksci_job_id),
-            )
-        except (ArtifactTransportError, PBSError):
-            if report_job_id:
-                cancel_dependent_pbs_job("unified-report", report_job_id)
-            raise
-    if mappings_job_id:
-        print(
-            f"[full-run] Waiting for coinjoin-mappings marker (PBS job {mappings_job_id})"
-        )
-        try:
-            wait_for_s3_marker(
-                "coinjoin-mappings",
-                f"{run_prefix}/.pbs/coinjoin-mappings.done",
-                f"{run_prefix}/.pbs/coinjoin-mappings.failed",
-                access,
-                timeout_seconds=pbs_wait_timeout(mappings_walltime),
-                probe=pbs_job_probe(mappings_job_id),
-            )
-        except (ArtifactTransportError, PBSError):
-            if report_job_id:
-                cancel_dependent_pbs_job("unified-report", report_job_id)
-            raise
-    if report_job_id:
-        print(f"[full-run] Waiting for unified-report marker (PBS job {report_job_id})")
-        wait_for_s3_marker(
-            "unified-report",
-            f"{run_prefix}/.pbs/unified-report.done",
-            f"{run_prefix}/.pbs/unified-report.failed",
-            access,
-            timeout_seconds=pbs_wait_timeout(report_walltime),
-            probe=pbs_job_probe(report_job_id),
-        )
-    print(
-        f"[full-run] Completed; results under {run_prefix}/ "
-        "(coinjoin-analysis_data/, blocksci-analysis_data/, "
-        "coinjoin-mappings_data/ when requested, blocksci-parse_data/ when reusable, "
-        "coinjoinPipeline_data/, logs/)"
-    )
+    run_s3_full_run(args, operations)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -3568,14 +3100,7 @@ def main() -> None:
                 if not args.dry_run:
                     # Same staging path as full-run; standalone emulate used to
                     # skip every preflight and never staged the exporters.
-                    stage_kubernetes_s3_run(
-                        args,
-                        S3Access(
-                            endpoint_url=args.s3_endpoint_url,
-                            credentials_file=args.s3_credentials_file,
-                            profile=args.s3_profile,
-                        ),
-                    )
+                    stage_kubernetes_s3_run(args, s3_access_from_args(args))
                 run_kubernetes_s3_emulation(args)
             except (ArtifactTransportError, RuntimeError) as error:
                 print(f"[ERROR] {error}", file=sys.stderr)
@@ -3638,16 +3163,7 @@ def main() -> None:
             print(f"[ERROR] {error}", file=sys.stderr)
             sys.exit(2)
     elif args.action == "analyze":
-        env = compose_env(
-            None,
-            args.engine,
-            args.coinjoin_type,
-            args.min_input_count,
-            joinmarket_detector=args.joinmarket_detector,
-            joinmarket_min_base_fee=args.joinmarket_min_base_fee,
-            joinmarket_percentage_fee=args.joinmarket_percentage_fee,
-            joinmarket_max_depth=args.joinmarket_max_depth,
-        )
+        env = compose_env_from_args(args, include_scenario=False)
         active_run_id = resolve_run_id(args.run_dir, env)
         if not active_run_id:
             print("[ERROR] No grouped emulation run folder found.", file=sys.stderr)
@@ -3706,17 +3222,7 @@ def main() -> None:
         with captured_pipeline_stage(logs_root, "Initialize container images", logs_root / "_maintenance"):
             initialize_images()
     elif args.action == "full-run":
-        env = compose_env(
-            None,
-            args.engine,
-            args.coinjoin_type,
-            args.min_input_count,
-            args.scenario,
-            args.joinmarket_detector,
-            args.joinmarket_min_base_fee,
-            args.joinmarket_percentage_fee,
-            args.joinmarket_max_depth,
-        )
+        env = compose_env_from_args(args)
         emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
         if getattr(args, "artifact_backend", "shared-storage") == "s3":
             # S3 full-run: k8s emulation → S3 markers → PBS analysis chain, all in the bucket

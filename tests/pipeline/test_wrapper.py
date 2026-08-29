@@ -52,6 +52,7 @@ from client.wrapper import (
     run_kubernetes_emulation,
     run_parallel_analysis,
     run_pbs_from_s3,
+    run_serial_analysis,
     run_timezone,
     stage_blocksci_script,
     stage_pbs_exporters,
@@ -107,6 +108,36 @@ def test_stage_pbs_exporters_rejects_partial_existing_snapshot(
 
     with pytest.raises(PBSError, match="Failed to stage PBS exporters"):
         stage_pbs_exporters(run_dir, source)
+
+
+def test_serial_analysis_preserves_legacy_analysis_script_dispatch() -> None:
+    """The serial refactor must retain the established Compose execution path."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        logs_root = Path(tmpdir)
+        run_dir = logs_root / "run-a"
+        run_dir.mkdir()
+        args = Namespace(
+            analysisPbs=False,
+            blocksciPbs=False,
+            mappingsPbs=False,
+            blocksci_script=None,
+            engine="wasabi",
+            coinjoin_type="wasabi2",
+            min_input_count=None,
+            scenario=None,
+            joinmarket_detector="definite",
+            joinmarket_min_base_fee=5000,
+            joinmarket_percentage_fee=0.00004,
+            joinmarket_max_depth=200000,
+        )
+        with mock.patch("client.wrapper.run_coinjoin_analysis") as baseline, mock.patch(
+            "client.wrapper.run_script"
+        ) as analysis_script:
+            run_serial_analysis(args, run_dir, logs_root)
+
+    baseline.assert_called_once_with("run-a")
+    assert analysis_script.call_args.args[0].name == "analysis.sh"
+    assert analysis_script.call_args.kwargs["active_run_id"] == "run-a"
 
 
 def test_blocksci_pbs_stage_submits_shared_staged_exporters(
@@ -786,7 +817,9 @@ class WrapperExportTest(unittest.TestCase):
                 side_effect=lambda *_args, **_kwargs: events.append("blocksci"),
             ), mock.patch(
                 "client.wrapper.run_mappings_pbs_stage",
-                side_effect=lambda *_args: events.append("mappings"),
+                side_effect=lambda *_args, **_kwargs: events.append("mappings"),
+            ), mock.patch(
+                "client.wrapper.wait_for_pbs_marker",
             ), mock.patch(
                 "client.wrapper.run_export_only",
                 side_effect=lambda *_args: events.append("export"),

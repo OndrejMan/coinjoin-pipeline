@@ -31,6 +31,7 @@ from client.artifacts import (
     render_s5cmd_cp,
     render_s5cmd_sync,
     shell_assignment,
+    shell_value,
     validate_artifact_uri,
     validate_credentials_file,
     validate_run_id,
@@ -314,21 +315,30 @@ def _parse_qsub_job_id(stdout: str) -> str:
     return job_id
 
 
+def qsub_command(
+    dependency_job_id: str | Sequence[str] | None = None,
+) -> list[str]:
+    """Build qsub's common dependency prefix for file and stdin submissions."""
+    command = ["qsub"]
+    if not dependency_job_id:
+        return command
+    dependency_job_ids = (
+        (dependency_job_id,)
+        if isinstance(dependency_job_id, str)
+        else tuple(dependency_job_id)
+    )
+    if any(not job_id for job_id in dependency_job_ids):
+        raise PBSError("PBS dependency job IDs must not be empty")
+    command.extend(["-W", f"depend=afterok:{':'.join(dependency_job_ids)}"])
+    return command
+
+
 def submit_pbs(
     script_path: Path,
     dependency_job_id: str | Sequence[str] | None = None,
 ) -> str:
     """Submit a PBS script via ``qsub`` and return the job ID."""
-    command = ["qsub"]
-    if dependency_job_id:
-        dependency_job_ids = (
-            (dependency_job_id,)
-            if isinstance(dependency_job_id, str)
-            else tuple(dependency_job_id)
-        )
-        if any(not job_id for job_id in dependency_job_ids):
-            raise PBSError("PBS dependency job IDs must not be empty")
-        command.extend(["-W", f"depend=afterok:{':'.join(dependency_job_ids)}"])
+    command = qsub_command(dependency_job_id)
     command.append(str(script_path))
     result = subprocess.run(
         command,
@@ -351,16 +361,7 @@ def submit_pbs_text(
     Stdin submission avoids needing a script path visible to the PBS server,
     which the S3-compatible stages lack (no shared run directory).
     """
-    command = ["qsub"]
-    if dependency_job_id:
-        dependency_job_ids = (
-            (dependency_job_id,)
-            if isinstance(dependency_job_id, str)
-            else tuple(dependency_job_id)
-        )
-        if any(not job_id for job_id in dependency_job_ids):
-            raise PBSError("PBS dependency job IDs must not be empty")
-        command.extend(["-W", f"depend=afterok:{':'.join(dependency_job_ids)}"])
+    command = qsub_command(dependency_job_id)
     result = subprocess.run(
         command,
         check=False,
@@ -506,13 +507,11 @@ def _s3_values(
     profile: str,
 ) -> dict[str, str]:
     return {
-        "artifact_uri": shell_assignment("ARTIFACT_URI", validate_artifact_uri(artifact_uri)).split("=", 1)[1],
-        "run_id": shell_assignment("RUN_ID", validate_run_id(run_id)).split("=", 1)[1],
-        "endpoint_url": shell_assignment("S3_ENDPOINT_URL", validate_s3_endpoint_url(endpoint_url)).split("=", 1)[1],
-        "credentials_file": shell_assignment("S3_CREDENTIALS_FILE", validate_credentials_file(credentials_file)).split(
-            "=", 1
-        )[1],
-        "profile": shell_assignment("S3_PROFILE", validate_s3_profile(profile)).split("=", 1)[1],
+        "artifact_uri": shell_value(validate_artifact_uri(artifact_uri)),
+        "run_id": shell_value(validate_run_id(run_id)),
+        "endpoint_url": shell_value(validate_s3_endpoint_url(endpoint_url)),
+        "credentials_file": shell_value(validate_credentials_file(credentials_file)),
+        "profile": shell_value(validate_s3_profile(profile)),
     }
 
 
@@ -536,7 +535,7 @@ def render_coinjoin_analysis_s3_pbs(
     template = (Path(__file__).parent / "coinjoin_analysis_s3_template.sh").read_text(encoding="utf-8")
     return template.format(
         **values,
-        image=shell_assignment("IMAGE", image).split("=", 1)[1],
+        image=shell_value(image),
         command=command,
         ncpus=ncpus,
         mem=mem,
@@ -605,8 +604,8 @@ def render_mappings_s3_pbs(
     )
     return template.format(
         **values,
-        enumerator_image=shell_assignment("ENUMERATOR_IMAGE", enumerator_image).split("=", 1)[1],
-        sake_image=shell_assignment("SAKE_IMAGE", sake_image).split("=", 1)[1],
+        enumerator_image=shell_value(enumerator_image),
+        sake_image=shell_value(sake_image),
         enumerator_image_value=enumerator_image,
         sake_image_value=sake_image,
         mining_fee_rate=mining_fee_rate,
@@ -659,7 +658,7 @@ def render_blocksci_s3_pbs(
     template = (Path(__file__).parent / "blocksci_s3_template.sh").read_text(encoding="utf-8")
     return template.format(
         **values,
-        image=shell_assignment("IMAGE", image).split("=", 1)[1],
+        image=shell_value(image),
         command=command,
         ncpus=ncpus,
         mem=mem,
@@ -768,7 +767,7 @@ def render_blocksci_parse_s3_pbs(
         network = external_network
         source_description = "external Bitcoin Core block directory"
         prepare_source = (
-            f"BITCOIN_DATADIR={shell_assignment('BITCOIN_DATADIR', str(bitcoin_path)).split('=', 1)[1]}\n"
+            f"BITCOIN_DATADIR={shell_value(str(bitcoin_path))}\n"
             f"EXPORTED_MAX_BLOCK={external_max_block}\n"
             'test -d "$BITCOIN_DATADIR/blocks"'
         )
@@ -792,7 +791,7 @@ def render_blocksci_parse_s3_pbs(
         source_kind = "bitcoin-blocks-s3"
         network = external_network
         source_description = "verified Bitcoin block archive from S3"
-        blocks_uri_assignment = shell_assignment("BITCOIN_BLOCKS_URI", blocks_uri).split("=", 1)[1]
+        blocks_uri_assignment = shell_value(blocks_uri)
         prepare_source = f'''BITCOIN_BLOCKS_URI={blocks_uri_assignment}
 EXPORTED_MAX_BLOCK={external_max_block}
 BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"
@@ -863,7 +862,7 @@ PY'''
         network = "from-config"
         source_description = "existing external BlockSci index"
         prepare_source = (
-            f"EXTERNAL_BLOCKSCI_DIR={shell_assignment('EXTERNAL_BLOCKSCI_DIR', str(blocksci_path)).split('=', 1)[1]}\n"
+            f"EXTERNAL_BLOCKSCI_DIR={shell_value(str(blocksci_path))}\n"
             'test -f "$EXTERNAL_BLOCKSCI_DIR/config.json"\n'
             'test -f "$EXTERNAL_BLOCKSCI_DIR/parsed/chain/block.dat"'
         )
@@ -925,7 +924,7 @@ PY'''
     )
     return template.format(
         **values,
-        image=shell_assignment("IMAGE", image).split("=", 1)[1],
+        image=shell_value(image),
         command=command,
         ncpus=ncpus,
         mem=mem,
@@ -999,11 +998,11 @@ def render_blocksci_update_s3_pbs(
     )
     return template.format(
         **values,
-        source_run_id=shell_assignment("SOURCE_RUN_ID", source_run_id).split("=", 1)[1],
-        image=shell_assignment("IMAGE", image).split("=", 1)[1],
-        network=shell_assignment("NETWORK", external_network).split("=", 1)[1],
+        source_run_id=shell_value(source_run_id),
+        image=shell_value(image),
+        network=shell_value(external_network),
         exported_max_block=external_max_block,
-        bitcoin_datadir=shell_assignment("BITCOIN_DATADIR", str(bitcoin_path)).split("=", 1)[1],
+        bitcoin_datadir=shell_value(str(bitcoin_path)),
         command=command,
         ncpus=ncpus,
         mem=mem,
@@ -1099,7 +1098,7 @@ def render_blocksci_analyze_s3_pbs(
             raise PBSError(f"BlockSci user script is not a file: {script_path}")
         prepare_mode = (
             'mkdir -p "$RUN_WORK/blocksci-custom-analysis_data"\n'
-            f"USER_SCRIPT={shell_assignment('USER_SCRIPT', str(script_path)).split('=', 1)[1]}\n"
+            f"USER_SCRIPT={shell_value(str(script_path))}\n"
             'cp "$USER_SCRIPT" "$RUN_WORK/blocksci-custom-analysis_data/script.py"\n'
             'sha256sum "$USER_SCRIPT" > "$RUN_WORK/blocksci-custom-analysis_data/script.py.sha256"'
         )
@@ -1118,7 +1117,7 @@ def render_blocksci_analyze_s3_pbs(
             if not notebook_path.is_dir():
                 raise PBSError(f"BlockSci notebooks path is not a directory: {notebook_path}")
             prepare_mode = (
-                f"NOTEBOOK_DIR={shell_assignment('NOTEBOOK_DIR', str(notebook_path)).split('=', 1)[1]}"
+                f"NOTEBOOK_DIR={shell_value(str(notebook_path))}"
             )
         else:
             prepare_mode = (
@@ -1170,7 +1169,7 @@ def render_blocksci_analyze_s3_pbs(
                 ),
                 'mkdir -p "$RUN_WORK/coinjoin-analysis_data"',
                 render_s5cmd_cp(
-                    shell_assignment("DUMPLINGS_BASELINE_URI", baseline_uri).split("=", 1)[1],
+                    shell_value(baseline_uri),
                     '"$RUN_WORK/coinjoin-analysis_data/coinjoin_tx_info.json"',
                 ),
             )
@@ -1181,9 +1180,9 @@ def render_blocksci_analyze_s3_pbs(
     )
     return template.format(
         **values,
-        image=shell_assignment("IMAGE", image).split("=", 1)[1],
+        image=shell_value(image),
         command=command,
-        mode=shell_assignment("MODE", mode).split("=", 1)[1],
+        mode=shell_value(mode),
         stage=mode,
         job_name=mode.replace("-", "_") + "_s3",
         ncpus=ncpus,
@@ -1255,7 +1254,7 @@ def render_unified_report_s3_pbs(
         )
     return template.format(
         **values,
-        image=shell_assignment("IMAGE", image).split("=", 1)[1],
+        image=shell_value(image),
         command=command,
         ncpus=ncpus,
         mem=mem,
