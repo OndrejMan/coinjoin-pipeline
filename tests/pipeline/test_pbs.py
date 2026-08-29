@@ -45,7 +45,7 @@ from client.pbs import (  # noqa: E402
 
 class PBSJobProbeTest(unittest.TestCase):
     def _probe_state(self, qstat_state):
-        with mock.patch("client.pbs._qstat_job_state", return_value=qstat_state):
+        with mock.patch("client.pbs.submission._qstat_job_state", return_value=qstat_state):
             return pbs_job_probe("7.server")()
 
     def test_terminal_states_map_to_terminal(self):
@@ -95,8 +95,8 @@ class PBSJobProbeTest(unittest.TestCase):
             stderr="qstat: Unknown Job Id 7.server",
         )
         with (
-            mock.patch("client.pbs.shutil.which", return_value="/usr/bin/qstat"),
-            mock.patch("client.pbs.subprocess.run", side_effect=[history_disabled, missing]) as run,
+            mock.patch("client.pbs.submission.shutil.which", return_value="/usr/bin/qstat"),
+            mock.patch("client.pbs.submission.subprocess.run", side_effect=[history_disabled, missing]) as run,
         ):
             self.assertEqual(_qstat_job_state("7.server"), "MISSING")
         self.assertEqual(run.call_args_list[1].args[0], ["qstat", "-f", "7.server"])
@@ -128,21 +128,21 @@ class PBSStateSetParityTest(unittest.TestCase):
 class PBSQdelTest(unittest.TestCase):
     def test_qdel_reports_success(self):
         with (
-            mock.patch("client.pbs.shutil.which", return_value="/usr/bin/qdel"),
-            mock.patch("client.pbs.subprocess.run") as run,
+            mock.patch("client.pbs.submission.shutil.which", return_value="/usr/bin/qdel"),
+            mock.patch("client.pbs.submission.subprocess.run") as run,
         ):
             run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
             self.assertTrue(qdel_pbs_job("7.server"))
 
     def test_qdel_reports_failure_when_unavailable(self):
         """Rollback must not claim success when qdel is not installed."""
-        with mock.patch("client.pbs.shutil.which", return_value=None):
+        with mock.patch("client.pbs.validation.shutil.which", return_value=None):
             self.assertFalse(qdel_pbs_job("7.server"))
 
     def test_qdel_reports_failure_when_scheduler_rejects(self):
         with (
-            mock.patch("client.pbs.shutil.which", return_value="/usr/bin/qdel"),
-            mock.patch("client.pbs.subprocess.run") as run,
+            mock.patch("client.pbs.submission.shutil.which", return_value="/usr/bin/qdel"),
+            mock.patch("client.pbs.submission.subprocess.run") as run,
         ):
             run.return_value = mock.Mock(
                 returncode=1, stdout="", stderr="qdel: Permission denied"
@@ -151,8 +151,8 @@ class PBSQdelTest(unittest.TestCase):
 
     def test_qdel_treats_already_finished_job_as_cancelled(self):
         with (
-            mock.patch("client.pbs.shutil.which", return_value="/usr/bin/qdel"),
-            mock.patch("client.pbs.subprocess.run") as run,
+            mock.patch("client.pbs.submission.shutil.which", return_value="/usr/bin/qdel"),
+            mock.patch("client.pbs.submission.subprocess.run") as run,
         ):
             run.return_value = mock.Mock(
                 returncode=1, stdout="", stderr="qdel: Unknown Job Id 7.server"
@@ -182,7 +182,7 @@ class PBSJobIdPersistenceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             run_dir = Path(raw)
             persist_pbs_job_id(run_dir, "blocksci", "7.server")
-            with mock.patch("client.pbs.os.replace", side_effect=OSError("boom")):
+            with mock.patch("client.pbs.submission.os.replace", side_effect=OSError("boom")):
                 with self.assertRaises(OSError):
                     persist_pbs_job_id(run_dir, "blocksci", "8.server")
             marker_dir = run_dir / ".pbs"
@@ -198,7 +198,7 @@ class PBSJobIdPersistenceTest(unittest.TestCase):
 
 class PBSStdinSubmissionTest(unittest.TestCase):
     def test_submit_pbs_text_pipes_script_and_dependency(self):
-        with mock.patch("client.pbs.subprocess.run") as run:
+        with mock.patch("client.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(returncode=0, stdout="9.server\n", stderr="")
             job_id = submit_pbs_text("#PBS -N stage\ntrue\n", "8.server")
         self.assertEqual(job_id, "9.server")
@@ -206,7 +206,7 @@ class PBSStdinSubmissionTest(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["input"], "#PBS -N stage\ntrue\n")
 
     def test_submit_pbs_text_supports_multiple_dependencies(self):
-        with mock.patch("client.pbs.subprocess.run") as run:
+        with mock.patch("client.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(returncode=0, stdout="10.server\n", stderr="")
             job_id = submit_pbs_text(
                 "#PBS -N report\ntrue\n",
@@ -219,7 +219,7 @@ class PBSStdinSubmissionTest(unittest.TestCase):
         )
 
     def test_submit_pbs_text_raises_on_qsub_failure(self):
-        with mock.patch("client.pbs.subprocess.run") as run:
+        with mock.patch("client.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(returncode=1, stdout="", stderr="bad queue")
             with self.assertRaises(PBSError):
                 submit_pbs_text("#PBS -N stage\ntrue\n")
@@ -233,13 +233,13 @@ class PBSStdinSubmissionTest(unittest.TestCase):
         """
         for stdout in ("", "   \n"):
             with self.subTest(stdout=stdout):
-                with mock.patch("client.pbs.subprocess.run") as run:
+                with mock.patch("client.pbs.submission.subprocess.run") as run:
                     run.return_value = mock.Mock(returncode=0, stdout=stdout, stderr="")
                     with self.assertRaisesRegex(PBSError, "invalid job ID"):
                         submit_pbs_text("#PBS -N stage\ntrue\n")
 
     def test_submit_pbs_text_rejects_multiline_job_id(self):
-        with mock.patch("client.pbs.subprocess.run") as run:
+        with mock.patch("client.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(
                 returncode=0,
                 stdout="warning: queue is full\n11.server\n",
@@ -249,7 +249,7 @@ class PBSStdinSubmissionTest(unittest.TestCase):
                 submit_pbs_text("#PBS -N stage\ntrue\n")
 
     def test_submit_pbs_text_rejects_unsafe_job_id(self):
-        with mock.patch("client.pbs.subprocess.run") as run:
+        with mock.patch("client.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(
                 returncode=0, stdout="11.server; rm -rf /\n", stderr=""
             )
@@ -257,7 +257,7 @@ class PBSStdinSubmissionTest(unittest.TestCase):
                 submit_pbs_text("#PBS -N stage\ntrue\n")
 
     def test_submit_pbs_text_accepts_metacentrum_job_id(self):
-        with mock.patch("client.pbs.subprocess.run") as run:
+        with mock.patch("client.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(
                 returncode=0,
                 stdout="12345678.meta-pbs.metacentrum.cz\n",
@@ -269,7 +269,7 @@ class PBSStdinSubmissionTest(unittest.TestCase):
             )
 
     def test_submit_pbs_rejects_empty_job_id_on_zero_exit(self):
-        with mock.patch("client.pbs.subprocess.run") as run:
+        with mock.patch("client.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(returncode=0, stdout="\n", stderr="")
             with self.assertRaisesRegex(PBSError, "invalid job ID"):
                 submit_pbs(Path("/storage/run-a/job.pbs"))
@@ -524,12 +524,12 @@ class PBSValidationTest(unittest.TestCase):
             )
 
     def test_require_qsub_raises_when_missing(self):
-        with mock.patch("client.pbs.shutil.which", return_value=None):
+        with mock.patch("client.pbs.validation.shutil.which", return_value=None):
             with self.assertRaises(PBSError):
                 require_qsub()
 
     def test_require_qsub_passes_when_available(self):
-        with mock.patch("client.pbs.shutil.which", return_value="/usr/bin/qsub"):
+        with mock.patch("client.pbs.validation.shutil.which", return_value="/usr/bin/qsub"):
             require_qsub()
 
     def test_require_storage_path_rejects_non_storage_path(self):
@@ -542,7 +542,7 @@ class PBSValidationTest(unittest.TestCase):
 
 class PBSSubmissionTest(unittest.TestCase):
     def test_submit_pbs_supports_afterok_dependency(self):
-        with mock.patch("client.pbs.subprocess.run") as run_mock:
+        with mock.patch("client.pbs.submission.subprocess.run") as run_mock:
             run_mock.return_value = subprocess.CompletedProcess(
                 [], 0, stdout="block-job.meta\n", stderr=""
             )
@@ -559,7 +559,7 @@ class PBSSubmissionTest(unittest.TestCase):
         )
 
     def test_submit_pbs_supports_multiple_afterok_dependencies(self):
-        with mock.patch("client.pbs.subprocess.run") as run_mock:
+        with mock.patch("client.pbs.submission.subprocess.run") as run_mock:
             run_mock.return_value = subprocess.CompletedProcess(
                 [], 0, stdout="report-job.meta\n", stderr=""
             )
@@ -583,11 +583,11 @@ class PBSSubmissionTest(unittest.TestCase):
             run_dir = Path(tmpdir) / "run-a"
             run_dir.mkdir()
             with (
-                mock.patch("client.pbs.shutil.which", return_value="/usr/bin/qsub"),
-                mock.patch("client.pbs.require_storage_path"),
-                mock.patch("client.pbs.require_existing_path"),
-                mock.patch("client.pbs.require_bitcoin_datadir"),
-                mock.patch("client.pbs.subprocess.run") as run_mock,
+                mock.patch("client.pbs.validation.shutil.which", return_value="/usr/bin/qsub"),
+                mock.patch("client.pbs.submission.require_storage_path"),
+                mock.patch("client.pbs.submission.require_existing_path"),
+                mock.patch("client.pbs.submission.require_bitcoin_datadir"),
+                mock.patch("client.pbs.submission.subprocess.run") as run_mock,
             ):
                 run_mock.return_value = subprocess.CompletedProcess(
                     [],
@@ -619,11 +619,11 @@ class PBSSubmissionTest(unittest.TestCase):
             run_dir = Path(tmpdir) / "run-a"
             run_dir.mkdir()
             with (
-                mock.patch("client.pbs.shutil.which", return_value="/usr/bin/qsub"),
-                mock.patch("client.pbs.require_storage_path"),
-                mock.patch("client.pbs.require_existing_path"),
-                mock.patch("client.pbs.require_bitcoin_datadir"),
-                mock.patch("client.pbs.subprocess.run") as run_mock,
+                mock.patch("client.pbs.validation.shutil.which", return_value="/usr/bin/qsub"),
+                mock.patch("client.pbs.submission.require_storage_path"),
+                mock.patch("client.pbs.submission.require_existing_path"),
+                mock.patch("client.pbs.submission.require_bitcoin_datadir"),
+                mock.patch("client.pbs.submission.subprocess.run") as run_mock,
             ):
                 run_mock.return_value = subprocess.CompletedProcess(
                     [], 0, stdout="42\n", stderr=""
@@ -650,9 +650,9 @@ class PBSSubmissionTest(unittest.TestCase):
             run_dir = Path(tmpdir) / "run-a"
             run_dir.mkdir()
             with (
-                mock.patch("client.pbs.shutil.which", return_value="/usr/bin/qsub"),
-                mock.patch("client.pbs.require_storage_path"),
-                mock.patch("client.pbs.subprocess.run") as run_mock,
+                mock.patch("client.pbs.validation.shutil.which", return_value="/usr/bin/qsub"),
+                mock.patch("client.pbs.submission.require_storage_path"),
+                mock.patch("client.pbs.submission.subprocess.run") as run_mock,
             ):
                 input_data_dir = run_dir / "coinjoin_emulator_data" / "data"
                 input_data_dir.mkdir(parents=True)
@@ -676,10 +676,10 @@ class PBSSubmissionTest(unittest.TestCase):
             run_dir = Path(tmpdir) / "run-a"
             run_dir.mkdir()
             with (
-                mock.patch("client.pbs.shutil.which", return_value="/usr/bin/qsub"),
-                mock.patch("client.pbs.require_storage_path"),
-                mock.patch("client.pbs.require_existing_path"),
-                mock.patch("client.pbs.require_bitcoin_datadir"),
+                mock.patch("client.pbs.validation.shutil.which", return_value="/usr/bin/qsub"),
+                mock.patch("client.pbs.submission.require_storage_path"),
+                mock.patch("client.pbs.submission.require_existing_path"),
+                mock.patch("client.pbs.submission.require_bitcoin_datadir"),
             ):
                 job_id = submit_blocksci_pbs(
                     run_dir=run_dir,
@@ -703,11 +703,11 @@ class PBSSubmissionTest(unittest.TestCase):
             run_dir = Path(tmpdir) / "run-a"
             run_dir.mkdir()
             with (
-                mock.patch("client.pbs.shutil.which", return_value="/usr/bin/qsub"),
-                mock.patch("client.pbs.require_storage_path"),
-                mock.patch("client.pbs.require_existing_path"),
-                mock.patch("client.pbs.require_bitcoin_datadir"),
-                mock.patch("client.pbs.subprocess.run") as run_mock,
+                mock.patch("client.pbs.validation.shutil.which", return_value="/usr/bin/qsub"),
+                mock.patch("client.pbs.submission.require_storage_path"),
+                mock.patch("client.pbs.submission.require_existing_path"),
+                mock.patch("client.pbs.submission.require_bitcoin_datadir"),
+                mock.patch("client.pbs.submission.subprocess.run") as run_mock,
             ):
                 run_mock.return_value = subprocess.CompletedProcess(
                     [],
@@ -734,7 +734,7 @@ class PBSSubmissionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir) / "run-a"
             run_dir.mkdir()
-            with mock.patch("client.pbs.shutil.which", return_value="/usr/bin/qsub"):
+            with mock.patch("client.pbs.validation.shutil.which", return_value="/usr/bin/qsub"):
                 with self.assertRaises(PBSError):
                     submit_blocksci_pbs(
                         run_dir=run_dir,
@@ -784,7 +784,7 @@ class PBSMarkerWaitTest(unittest.TestCase):
                 if call_count[0] == 2:
                     done.write_text("", encoding="utf-8")
 
-            with mock.patch("client.pbs.time.sleep", side_effect=fake_sleep):
+            with mock.patch("client.pbs.submission.time.sleep", side_effect=fake_sleep):
                 wait_for_pbs_marker(run_dir, "blocksci", poll_interval=0)
             self.assertGreaterEqual(call_count[0], 2)
 
@@ -804,8 +804,8 @@ class PBSMarkerWaitTest(unittest.TestCase):
                     done.write_text("", encoding="utf-8")
 
             with (
-                mock.patch("client.pbs._qstat_job_state", return_value="Q"),
-                mock.patch("client.pbs.time.sleep", side_effect=fake_sleep),
+                mock.patch("client.pbs.submission._qstat_job_state", return_value="Q"),
+                mock.patch("client.pbs.submission.time.sleep", side_effect=fake_sleep),
             ):
                 wait_for_pbs_marker(
                     run_dir, "blocksci", poll_interval=0,
@@ -840,7 +840,7 @@ class PBSStageLogReportTest(unittest.TestCase):
             run_dir = Path(tmpdir) / "run-a"
             run_dir.mkdir()
             with (
-                mock.patch("client.pbs.time.sleep") as sleep,
+                mock.patch("client.pbs.submission.time.sleep") as sleep,
                 mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
             ):
                 reported = report_stage_log(run_dir, "blocksci")
@@ -859,7 +859,7 @@ class PBSStageLogReportTest(unittest.TestCase):
                 log_path.write_text("late arrival\n", encoding="utf-8")
 
             with (
-                mock.patch("client.pbs.time.sleep", side_effect=fake_sleep),
+                mock.patch("client.pbs.submission.time.sleep", side_effect=fake_sleep),
                 mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
             ):
                 reported = report_stage_log(run_dir, "blocksci")
@@ -888,8 +888,8 @@ class PBSStageLogReportTest(unittest.TestCase):
             log_path.parent.mkdir(parents=True)
             log_path.write_text("killed by the scheduler\n", encoding="utf-8")
             with (
-                mock.patch("client.pbs._qstat_job_state", return_value="F"),
-                mock.patch("client.pbs.time.sleep"),
+                mock.patch("client.pbs.submission._qstat_job_state", return_value="F"),
+                mock.patch("client.pbs.submission.time.sleep"),
                 mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
             ):
                 with self.assertRaises(PBSError) as raised:

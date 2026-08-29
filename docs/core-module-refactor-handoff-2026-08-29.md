@@ -48,6 +48,26 @@ The tree contains pre-existing user work plus these refactor modules:
 At this point `wrapper.py` is about 2,674 lines, roughly 1,080 lines smaller
 than the tracked base, while preserving its public/patchable surface.
 
+### PBS package follow-up
+
+`pipeline/client/pbs.py` is now the `pipeline/client/pbs/` package.  Its
+compatibility façade (`pbs/__init__.py`) preserves the `from client.pbs import
+...` API used by the wrapper and callers, while implementation ownership is
+explicit:
+
+- `defaults.py` owns scheduler and image defaults;
+- `validation.py` owns template and filesystem validation;
+- `templates_local.py` and `templates_s3.py` render their respective scripts;
+- `commands.py` builds in-container commands; and
+- `submission.py` owns qsub/qstat/qdel, marker waits, and local/S3 submission.
+
+Tests must patch the owning module (for example
+`client.pbs.submission.subprocess`), not the façade.  This prevents a mock
+from silently missing the name resolved by the production function.  The
+focused PBS/S3, wrapper, and CLI-contract test groups passed after the split;
+the local PBS integration test remains the required gate before changing
+template or scheduler behavior.
+
 ## Completed extractions
 
 ### Plans and generic execution
@@ -241,3 +261,28 @@ ownership and tests.  A realistic final result remains approximately
 depending on how much dead code becomes safely provable.  Removing legacy
 shared-storage PBS or local Compose is a separate, higher-risk deletion and
 should not be counted as already complete.
+
+## Follow-up: CLI parser and S3 target boundary
+
+The wrapper remains the executable compatibility façade, but declaration-only
+CLI code now lives in `client.cli_defaults`, `client.cli_validation`, and
+`client.cli_parser`.  `build_parser` and the option helper names are still
+re-exported from `client.wrapper`, so callers and command metadata retain the
+same public surface.
+
+`client.artifacts.S3Target` is an immutable value object for the five S3 run
+parameters (`artifact_uri`, `run_id`, endpoint URL, credentials file, and
+profile).  The S3 PBS render and submission APIs accept that target rather
+than five parallel strings.  `S3Target.from_args` is deliberately called only
+after existing CLI validation; the command-line names, marker/key layout,
+credential handling, and generated PBS scripts therefore remain unchanged.
+
+Focused verification after this follow-up:
+
+```text
+230 tests: test_pbs.py, test_s3_backend.py, test_wrapper.py, test_cli_contract.py
+41 command-builder contract tests; both metadata snapshots match
+Ruff: all checks passed
+Mypy: no issues found in 13 source files
+git diff --check: clean
+```

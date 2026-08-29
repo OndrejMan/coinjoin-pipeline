@@ -12,6 +12,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 from urllib.parse import urlparse
 
 # The exporters ship to the compute node on their own, so the tree hash they
@@ -49,6 +50,47 @@ class S3Access:
     endpoint_url: str
     credentials_file: str
     profile: str
+
+
+class S3TargetArguments(Protocol):
+    """CLI values needed to construct an :class:`S3Target`."""
+
+    artifact_uri: str
+    run_id: str
+    s3_endpoint_url: str
+    s3_credentials_file: str
+    s3_profile: str
+
+
+@dataclass(frozen=True)
+class S3Target:
+    """Identity of one S3-backed run and the credentials used to reach it."""
+
+    artifact_uri: str
+    run_id: str
+    endpoint_url: str
+    credentials_file: str
+    profile: str
+
+    @property
+    def access(self) -> S3Access:
+        """Return the frontend transport credentials for this run target."""
+        return S3Access(
+            endpoint_url=self.endpoint_url,
+            credentials_file=self.credentials_file,
+            profile=self.profile,
+        )
+
+    @classmethod
+    def from_args(cls, args: S3TargetArguments) -> "S3Target":
+        """Build a target after the public CLI has validated its S3 options."""
+        return cls(
+            artifact_uri=args.artifact_uri,
+            run_id=args.run_id,
+            endpoint_url=args.s3_endpoint_url,
+            credentials_file=args.s3_credentials_file,
+            profile=args.s3_profile,
+        )
 
 
 def validate_artifact_uri(uri: str) -> str:

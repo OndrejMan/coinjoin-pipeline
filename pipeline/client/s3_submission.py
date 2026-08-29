@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from client.artifacts import ArtifactTransportError, S3Access
+from client.artifacts import ArtifactTransportError, S3Access, S3Target
 from client.pbs import PBSError
 from client.pbs_settings import PBSResources
 from client.s3_workflow import S3PBSJobs
@@ -26,6 +26,7 @@ class S3SubmissionTracker:
     """Prepare marker state and remember every job for rollback on failure."""
 
     args: argparse.Namespace
+    target: S3Target
     access: S3Access
     submitted_jobs: list[tuple[str, str]]
     operations: S3SubmissionOperations
@@ -37,8 +38,8 @@ class S3SubmissionTracker:
             return
         self.operations.clear_stage_markers(
             self.access,
-            self.args.artifact_uri,
-            self.args.run_id,
+            self.target.artifact_uri,
+            self.target.run_id,
             stage,
         )
 
@@ -73,7 +74,7 @@ class S3StageSubmissionOperations:
     existing monkeypatch surface while this module owns graph construction.
     """
 
-    make_access: Callable[[argparse.Namespace], S3Access]
+    make_access: Callable[[S3Target], S3Access]
     tracker_operations: S3SubmissionOperations
     stage_resources: Callable[..., PBSResources]
     s3_preflight: Callable[..., None]
@@ -143,50 +144,45 @@ def submit_s3_pbs_stages(
     operations: S3StageSubmissionOperations,
 ) -> S3PBSJobs:
     """Submit the concrete S3 PBS DAG while preserving marker semantics."""
-    access = operations.make_access(args)
+    target = S3Target.from_args(args)
+    access = operations.make_access(target)
     tracker = S3SubmissionTracker(
         args,
+        target,
         access,
         submitted_jobs,
         operations.tracker_operations,
     )
-    common = dict(
-        artifact_uri=args.artifact_uri,
-        run_id=args.run_id,
-        endpoint_url=args.s3_endpoint_url,
-        credentials_file=args.s3_credentials_file,
-        profile=args.s3_profile,
-        dry_run=args.dry_run,
-    )
+    common = dict(target=target, dry_run=args.dry_run)
     analysis_resources = operations.stage_resources(args, "analysis")
     mappings_resources = operations.stage_resources(args, "mappings")
     workflow = getattr(args, "blocksci_workflow", "combined")
     task = getattr(args, "blocksci_task", "detect")
     if task == "update" and not args.dry_run:
         source_run_id = args.blocksci_cache_source_run_id
-        operations.s3_preflight(access, args.artifact_uri)
+        operations.s3_preflight(access, target.artifact_uri)
         if not operations.object_exists(
             access,
-            f"{args.artifact_uri}/{source_run_id}/blocksci-parse_data/manifest.json",
+            f"{target.artifact_uri}/{source_run_id}/blocksci-parse_data/manifest.json",
         ):
             raise ArtifactTransportError(
                 f"source BlockSci cache manifest does not exist for run {source_run_id}"
             )
-        operations.ensure_empty_prefix(access, args.artifact_uri, args.run_id)
+        operations.ensure_empty_prefix(access, target.artifact_uri, target.run_id)
     mappings_pbs = getattr(args, "mappingsPbs", False)
     if (
         not args.dry_run
         and not args.analysisPbs
         and (mappings_pbs or (args.blocksciPbs and task == "detect"))
     ):
-        operations.s3_preflight(access, args.artifact_uri)
+        operations.s3_preflight(access, target.artifact_uri)
         if not operations.object_exists(
             access,
-            f"{args.artifact_uri}/{args.run_id}/coinjoin-analysis_data/coinjoin_tx_info.json",
+            f"{target.artifact_uri}/{target.run_id}/coinjoin-analysis_data/coinjoin_tx_info.json",
         ):
             raise ArtifactTransportError(
                 "resuming without --analysisPbs requires an existing "
-                f"coinjoin-analysis_data/coinjoin_tx_info.json for run {args.run_id}"
+                f"coinjoin-analysis_data/coinjoin_tx_info.json for run {target.run_id}"
             )
     if not args.dry_run and (
         getattr(args, "stage_exporters", False) or operations.stages_need_exporters(args)
@@ -245,7 +241,7 @@ def submit_s3_pbs_stages(
                 **common,
                 source_run_id=args.blocksci_cache_source_run_id,
                 image=blocksci_image,
-                command=operations.update_command(args.run_id),
+                command=operations.update_command(target.run_id),
                 external_bitcoin_datadir=Path(args.blocksci_external_bitcoin_datadir),
                 external_network=args.blocksci_network,
                 external_max_block=args.blocksci_max_block,
@@ -258,7 +254,7 @@ def submit_s3_pbs_stages(
                 **common,
                 image=blocksci_image,
                 command=operations.blocksci_command(
-                    args.run_id,
+                    target.run_id,
                     args.coinjoin_type,
                     args.min_input_count,
                     args.joinmarket_detector,
@@ -278,10 +274,10 @@ def submit_s3_pbs_stages(
                 external_bitcoin = getattr(args, "blocksci_external_bitcoin_datadir", None)
                 bitcoin_blocks_uri = getattr(args, "blocksci_bitcoin_blocks_uri", None)
                 external_index = getattr(args, "blocksci_external_blocksci_dir", None)
-                parse_command = operations.parse_command(args.run_id)
+                parse_command = operations.parse_command(target.run_id)
                 if external_bitcoin or bitcoin_blocks_uri:
                     parse_command = operations.parse_command(
-                        args.run_id,
+                        target.run_id,
                         coin_type=args.blocksci_network,
                         disk_path="/mnt/data",
                         max_block_expression=str(args.blocksci_max_block + 1),
@@ -305,7 +301,7 @@ def submit_s3_pbs_stages(
                 mode = f"blocksci-{task if task != 'detect' else 'analyze'}"
                 if task == "detect":
                     work_command = operations.blocksci_analysis_command(
-                        args.run_id,
+                        target.run_id,
                         args.coinjoin_type,
                         args.min_input_count,
                         args.joinmarket_detector,
@@ -315,7 +311,7 @@ def submit_s3_pbs_stages(
                     )
                 elif task == "external":
                     work_command = operations.blocksci_external_command(
-                        args.run_id,
+                        target.run_id,
                         args.coinjoin_type,
                         args.min_input_count,
                         args.joinmarket_detector,
@@ -325,7 +321,7 @@ def submit_s3_pbs_stages(
                     )
                 elif task == "script":
                     work_command = operations.blocksci_script_command(
-                        args.run_id,
+                        target.run_id,
                         args.coinjoin_type,
                         args.min_input_count,
                         args.joinmarket_detector,
@@ -378,7 +374,7 @@ def submit_s3_pbs_stages(
             **common,
             image=operations.resolve_report_image(args),
             command=operations.report_command(
-                args.run_id,
+                target.run_id,
                 args.coinjoin_type,
                 args.min_input_count,
                 args.joinmarket_detector,

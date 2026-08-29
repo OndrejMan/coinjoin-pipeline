@@ -17,6 +17,7 @@ from client.artifacts import (
     ArtifactTransportError,
     S3Access,
 )
+from client.kubernetes import kubeconfig_path
 
 
 def pbs_stages_need_exporters(args: argparse.Namespace) -> bool:
@@ -69,14 +70,10 @@ def stage_kubernetes_s3_run(
     upload_exporter_tree: Callable[[S3Access, str, str, Path], None],
 ) -> None:
     """Preflight and stage one fresh S3 prefix before a Kubernetes Job exists."""
-    kubeconfig_path = (
-        Path(args.kubeconfig).expanduser().resolve()
-        if args.kubeconfig
-        else Path.home() / ".kube/config"
-    )
+    resolved_kubeconfig = kubeconfig_path(args.kubeconfig)
     s3_preflight(access, args.artifact_uri)
     kubernetes_preflight(
-        kubeconfig_path, args.namespace, args.reuse_namespace, args.s3_secret_name
+        resolved_kubeconfig, args.namespace, args.reuse_namespace, args.s3_secret_name
     )
     ensure_empty_prefix(access, args.artifact_uri, args.run_id)
     exporters_dir = Path(compose_environment()["EXPORTERS_DIR"]).expanduser().resolve()

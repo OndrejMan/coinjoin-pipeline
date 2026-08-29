@@ -29,6 +29,11 @@ CONTROLLER_LOG_TAIL_LINES = 100
 CONTROLLER_FATAL_SUMMARY_MARKERS = ("Kubernetes CPU quota exhausted",)
 
 
+def kubeconfig_path(value: str | None) -> Path:
+    """Resolve an optional kubeconfig argument using the established default."""
+    return Path(value).expanduser().resolve() if value else Path.home() / ".kube" / "config"
+
+
 def run_kubectl_preflight_command(command: list[str]) -> str:
     try:
         completed = subprocess.run(

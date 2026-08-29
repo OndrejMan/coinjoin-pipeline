@@ -16,6 +16,7 @@ from client.artifacts import (  # noqa: E402
     ArtifactTransportError,
     PROBE_RUNNING,
     REQUIRED_EXPORTERS,
+    S3Target,
     STAGED_EXPORTERS_COMPLETE,
     STAGED_EXPORTERS_MISSING,
     STAGED_EXPORTERS_PARTIAL,
@@ -55,13 +56,14 @@ from client.wrapper import (  # noqa: E402
     validate_artifact_arguments,
 )
 
-COMMON = dict(
+S3_TARGET = S3Target(
     artifact_uri="s3://bucket/runs",
     run_id="run-1",
     endpoint_url="https://s3.cl4.du.cesnet.cz",
     credentials_file="/storage/user/.aws/credentials",
     profile="coinjoin",
 )
+COMMON = dict(target=S3_TARGET)
 
 
 _SUBMISSION_DIR: list[Path] = []
@@ -199,11 +201,11 @@ def s3_pbs_args(
     *, analysis: bool = True, blocksci: bool = True, mappings: bool = False
 ) -> SimpleNamespace:
     return SimpleNamespace(
-        artifact_uri=COMMON["artifact_uri"],
-        run_id=COMMON["run_id"],
-        s3_endpoint_url=COMMON["endpoint_url"],
-        s3_credentials_file=COMMON["credentials_file"],
-        s3_profile=COMMON["profile"],
+        artifact_uri=S3_TARGET.artifact_uri,
+        run_id=S3_TARGET.run_id,
+        s3_endpoint_url=S3_TARGET.endpoint_url,
+        s3_credentials_file=S3_TARGET.credentials_file,
+        s3_profile=S3_TARGET.profile,
         # main() resolves this to <runs-root>/<run-id>; point it at the test tmp
         # dir so the submit lock and .jobid files stay out of the real runs root.
         pbs_submission_dir=_SUBMISSION_DIR[0] if _SUBMISSION_DIR else None,
@@ -355,8 +357,8 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
 
 def test_external_bitcoin_parse_uses_shared_blocks_without_s3_emulator_inputs() -> None:
     with (
-        mock.patch("client.pbs.require_storage_path"),
-        mock.patch("client.pbs.require_existing_path"),
+        mock.patch("client.pbs.templates_s3.require_storage_path"),
+        mock.patch("client.pbs.templates_s3.require_existing_path"),
         mock.patch.object(Path, "is_dir", return_value=True),
     ):
         script = render_blocksci_parse_s3_pbs(
@@ -424,8 +426,8 @@ def test_cached_external_task_downloads_dumplings_baseline_and_uploads_report() 
 
 def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target() -> None:
     with (
-        mock.patch("client.pbs.require_storage_path"),
-        mock.patch("client.pbs.require_existing_path"),
+        mock.patch("client.pbs.templates_s3.require_storage_path"),
+        mock.patch("client.pbs.templates_s3.require_existing_path"),
         mock.patch.object(Path, "is_dir", return_value=True),
     ):
         script = render_blocksci_update_s3_pbs(
@@ -454,8 +456,8 @@ def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target(
 
 def test_external_blocksci_import_repackages_index_without_parser() -> None:
     with (
-        mock.patch("client.pbs.require_storage_path"),
-        mock.patch("client.pbs.require_existing_path"),
+        mock.patch("client.pbs.templates_s3.require_storage_path"),
+        mock.patch("client.pbs.templates_s3.require_existing_path"),
         mock.patch.object(Path, "is_file", return_value=True),
     ):
         script = render_blocksci_parse_s3_pbs(
@@ -810,8 +812,8 @@ def test_blocksci_s3_analysis_mode_uploads_precomputed_artifact() -> None:
 
 def test_frontend_submit_does_not_invoke_s5cmd() -> None:
     with (
-        mock.patch("client.pbs.require_qsub"),
-        mock.patch("client.pbs.submit_pbs_text", return_value="42.server") as qsub,
+        mock.patch("client.pbs.submission.require_qsub"),
+        mock.patch("client.pbs.submission.submit_pbs_text", return_value="42.server") as qsub,
         mock.patch("subprocess.run") as run,
     ):
         assert (
@@ -826,8 +828,8 @@ def test_frontend_submit_does_not_invoke_s5cmd() -> None:
 
 def test_blocksci_submission_forwards_analysis_dependency() -> None:
     with (
-        mock.patch("client.pbs.require_qsub"),
-        mock.patch("client.pbs.submit_pbs_text", return_value="blocksci.server") as qsub,
+        mock.patch("client.pbs.submission.require_qsub"),
+        mock.patch("client.pbs.submission.submit_pbs_text", return_value="blocksci.server") as qsub,
     ):
         assert (
             submit_blocksci_s3_pbs(
@@ -843,8 +845,8 @@ def test_blocksci_submission_forwards_analysis_dependency() -> None:
 
 def test_unified_report_submission_forwards_both_dependencies() -> None:
     with (
-        mock.patch("client.pbs.require_qsub"),
-        mock.patch("client.pbs.submit_pbs_text", return_value="report.server") as qsub,
+        mock.patch("client.pbs.submission.require_qsub"),
+        mock.patch("client.pbs.submission.submit_pbs_text", return_value="report.server") as qsub,
     ):
         assert (
             submit_unified_report_s3_pbs(
@@ -860,8 +862,8 @@ def test_unified_report_submission_forwards_both_dependencies() -> None:
 
 def test_mappings_submission_forwards_analysis_dependency() -> None:
     with (
-        mock.patch("client.pbs.require_qsub"),
-        mock.patch("client.pbs.submit_pbs_text", return_value="mappings.server") as qsub,
+        mock.patch("client.pbs.submission.require_qsub"),
+        mock.patch("client.pbs.submission.submit_pbs_text", return_value="mappings.server") as qsub,
     ):
         assert (
             submit_mappings_s3_pbs(
@@ -1482,8 +1484,8 @@ def test_pbs_from_s3_external_bitcoin_builds_network_specific_parse() -> None:
 
 def test_s3_submission_pipes_script_to_qsub_stdin() -> None:
     with (
-        mock.patch("client.pbs.require_qsub"),
-        mock.patch("client.pbs.subprocess.run") as run,
+        mock.patch("client.pbs.submission.require_qsub"),
+        mock.patch("client.pbs.submission.subprocess.run") as run,
     ):
         run.return_value = mock.Mock(returncode=0, stdout="7.server\n", stderr="")
         job_id = submit_blocksci_s3_pbs(
@@ -1534,11 +1536,13 @@ def test_rendered_pbs_script_calls_fake_s5cmd_only_on_compute_path() -> None:
         )
         fake_singularity.chmod(0o700)
         script = render_coinjoin_analysis_s3_pbs(
-            artifact_uri="s3://bucket/runs",
-            run_id="run-1",
-            endpoint_url="https://s3.cl4.du.cesnet.cz",
-            credentials_file=str(credentials),
-            profile="coinjoin",
+            S3Target(
+                artifact_uri="s3://bucket/runs",
+                run_id="run-1",
+                endpoint_url="https://s3.cl4.du.cesnet.cz",
+                credentials_file=str(credentials),
+                profile="coinjoin",
+            ),
             image="docker://coinjoin",
             command="true",
         )
