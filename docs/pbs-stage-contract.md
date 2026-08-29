@@ -80,10 +80,14 @@ manifest records `cache_operation`, `source_run_id`, and
 is not reusable as a target; choose another fresh `--run-id` after diagnosis.
 
 For parse-only `pbs-from-s3` submissions, the producer may replace emulator
-inputs with exactly one shared-storage source. An external Bitcoin source is a
-coin directory under `/storage` containing `blocks/`; the caller supplies a
-BlockSci network and inclusive maximum height. An external BlockSci source is
-a directory under `/storage` containing `config.json` and
+inputs with exactly one source. An external Bitcoin source is either a coin
+directory under `/storage` containing `blocks/`, or a
+`bitcoin-block-archive` S3 prefix containing `archive-manifest.json`, every
+listed `blk*.dat`, and its `.sha256` sidecar. The latter is restored to PBS
+scratch and fails closed unless manifest schema 1 is contiguous from
+`blk00000.dat`, every size and SHA-256 matches, and its recorded archive height
+covers the requested inclusive maximum. An external BlockSci source is a
+directory under `/storage` containing `config.json` and
 `parsed/chain/block.dat`; it is copied into the run layout and its
 `chainConfig.dataDirectory` is canonicalized before archiving. The cache
 manifest records `source_kind` and `network`. Cached `script` and `notebook`
@@ -92,7 +96,11 @@ emulator and exporter inputs required by the standard detector contract.
 
 `--blocksci-task parse` submits only the cache producer. `script` and
 `notebook` submit `blocksci-script` and `blocksci-notebook` work jobs and do
-not submit a unified report. A custom script is bound read-only from shared
+not submit a unified report. `external` downloads a Dumplings
+`coinjoin_tx_info.json` from `--external-baseline-uri`, reuses a verified cache,
+and writes an external-mode unified report. It compares agreement with that
+baseline; it never claims emulator ground-truth precision/recall. A custom
+script is bound read-only from shared
 `/storage` and its output is uploaded under
 `blocksci-custom-analysis_data/`. The notebook is intentionally a long-lived
 independent PBS job; its termination marker describes notebook shutdown, not

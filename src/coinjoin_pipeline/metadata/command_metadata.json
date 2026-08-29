@@ -1583,6 +1583,18 @@
           "required": false,
           "takes_value": true
         },
+        "--blocksci-bitcoin-blocks-uri": {
+          "aliases": [
+            "--blocksci-bitcoin-blocks-uri"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-bitcoin-blocks-uri",
+          "help": "S3 prefix produced by bitcoin-block-archive containing archive-manifest.json, blk*.dat, and SHA-256 sidecars.",
+          "metavar": "S3_URI",
+          "required": false,
+          "takes_value": true
+        },
         "--blocksci-cache-source-run-id": {
           "aliases": [
             "--blocksci-cache-source-run-id"
@@ -1693,11 +1705,12 @@
             "parse",
             "update",
             "script",
-            "notebook"
+            "notebook",
+            "external"
           ],
           "default": "detect",
           "flag": "--blocksci-task",
-          "help": "BlockSci work to run; parse publishes a reusable cache and update incrementally advances an external-Bitcoin cache (default: detect).",
+          "help": "BlockSci work to run; parse publishes a reusable cache and update incrementally advances an external-Bitcoin cache; external builds a BlockSci-vs-Dumplings mainnet report (default: detect).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -1821,6 +1834,18 @@
           "help": "CoinJoin emulator engine to run. Select explicitly: wasabi or joinmarket.",
           "metavar": null,
           "required": true,
+          "takes_value": true
+        },
+        "--external-baseline-uri": {
+          "aliases": [
+            "--external-baseline-uri"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--external-baseline-uri",
+          "help": "S3 object containing Dumplings coinjoin_tx_info.json for --blocksci-task external.",
+          "metavar": "S3_URI",
+          "required": false,
           "takes_value": true
         },
         "--image-prefix": {
@@ -2981,6 +3006,18 @@
           "required": false,
           "takes_value": true
         },
+        "--blocksci-bitcoin-blocks-uri": {
+          "aliases": [
+            "--blocksci-bitcoin-blocks-uri"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-bitcoin-blocks-uri",
+          "help": "S3 prefix produced by bitcoin-block-archive containing archive-manifest.json, blk*.dat, and SHA-256 sidecars.",
+          "metavar": "S3_URI",
+          "required": false,
+          "takes_value": true
+        },
         "--blocksci-cache-source-run-id": {
           "aliases": [
             "--blocksci-cache-source-run-id"
@@ -3091,11 +3128,12 @@
             "parse",
             "update",
             "script",
-            "notebook"
+            "notebook",
+            "external"
           ],
           "default": "detect",
           "flag": "--blocksci-task",
-          "help": "BlockSci work to run; parse publishes a reusable cache and update incrementally advances an external-Bitcoin cache (default: detect).",
+          "help": "BlockSci work to run; parse publishes a reusable cache and update incrementally advances an external-Bitcoin cache; external builds a BlockSci-vs-Dumplings mainnet report (default: detect).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -3168,6 +3206,18 @@
           "help": "CoinJoin emulator engine to run. Select explicitly: wasabi or joinmarket.",
           "metavar": null,
           "required": true,
+          "takes_value": true
+        },
+        "--external-baseline-uri": {
+          "aliases": [
+            "--external-baseline-uri"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--external-baseline-uri",
+          "help": "S3 object containing Dumplings coinjoin_tx_info.json for --blocksci-task external.",
+          "metavar": "S3_URI",
+          "required": false,
           "takes_value": true
         },
         "--joinmarket-detector": {

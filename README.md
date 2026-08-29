@@ -234,7 +234,11 @@ and full-run `--blocksci-script` are not supported in S3 mode. Optional
 the unified-report job waits for and embeds its uploaded mapping results. The
 `.pipeline.lock` in the runs root is held for the whole duration — one S3
 full-run at a time per frontend. The end-to-end test for this path is
-`tests/test-kubernetes-s3-minio.sh` (k3d + local PBS rig + MinIO).
+`tests/test-kubernetes-s3-minio.sh` (k3d + local PBS rig + MinIO). The
+separate archive contract is `tests/test-bitcoin-block-archive-s3-minio.sh`:
+it downloads only public mainnet heights 0 and 1, builds and runs the
+`bitcoin-block-archive` Docker image to archive them into MinIO using S3
+environment secrets, and verifies the PBS BlockSci S3 restore and parse.
 
 The same run can be described in YAML. `--fromConfiguration` is retained as a
 compatibility spelling; new scripts may use `--from-configuration`. The
@@ -272,6 +276,20 @@ thresholds, and leaves the larger global/mainnet PBS defaults unchanged.
 # Reuses that run ID and cache to produce joinmarket-mainnet-summary.json.
 ./runIt.sh \
   --from-configuration examples/metacentrum-mainnet-analyze.yaml
+```
+
+When the Bitcoin Core node is pruned after archival by
+`bitcoin-block-archive`, use the S3 archive variant instead. The parser job
+downloads the complete archive to PBS scratch, requires a schema-1
+`archive-manifest.json` with contiguous `blk00000.dat…` entries, verifies each
+object and its `.sha256` sidecar, and refuses a requested height not covered by
+the manifest. The second job compares the cached BlockSci index with a
+`coinjoin_tx_info.json` produced from Dumplings; it reports baseline agreement,
+not ground-truth precision/recall.
+
+```bash
+./runIt.sh --from-configuration examples/metacentrum-mainnet-s3-blocks-parse.yaml
+./runIt.sh --from-configuration examples/metacentrum-mainnet-dumplings-report.yaml
 ```
 
 Before submission, set the same `run_id` and immutable `images.version` in

@@ -184,16 +184,16 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
             errors.append(
                 "--blocksci-task update requires --blocksciPbs without --analysisPbs"
             )
-    elif blocksci_task != "detect":
+    elif blocksci_task not in {"detect", "external"}:
         if action != "pbs-from-s3":
-            errors.append("BlockSci script and notebook tasks are submitted with pbs-from-s3")
+            errors.append("BlockSci reusable tasks are submitted with pbs-from-s3")
         if blocksci_workflow == "combined":
             errors.append(
-                "BlockSci script and notebook tasks require --blocksci-workflow reusable or cached"
+                "BlockSci reusable tasks require --blocksci-workflow reusable or cached"
             )
         if has_option(argv, "--analysisPbs") or not has_option(argv, "--blocksciPbs"):
             errors.append(
-                "BlockSci script and notebook tasks require --blocksciPbs without --analysisPbs"
+                "BlockSci reusable tasks require --blocksciPbs without --analysisPbs"
             )
     if action == "pbs-from-s3" and blocksci_task == "script" and not (
         has_option(argv, "--blocksci-script") or has_option(argv, "--blocksciScript")
@@ -208,6 +208,7 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
     if blocksci_task != "notebook" and has_option(argv, "--blocksci-notebook-port"):
         errors.append("--blocksci-notebook-port requires --blocksci-task notebook")
     external_bitcoin = has_option(argv, "--blocksci-external-bitcoin-datadir")
+    bitcoin_blocks_uri = has_option(argv, "--blocksci-bitcoin-blocks-uri")
     external_index = has_option(argv, "--blocksci-external-blocksci-dir")
     external_network = has_option(argv, "--blocksci-network")
     external_max_block = has_option(argv, "--blocksci-max-block")
@@ -224,12 +225,12 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
             errors.append("--blocksci-cache-source-run-id must differ from target --run-id")
     elif source_cache_run_id:
         errors.append("--blocksci-cache-source-run-id requires --blocksci-task update")
-    if external_bitcoin and external_index:
+    if sum((external_bitcoin, bitcoin_blocks_uri, external_index)) > 1:
         errors.append(
-            "choose either --blocksci-external-bitcoin-datadir or "
-            "--blocksci-external-blocksci-dir, not both"
+            "choose only one BlockSci source: --blocksci-external-bitcoin-datadir, "
+            "--blocksci-bitcoin-blocks-uri, or --blocksci-external-blocksci-dir"
         )
-    if external_bitcoin or external_index:
+    if external_bitcoin or bitcoin_blocks_uri or external_index:
         parse_source = (
             action == "pbs-from-s3"
             and blocksci_workflow == "reusable"
@@ -246,17 +247,29 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
             errors.append(
                 "external BlockSci sources require either reusable parse or cached update"
             )
-    if external_bitcoin:
+    if external_bitcoin or bitcoin_blocks_uri:
         if not external_network or not external_max_block:
             errors.append(
-                "--blocksci-external-bitcoin-datadir requires --blocksci-network "
-                "and --blocksci-max-block"
+                "an external Bitcoin source requires --blocksci-network and "
+                "--blocksci-max-block"
             )
     elif external_network or external_max_block:
         errors.append(
             "--blocksci-network and --blocksci-max-block require "
-            "--blocksci-external-bitcoin-datadir"
+            "an external Bitcoin source"
         )
+    external_baseline_uri = has_option(argv, "--external-baseline-uri")
+    if blocksci_task == "external":
+        if action != "pbs-from-s3" or blocksci_workflow == "combined":
+            errors.append(
+                "--blocksci-task external requires pbs-from-s3 with reusable or cached workflow"
+            )
+        if has_option(argv, "--analysisPbs") or not has_option(argv, "--blocksciPbs"):
+            errors.append("--blocksci-task external requires --blocksciPbs without --analysisPbs")
+        if not external_baseline_uri:
+            errors.append("--blocksci-task external requires --external-baseline-uri")
+    elif external_baseline_uri:
+        errors.append("--external-baseline-uri requires --blocksci-task external")
     if action == "pbs-from-s3":
         for flag in ("--run-id", "--artifact-uri", "--s3-endpoint-url", "--s3-credentials-file", "--s3-profile", "--engine"):
             if not has_option(argv, flag):

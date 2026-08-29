@@ -28,6 +28,7 @@ from client.kubernetes import (  # noqa: E402
 )
 from client.pbs import (  # noqa: E402
     blocksci_analysis_pbs_command,
+    blocksci_external_report_pbs_command,
     blocksci_export_pbs_command,
     blocksci_parse_pbs_command,
     blocksci_update_pbs_command,
@@ -223,7 +224,9 @@ def s3_pbs_args(
         blocksci_notebooks_dir=None,
         blocksci_cache_source_run_id=None,
         blocksci_external_bitcoin_datadir=None,
+        blocksci_bitcoin_blocks_uri=None,
         blocksci_external_blocksci_dir=None,
+        external_baseline_uri=None,
         blocksci_network=None,
         blocksci_max_block=None,
     )
@@ -377,6 +380,46 @@ def test_external_bitcoin_parse_uses_shared_blocks_without_s3_emulator_inputs() 
     assert '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"' not in script
     assert '"$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/' not in script
     assert '"external-bitcoin" "bitcoin" "$EXPORTED_MAX_BLOCK"' in script
+
+
+def test_s3_bitcoin_archive_parse_verifies_manifest_checksums_and_height() -> None:
+    script = render_blocksci_parse_s3_pbs(
+        **COMMON,
+        image="docker://blocksci",
+        command=blocksci_parse_pbs_command(
+            "run-1", coin_type="bitcoin", disk_path="/mnt/data", max_block_expression="900001"
+        ),
+        bitcoin_blocks_uri="s3://bucket/bitcoin-mainnet/blocks",
+        external_network="bitcoin",
+        external_max_block=900000,
+    )
+
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert 'sync "$BITCOIN_BLOCKS_URI/*" "$BITCOIN_DATADIR/blocks/"' in script
+    assert "archive-manifest.json" in script
+    assert "contiguous from blk00000.dat" in script
+    assert "checksum mismatch" in script
+    assert "coverage through requested --blocksci-max-block" in script
+    assert '"bitcoin-blocks-s3" "bitcoin" "$EXPORTED_MAX_BLOCK"' in script
+
+
+def test_cached_external_task_downloads_dumplings_baseline_and_uploads_report() -> None:
+    command = blocksci_external_report_pbs_command(
+        "run-1", "joinmarket", None, "definite", 5000, 0.00004, 200000
+    )
+    script = render_blocksci_analyze_s3_pbs(
+        **COMMON,
+        image="docker://blocksci",
+        command=command,
+        mode="blocksci-external",
+        external_baseline_uri="s3://bucket/dumplings/coinjoin_tx_info.json",
+    )
+
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert "--mode external --network bitcoin" in script
+    assert "coinjoin_tx_info.json" in script
+    assert '"$RUN_WORK/coinjoinPipeline_data/"' in script
+    assert ".pbs/blocksci-external.done" in script
 
 
 def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target() -> None:

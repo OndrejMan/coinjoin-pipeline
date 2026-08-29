@@ -144,6 +144,7 @@ try:
         PBSError,
         blocksci_analysis_pbs_command,
         blocksci_export_pbs_command,
+        blocksci_external_report_pbs_command,
         blocksci_notebook_pbs_command,
         blocksci_parse_pbs_command,
         blocksci_pbs_command,
@@ -193,6 +194,7 @@ except ImportError:
         PBSError,
         blocksci_analysis_pbs_command,
         blocksci_export_pbs_command,
+        blocksci_external_report_pbs_command,
         blocksci_notebook_pbs_command,
         blocksci_parse_pbs_command,
         blocksci_pbs_command,
@@ -1623,11 +1625,12 @@ def add_blocksci_reusable_arguments(arg_parser: argparse.ArgumentParser) -> None
     )
     arg_parser.add_argument(
         "--blocksci-task",
-        choices=("detect", "parse", "update", "script", "notebook"),
+        choices=("detect", "parse", "update", "script", "notebook", "external"),
         default="detect",
         help=(
             "BlockSci work to run; parse publishes a reusable cache and update "
-            "incrementally advances an external-Bitcoin cache (default: detect)."
+            "incrementally advances an external-Bitcoin cache; external builds a "
+            "BlockSci-vs-Dumplings mainnet report (default: detect)."
         ),
     )
     arg_parser.add_argument(
@@ -1661,6 +1664,14 @@ def add_blocksci_reusable_arguments(arg_parser: argparse.ArgumentParser) -> None
         ),
     )
     arg_parser.add_argument(
+        "--blocksci-bitcoin-blocks-uri",
+        metavar="S3_URI",
+        help=(
+            "S3 prefix produced by bitcoin-block-archive containing "
+            "archive-manifest.json, blk*.dat, and SHA-256 sidecars."
+        ),
+    )
+    arg_parser.add_argument(
         "--blocksci-external-blocksci-dir",
         metavar="PATH",
         help=(
@@ -1679,6 +1690,14 @@ def add_blocksci_reusable_arguments(arg_parser: argparse.ArgumentParser) -> None
         type=non_negative_int,
         default=None,
         help="Inclusive maximum block height for external Bitcoin parsing.",
+    )
+    arg_parser.add_argument(
+        "--external-baseline-uri",
+        metavar="S3_URI",
+        help=(
+            "S3 object containing Dumplings coinjoin_tx_info.json for "
+            "--blocksci-task external."
+        ),
     )
 
 
@@ -2327,13 +2346,13 @@ def validate_artifact_arguments(parser: argparse.ArgumentParser, args: argparse.
             parser.error("--blocksci-task update requires pbs-from-s3 --blocksci-workflow cached")
         if getattr(args, "analysisPbs", False) or not getattr(args, "blocksciPbs", False):
             parser.error("--blocksci-task update requires --blocksciPbs without --analysisPbs")
-    elif blocksci_task != "detect":
+    elif blocksci_task not in {"detect", "external"}:
         if args.action != "pbs-from-s3":
-            parser.error("BlockSci script and notebook tasks are submitted with pbs-from-s3")
+            parser.error("BlockSci reusable tasks are submitted with pbs-from-s3")
         if blocksci_workflow == "combined":
-            parser.error("BlockSci script and notebook tasks require --blocksci-workflow reusable or cached")
+            parser.error("BlockSci reusable tasks require --blocksci-workflow reusable or cached")
         if getattr(args, "analysisPbs", False) or not getattr(args, "blocksciPbs", False):
-            parser.error("BlockSci script and notebook tasks require --blocksciPbs without --analysisPbs")
+            parser.error("BlockSci reusable tasks require --blocksciPbs without --analysisPbs")
     if args.action == "pbs-from-s3" and blocksci_task == "script" and not getattr(args, "blocksci_script", None):
         parser.error("--blocksci-task script requires --blocksci-script")
     if args.action == "pbs-from-s3" and blocksci_task != "script" and getattr(args, "blocksci_script", None):
@@ -2347,6 +2366,7 @@ def validate_artifact_arguments(parser: argparse.ArgumentParser, args: argparse.
     if not 1024 <= notebook_port <= 65535:
         parser.error("--blocksci-notebook-port must be between 1024 and 65535")
     external_bitcoin = getattr(args, "blocksci_external_bitcoin_datadir", None)
+    bitcoin_blocks_uri = getattr(args, "blocksci_bitcoin_blocks_uri", None)
     external_index = getattr(args, "blocksci_external_blocksci_dir", None)
     external_network = getattr(args, "blocksci_network", None)
     external_max_block = getattr(args, "blocksci_max_block", None)
@@ -2360,12 +2380,12 @@ def validate_artifact_arguments(parser: argparse.ArgumentParser, args: argparse.
             parser.error("--blocksci-task update does not support --blocksci-external-blocksci-dir")
     elif source_cache_run_id:
         parser.error("--blocksci-cache-source-run-id requires --blocksci-task update")
-    if external_bitcoin and external_index:
+    if sum(bool(value) for value in (external_bitcoin, bitcoin_blocks_uri, external_index)) > 1:
         parser.error(
-            "choose either --blocksci-external-bitcoin-datadir or "
-            "--blocksci-external-blocksci-dir, not both"
+            "choose only one BlockSci source: --blocksci-external-bitcoin-datadir, "
+            "--blocksci-bitcoin-blocks-uri, or --blocksci-external-blocksci-dir"
         )
-    if external_bitcoin or external_index:
+    if external_bitcoin or bitcoin_blocks_uri or external_index:
         parse_source = (
             args.action == "pbs-from-s3"
             and blocksci_workflow == "reusable"
@@ -2382,17 +2402,27 @@ def validate_artifact_arguments(parser: argparse.ArgumentParser, args: argparse.
             parser.error(
                 "external BlockSci sources require either reusable parse or cached update"
             )
-    if external_bitcoin:
+    if external_bitcoin or bitcoin_blocks_uri:
         if external_network is None or external_max_block is None:
             parser.error(
-                "--blocksci-external-bitcoin-datadir requires --blocksci-network "
-                "and --blocksci-max-block"
+                "an external Bitcoin source requires --blocksci-network and "
+                "--blocksci-max-block"
             )
     elif external_network is not None or external_max_block is not None:
         parser.error(
             "--blocksci-network and --blocksci-max-block require "
-            "--blocksci-external-bitcoin-datadir"
+            "an external Bitcoin source"
         )
+    baseline_uri = getattr(args, "external_baseline_uri", None)
+    if blocksci_task == "external":
+        if args.action != "pbs-from-s3" or blocksci_workflow == "combined":
+            parser.error("--blocksci-task external requires pbs-from-s3 with reusable or cached workflow")
+        if getattr(args, "analysisPbs", False) or not getattr(args, "blocksciPbs", False):
+            parser.error("--blocksci-task external requires --blocksciPbs without --analysisPbs")
+        if not baseline_uri:
+            parser.error("--blocksci-task external requires --external-baseline-uri")
+    elif baseline_uri:
+        parser.error("--external-baseline-uri requires --blocksci-task external")
     if args.action == "pbs-from-s3":
         args.artifact_backend = "s3"
         required = (
@@ -2848,11 +2878,12 @@ def _run_pbs_from_s3(
                 external_bitcoin = getattr(
                     args, "blocksci_external_bitcoin_datadir", None
                 )
+                bitcoin_blocks_uri = getattr(args, "blocksci_bitcoin_blocks_uri", None)
                 external_index = getattr(
                     args, "blocksci_external_blocksci_dir", None
                 )
                 parse_command = blocksci_parse_pbs_command(args.run_id)
-                if external_bitcoin:
+                if external_bitcoin or bitcoin_blocks_uri:
                     parse_command = blocksci_parse_pbs_command(
                         args.run_id,
                         coin_type=args.blocksci_network,
@@ -2867,6 +2898,7 @@ def _run_pbs_from_s3(
                     external_bitcoin_datadir=(
                         Path(external_bitcoin) if external_bitcoin else None
                     ),
+                    bitcoin_blocks_uri=bitcoin_blocks_uri,
                     external_blocksci_dir=(
                         Path(external_index) if external_index else None
                     ),
@@ -2879,6 +2911,16 @@ def _run_pbs_from_s3(
                 mode = f"blocksci-{task if task != 'detect' else 'analyze'}"
                 if task == "detect":
                     work_command = blocksci_analysis_pbs_command(
+                        args.run_id,
+                        args.coinjoin_type,
+                        args.min_input_count,
+                        args.joinmarket_detector,
+                        args.joinmarket_min_base_fee,
+                        args.joinmarket_percentage_fee,
+                        args.joinmarket_max_depth,
+                    )
+                elif task == "external":
+                    work_command = blocksci_external_report_pbs_command(
                         args.run_id,
                         args.coinjoin_type,
                         args.min_input_count,
@@ -2909,6 +2951,9 @@ def _run_pbs_from_s3(
                     mode=mode,
                     user_script=(
                         Path(args.blocksci_script) if task == "script" else None
+                    ),
+                    external_baseline_uri=(
+                        args.external_baseline_uri if task == "external" else None
                     ),
                     notebooks_dir=(
                         Path(args.blocksci_notebooks_dir)
@@ -2998,7 +3043,7 @@ def pbs_stages_need_exporters(args: argparse.Namespace) -> bool:
     task = getattr(args, "blocksci_task", "detect")
     if task == "update":
         return False
-    return getattr(args, "blocksci_workflow", "combined") == "combined" or task == "detect"
+    return getattr(args, "blocksci_workflow", "combined") == "combined" or task in {"detect", "external"}
 
 
 def ensure_staged_exporters(args: argparse.Namespace) -> None:

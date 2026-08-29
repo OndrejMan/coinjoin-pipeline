@@ -732,6 +732,7 @@ def render_blocksci_parse_s3_pbs(
     scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
     walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
     external_bitcoin_datadir: Path | None = None,
+    bitcoin_blocks_uri: str | None = None,
     external_blocksci_dir: Path | None = None,
     external_network: str | None = None,
     external_max_block: int | None = None,
@@ -739,8 +740,8 @@ def render_blocksci_parse_s3_pbs(
     """Render a parser-only job that publishes a checksummed reusable index."""
     require_safe_image(image)
     require_safe_pbs_resources(ncpus, mem, scratch, walltime)
-    if external_bitcoin_datadir is not None and external_blocksci_dir is not None:
-        raise PBSError("Choose either an external Bitcoin datadir or an external BlockSci index, not both")
+    if sum(value is not None for value in (external_bitcoin_datadir, bitcoin_blocks_uri, external_blocksci_dir)) > 1:
+        raise PBSError("Choose only one external Bitcoin or BlockSci source")
 
     download_inputs = ""
     source_kind = "emulator"
@@ -773,6 +774,74 @@ def render_blocksci_parse_s3_pbs(
         )
         produce_index = (
             'echo "[blocksci-parse] parsing external chain through block $EXPORTED_MAX_BLOCK"\n'
+            'singularity exec \\\n'
+            '  --bind "$RUNS_ROOT:/runs/emulation/logs:rw" \\\n'
+            '  --bind "$BITCOIN_DATADIR:/mnt/data:ro" \\\n'
+            '  --env PBS_RUN_ID="$RUN_ID" --env PBS_EXPORTED_MAX_BLOCK="$EXPORTED_MAX_BLOCK" "$IMAGE" \\\n'
+            f"  bash -c 'cd \"/runs/emulation/logs/$PBS_RUN_ID\" && {command}'"
+        )
+    elif bitcoin_blocks_uri is not None:
+        try:
+            blocks_uri = validate_artifact_uri(bitcoin_blocks_uri)
+        except ValueError as error:
+            raise PBSError(f"Invalid Bitcoin block archive URI: {error}") from error
+        if external_network not in {"bitcoin", "bitcoin_testnet", "bitcoin_regtest"}:
+            raise PBSError("External BlockSci network must be bitcoin, bitcoin_testnet, or bitcoin_regtest")
+        if isinstance(external_max_block, bool) or not isinstance(external_max_block, int) or external_max_block < 0:
+            raise PBSError("External Bitcoin parsing requires a non-negative --blocksci-max-block")
+        source_kind = "bitcoin-blocks-s3"
+        network = external_network
+        source_description = "verified Bitcoin block archive from S3"
+        blocks_uri_assignment = shell_assignment("BITCOIN_BLOCKS_URI", blocks_uri).split("=", 1)[1]
+        prepare_source = f'''BITCOIN_BLOCKS_URI={blocks_uri_assignment}
+EXPORTED_MAX_BLOCK={external_max_block}
+BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"
+mkdir -p "$BITCOIN_DATADIR/blocks"
+{render_s5cmd_sync('"$BITCOIN_BLOCKS_URI/*"', '"$BITCOIN_DATADIR/blocks/"')}
+python3 - "$BITCOIN_DATADIR/blocks/archive-manifest.json" "$BITCOIN_DATADIR/blocks" "$EXPORTED_MAX_BLOCK" <<'PY'
+import hashlib
+import json
+import re
+import sys
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+blocks_dir = Path(sys.argv[2])
+requested_height = int(sys.argv[3])
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+if manifest.get("schema_version") != 1 or not manifest.get("contiguous_from_zero"):
+    raise SystemExit("Bitcoin block archive manifest is not schema-1 contiguous from blk00000.dat")
+archived_max_height = manifest.get("archived_max_height")
+if not isinstance(archived_max_height, int) or archived_max_height < requested_height:
+    raise SystemExit("Bitcoin block archive does not prove coverage through requested --blocksci-max-block")
+entries = manifest.get("block_files")
+if not isinstance(entries, list) or not entries:
+    raise SystemExit("Bitcoin block archive manifest has no block files")
+for number, entry in enumerate(entries):
+    if not isinstance(entry, dict):
+        raise SystemExit("Bitcoin block archive manifest has an invalid entry")
+    name, checksum, size = entry.get("file"), entry.get("sha256"), entry.get("size")
+    if name != f"blk{{number:05d}}.dat" or not isinstance(size, int) or size < 0:
+        raise SystemExit("Bitcoin block archive manifest has a gap or invalid file size")
+    if not isinstance(checksum, str) or re.fullmatch(r"[0-9a-f]{{64}}", checksum) is None:
+        raise SystemExit("Bitcoin block archive manifest has an invalid checksum")
+    block_path = blocks_dir / name
+    sidecar = blocks_dir / f"{{name}}.sha256"
+    if not block_path.is_file() or block_path.stat().st_size != size:
+        raise SystemExit(f"Bitcoin block archive is missing or changed: {{name}}")
+    expected_sidecar = f"{{checksum}}  {{name}}\\n"
+    if not sidecar.is_file() or sidecar.read_text(encoding="utf-8") != expected_sidecar:
+        raise SystemExit(f"Bitcoin block archive sidecar is invalid: {{name}}.sha256")
+    hasher = hashlib.sha256()
+    with block_path.open("rb") as stream:
+        while chunk := stream.read(8 * 1024 * 1024):
+            hasher.update(chunk)
+    digest = hasher.hexdigest()
+    if digest != checksum:
+        raise SystemExit(f"Bitcoin block archive checksum mismatch: {{name}}")
+PY'''
+        produce_index = (
+            'echo "[blocksci-parse] parsing verified S3 block archive through block $EXPORTED_MAX_BLOCK"\n'
             'singularity exec \\\n'
             '  --bind "$RUNS_ROOT:/runs/emulation/logs:rw" \\\n'
             '  --bind "$BITCOIN_DATADIR:/mnt/data:ro" \\\n'
@@ -968,6 +1037,7 @@ def render_blocksci_analyze_s3_pbs(
     *,
     mode: str = "blocksci-analyze",
     user_script: Path | None = None,
+    external_baseline_uri: str | None = None,
     notebooks_dir: Path | None = None,
     notebook_port: int = 8888,
     ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
@@ -976,7 +1046,7 @@ def render_blocksci_analyze_s3_pbs(
     walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
 ) -> str:
     """Render analysis, custom-script, or notebook work over a cached index."""
-    if mode not in {"blocksci-analyze", "blocksci-script", "blocksci-notebook"}:
+    if mode not in {"blocksci-analyze", "blocksci-script", "blocksci-notebook", "blocksci-external"}:
         raise PBSError(f"Unsupported reusable BlockSci mode: {mode}")
     require_safe_image(image)
     require_safe_pbs_resources(ncpus, mem, scratch, walltime)
@@ -1002,6 +1072,22 @@ def render_blocksci_analyze_s3_pbs(
                 '"$RUN_WORK/blocksci-analysis_data/"',
                 '"$ARTIFACT_URI/$RUN_ID/blocksci-analysis_data/"',
             )
+        )
+    elif mode == "blocksci-external":
+        if external_baseline_uri is None:
+            raise PBSError("External BlockSci report requires a Dumplings baseline URI")
+        try:
+            baseline_uri = validate_artifact_uri(external_baseline_uri)
+        except ValueError as error:
+            raise PBSError(f"Invalid Dumplings baseline URI: {error}") from error
+        output_check = (
+            'test -f "$RUN_WORK/coinjoinPipeline_data/unified_report.json" || {\n'
+            '  echo "External BlockSci report did not produce unified_report.json" >&2\n'
+            "  exit 1\n"
+            "}"
+        )
+        upload_sources.append(
+            ('"$RUN_WORK/coinjoinPipeline_data/"', '"$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"')
         )
     elif mode == "blocksci-script":
         if user_script is None:
@@ -1072,6 +1158,20 @@ def render_blocksci_analyze_s3_pbs(
                 render_s5cmd_sync(
                     '"$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/*"',
                     '"$RUN_WORK/coinjoin_emulator_data/"',
+                ),
+            )
+        )
+    elif mode == "blocksci-external":
+        downloads.extend(
+            (
+                render_s5cmd_sync(
+                    '"$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/*"',
+                    '"$RUN_WORK/.pipeline/exporters/"',
+                ),
+                'mkdir -p "$RUN_WORK/coinjoin-analysis_data"',
+                render_s5cmd_cp(
+                    shell_assignment("DUMPLINGS_BASELINE_URI", baseline_uri).split("=", 1)[1],
+                    '"$RUN_WORK/coinjoin-analysis_data/coinjoin_tx_info.json"',
                 ),
             )
         )
@@ -1320,6 +1420,7 @@ def submit_blocksci_parse_s3_pbs(
     scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
     walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
     external_bitcoin_datadir: Path | None = None,
+    bitcoin_blocks_uri: str | None = None,
     external_blocksci_dir: Path | None = None,
     external_network: str | None = None,
     external_max_block: int | None = None,
@@ -1338,6 +1439,7 @@ def submit_blocksci_parse_s3_pbs(
         scratch=scratch,
         walltime=walltime,
         external_bitcoin_datadir=external_bitcoin_datadir,
+        bitcoin_blocks_uri=bitcoin_blocks_uri,
         external_blocksci_dir=external_blocksci_dir,
         external_network=external_network,
         external_max_block=external_max_block,
@@ -1395,6 +1497,7 @@ def submit_blocksci_analyze_s3_pbs(
     *,
     mode: str = "blocksci-analyze",
     user_script: Path | None = None,
+    external_baseline_uri: str | None = None,
     notebooks_dir: Path | None = None,
     notebook_port: int = 8888,
     ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
@@ -1414,6 +1517,7 @@ def submit_blocksci_analyze_s3_pbs(
         command,
         mode=mode,
         user_script=user_script,
+        external_baseline_uri=external_baseline_uri,
         notebooks_dir=notebooks_dir,
         notebook_port=notebook_port,
         ncpus=ncpus,
@@ -1826,6 +1930,31 @@ def blocksci_analysis_pbs_command(
         f"--joinmarket-max-depth {joinmarket_max_depth}"
     )
     return command
+
+
+def blocksci_external_report_pbs_command(
+    run_id: str,
+    coinjoin_type: str,
+    min_input_count: int | None,
+    joinmarket_detector: str,
+    joinmarket_min_base_fee: int,
+    joinmarket_percentage_fee: float,
+    joinmarket_max_depth: int,
+) -> str:
+    """Build a mainnet report against a Dumplings baseline over cached BlockSci."""
+    run_dir = f"/runs/emulation/logs/{run_id}"
+    config = f"{run_dir}/blocksci_data/config.json"
+    return (
+        f"{BLOCKSCI_IMAGE_PYTHON_COMMAND} /mnt/exporters/unified_report.py "
+        f"--config {config} --runs-root /runs/emulation/logs --run-dir {run_dir} "
+        "--mode external --network bitcoin "
+        f"--coinjoin-type {coinjoin_type} "
+        f"--min-input-count {min_input_count if min_input_count is not None else 'default'} "
+        f"--joinmarket-detector {joinmarket_detector} "
+        f"--joinmarket-min-base-fee {joinmarket_min_base_fee} "
+        f"--joinmarket-percentage-fee {joinmarket_percentage_fee} "
+        f"--joinmarket-max-depth {joinmarket_max_depth} --markdown"
+    )
 
 
 def blocksci_script_pbs_command(

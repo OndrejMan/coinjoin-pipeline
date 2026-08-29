@@ -34,7 +34,7 @@ CoinjoinType = Literal["wasabi2", "joinmarket"]
 ArtifactBackend = Literal["shared-storage", "s3"]
 ContainerRuntime = Literal["docker", "podman"]
 BlockSciWorkflow = Literal["combined", "reusable", "cached"]
-BlockSciTask = Literal["detect", "parse", "update", "script", "notebook"]
+BlockSciTask = Literal["detect", "parse", "update", "script", "notebook", "external"]
 BlockSciNetwork = Literal["bitcoin", "bitcoin_testnet", "bitcoin_regtest"]
 JoinMarketDetector = Literal["possible", "definite"]
 MappingMode = Literal["numeric", "all"]
@@ -334,7 +334,9 @@ class BlockSciConfiguration:
     notebook_port: int | None = None
     notebooks_dir: str | None = None
     external_bitcoin_datadir: str | None = None
+    bitcoin_blocks_uri: str | None = None
     external_blocksci_dir: str | None = None
+    external_baseline_uri: str | None = None
     network: BlockSciNetwork | None = None
     max_block: int | None = None
 
@@ -351,7 +353,9 @@ class BlockSciConfiguration:
                 "notebook_port",
                 "notebooks_dir",
                 "external_bitcoin_datadir",
+                "bitcoin_blocks_uri",
                 "external_blocksci_dir",
+                "external_baseline_uri",
                 "network",
                 "max_block",
             },
@@ -373,7 +377,7 @@ class BlockSciConfiguration:
                     data,
                     "task",
                     "blocksci",
-                    ("detect", "parse", "update", "script", "notebook"),
+                    ("detect", "parse", "update", "script", "notebook", "external"),
                 ),
             ),
             script=_optional_string(data, "script", "blocksci"),
@@ -387,9 +391,11 @@ class BlockSciConfiguration:
             external_bitcoin_datadir=_optional_string(
                 data, "external_bitcoin_datadir", "blocksci"
             ),
+            bitcoin_blocks_uri=_optional_string(data, "bitcoin_blocks_uri", "blocksci"),
             external_blocksci_dir=_optional_string(
                 data, "external_blocksci_dir", "blocksci"
             ),
+            external_baseline_uri=_optional_string(data, "external_baseline_uri", "blocksci"),
             network=cast(
                 BlockSciNetwork | None,
                 _choice(
@@ -418,11 +424,13 @@ class BlockSciConfiguration:
             "--blocksci-external-bitcoin-datadir",
             self.external_bitcoin_datadir,
         )
+        _append_option(arguments, "--blocksci-bitcoin-blocks-uri", self.bitcoin_blocks_uri)
         _append_option(
             arguments,
             "--blocksci-external-blocksci-dir",
             self.external_blocksci_dir,
         )
+        _append_option(arguments, "--external-baseline-uri", self.external_baseline_uri)
         _append_option(arguments, "--blocksci-network", self.network)
         _append_option(arguments, "--blocksci-max-block", self.max_block)
 

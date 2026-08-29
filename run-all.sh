@@ -406,6 +406,7 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
     "tests/test-kubernetes-pbs-analysis.sh"
     "tests/test-parallel-pbs-analysis.sh"
     "tests/test-kubernetes-s3-minio.sh"
+    "tests/test-bitcoin-block-archive-s3-minio.sh"
   )
 
   for test_script in "${tests[@]}"; do
@@ -493,6 +494,18 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
         "${pbs_local_image_env[@]}" \
         IMAGE_PREFIX="${UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX}" \
         bash "${test_script}" wasabi
+    elif [[ "${test_script}" == "tests/test-bitcoin-block-archive-s3-minio.sh" ]]; then
+      # This is the archive-to-MinIO parser contract.  In local image mode,
+      # hand Apptainer the selected BlockSci image as a docker archive.
+      pbs_local_image_env=()
+      if [[ "${IMAGE_MODE}" == "local" ]]; then
+        pbs_local_image_env=("PBS_BLOCKSCI_LOCAL_IMAGE=${BLOCKSCI_IMAGE}")
+      fi
+      run_in_dir "${SCRIPT_DIR}" env \
+        BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
+        S5CMD_IMAGE="${UPLOADER_IMAGE}" \
+        "${pbs_local_image_env[@]}" \
+        bash "${test_script}"
     elif [[ "${test_script}" == "tests/test-kubernetes-k3d.sh" ]]; then
       run_in_dir "${SCRIPT_DIR}" env \
         EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
