@@ -8,7 +8,7 @@ else
   SCENARIO_PATH="/app/scenarios/overactive-local.json"
 fi
 COMPOSE_FILE="${COMPOSE_FILE:-}"
-PROJECT_NAME="blocksci-emulator"
+PROJECT_NAME="${COINJOIN_COMPOSE_PROJECT:-blocksci-emulator}"
 if [[ -z "${HOST_CLIENT_DIR:-}" ]]; then
   HOST_CLIENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/client" && pwd)"
 fi
@@ -121,6 +121,17 @@ read -r EXIT_CODE <"${WAIT_RESULT_FILE}" || EXIT_CODE=""
 if [[ ! "${EXIT_CODE}" =~ ^[0-9]+$ || "${EXIT_CODE}" -gt 255 ]]; then
   echo "ERROR: invalid manager exit code from ${CONTAINER_RUNTIME} wait: ${EXIT_CODE:-<empty>}" >&2
   exit 1
+fi
+
+# ``compose logs -f`` is terminated by the EXIT trap below.  Docker can still
+# have the manager's final stderr frames in flight when ``docker wait``
+# returns, so print a direct tail before teardown on failure.  Without this,
+# the pipeline only reports the wrapper's generic CalledProcessError and loses
+# the actual emulator exception that explains a non-zero manager exit.
+if [[ "${EXIT_CODE}" -ne 0 ]]; then
+  echo "ERROR: emulator manager exited with code ${EXIT_CODE}; final manager logs follow" >&2
+  "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile emulate \
+    logs --no-color --tail 200 manager >&2 || true
 fi
 
 # Exit your terminal or CI/CD pipeline with the manager's exit code.

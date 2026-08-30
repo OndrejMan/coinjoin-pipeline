@@ -27,10 +27,16 @@ BLOCKSCI_SOURCE_DIR="${BLOCKSCI_SOURCE_DIR:-${REPO_ROOT}/blocksci}"
 EMULATOR_SOURCE_DIR="${EMULATOR_SOURCE_DIR:-${REPO_ROOT}/coinjoin-emulator}"
 COINJOIN_ANALYSIS_SOURCE_DIR="${COINJOIN_ANALYSIS_SOURCE_DIR:-${REPO_ROOT}/coinjoin-analysis}"
 LOCAL_IMAGES_PREBUILT="${LOCAL_IMAGES_PREBUILT:-0}"
+COMPOSE_PROJECT="cjp-overactive-local-${RANDOM}"
+
+stop_blocksci() {
+  docker compose -f "${PROJECT_DIR}/pipeline/compose.yaml" -p "${COMPOSE_PROJECT}" \
+    stop blocksci >/dev/null 2>&1 || true
+}
 
 cleanup() {
   if [[ -n "${RUN_PID}" ]] && kill -0 "${RUN_PID}" >/dev/null 2>&1; then
-    docker stop blocksci_analyzer >/dev/null 2>&1 || true
+    stop_blocksci
     wait "${RUN_PID}" >/dev/null 2>&1 || true
   fi
   rm -f "${BEFORE_FILE}" "${AFTER_FILE}" "${RUN_LOG}"
@@ -115,6 +121,7 @@ echo "Using BlockSci image ${BLOCKSCI_IMAGE}, emulator image ${COINJOIN_EMULATOR
     COINJOIN_EMULATOR_PULL_POLICY="${COINJOIN_EMULATOR_PULL_POLICY}" \
     COINJOIN_EMULATOR_IMAGE_PREFIX="${COINJOIN_EMULATOR_IMAGE_PREFIX}" \
     COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD}" \
+    COINJOIN_COMPOSE_PROJECT="${COMPOSE_PROJECT}" \
     bash runIt.sh --engine wasabi --scenario scenarios/overactive-local.json \
       --min-input-count 15
   ) 2>&1 | tee "${RUN_LOG}"
@@ -132,7 +139,7 @@ for ((elapsed = 0; elapsed < RUN_TIMEOUT_SECONDS; elapsed++)); do
     grep -q "http://127.0.0.1:8888/tree?token" "${RUN_LOG}"; then
     echo "FAIL: noninteractive runIt.sh launched the BlockSci Jupyter server" >&2
     echo "Expected BLOCKSCI_LAUNCH_JUPYTER=0 to make analysis exit after exports." >&2
-    docker stop blocksci_analyzer >/dev/null 2>&1 || true
+    stop_blocksci
     wait "${RUN_PID}" >/dev/null 2>&1 || true
     RUN_PID=""
     exit 1
@@ -143,7 +150,7 @@ done
 
 if [[ "${run_finished}" == "false" ]] && kill -0 "${RUN_PID}" >/dev/null 2>&1; then
   echo "FAIL: runIt.sh did not exit within ${RUN_TIMEOUT_SECONDS}s" >&2
-  docker stop blocksci_analyzer >/dev/null 2>&1 || true
+  stop_blocksci
   wait "${RUN_PID}" >/dev/null 2>&1 || true
   RUN_PID=""
   exit 1

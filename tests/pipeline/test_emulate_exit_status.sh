@@ -48,4 +48,10 @@ if [[ "${RUN_EXIT_CODE}" -ne 17 ]]; then
   exit 1
 fi
 
-echo "PASS: emulate.sh propagates the manager container exit status."
+if ! grep -q -- "logs --no-color --tail 200 manager" "${DOCKER_LOG}"; then
+  echo "FAIL: expected emulate.sh to capture final manager logs after a failure" >&2
+  echo "Observed: $(cat "${DOCKER_LOG}")" >&2
+  exit 1
+fi
+
+echo "PASS: emulate.sh propagates the manager exit status and captures failure diagnostics."

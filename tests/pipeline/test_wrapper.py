@@ -1098,6 +1098,13 @@ class WrapperExportTest(unittest.TestCase):
     def test_compose_env_sets_default_run_timezone(self):
         self.assertEqual(compose_env()["RUN_TIMEZONE"], DEFAULT_RUN_TIMEZONE)
 
+    def test_compose_env_isolates_the_checkout_compose_project_and_notebook_port(self):
+        env = compose_env()
+
+        self.assertRegex(env["COINJOIN_COMPOSE_PROJECT"], r"^blocksci-emulator-[0-9a-f]{12}$")
+        self.assertGreaterEqual(int(env["BLOCKSCI_HOST_PORT"]), 20000)
+        self.assertLessEqual(int(env["BLOCKSCI_HOST_PORT"]), 29999)
+
     def test_compose_env_allows_run_timezone_override(self):
         self.assertEqual(compose_env(run_timezone_name="UTC")["RUN_TIMEZONE"], "UTC")
 

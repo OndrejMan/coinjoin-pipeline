@@ -2,6 +2,7 @@
 # ruff: noqa: F401, I001
 
 import argparse
+import hashlib
 import json
 import os
 import shlex
@@ -328,6 +329,7 @@ ANALYSIS_SCRIPT = ROOT_DIR / "analysis.sh"
 DELETE_SCRIPT = ROOT_DIR / "delete.sh"
 COMPOSE_FILE = ROOT_DIR / "compose.yaml"
 COMPOSE_PROJECT = "blocksci-emulator"
+COMPOSE_PROJECT_ENV = "COINJOIN_COMPOSE_PROJECT"
 COINJOIN_ANALYSIS_SOURCE_PATH_ENV = "COINJOIN_ANALYSIS_SOURCE_PATH"
 COINJOIN_ANALYSIS_MOUNT_PATH_ENV = "COINJOIN_ANALYSIS_MOUNT_PATH"
 COINJOIN_ANALYSIS_TARGET_PATH_ENV = "COINJOIN_ANALYSIS_TARGET_PATH"
@@ -577,6 +579,18 @@ def default_host_root_dir() -> Path:
     return ROOT_DIR
 
 
+def compose_project_name(host_root_dir: Path) -> str:
+    """Return a stable Compose project name isolated to one pipeline checkout."""
+    checkout_hash = hashlib.sha256(str(host_root_dir).encode("utf-8")).hexdigest()[:12]
+    return f"{COMPOSE_PROJECT}-{checkout_hash}"
+
+
+def blocksci_host_port(host_root_dir: Path) -> str:
+    """Pick a stable unprivileged notebook port for one pipeline checkout."""
+    checkout_hash = hashlib.sha256(str(host_root_dir).encode("utf-8")).hexdigest()
+    return str(20000 + int(checkout_hash[:8], 16) % 10000)
+
+
 def compose_env(
     active_run_id: str | None = None,
     engine: str = DEFAULT_ENGINE,
@@ -603,6 +617,12 @@ def compose_env(
         emulation_logs_dir.mkdir(parents=True, exist_ok=True)
 
     env.setdefault("HOST_CLIENT_DIR", str(host_root_dir / "client"))
+    # A self-hosted Actions checkout can run on the same Docker daemon as a
+    # developer checkout.  Compose project scoping keeps their networks and
+    # named volumes separate; removing ``container_name`` from compose.yaml
+    # then makes service container names project-local too.
+    env.setdefault(COMPOSE_PROJECT_ENV, compose_project_name(host_root_dir))
+    env.setdefault("BLOCKSCI_HOST_PORT", blocksci_host_port(host_root_dir))
     env.setdefault("SCENARIOS_DIR", str(scenarios_dir))
     env.setdefault("NOTEBOOKS_DIR", str(notebooks_dir))
     env.setdefault("EMULATION_LOGS_DIR", str(emulation_logs_dir))
@@ -673,7 +693,7 @@ def compose_base_command(env: Mapping[str, str]) -> list[str]:
         "-f",
         str(COMPOSE_FILE),
         "-p",
-        COMPOSE_PROJECT,
+        env.get(COMPOSE_PROJECT_ENV, COMPOSE_PROJECT),
     ]
 
 
@@ -1133,13 +1153,13 @@ def kubernetes_emulator_command(
 def populate_btc_data_volume(btc_data_dir: Path) -> None:
     """Copy downloaded btc-data into the Docker named volume used by blocksci.
 
-    The analysis compose services expect blockchain data in the
-    ``blocksci-emulator_btc_data`` named Docker volume.  After a Kubernetes
+    The analysis compose services expect blockchain data in this checkout's
+    Compose-managed ``btc_data`` volume. After a Kubernetes
     emulation run, the data lives in a local directory.  This helper copies
     it into the volume so that the existing analysis pipeline works
     unchanged.
     """
-    volume_name = f"{COMPOSE_PROJECT}_btc_data"
+    volume_name = f"{compose_env()[COMPOSE_PROJECT_ENV]}_btc_data"
     runtime = container_runtime()
     # Reuse the emulator image for the copy helper instead of pulling a separate
     # one: this only ever runs after a Kubernetes emulation, whose local manager

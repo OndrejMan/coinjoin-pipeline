@@ -4,7 +4,6 @@ services:
       profiles: ["emulate"]
       image: docker:29-dind
       pull_policy: always
-      container_name: isolated_docker_daemon
       privileged: true # REQUIRED for a container to run its own Docker daemon
       command: ["--tls=false"]
       sysctls:
@@ -32,7 +31,6 @@ services:
       profiles: ["emulate"]
       image: alpine
       pull_policy: always
-      container_name: btc_data_wiper
       volumes:
         - btc_data:/home/bitcoin/data:rw
       # Deletes everything inside the directory without deleting the directory itself
@@ -48,7 +46,6 @@ services:
       profiles: ["emulate"]
       image: docker:29-cli
       pull_policy: always
-      container_name: dind_image_prefetch
       environment:
         - DOCKER_HOST=tcp://dind:2375
         - DOCKER_DEFAULT_PLATFORM=${COINJOIN_EMULATOR_DOCKER_PLATFORM:-}
@@ -94,7 +91,6 @@ services:
     profiles: ["emulate"]
     image: ${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}
     pull_policy: ${COINJOIN_EMULATOR_PULL_POLICY:-always}
-    container_name: emulator_manager
     volumes:
      - btc_data:/home/bitcoin/data:rw # Named container volume
      - ${EMULATION_LOGS_DIR:-./emulation_logs}:/app/logs:rw
@@ -124,7 +120,6 @@ services:
       profiles: ["analysis"]
       image: ${BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-complete:latest}
       pull_policy: ${BLOCKSCI_PULL_POLICY:-always}
-      container_name: blocksci_analyzer
       volumes:
         - btc_data:/mnt/data:ro # Mount the BTC data as Read-Only for analysis
         - ${EMULATION_LOGS_DIR:-./emulation_logs}/${ACTIVE_RUN_ID:-}/blocksci_data:/mnt/anal:rw # Current run-local BlockSci output for notebooks
@@ -165,7 +160,7 @@ services:
           condition: service_completed_successfully
           required: true
       ports:
-        - 8888:8888
+        - "${BLOCKSCI_HOST_PORT:-8888}:8888"
       entrypoint: ["/bin/bash"]
       command:
         - "-c"
@@ -223,7 +218,6 @@ services:
       profiles: ["analysis"]
       image: ${COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}
       pull_policy: ${COINJOIN_ANALYSIS_PULL_POLICY:-always}
-      container_name: coinjoin_analysis
       volumes:
         - ${COINJOIN_ANALYSIS_SOURCE_PATH:-${EMULATION_LOGS_DIR:-./emulation_logs}}:${COINJOIN_ANALYSIS_MOUNT_PATH:-/runs/emulation/logs}:rw
         - ${COINJOIN_ANALYSIS_INPUT_DATA_PATH:-${EMULATION_LOGS_DIR:-./emulation_logs}}:${COINJOIN_ANALYSIS_MOUNT_PATH:-/runs/emulation/logs}/data:ro

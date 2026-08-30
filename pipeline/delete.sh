@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_NAME="blocksci-emulator"
+PROJECT_NAME="${COINJOIN_COMPOSE_PROJECT:-blocksci-emulator}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="${COMPOSE_FILE:-${SCRIPT_DIR}/compose.yaml}"
 if [[ ! -f "${COMPOSE_FILE}" && -f /compose.yaml ]]; then
