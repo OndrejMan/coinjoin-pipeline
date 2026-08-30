@@ -19,7 +19,7 @@ except ImportError:
         Blockchain=lambda *_args, **_kwargs: (_ for _ in ()).throw(
             RuntimeError("BlockSci is required for export_blocksci_records integration tests.")
         ),
-        heuristics=types.SimpleNamespace(set_test_values_enabled=lambda *_args, **_kwargs: None),
+        heuristics=types.SimpleNamespace(),
     )
 else:
     _ = _blocksci
@@ -287,7 +287,6 @@ def complete_image_ids():
         "blocksci": "sha256:blocksci-id",
         "coinjoin_analysis": "sha256:analysis-id",
         "coinjoin_emulator": "sha256:emulator-id",
-        "wrapper": "sha256:wrapper-id",
     }
 
 
@@ -296,7 +295,7 @@ def complete_image_digests():
         "blocksci": "ghcr.io/ondrejman/blocksci-complete@sha256:blocksci",
         "coinjoin_analysis": "ghcr.io/ondrejman/coinjoin-analysis@sha256:analysis",
         "coinjoin_emulator": "ghcr.io/ondrejman/coinjoin-emulator@sha256:emulator",
-        "wrapper": "ghcr.io/ondrejman/coinjoin-pipeline@sha256:wrapper",
+        "uploader": "ghcr.io/ondrejman/coinjoin-pipeline-uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     }
 
 
@@ -305,7 +304,8 @@ def complete_image_refs():
         "blocksci": "blocksci:test",
         "coinjoin_analysis": "coinjoin-analysis:test",
         "coinjoin_emulator": "coinjoin-emulator:test",
-        "wrapper": "wrapper:test",
+        "uploader": "uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "unified_report": "python:3.12-slim-bookworm",
     }
 
 
@@ -354,15 +354,14 @@ class UnifiedReportTest(unittest.TestCase):
     def test_run_manifest_records_reproduction_command(self):
         with mock.patch.dict(os.environ, {"REPRODUCTION_COMMAND": "./runIt.sh full-run --engine joinmarket"}):
             manifest = build_run_manifest(
-                Path("/tmp/run"), None, "joinmarket", "joinmarket", 1, False, 0,
+                Path("/tmp/run"), None, "joinmarket", "joinmarket", 1, 0,
                 "definite", 5000, 0.00004, 200000,
             )
         self.assertEqual(manifest["execution"]["reproduction_command"], "./runIt.sh full-run --engine joinmarket")
 
-    def test_parse_args_accepts_test_values(self):
-        args = parse_args(["--test-values"])
-
-        self.assertTrue(args.test_values)
+    def test_parse_args_rejects_removed_test_values(self):
+        with self.assertRaises(SystemExit):
+            parse_args(["--test-values"])
 
     def test_min_input_count_requires_a_positive_integer_or_default(self):
         self.assertIsNone(parse_min_input_count("default"))
@@ -406,8 +405,10 @@ class UnifiedReportTest(unittest.TestCase):
             "coinjoin-analysis:test",
             "--coinjoin-emulator-image",
             "coinjoin-emulator:test",
-            "--wrapper-image",
-            "wrapper:test",
+            "--uploader-image",
+            "uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--unified-report-image",
+            "python:3.12-slim-bookworm",
             "--emulator-git-commit",
             "abc123",
         ])
@@ -415,7 +416,8 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(args.blocksci_image, "blocksci:test")
         self.assertEqual(args.coinjoin_analysis_image, "coinjoin-analysis:test")
         self.assertEqual(args.coinjoin_emulator_image, "coinjoin-emulator:test")
-        self.assertEqual(args.wrapper_image, "wrapper:test")
+        self.assertEqual(args.uploader_image, "uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        self.assertEqual(args.unified_report_image, "python:3.12-slim-bookworm")
         self.assertEqual(args.emulator_git_commit, "abc123")
 
     def test_run_manifest_comparison_reports_changed_provenance(self):
@@ -425,7 +427,6 @@ class UnifiedReportTest(unittest.TestCase):
             "joinmarket",
             "joinmarket",
             1,
-            True,
             0,
             "definite",
             5000,
@@ -434,7 +435,7 @@ class UnifiedReportTest(unittest.TestCase):
             blocksci_image="blocksci:old",
             coinjoin_analysis_image="coinjoin-analysis:old",
             coinjoin_emulator_image="coinjoin-emulator:old",
-            wrapper_image="wrapper:old",
+            uploader_image="uploader:old",
             emulator_git_commit="old-commit",
         )
         current = build_run_manifest(
@@ -443,7 +444,6 @@ class UnifiedReportTest(unittest.TestCase):
             "joinmarket",
             "joinmarket",
             1,
-            True,
             0,
             "possible",
             5000,
@@ -452,7 +452,7 @@ class UnifiedReportTest(unittest.TestCase):
             blocksci_image="blocksci:new",
             coinjoin_analysis_image="coinjoin-analysis:old",
             coinjoin_emulator_image="coinjoin-emulator:old",
-            wrapper_image="wrapper:old",
+            uploader_image="uploader:old",
             emulator_git_commit="old-commit",
         )
 
@@ -474,7 +474,6 @@ class UnifiedReportTest(unittest.TestCase):
                 "wasabi2",
                 "wasabi",
                 1,
-                False,
                 0,
                 "definite",
                 5000,
@@ -617,13 +616,13 @@ class UnifiedReportTest(unittest.TestCase):
                 blocksci_image_digest="sha256:blocksci",
                 coinjoin_analysis_image_digest="sha256:analysis",
                 coinjoin_emulator_image_digest="sha256:emulator",
-                wrapper_image_digest="sha256:wrapper",
+                uploader_image_digest="sha256:uploader",
             )
 
         self.assertEqual(report["run_manifest"]["image_digests"]["blocksci"], "sha256:blocksci")
         self.assertEqual(report["run_manifest"]["image_digests"]["coinjoin_analysis"], "sha256:analysis")
         self.assertEqual(report["run_manifest"]["image_digests"]["coinjoin_emulator"], "sha256:emulator")
-        self.assertEqual(report["run_manifest"]["image_digests"]["wrapper"], "sha256:wrapper")
+        self.assertEqual(report["run_manifest"]["image_digests"]["uploader"], "sha256:uploader")
 
     def test_build_report_includes_integration_diagnostics(self):
         diagnostics = {"status": "ok", "problems": [], "images": {}, "chain": {}, "target_txids": {}, "detector": {}}
@@ -1464,8 +1463,11 @@ class UnifiedReportTest(unittest.TestCase):
                 return FakeCluster(0, 0)
 
         class FakeCoinjoinClusterManager:
+            arguments = None
+
             @staticmethod
-            def create_clustering(**_kwargs):
+            def create_clustering(**kwargs):
+                FakeCoinjoinClusterManager.arguments = kwargs
                 return FakeClusterer()
 
         class FakeClusterBlockchain:
@@ -1494,12 +1496,14 @@ class UnifiedReportTest(unittest.TestCase):
                 },
                 "wasabi2",
                 Path("/tmp/clusters"),
+                min_input_count=10,
             )
         finally:
             unified_report.blocksci = previous_blocksci
 
         self.assertIsNone(error)
         self.assertEqual(predicted, {"known-a": "7"})
+        self.assertEqual(FakeCoinjoinClusterManager.arguments["min_input_count"], 10)
 
     def test_export_blocksci_cluster_assignments_creates_output_parent(self):
         class FakeHeuristic:
@@ -1620,7 +1624,7 @@ class UnifiedReportTest(unittest.TestCase):
 
     def test_wasabi2_default_threshold_fails_small_current_missed_shape(self):
         records = normalize_coinjoin_analysis(coinjoin_analysis_fixture_with_block_height(226))
-        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=None, test_values=True)
+        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=None)
 
         input_count_rule = next(rule for rule in explanation["rules"] if rule["name"] == "input_count")
         self.assertFalse(input_count_rule["passed"])
@@ -1628,7 +1632,7 @@ class UnifiedReportTest(unittest.TestCase):
 
     def test_wasabi2_low_min_input_count_can_pass_input_count_rule(self):
         records = normalize_coinjoin_analysis(coinjoin_analysis_fixture_with_block_height(226))
-        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=1, test_values=True)
+        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=1)
 
         input_count_rule = next(rule for rule in explanation["rules"] if rule["name"] == "input_count")
         self.assertTrue(input_count_rule["passed"])
@@ -1657,7 +1661,7 @@ class UnifiedReportTest(unittest.TestCase):
             ],
         }
 
-        explanation = explain_wasabi2_heuristic(record, min_input_count=1, test_values=True)
+        explanation = explain_wasabi2_heuristic(record, min_input_count=1)
 
         denom_rule = next(rule for rule in explanation["rules"] if rule["name"] == "wasabi2_denominations")
         self.assertIn(5_000_000, WASABI2_BLOCKSCI_DENOMINATIONS)
@@ -1671,14 +1675,14 @@ class UnifiedReportTest(unittest.TestCase):
         record["inputs"][1]["value"] = 6000
         record["outputs"][1]["value"] = 2000
 
-        explanation = explain_wasabi2_heuristic(record, min_input_count=1, test_values=True)
+        explanation = explain_wasabi2_heuristic(record, min_input_count=1)
 
         self.assertIn("input_values_descending", explanation["failed_rules"])
         self.assertIn("output_values_descending", explanation["failed_rules"])
 
     def test_wasabi2_fewer_than_five_unique_addresses_fail(self):
         records = normalize_coinjoin_analysis(coinjoin_analysis_fixture_with_block_height(226))
-        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=1, test_values=True)
+        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=1)
 
         self.assertIn("unique_input_addresses", explanation["failed_rules"])
         self.assertIn("unique_output_addresses", explanation["failed_rules"])
@@ -1866,7 +1870,6 @@ class UnifiedReportTest(unittest.TestCase):
                 blocksci_fixture("txB"),
                 "wasabi2",
                 min_input_count=1,
-                test_values=True,
             )
 
         tx_record = report["transactions"]["txA"]["coinjoin_analysis"]
@@ -1945,7 +1948,6 @@ class UnifiedReportTest(unittest.TestCase):
                 "blocksci": {"status": "ok"},
                 "coinjoin_analysis": {"status": "ok"},
                 "coinjoin_emulator": {"status": "ok"},
-                "wrapper": {"status": "ok"},
             },
             "chain": {
                 "status": "ok",
@@ -1990,7 +1992,6 @@ class UnifiedReportTest(unittest.TestCase):
                 "blocksci": {"status": "ok"},
                 "coinjoin_analysis": {"status": "ok"},
                 "coinjoin_emulator": {"status": "ok"},
-                "wrapper": {"status": "ok"},
             },
             "chain": {
                 "status": "not_ok",
@@ -2038,7 +2039,6 @@ class UnifiedReportTest(unittest.TestCase):
                 blocksci_fixture("txB"),
                 "wasabi2",
                 min_input_count=1,
-                test_values=True,
             )
 
         markdown = render_report(report)

@@ -51,16 +51,18 @@ PBS_CONTAINER_NAME="${PBS_CONTAINER_NAME:-pbs-${ENGINE}-itest-${RESOURCE_ID}}"
 HOST_KUBECONFIG="${WORK_ROOT}/kubeconfig-host.yaml"
 CONTAINER_KUBECONFIG="${WORK_ROOT}/kubeconfig-container.yaml"
 IMAGE_PREFIX="${IMAGE_PREFIX:-ghcr.io/ondrejman/}"
-WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/coinjoin-pipeline:latest}"
 COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
-RESULT_DIR="${TEST_RESULT_DIR:-}"
+RESULT_DIR="${TEST_RESULT_DIR:-${PROJECT_DIR}/emulation_logs/_test-results/kubernetes-pbs-analysis-${RUN_TOKEN}}"
 KEEP_WORK="${KEEP_TEST_WORK:-0}"
 KUBERNETES_PBS_TIMEOUT="${KUBERNETES_PBS_TIMEOUT:-85m}"
 KUBERNETES_DIAGNOSTICS_FILE="${WORK_ROOT}/kubernetes-diagnostics.txt"
+POD_FAILURE_FILE="${WORK_ROOT}/pod-failures.txt"
 PIPELINE_OUTPUT_FILE="${WORK_ROOT}/pipeline-output.log"
+FAILED_LOGS_DIR="${EMULATION_LOGS_DIR}/_failed"
 INJECT_KUBERNETES_CLIENT_FAILURE="${INJECT_KUBERNETES_CLIENT_FAILURE:-0}"
 INJECT_KUBERNETES_CLIENT_NAME="${INJECT_KUBERNETES_CLIENT_NAME:-wasabi-client-002}"
 FAILURE_INJECTOR_PID=""
+POD_WATCHER_PID=""
 # Optional offline mode: run a PBS analyzer from a local Docker image instead
 # of a registry-backed docker:// reference. Apptainer cannot see host Docker
 # tags, so the image is exported into the shared workspace with `docker save`
@@ -73,16 +75,56 @@ if [[ "${ENGINE}" == "wasabi" ]]; then
   SCENARIO="${SCENARIO:-overactive-local.json}"
   EXPECTED_SCENARIO="overactive-local"
   EXPECTED_COINJOIN_TYPE="wasabi2"
-  TEST_VALUES_ARGS=(--test-values --min-input-count 15)
+  MIN_INPUT_COUNT_ARGS=(--min-input-count 15)
 else
   SCENARIO="${SCENARIO:-defaultJoinMarket.json}"
   EXPECTED_SCENARIO="default-joinmarket"
   EXPECTED_COINJOIN_TYPE="joinmarket"
-  TEST_VALUES_ARGS=()
+  MIN_INPUT_COUNT_ARGS=()
 fi
+
+# The emulator tears its namespace down as soon as a run fails, so a pod that
+# died mid-run is already gone by the time the post-mortem dump runs - exactly
+# the pod whose logs and termination reason are needed. Record the evidence
+# while it still exists.
+watch_pod_failures() {
+  local seen=" " name phase
+  while :; do
+    while read -r name phase; do
+      [[ -n "${name}" ]] || continue
+      [[ "${phase}" == "Running" || "${phase}" == "Pending" ]] && continue
+      [[ "${seen}" == *" ${name} "* ]] && continue
+      seen+="${name} "
+      {
+        echo "===== ${name} left Running (phase=${phase}) at $(TZ=UTC date -Is) ====="
+        kubectl --kubeconfig "${HOST_KUBECONFIG}" describe pod -n "${NAMESPACE}" \
+          "${name}" || true
+        echo "===== final 500 log lines: ${name} ====="
+        kubectl --kubeconfig "${HOST_KUBECONFIG}" logs -n "${NAMESPACE}" "${name}" \
+          --all-containers --tail=500 --timestamps || true
+      } >>"${POD_FAILURE_FILE}" 2>&1
+    done < <(kubectl --kubeconfig "${HOST_KUBECONFIG}" get pods -n "${NAMESPACE}" \
+      -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.phase}{"\n"}{end}' \
+      2>/dev/null || true)
+    sleep "${POD_WATCH_INTERVAL_SECONDS:-5}"
+  done
+}
+
+stop_pod_watcher() {
+  [[ -n "${POD_WATCHER_PID}" ]] || return 0
+  kill "${POD_WATCHER_PID}" >/dev/null 2>&1 || true
+  wait "${POD_WATCHER_PID}" >/dev/null 2>&1 || true
+  POD_WATCHER_PID=""
+}
 
 dump_kubernetes_diagnostics() {
   {
+    if [[ -s "${POD_FAILURE_FILE}" ]]; then
+      echo "===== pods that stopped running during the run (captured live) ====="
+      cat "${POD_FAILURE_FILE}"
+    else
+      echo "No pod left the Running phase while the pod watcher was active."
+    fi
     echo "Kubernetes workflow failed; collecting diagnostics for namespace ${NAMESPACE}..."
     if [[ ! -s "${HOST_KUBECONFIG}" ]]; then
       echo "Kubeconfig is unavailable: ${HOST_KUBECONFIG}"
@@ -104,13 +146,63 @@ dump_kubernetes_diagnostics() {
         kubectl --kubeconfig "${HOST_KUBECONFIG}" logs -n "${NAMESPACE}" \
           "${pod}" --all-containers --tail=200 --timestamps || true
         echo "===== previous final 200 log lines: ${pod} ====="
-        kubectl --kubeconfig "${HOST_KUBECONFIG}" logs -n "${NAMESPACE}" \
-          "${pod}" --all-containers --tail=200 --timestamps --previous || true
+        local previous_log="${WORK_ROOT}/$(basename "${pod}")-previous.log"
+        if kubectl --kubeconfig "${HOST_KUBECONFIG}" logs -n "${NAMESPACE}" \
+          "${pod}" --all-containers --tail=200 --timestamps --previous \
+          >"${previous_log}" 2>&1
+        then
+          cat "${previous_log}"
+        else
+          echo "No previous terminated container logs are available."
+        fi
       done < <(kubectl --kubeconfig "${HOST_KUBECONFIG}" get pods -n "${NAMESPACE}" \
         -o name 2>/dev/null || true)
     fi
   } >"${KUBERNETES_DIAGNOSTICS_FILE}" 2>&1
   cat "${KUBERNETES_DIAGNOSTICS_FILE}" >&2
+}
+
+# A PBS stage reports only that it failed; the reason is in the job's own
+# output under the run directory, which lives in the scratch work root that
+# cleanup is about to delete. Archive it alongside the pipeline log.
+archive_pbs_stage_artifacts() {
+  local timestamp="$1" log run_id marker markers
+  [[ -d "${LOGS_ROOT}" ]] || return 0
+  while IFS= read -r log; do
+    [[ -s "${log}" ]] || continue
+    run_id="$(basename "$(dirname "$(dirname "${log}")")")"
+    cp "${log}" \
+      "${FAILED_LOGS_DIR}/${timestamp}-${run_id}-$(basename "${log}")" || true
+  done < <(find "${LOGS_ROOT}" -mindepth 3 -maxdepth 3 -type f -name '*.pbs.log' \
+    2>/dev/null | sort)
+
+  # Which stages reached which marker: this says what the pipeline was waiting
+  # on when it gave up, even for a stage that never produced a log.
+  markers="${FAILED_LOGS_DIR}/${timestamp}-kubernetes-pbs-markers.txt"
+  while IFS= read -r marker; do
+    printf '%s: %s\n' "${marker#"${LOGS_ROOT}"/}" \
+      "$(head -c 200 "${marker}" | tr '\n' ' ')"
+  done < <(find "${LOGS_ROOT}" -mindepth 3 -maxdepth 3 -type f -path '*/.pbs/*' \
+    \( -name '*.done' -o -name '*.failed' -o -name '*.jobid' \) 2>/dev/null | sort) \
+    >"${markers}"
+  [[ -s "${markers}" ]] || rm -f "${markers}"
+}
+
+archive_failure_artifacts() {
+  local timestamp
+  timestamp="$(TZ=UTC date +%Y%m%dT%H%M%S.%NZ)"
+  mkdir -p "${FAILED_LOGS_DIR}"
+  # A missing pipeline log must not abort the rest of the archival under set -e.
+  [[ -s "${PIPELINE_OUTPUT_FILE}" ]] && cp "${PIPELINE_OUTPUT_FILE}" \
+    "${FAILED_LOGS_DIR}/${timestamp}-kubernetes-pbs-pipeline.log" || true
+  [[ -s "${KUBERNETES_DIAGNOSTICS_FILE}" ]] && cp "${KUBERNETES_DIAGNOSTICS_FILE}" \
+    "${FAILED_LOGS_DIR}/${timestamp}-kubernetes-pbs-diagnostics.log" || true
+  archive_pbs_stage_artifacts "${timestamp}" || true
+  # The Kubernetes dump above describes a namespace that is already torn down, so
+  # it reads as "nothing wrong here" even when a later stage is what failed. Point
+  # at the archived pipeline and PBS logs, which carry the actual reason.
+  echo "Failure artifacts archived under ${FAILED_LOGS_DIR} (prefix ${timestamp});" \
+    "the failing stage and its reason are in ${timestamp}-kubernetes-pbs-pipeline.log" >&2
 }
 
 inject_kubernetes_client_failure() {
@@ -143,6 +235,33 @@ export_pbs_docker_archive() {
   docker save "${image}" -o "${WORK_ROOT}/pbs-images/${archive_name}.tar"
   chmod 0644 "${WORK_ROOT}/pbs-images/${archive_name}.tar"
   PBS_IMAGE_ARGS+=("${image_flag}" "docker-archive:${WORK_ROOT}/pbs-images/${archive_name}.tar")
+}
+
+# k3d can report a cluster as created while the embedded k3s API server is
+# still settling.  A one-off ServiceUnavailable from the first kubectl call is
+# transient in that case; do not discard an otherwise healthy test run.
+wait_for_kubernetes_nodes() {
+  local timeout_seconds="${K3D_NODE_READY_TIMEOUT:-240}"
+  local deadline=$((SECONDS + timeout_seconds))
+  local remaining
+
+  until (( SECONDS >= deadline )); do
+    if kubectl --kubeconfig "${HOST_KUBECONFIG}" get --raw='/readyz' >/dev/null 2>&1; then
+      remaining=$((deadline - SECONDS))
+      if kubectl --kubeconfig "${HOST_KUBECONFIG}" wait node --all \
+        --for=condition=Ready --timeout="${remaining}s"
+      then
+        return 0
+      fi
+    fi
+    sleep 2
+  done
+
+  echo "FAIL: Kubernetes API or all nodes did not become Ready within ${timeout_seconds}s" >&2
+  kubectl --kubeconfig "${HOST_KUBECONFIG}" get nodes -o wide >&2 || true
+  echo "===== k3s control-plane logs =====" >&2
+  docker logs --tail 200 "k3d-${CLUSTER_NAME}-server-0" >&2 || true
+  return 1
 }
 
 copy_analysis_artifacts() {
@@ -180,12 +299,15 @@ cleanup() {
     kill "${FAILURE_INJECTOR_PID}" >/dev/null 2>&1 || true
     wait "${FAILURE_INJECTOR_PID}" >/dev/null 2>&1 || true
   fi
+  stop_pod_watcher
   if (( status != 0 )); then
     dump_kubernetes_diagnostics
+    archive_failure_artifacts
   fi
   if [[ -n "${RESULT_DIR}" ]]; then
     mkdir -p "${RESULT_DIR}/${ENGINE}/pbs-logs"
-    find "${WORK_ROOT}" -type f \( -name '*.o[0-9]*' -o -name '*.e[0-9]*' \) \
+    find "${WORK_ROOT}" -type f \
+      \( -name '*.o[0-9]*' -o -name '*.e[0-9]*' -o -name '*.pbs.log' \) \
       -exec cp -t "${RESULT_DIR}/${ENGINE}/pbs-logs" {} + 2>/dev/null || true
     copy_analysis_artifacts || true
     if [[ -s "${KUBERNETES_DIAGNOSTICS_FILE}" ]]; then
@@ -229,21 +351,38 @@ if [[ -n "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" ]]; then
   export_pbs_docker_archive "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" coinjoin-analysis --pbs-coinjoin-analysis-image
 fi
 
-CONTAINER_KUBE_HOST="${CONTAINER_KUBE_HOST:-$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')}"
 echo "Creating k3d cluster ${CLUSTER_NAME} with direct shared storage ${WORK_ROOT}..."
 k3d cluster create "${CLUSTER_NAME}" \
   --servers 1 --agents "${K3D_AGENTS:-2}" --wait --timeout "${K3D_WAIT_TIMEOUT:-240s}" \
   --volume "${WORK_ROOT}:${WORK_ROOT}@all"
 k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
-kubectl --kubeconfig "${HOST_KUBECONFIG}" wait node --all --for=condition=Ready --timeout=240s
+wait_for_kubernetes_nodes
+
+# Both the Kubernetes API and the NodePort listeners belong to the k3d node
+# containers, not to the host's default Docker bridge. k3d publishes only the
+# API port, so an emulator manager on the bridge gateway cannot reach the
+# btc-node NodePort and its RPC wait times out. Put the manager in the cluster
+# network and address the server node directly.
+K3D_NETWORK="k3d-${CLUSTER_NAME}"
+K3D_SERVER="k3d-${CLUSTER_NAME}-server-0"
+K3D_SERVER_IP="$(python3 - "${K3D_SERVER}" "${K3D_NETWORK}" <<'PY'
+import json
+import subprocess
+import sys
+
+server, network = sys.argv[1:]
+container = json.loads(subprocess.check_output(["docker", "inspect", server]))[0]
+address = (container.get("NetworkSettings", {}).get("Networks", {}).get(network, {}).get("IPAddress", ""))
+if not address:
+    raise SystemExit(f"FAIL: could not determine {server}'s address on Docker network {network}")
+print(address)
+PY
+)"
 
 cp "${HOST_KUBECONFIG}" "${CONTAINER_KUBECONFIG}"
-API_SERVER="$(kubectl --kubeconfig "${HOST_KUBECONFIG}" config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
-API_PORT="${API_SERVER##*:}"
-API_PORT="${API_PORT%%/*}"
 KUBE_CLUSTER="$(kubectl --kubeconfig "${CONTAINER_KUBECONFIG}" config view --minify -o jsonpath='{.contexts[0].context.cluster}')"
 kubectl --kubeconfig "${CONTAINER_KUBECONFIG}" config set-cluster "${KUBE_CLUSTER}" \
-  --server="https://${CONTAINER_KUBE_HOST}:${API_PORT}" --insecure-skip-tls-verify=true >/dev/null
+  --server="https://${K3D_SERVER_IP}:6443" --insecure-skip-tls-verify=true >/dev/null
 kubectl --kubeconfig "${CONTAINER_KUBECONFIG}" config unset \
   "clusters.${KUBE_CLUSTER}.certificate-authority-data" >/dev/null 2>&1 || true
 
@@ -264,14 +403,17 @@ export PBS_CONTAINER_NAME PBS_WORKDIR_HOST="${WORK_ROOT}" PBS_WORKDIR_CONTAINER=
 source "${PBS_ENV}"
 
 export PBS_CLIENT_WORKDIR="${WORK_ROOT}"
-export PBS_FRONTEND_DIRECT=1
 export EMULATION_LOGS_DIR="${LOGS_ROOT}"
-export WRAPPER_IMAGE COINJOIN_EMULATOR_IMAGE
-export KUBERNETES_CONTROL_IP="${CONTAINER_KUBE_HOST}"
+export COINJOIN_EMULATOR_IMAGE
+export KUBERNETES_EMULATOR_CONTAINER_NETWORK="${K3D_NETWORK}"
+export KUBERNETES_CONTROL_IP="${K3D_SERVER_IP}"
 export KUBERNETES_STORAGE_UID="$(id -u)"
 export KUBERNETES_STORAGE_GID="$(id -g)"
+echo "Emulator manager network: ${K3D_NETWORK}; Kubernetes NodePort host: ${K3D_SERVER_IP}"
 
 echo "Running ${ENGINE} Kubernetes emulation followed by PBS analyzers..."
+watch_pod_failures &
+POD_WATCHER_PID=$!
 if [[ "${INJECT_KUBERNETES_CLIENT_FAILURE}" == 1 ]]; then
   inject_kubernetes_client_failure &
   FAILURE_INJECTOR_PID=$!
@@ -290,7 +432,7 @@ set +e
     --kubernetes-btc-datadir "${BITCOIN_DATADIR}" \
     --analysisPbs \
     --blocksciPbs \
-    "${TEST_VALUES_ARGS[@]}" \
+    "${MIN_INPUT_COUNT_ARGS[@]}" \
     "${PBS_IMAGE_ARGS[@]}" \
     --pbs-bitcoin-datadir "${BITCOIN_DATADIR}" \
     --pbs-ncpus 2 \
@@ -305,6 +447,7 @@ if [[ -n "${FAILURE_INJECTOR_PID}" ]]; then
   wait "${FAILURE_INJECTOR_PID}" || true
   FAILURE_INJECTOR_PID=""
 fi
+stop_pod_watcher
 
 if [[ "${INJECT_KUBERNETES_CLIENT_FAILURE}" == 1 ]]; then
   [[ -f "${WORK_ROOT}/client-failure-injected" ]] || {
@@ -349,8 +492,15 @@ if run.get("scenario_name") != expected_scenario:
     raise SystemExit(f"FAIL: scenario {run.get('scenario_name')!r} != {expected_scenario!r}")
 if run.get("coinjoin_type") != expected_type:
     raise SystemExit(f"FAIL: coinjoin type {run.get('coinjoin_type')!r} != {expected_type!r}")
-if not baseline:
-    raise SystemExit("FAIL: coinjoin-analysis produced no records")
+baseline_coinjoins = baseline.get("coinjoins") or {}
+if not baseline_coinjoins:
+    raise SystemExit("FAIL: coinjoin-analysis produced no CoinJoin transactions")
+if summary.get("coinjoin_analysis_coinjoins") != len(baseline_coinjoins):
+    raise SystemExit(
+        "FAIL: report baseline count "
+        f"{summary.get('coinjoin_analysis_coinjoins')!r} != "
+        f"{len(baseline_coinjoins)} CoinJoins in coinjoin_tx_info.json"
+    )
 if summary.get("blocksci_detected_coinjoins", 0) < 1:
     raise SystemExit("FAIL: BlockSci detected no CoinJoin transactions")
 if "blocksci_agreement_rate" not in summary:
@@ -361,13 +511,14 @@ if expected_type == "joinmarket":
         raise SystemExit("FAIL: JoinMarket round events are missing")
 print(
     f"PASS: {expected_type} via Kubernetes→shared storage→PBS; "
-    f"baseline={len(baseline)}, blocksci={summary['blocksci_detected_coinjoins']}"
+    f"baseline={len(baseline_coinjoins)}, blocksci={summary['blocksci_detected_coinjoins']}"
 )
 PY
 
 if [[ -n "${RESULT_DIR}" ]]; then
   mkdir -p "${RESULT_DIR}/${ENGINE}"
-  cp "${RUN_DIR}/coinjoinPipeline_data/unified_report.json" "${RESULT_DIR}/${ENGINE}/"
-  cp "${RUN_DIR}/coinjoinPipeline_data/unified_report.md" "${RESULT_DIR}/${ENGINE}/"
-  cp "${RUN_DIR}/coinjoin-analysis_data/coinjoin_tx_info.json" "${RESULT_DIR}/${ENGINE}/"
+  cp "${RUN_DIR}/coinjoinPipeline_data/unified_report.json" "${RESULT_DIR}/${ENGINE}/" || true
+  cp "${RUN_DIR}/coinjoinPipeline_data/unified_report.md" "${RESULT_DIR}/${ENGINE}/" 2>/dev/null || true
+  cp "${RUN_DIR}/coinjoin-analysis_data/coinjoin_tx_info.json" "${RESULT_DIR}/${ENGINE}/" 2>/dev/null || true
+  find "${RESULT_DIR}" -type d -empty -delete 2>/dev/null || true
 fi

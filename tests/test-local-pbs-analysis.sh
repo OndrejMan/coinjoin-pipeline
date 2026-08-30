@@ -123,7 +123,6 @@ export PBS_CONTAINER_NAME PBS_WORKDIR_HOST="${WORK_DIR}" PBS_WORKDIR_CONTAINER="
 source "${PBS_ENV}"
 export PBS_CLIENT_WORKDIR="${WORK_DIR}"
 export EMULATION_LOGS_DIR="${WORK_DIR}"
-export PBS_FRONTEND_DIRECT=1
 
 echo "Running coinjoin-analysis through the documented runIt.sh PBS interface..."
 (cd "${PROJECT_DIR}" && ./runIt.sh coinjoin-analysis \
@@ -142,14 +141,21 @@ from pathlib import Path
 run_dir = Path(sys.argv[1])
 baseline = json.loads((run_dir / "coinjoin-analysis_data/coinjoin_tx_info.json").read_text())
 report = json.loads((run_dir / "coinjoinPipeline_data/unified_report.json").read_text())
-if not baseline:
-    raise SystemExit("FAIL: coinjoin-analysis returned no records")
+baseline_coinjoins = baseline.get("coinjoins") or {}
+if not baseline_coinjoins:
+    raise SystemExit("FAIL: coinjoin-analysis returned no CoinJoin transactions")
 if (report.get("run") or {}).get("coinjoin_type") != "wasabi2":
     raise SystemExit("FAIL: BlockSci report is not for wasabi2")
 summary = report.get("summary") or {}
+if summary.get("coinjoin_analysis_coinjoins") != len(baseline_coinjoins):
+    raise SystemExit(
+        "FAIL: report baseline count "
+        f"{summary.get('coinjoin_analysis_coinjoins')!r} != "
+        f"{len(baseline_coinjoins)} CoinJoins in coinjoin_tx_info.json"
+    )
 if "blocksci_agreement_rate" not in summary or not report.get("transactions"):
     raise SystemExit("FAIL: unified report has no analyzer comparison metrics")
-print(f"PASS: validated {len(baseline)} baseline records and the BlockSci comparison report")
+print(f"PASS: validated {len(baseline_coinjoins)} baseline CoinJoins and the BlockSci comparison report")
 PY
 
 if [[ -n "${RESULT_DIR}" ]]; then

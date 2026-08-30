@@ -46,23 +46,44 @@ PBS_CONTAINER_NAME="${PBS_CONTAINER_NAME:-pbs-s3-itest-${RESOURCE_ID}}"
 MINIO_CONTAINER_NAME="${MINIO_CONTAINER_NAME:-minio-s3-itest-${RESOURCE_ID}}"
 HOST_KUBECONFIG="${WORK_ROOT}/kubeconfig-host.yaml"
 IMAGE_PREFIX="${IMAGE_PREFIX:-ghcr.io/ondrejman/}"
-WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/coinjoin-pipeline:latest}"
+UPLOADER_IMAGE="${UPLOADER_IMAGE:-}"
 COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
+COINJOIN_EMULATOR_ROOT="${COINJOIN_EMULATOR_ROOT:-${PROJECT_DIR}/../coinjoin-emulator}"
+BTC_NODE_SOURCE_IMAGE="${BTC_NODE_IMAGE:-}"
 MINIO_IMAGE="${MINIO_IMAGE:-minio/minio:latest}"
-RESULT_DIR="${TEST_RESULT_DIR:-}"
+RESULT_DIR="${TEST_RESULT_DIR:-${PROJECT_DIR}/emulation_logs/_test-results/kubernetes-s3-minio-${RUN_TOKEN}}"
 KEEP_WORK="${KEEP_TEST_WORK:-0}"
 KUBERNETES_S3_TIMEOUT="${KUBERNETES_S3_TIMEOUT:-85m}"
+# A Wasabi wallet creates only after it has downloaded the complete filter
+# chain. A loaded k3d node can take longer than the emulator's 900-second
+# default, so give this intentionally heavyweight integration test headroom.
+COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT="${COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT:-1800}"
+# Keep the test chain at the historical main-branch depth.  Wasabi downloads
+# its complete filter chain before creating the distributor wallet; 201 blocks
+# provide mature coinbases without consuming the distributor timeout on ~1000
+# initial filters.
+COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT="${COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT:-201}"
 KUBERNETES_DIAGNOSTICS_FILE="${WORK_ROOT}/kubernetes-diagnostics.txt"
 PIPELINE_OUTPUT_FILE="${WORK_ROOT}/pipeline-output.log"
+# The work root is deleted on exit, so a failed run would otherwise leave no
+# trace of why the pipeline exited - the frontend's "[ERROR] ..." line lives in
+# the pipeline output, not in the Kubernetes diagnostics. Keep both outside it.
+# Resolved before EMULATION_LOGS_DIR is repointed at the run-local LOGS_ROOT.
+FAILED_LOGS_DIR="${TEST_FAILED_LOGS_DIR:-${EMULATION_LOGS_DIR:-${PROJECT_DIR}/emulation_logs}/_failed}"
 S3_ENDPOINT_URL=""
-WRAPPER_SOURCE_IMAGE="${WRAPPER_IMAGE}"
 COINJOIN_EMULATOR_SOURCE_IMAGE="${COINJOIN_EMULATOR_IMAGE}"
-K3D_WRAPPER_IMAGE="coinjoin-pipeline-s3-e2e:${RUN_TOKEN}"
+K3D_UPLOADER_IMAGE="coinjoin-pipeline-uploader-s3-e2e:${RUN_TOKEN}"
 K3D_COINJOIN_EMULATOR_IMAGE="coinjoin-emulator-s3-e2e:${RUN_TOKEN}"
+K3D_BTC_NODE_IMAGE="coinjoin-btc-node-s3-e2e:${RUN_TOKEN}"
 # Optional offline mode for analyzer images. Apptainer cannot see Docker's
 # local tag store, so local images are exported into the PBS shared workspace.
 PBS_BLOCKSCI_LOCAL_IMAGE="${PBS_BLOCKSCI_LOCAL_IMAGE:-}"
 PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE="${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE:-}"
+# The report job runs in a stock public Python image. Unlike the two analyzers
+# it has no local build here, so pull it once on the host and hand Apptainer a
+# docker-archive: otherwise every run of this test depends on a Docker Hub pull
+# from inside the PBS container, rate limits included.
+PBS_UNIFIED_REPORT_LOCAL_IMAGE="${PBS_UNIFIED_REPORT_LOCAL_IMAGE:-$(tr -d '[:space:]' <"${PROJECT_DIR}/container/unified-report.image")}"
 PBS_IMAGE_ARGS=()
 
 SCENARIO="${SCENARIO:-overactive-local.json}"
@@ -135,11 +156,23 @@ dump_kubernetes_diagnostics() {
   cat "${KUBERNETES_DIAGNOSTICS_FILE}" >&2
 }
 
+archive_failure_artifacts() {
+  local timestamp
+  timestamp="$(TZ=UTC date +%Y%m%dT%H%M%S.%NZ)"
+  mkdir -p "${FAILED_LOGS_DIR}" || return 0
+  [[ -s "${PIPELINE_OUTPUT_FILE}" ]] && cp "${PIPELINE_OUTPUT_FILE}" \
+    "${FAILED_LOGS_DIR}/${timestamp}-kubernetes-s3-pipeline.log"
+  [[ -s "${KUBERNETES_DIAGNOSTICS_FILE}" ]] && cp "${KUBERNETES_DIAGNOSTICS_FILE}" \
+    "${FAILED_LOGS_DIR}/${timestamp}-kubernetes-s3-diagnostics.log"
+  return 0
+}
+
 cleanup() {
   local status=$?
   trap - EXIT
   if (( status != 0 )); then
     dump_kubernetes_diagnostics || true
+    archive_failure_artifacts || true
   fi
   if [[ -n "${RESULT_DIR}" ]]; then
     mkdir -p "${RESULT_DIR}/${ENGINE}"
@@ -151,13 +184,14 @@ cleanup() {
       && cp "${KUBERNETES_DIAGNOSTICS_FILE}" "${RESULT_DIR}/${ENGINE}/"
     [[ -s "${PIPELINE_OUTPUT_FILE}" ]] \
       && cp "${PIPELINE_OUTPUT_FILE}" "${RESULT_DIR}/${ENGINE}/"
+    find "${RESULT_DIR}" -type d -empty -delete 2>/dev/null || true
   fi
   docker rm -f "${PBS_CONTAINER_NAME}" >/dev/null 2>&1 || true
   docker rm -f "${MINIO_CONTAINER_NAME}" >/dev/null 2>&1 || true
   if [[ "${KEEP_CLUSTER:-0}" != 1 ]]; then
     k3d cluster delete "${CLUSTER_NAME}" >/dev/null 2>&1 || true
   fi
-  docker image rm "${K3D_WRAPPER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}" \
+  docker image rm "${K3D_UPLOADER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}" "${K3D_BTC_NODE_IMAGE}" \
     >/dev/null 2>&1 || true
   if [[ "${KEEP_WORK}" != 1 ]]; then
     rm -rf "${WORK_ROOT}"
@@ -175,9 +209,42 @@ docker rm -f "${PBS_CONTAINER_NAME}" "${MINIO_CONTAINER_NAME}" >/dev/null 2>&1 |
 mkdir -p "${LOGS_ROOT}" "${WORK_ROOT}/bin" "${WORK_ROOT}/results"
 chmod 0777 "${WORK_ROOT}" "${LOGS_ROOT}"
 
-ensure_source_image "${WRAPPER_SOURCE_IMAGE}"
 ensure_source_image "${COINJOIN_EMULATOR_SOURCE_IMAGE}"
-docker tag "${WRAPPER_SOURCE_IMAGE}" "${K3D_WRAPPER_IMAGE}"
+if ! docker run --rm --entrypoint sh "${COINJOIN_EMULATOR_SOURCE_IMAGE}" -c \
+  'grep -q COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT /app/manager/engine/engine_base.py && grep -q "ports.get(container_port, container_port)" /app/manager/engine/engine_base.py && grep -q KUBERNETES_IMAGE_PULL_POLICY /app/manager/driver/kubernetes.py'; then
+  echo "FAIL: emulator image ${COINJOIN_EMULATOR_SOURCE_IMAGE} is stale for this S3 test." >&2
+  echo "      Rebuild it from ${COINJOIN_EMULATOR_ROOT}:" >&2
+  echo "      docker build -t ${COINJOIN_EMULATOR_SOURCE_IMAGE} ${COINJOIN_EMULATOR_ROOT}" >&2
+  exit 2
+fi
+
+# The uploader image replaces the retired wrapper image in the cluster: it
+# backs both the prefix-preflight and uploader containers of the emulation Job.
+if [[ -z "${UPLOADER_IMAGE}" ]]; then
+  UPLOADER_IMAGE="coinjoin-pipeline-uploader:${RUN_TOKEN}"
+  echo "Building the uploader image ${UPLOADER_IMAGE}..."
+  docker build -t "${UPLOADER_IMAGE}" \
+    -f "${PROJECT_DIR}/container/uploader.Dockerfile" "${PROJECT_DIR}/container"
+else
+  ensure_source_image "${UPLOADER_IMAGE}"
+fi
+if [[ -n "${BTC_NODE_SOURCE_IMAGE}" ]]; then
+  ensure_source_image "${BTC_NODE_SOURCE_IMAGE}"
+  docker tag "${BTC_NODE_SOURCE_IMAGE}" "${K3D_BTC_NODE_IMAGE}"
+else
+  [[ -f "${COINJOIN_EMULATOR_ROOT}/containers/btc-node/Dockerfile" ]] || {
+    echo "FAIL: btc-node Dockerfile not found under ${COINJOIN_EMULATOR_ROOT}" >&2
+    exit 2
+  }
+  echo "Building the current local btc-node image ${K3D_BTC_NODE_IMAGE}..."
+  docker build -t "${K3D_BTC_NODE_IMAGE}" "${COINJOIN_EMULATOR_ROOT}/containers/btc-node"
+fi
+if ! docker run --rm --entrypoint sh "${K3D_BTC_NODE_IMAGE}" -c \
+  'grep -q COINJOIN_INITIAL_BLOCK_COUNT /home/bitcoin/mine.sh'; then
+  echo "FAIL: btc-node image ${K3D_BTC_NODE_IMAGE} lacks the S3 test startup controls." >&2
+  exit 2
+fi
+docker tag "${UPLOADER_IMAGE}" "${K3D_UPLOADER_IMAGE}"
 docker tag "${COINJOIN_EMULATOR_SOURCE_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"
 
 if [[ -n "${PBS_BLOCKSCI_LOCAL_IMAGE}" ]]; then
@@ -187,9 +254,15 @@ if [[ -n "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" ]]; then
   export_pbs_docker_archive \
     "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" coinjoin-analysis --pbs-coinjoin-analysis-image
 fi
+if [[ -n "${PBS_UNIFIED_REPORT_LOCAL_IMAGE}" ]]; then
+  docker image inspect "${PBS_UNIFIED_REPORT_LOCAL_IMAGE}" >/dev/null 2>&1 \
+    || docker pull "${PBS_UNIFIED_REPORT_LOCAL_IMAGE}"
+  export_pbs_docker_archive \
+    "${PBS_UNIFIED_REPORT_LOCAL_IMAGE}" unified-report --unified-report-image
+fi
 
-echo "Extracting s5cmd from ${WRAPPER_SOURCE_IMAGE} for the host and the PBS container..."
-S5CMD_SOURCE_CONTAINER="$(docker create "${WRAPPER_SOURCE_IMAGE}")"
+echo "Extracting s5cmd from ${UPLOADER_IMAGE} for the host and the PBS container..."
+S5CMD_SOURCE_CONTAINER="$(docker create "${UPLOADER_IMAGE}")"
 docker cp "${S5CMD_SOURCE_CONTAINER}:/usr/local/bin/s5cmd" "${WORK_ROOT}/bin/s5cmd"
 docker rm -f "${S5CMD_SOURCE_CONTAINER}" >/dev/null
 chmod 0755 "${WORK_ROOT}/bin/s5cmd"
@@ -221,15 +294,15 @@ s5 mb "s3://${BUCKET}" >/dev/null
 echo "Creating k3d cluster ${CLUSTER_NAME} (no shared storage needed in S3 mode)..."
 k3d cluster create "${CLUSTER_NAME}" \
   --servers 1 --agents "${K3D_AGENTS:-2}" --wait --timeout "${K3D_WAIT_TIMEOUT:-240s}"
-echo "Importing wrapper and emulator images into ${CLUSTER_NAME}..."
+echo "Importing wrapper, emulator, and btc-node images into ${CLUSTER_NAME}..."
 k3d image import --cluster "${CLUSTER_NAME}" \
-  "${K3D_WRAPPER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"
+  "${K3D_UPLOADER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}" "${K3D_BTC_NODE_IMAGE}"
 # k3d exits 0 even when containerd rejects the tarball (e.g. "content digest
 # ... not found" when Docker's containerd image store is enabled). Verify the
 # images actually landed on a node, otherwise the job pod would hang in
 # Init:ImagePullBackOff until the outer timeout fires ~90 min later.
 SERVER_NODE="k3d-${CLUSTER_NAME}-server-0"
-for image in "${K3D_WRAPPER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"; do
+for image in "${K3D_UPLOADER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}" "${K3D_BTC_NODE_IMAGE}"; do
   if ! docker exec "${SERVER_NODE}" crictl images 2>/dev/null | grep -qF "${image%:*}"; then
     echo "FAIL: image ${image} was not imported into ${CLUSTER_NAME} (k3d import silently failed)." >&2
     echo "      If Docker uses the containerd image store, disable it: set" >&2
@@ -237,8 +310,10 @@ for image in "${K3D_WRAPPER_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"; do
     exit 1
   fi
 done
-WRAPPER_IMAGE="${K3D_WRAPPER_IMAGE}"
+UPLOADER_IMAGE="${K3D_UPLOADER_IMAGE}"
 COINJOIN_EMULATOR_IMAGE="${K3D_COINJOIN_EMULATOR_IMAGE}"
+COINJOIN_BTC_NODE_IMAGE="${K3D_BTC_NODE_IMAGE}"
+KUBERNETES_IMAGE_PULL_POLICY="${KUBERNETES_IMAGE_PULL_POLICY:-IfNotPresent}"
 k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
 kubectl --kubeconfig "${HOST_KUBECONFIG}" wait node --all --for=condition=Ready --timeout=240s
 
@@ -258,15 +333,20 @@ docker cp "${WORK_ROOT}/bin/s5cmd" "${PBS_CONTAINER_NAME}:/usr/bin/s5cmd"
 docker exec -u root "${PBS_CONTAINER_NAME}" chmod 0755 /usr/bin/s5cmd
 
 export PBS_CLIENT_WORKDIR="${WORK_ROOT}"
-export PBS_FRONTEND_DIRECT=1
 export EMULATION_LOGS_DIR="${LOGS_ROOT}"
-export WRAPPER_IMAGE COINJOIN_EMULATOR_IMAGE
+export COINJOIN_EMULATOR_IMAGE
+export COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT
+export COINJOIN_BTC_NODE_IMAGE
+export KUBERNETES_IMAGE_PULL_POLICY
+export COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT
 
 echo "Running the S3-compatible full-run for run ${RUN_ID}..."
 set +e
 (
   cd "${PROJECT_DIR}"
-  timeout --foreground "${KUBERNETES_S3_TIMEOUT}" ./runIt.sh full-run \
+  PYTHONPATH="${PROJECT_DIR}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+    timeout --foreground "${KUBERNETES_S3_TIMEOUT}" \
+    python3 -m coinjoin_pipeline.cli full-run \
     --engine "${ENGINE}" \
     --scenario "${SCENARIO}" \
     --driver kubernetes \
@@ -281,9 +361,9 @@ set +e
     --s3-secret-name "${S3_SECRET_NAME}" \
     --s3-credentials-file "${CREDENTIALS_FILE}" \
     --s3-profile "${S3_PROFILE}" \
+    --uploader-image "${UPLOADER_IMAGE}" \
     --analysisPbs \
     --blocksciPbs \
-    --test-values \
     --min-input-count 15 \
     "${PBS_IMAGE_ARGS[@]}" \
     --pbs-ncpus 2 \
@@ -330,14 +410,21 @@ if run.get("scenario_name") != expected_scenario:
     raise SystemExit(f"FAIL: scenario {run.get('scenario_name')!r} != {expected_scenario!r}")
 if run.get("coinjoin_type") != expected_type:
     raise SystemExit(f"FAIL: coinjoin type {run.get('coinjoin_type')!r} != {expected_type!r}")
-if not baseline:
-    raise SystemExit("FAIL: coinjoin-analysis produced no records")
+baseline_coinjoins = baseline.get("coinjoins") or {}
+if not baseline_coinjoins:
+    raise SystemExit("FAIL: coinjoin-analysis produced no CoinJoin transactions")
+if summary.get("coinjoin_analysis_coinjoins") != len(baseline_coinjoins):
+    raise SystemExit(
+        "FAIL: report baseline count "
+        f"{summary.get('coinjoin_analysis_coinjoins')!r} != "
+        f"{len(baseline_coinjoins)} CoinJoins in coinjoin_tx_info.json"
+    )
 if summary.get("blocksci_detected_coinjoins", 0) < 1:
     raise SystemExit("FAIL: BlockSci detected no CoinJoin transactions")
 if "blocksci_agreement_rate" not in summary:
     raise SystemExit("FAIL: report has no analyzer agreement metrics")
 print(
     f"PASS: {expected_type} via Kubernetes→S3 (MinIO)→PBS full-run; "
-    f"baseline={len(baseline)}, blocksci={summary['blocksci_detected_coinjoins']}"
+    f"baseline={len(baseline_coinjoins)}, blocksci={summary['blocksci_detected_coinjoins']}"
 )
 PY

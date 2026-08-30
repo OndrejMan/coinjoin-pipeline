@@ -1,0 +1,36 @@
+action: pbs-from-s3
+engine: joinmarket
+coinjoin_type: joinmarket
+
+# Use a new run ID whenever the requested height changes.
+run_id: mainnet-s3-archive-900000
+
+images:
+  # Pin parse and later external analysis to the identical immutable image.
+  version: latest
+
+artifacts:
+  backend: s3
+  uri: s3://coinjoin-thesis/runs
+  endpoint_url: https://s3.cl4.du.cesnet.cz
+  credentials_file: /storage/brno2/home/<login>/.aws/credentials
+  profile: coinjoin
+
+stages:
+  blocksci: true
+
+blocksci:
+  workflow: reusable
+  task: parse
+  # Prefix created by bitcoin-core-s3-archive, not the per-run artifact URI.
+  bitcoin_blocks_uri: s3://xman-coinjoin/bitcoin-mainnet/blocks
+  network: bitcoin
+  # Inclusive and rejected unless archive-manifest.json proves coverage.
+  max_block: 900000
+
+pbs:
+  blocksci:
+    ncpus: 8
+    mem: 64gb
+    scratch: 2tb
+    walltime: "48:00:00"

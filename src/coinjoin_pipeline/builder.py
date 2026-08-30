@@ -66,13 +66,38 @@ PBS_FLAGS = {
     "--mapping-mining-fee-rate", "--mapping-coordination-fee-rate",
     "--mapping-max-decomposition-fee", "--mapping-mode", "--mapping-timeout",
     "--mapping-retry-timeout", "--sake-seed",
+    "--blocksci-workflow", "--blocksci-task", "--blocksci-notebook-port",
+    "--blocksci-notebooks-dir", "--blocksci-external-bitcoin-datadir",
+    "--blocksci-external-blocksci-dir", "--blocksci-network",
+    "--blocksci-max-block", "--blocksci-cache-source-run-id",
+    *{
+        f"--pbs-{stage}-{resource}"
+        for stage in ("analysis", "blocksci", "mappings")
+        for resource in ("ncpus", "mem", "scratch", "walltime")
+    },
 }
 # Flags that only affect the BlockSci PBS stage (--blocksciPbs). The shared
 # Bitcoin datadir is BlockSci-specific: coinjoin-analysis PBS reads emulator
 # artifacts from the run directory and never touches the Bitcoin datadir.
-PBS_BLOCKSCI_ONLY = {"--blocksciPbs", "--pbs-blocksci-image", "--pbs-bitcoin-datadir"}
+PBS_BLOCKSCI_ONLY = {
+    "--blocksciPbs", "--pbs-blocksci-image", "--pbs-bitcoin-datadir",
+    "--blocksci-workflow", "--blocksci-task", "--blocksci-notebook-port",
+    "--blocksci-notebooks-dir", "--blocksci-external-bitcoin-datadir",
+    "--blocksci-external-blocksci-dir", "--blocksci-network",
+    "--blocksci-max-block", "--blocksci-cache-source-run-id",
+    *{
+        f"--pbs-blocksci-{resource}"
+        for resource in ("ncpus", "mem", "scratch", "walltime")
+    },
+}
 # Flags that only affect the coinjoin-analysis PBS stage (--analysisPbs).
-PBS_ANALYSIS_ONLY = {"--analysisPbs", "--pbs-coinjoin-analysis-image"}
+PBS_ANALYSIS_ONLY = {
+    "--analysisPbs", "--pbs-coinjoin-analysis-image",
+    *{
+        f"--pbs-analysis-{resource}"
+        for resource in ("ncpus", "mem", "scratch", "walltime")
+    },
+}
 PBS_REPORT_ONLY = {
     "--pbs-unified-report-ncpus", "--pbs-unified-report-mem",
     "--pbs-unified-report-scratch", "--pbs-unified-report-walltime",
@@ -80,7 +105,9 @@ PBS_REPORT_ONLY = {
 PBS_MAPPINGS_ONLY = {"--mappingsPbs", "--pbs-mappings-enumerator-image", "--pbs-sake-image",
                      "--mapping-mining-fee-rate", "--mapping-coordination-fee-rate",
                      "--mapping-max-decomposition-fee", "--mapping-mode", "--mapping-timeout",
-                     "--mapping-retry-timeout", "--sake-seed"}
+                     "--mapping-retry-timeout", "--sake-seed",
+                     *{f"--pbs-mappings-{resource}"
+                       for resource in ("ncpus", "mem", "scratch", "walltime")}}
 # Flags meaningful for either PBS stage (resources and the shared image override).
 PBS_SHARED = PBS_FLAGS - PBS_BLOCKSCI_ONLY - PBS_ANALYSIS_ONLY - PBS_REPORT_ONLY - PBS_MAPPINGS_ONLY
 SEMANTICALLY_DISABLED_FLAGS = {
@@ -236,8 +263,8 @@ def validate_command(command: Command) -> Validation:
     if has_option(command, "--yes") and has_option(command, "--dry-run"):
         result.errors.append("Use either --yes or --dry-run for clean, not both.")
 
-    if driver == "kubernetes" and action not in {"full-run", "recreate"}:
-        result.errors.append("--driver kubernetes is supported only by full-run and recreate.")
+    if driver == "kubernetes" and action not in {"full-run", "emulate"}:
+        result.errors.append("--driver kubernetes is supported only by full-run and emulate.")
     driver_dependent_flags = KUBERNETES_FLAGS - {"--driver", "--coinjoin-infrastructure-local-build"}
     if driver != "kubernetes" and any(has_option(command, flag) for flag in driver_dependent_flags):
         result.errors.append("Kubernetes-specific options require --driver kubernetes.")
@@ -247,17 +274,26 @@ def validate_command(command: Command) -> Validation:
     analysis_pbs = has_option(command, "--analysisPbs")
     blocksci_pbs = has_option(command, "--blocksciPbs")
     mappings_pbs = has_option(command, "--mappingsPbs")
-    if analysis_pbs and action not in {"full-run", "coinjoin-analysis"}:
-        result.errors.append("--analysisPbs is supported only by full-run and coinjoin-analysis.")
-    if blocksci_pbs and action not in {"full-run", "analyze"}:
-        result.errors.append("--blocksciPbs is supported only by full-run and analyze.")
-    if mappings_pbs and action not in {"full-run", "mappings"}:
-        result.errors.append("--mappingsPbs is supported only by full-run and mappings.")
+    if analysis_pbs and action not in {"full-run", "coinjoin-analysis", "pbs-from-s3"}:
+        result.errors.append(
+            "--analysisPbs is supported only by full-run and coinjoin-analysis "
+            "(or pbs-from-s3)."
+        )
+    if blocksci_pbs and action not in {"full-run", "analyze", "pbs-from-s3"}:
+        result.errors.append(
+            "--blocksciPbs is supported only by full-run and analyze (or pbs-from-s3)."
+        )
+    if mappings_pbs and action not in {"full-run", "mappings", "pbs-from-s3"}:
+        result.errors.append(
+            "--mappingsPbs is supported only by full-run, mappings, and pbs-from-s3."
+        )
     if mappings_pbs and engine != "wasabi":
         result.errors.append("--mappingsPbs requires --engine wasabi.")
     if mappings_pbs and (option_value(command, "--coinjoin-type") or "wasabi2") != "wasabi2":
         result.errors.append("--mappingsPbs requires --coinjoin-type wasabi2.")
-    backend = option_value(command, "--artifact-backend") or "shared-storage"
+    backend = "s3" if action == "pbs-from-s3" else (option_value(command, "--artifact-backend") or "shared-storage")
+    blocksci_workflow = option_value(command, "--blocksci-workflow") or "combined"
+    blocksci_task = option_value(command, "--blocksci-task") or "detect"
     if blocksci_pbs and backend != "s3" and not has_option(command, "--pbs-bitcoin-datadir"):
         result.errors.append("--blocksciPbs requires --pbs-bitcoin-datadir.")
     if has_option(command, "--pbs-bitcoin-datadir") and not blocksci_pbs:
@@ -282,8 +318,6 @@ def validate_command(command: Command) -> Validation:
                 "Kubernetes S3-compatible mode requires --reuse-namespace because "
                 "the credentials Secret must exist before the Job is created."
             )
-        if mappings_pbs:
-            result.errors.append("S3-compatible mappings are not implemented yet.")
         if has_option(command, "--parallel"):
             result.errors.append("full-run --artifact-backend s3 does not support --parallel.")
         if has_option(command, "--blocksci-script"):
@@ -291,7 +325,7 @@ def validate_command(command: Command) -> Validation:
         for flag in ("--kubernetes-btc-datadir", "--pbs-bitcoin-datadir", "--copy-to-host"):
             if has_option(command, flag):
                 result.errors.append(f"Kubernetes S3-compatible mode does not support {flag}.")
-    if backend == "s3" and action == "recreate":
+    if backend == "s3" and action == "emulate":
         if driver != "kubernetes":
             result.errors.append("--artifact-backend s3 requires --driver kubernetes.")
         for flag in ("--run-id", "--artifact-uri", "--s3-endpoint-url", "--s3-secret-name"):
@@ -305,6 +339,98 @@ def validate_command(command: Command) -> Validation:
         for flag in ("--kubernetes-btc-datadir", "--pbs-bitcoin-datadir", "--copy-to-host"):
             if has_option(command, flag):
                 result.errors.append(f"Kubernetes S3-compatible mode does not support {flag}.")
+    if action == "pbs-from-s3":
+        for flag in (
+            "--run-id", "--artifact-uri", "--s3-endpoint-url",
+            "--s3-credentials-file", "--s3-profile", "--engine",
+        ):
+            if not has_option(command, flag):
+                result.errors.append(f"pbs-from-s3 requires {flag}.")
+        if not analysis_pbs and not blocksci_pbs and not mappings_pbs:
+            result.errors.append(
+                "pbs-from-s3 requires --analysisPbs, --blocksciPbs, or --mappingsPbs."
+            )
+    if blocksci_workflow != "combined" and not blocksci_pbs:
+        result.errors.append("Reusable BlockSci workflows require --blocksciPbs.")
+    if blocksci_task == "parse":
+        if action != "pbs-from-s3" or blocksci_workflow != "reusable":
+            result.errors.append("--blocksci-task parse requires pbs-from-s3 --blocksci-workflow reusable.")
+        if analysis_pbs or not blocksci_pbs:
+            result.errors.append("--blocksci-task parse requires --blocksciPbs without --analysisPbs.")
+    elif blocksci_task == "update":
+        if action != "pbs-from-s3" or blocksci_workflow != "cached":
+            result.errors.append(
+                "--blocksci-task update requires pbs-from-s3 --blocksci-workflow cached."
+            )
+        if analysis_pbs or not blocksci_pbs:
+            result.errors.append("--blocksci-task update requires --blocksciPbs without --analysisPbs.")
+    elif blocksci_task in {"script", "notebook"}:
+        if action != "pbs-from-s3" or blocksci_workflow == "combined":
+            result.errors.append(
+                "BlockSci script and notebook tasks require pbs-from-s3 "
+                "--blocksci-workflow reusable or cached."
+            )
+        if analysis_pbs or not blocksci_pbs:
+            result.errors.append(
+                "BlockSci script and notebook tasks require --blocksciPbs without --analysisPbs."
+            )
+    if action == "pbs-from-s3" and blocksci_task == "script" and not has_option(command, "--blocksci-script"):
+        result.errors.append("--blocksci-task script requires --blocksci-script.")
+    if action == "pbs-from-s3" and blocksci_task != "script" and has_option(command, "--blocksci-script"):
+        result.errors.append("--blocksci-script requires --blocksci-task script.")
+    if blocksci_task != "notebook" and has_option(command, "--blocksci-notebooks-dir"):
+        result.errors.append("--blocksci-notebooks-dir requires --blocksci-task notebook.")
+    if blocksci_task != "notebook" and has_option(command, "--blocksci-notebook-port"):
+        result.errors.append("--blocksci-notebook-port requires --blocksci-task notebook.")
+    external_bitcoin = has_option(command, "--blocksci-external-bitcoin-datadir")
+    external_index = has_option(command, "--blocksci-external-blocksci-dir")
+    external_network = has_option(command, "--blocksci-network")
+    external_max_block = has_option(command, "--blocksci-max-block")
+    source_cache_run_id = option_value(command, "--blocksci-cache-source-run-id")
+    if blocksci_task == "update":
+        if not source_cache_run_id:
+            result.errors.append("--blocksci-task update requires --blocksci-cache-source-run-id.")
+        if not external_bitcoin:
+            result.errors.append("--blocksci-task update requires --blocksci-external-bitcoin-datadir.")
+        if external_index:
+            result.errors.append("--blocksci-task update does not support --blocksci-external-blocksci-dir.")
+        if source_cache_run_id and source_cache_run_id == option_value(command, "--run-id"):
+            result.errors.append("--blocksci-cache-source-run-id must differ from target --run-id.")
+    elif source_cache_run_id:
+        result.errors.append("--blocksci-cache-source-run-id requires --blocksci-task update.")
+    if external_bitcoin and external_index:
+        result.errors.append(
+            "Choose either --blocksci-external-bitcoin-datadir or "
+            "--blocksci-external-blocksci-dir, not both."
+        )
+    if external_bitcoin or external_index:
+        parse_source = (
+            action == "pbs-from-s3"
+            and blocksci_workflow == "reusable"
+            and blocksci_task == "parse"
+        )
+        update_source = (
+            action == "pbs-from-s3"
+            and blocksci_workflow == "cached"
+            and blocksci_task == "update"
+            and external_bitcoin
+            and not external_index
+        )
+        if not (parse_source or update_source):
+            result.errors.append(
+                "External BlockSci sources require either reusable parse or cached update."
+            )
+    if external_bitcoin:
+        if not external_network or not external_max_block:
+            result.errors.append(
+                "--blocksci-external-bitcoin-datadir requires --blocksci-network "
+                "and --blocksci-max-block."
+            )
+    elif external_network or external_max_block:
+        result.errors.append(
+            "--blocksci-network and --blocksci-max-block require "
+            "--blocksci-external-bitcoin-datadir."
+        )
     # Shared PBS resources (ncpus/mem/scratch/walltime/shared image) require at
     # least one PBS stage. Stage-specific images require their own stage flag.
     if not (analysis_pbs or blocksci_pbs or mappings_pbs) and any(has_option(command, flag) for flag in PBS_SHARED):
@@ -313,9 +439,25 @@ def validate_command(command: Command) -> Validation:
         result.errors.append("--pbs-blocksci-image requires --blocksciPbs.")
     if has_option(command, "--pbs-coinjoin-analysis-image") and not analysis_pbs:
         result.errors.append("--pbs-coinjoin-analysis-image requires --analysisPbs.")
+    for stage, enabled, enabling_flag in (
+        ("analysis", analysis_pbs, "--analysisPbs"),
+        ("blocksci", blocksci_pbs, "--blocksciPbs"),
+        ("mappings", mappings_pbs, "--mappingsPbs"),
+    ):
+        stage_resources = (
+            f"--pbs-{stage}-{resource}"
+            for resource in ("ncpus", "mem", "scratch", "walltime")
+        )
+        if not enabled and any(has_option(command, flag) for flag in stage_resources):
+            result.errors.append(
+                f"{stage}-specific PBS resources require {enabling_flag}."
+            )
     for flag in sorted(PBS_REPORT_ONLY):
-        if has_option(command, flag) and not (analysis_pbs and blocksci_pbs):
-            result.errors.append(f"{flag} requires both --analysisPbs and --blocksciPbs.")
+        separate_report = blocksci_pbs and blocksci_task == "detect" and (
+            analysis_pbs or mappings_pbs or blocksci_workflow != "combined"
+        )
+        if has_option(command, flag) and not separate_report:
+            result.errors.append(f"{flag} requires a separate unified-report job.")
     for flag in sorted(PBS_MAPPINGS_ONLY - {"--mappingsPbs"}):
         if has_option(command, flag) and not mappings_pbs:
             result.errors.append(f"{flag} requires --mappingsPbs.")
@@ -409,7 +551,7 @@ def explain_command(command: Command) -> list[str]:
     action = command.action.split()[0]
     descriptions = {
         "full-run": "clean runtime resources, emulate CoinJoins, analyze, and export a report",
-        "recreate": "run CoinJoin emulation only",
+        "emulate": "run CoinJoin emulation only",
         "analyze": "analyze an existing emulator run",
         "export": "regenerate the unified report from existing analysis outputs",
         "coinjoin-analysis": "run the baseline coinjoin-analysis stage only",
@@ -570,7 +712,7 @@ def completion_values(flag: str) -> list[str]:
             if help_default:
                 values.add(help_default.group(1).strip())
         for variable in (
-            "WRAPPER_IMAGE", "BLOCKSCI_IMAGE", "COINJOIN_ANALYSIS_IMAGE",
+            "BLOCKSCI_IMAGE", "COINJOIN_ANALYSIS_IMAGE",
             "COINJOIN_EMULATOR_IMAGE",
         ):
             if os.environ.get(variable):
@@ -749,7 +891,6 @@ def collect_command() -> Command:
         choices = [
             advanced_choice(result, "CoinJoin heuristic type", "--coinjoin-type"),
             advanced_choice(result, "Minimum input count", "--min-input-count"),
-            advanced_choice(result, "BlockSci test thresholds", "--test-values"),
         ]
         if engine == "joinmarket":
             choices.extend(
@@ -773,7 +914,6 @@ def collect_command() -> Command:
             result.options.append(("--coinjoin-type", value))
         if "min-input-count" in selected:
             add_value(result, "--min-input-count", "Minimum input count")
-        add_flag(result, "--test-values", "test-values" in selected)
         if "joinmarket-detector" in selected:
             result.options.append(
                 (
@@ -996,7 +1136,7 @@ def collect_command() -> Command:
 
     action_labels = {
         "full-run": "Full run (clean, emulate, analyze)",
-        "recreate": "Emulation only",
+        "emulate": "Emulation only",
         "analyze": "Analyze an existing run",
         "export": "Export an existing run",
         "coinjoin-analysis": "coinjoin-analysis only",
@@ -1158,7 +1298,7 @@ def main() -> None:
         console.print("\n[dim]Cancelled.[/dim]")
         raise SystemExit(130)
     if base_action(command) in {
-        "full-run", "recreate", "clean", "analyze", "export",
+        "full-run", "emulate", "clean", "analyze", "export",
         "coinjoin-analysis", "mappings", "initialize", "external analyze",
     }:
         command.version = questionary.text(

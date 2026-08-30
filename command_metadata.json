@@ -226,7 +226,55 @@
           "choices": [],
           "default": null,
           "flag": "--min-input-count",
-          "help": "Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
+          "help": "Minimum transaction input count considered by detection (default: BlockSci height-aware threshold).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-mem": {
+          "aliases": [
+            "--pbs-analysis-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-mem",
+          "help": "Memory for the coinjoin-analysis PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-ncpus": {
+          "aliases": [
+            "--pbs-analysis-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-ncpus",
+          "help": "CPU count for the coinjoin-analysis PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-scratch": {
+          "aliases": [
+            "--pbs-analysis-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-scratch",
+          "help": "Scratch storage for the coinjoin-analysis PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-walltime": {
+          "aliases": [
+            "--pbs-analysis-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-walltime",
+          "help": "Walltime for the coinjoin-analysis PBS job (default: 04:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -251,6 +299,54 @@
           "default": null,
           "flag": "--pbs-blocksci-image",
           "help": "Singularity image for BlockSci PBS jobs (default: docker://ghcr.io/ondrejman/blocksci-complete:latest).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-mem": {
+          "aliases": [
+            "--pbs-blocksci-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-mem",
+          "help": "Memory for the blocksci PBS job (default: 64gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-ncpus": {
+          "aliases": [
+            "--pbs-blocksci-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-ncpus",
+          "help": "CPU count for the blocksci PBS job (default: 8; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-scratch": {
+          "aliases": [
+            "--pbs-blocksci-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-scratch",
+          "help": "Scratch storage for the blocksci PBS job (default: 100gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-walltime": {
+          "aliases": [
+            "--pbs-blocksci-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-walltime",
+          "help": "Walltime for the blocksci PBS job (default: 24:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -287,6 +383,54 @@
           "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:latest",
           "flag": "--pbs-mappings-enumerator-image",
           "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-mem": {
+          "aliases": [
+            "--pbs-mappings-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-mem",
+          "help": "Memory for the mappings PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-ncpus": {
+          "aliases": [
+            "--pbs-mappings-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-ncpus",
+          "help": "CPU count for the mappings PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-scratch": {
+          "aliases": [
+            "--pbs-mappings-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-scratch",
+          "help": "Scratch storage for the mappings PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-walltime": {
+          "aliases": [
+            "--pbs-mappings-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-walltime",
+          "help": "Walltime for the mappings PBS job (default: 04:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -386,18 +530,6 @@
           "metavar": null,
           "required": false,
           "takes_value": true
-        },
-        "--test-values": {
-          "aliases": [
-            "--test-values"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--test-values",
-          "help": "Use BlockSci test heuristic thresholds.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
         }
       }
     },
@@ -581,6 +713,54 @@
           "required": false,
           "takes_value": false
         },
+        "--pbs-analysis-mem": {
+          "aliases": [
+            "--pbs-analysis-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-mem",
+          "help": "Memory for the coinjoin-analysis PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-ncpus": {
+          "aliases": [
+            "--pbs-analysis-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-ncpus",
+          "help": "CPU count for the coinjoin-analysis PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-scratch": {
+          "aliases": [
+            "--pbs-analysis-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-scratch",
+          "help": "Scratch storage for the coinjoin-analysis PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-walltime": {
+          "aliases": [
+            "--pbs-analysis-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-walltime",
+          "help": "Walltime for the coinjoin-analysis PBS job (default: 04:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
         "--pbs-bitcoin-datadir": {
           "aliases": [
             "--pbs-bitcoin-datadir"
@@ -601,6 +781,54 @@
           "default": null,
           "flag": "--pbs-blocksci-image",
           "help": "Singularity image for BlockSci PBS jobs (default: docker://ghcr.io/ondrejman/blocksci-complete:latest).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-mem": {
+          "aliases": [
+            "--pbs-blocksci-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-mem",
+          "help": "Memory for the blocksci PBS job (default: 64gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-ncpus": {
+          "aliases": [
+            "--pbs-blocksci-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-ncpus",
+          "help": "CPU count for the blocksci PBS job (default: 8; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-scratch": {
+          "aliases": [
+            "--pbs-blocksci-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-scratch",
+          "help": "Scratch storage for the blocksci PBS job (default: 100gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-walltime": {
+          "aliases": [
+            "--pbs-blocksci-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-walltime",
+          "help": "Walltime for the blocksci PBS job (default: 24:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -637,6 +865,54 @@
           "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:latest",
           "flag": "--pbs-mappings-enumerator-image",
           "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-mem": {
+          "aliases": [
+            "--pbs-mappings-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-mem",
+          "help": "Memory for the mappings PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-ncpus": {
+          "aliases": [
+            "--pbs-mappings-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-ncpus",
+          "help": "CPU count for the mappings PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-scratch": {
+          "aliases": [
+            "--pbs-mappings-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-scratch",
+          "help": "Scratch storage for the mappings PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-walltime": {
+          "aliases": [
+            "--pbs-mappings-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-walltime",
+          "help": "Walltime for the mappings PBS job (default: 04:00:00; overrides --pbs-walltime).",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -727,1744 +1003,7 @@
         }
       }
     },
-    "export": {
-      "options": {
-        "--coinjoin-type": {
-          "aliases": [
-            "--coinjoin-type"
-          ],
-          "choices": [
-            "wasabi2",
-            "joinmarket"
-          ],
-          "default": "wasabi2",
-          "flag": "--coinjoin-type",
-          "help": "BlockSci CoinJoin heuristic family (default: wasabi2).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--dry-run": {
-          "aliases": [
-            "--dry-run"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--dry-run",
-          "help": "Print the selected pipeline stages and exit without side effects.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--engine": {
-          "aliases": [
-            "--engine"
-          ],
-          "choices": [
-            "wasabi",
-            "joinmarket"
-          ],
-          "default": null,
-          "flag": "--engine",
-          "help": "CoinJoin emulator engine to run. Select explicitly: wasabi or joinmarket.",
-          "metavar": null,
-          "required": true,
-          "takes_value": true
-        },
-        "--joinmarket-detector": {
-          "aliases": [
-            "--joinmarket-detector"
-          ],
-          "choices": [
-            "possible",
-            "definite"
-          ],
-          "default": "definite",
-          "flag": "--joinmarket-detector",
-          "help": "BlockSci JoinMarket subset detector to use when --coinjoin-type joinmarket (default: definite).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--joinmarket-max-depth": {
-          "aliases": [
-            "--joinmarket-max-depth"
-          ],
-          "choices": [],
-          "default": 200000,
-          "flag": "--joinmarket-max-depth",
-          "help": "Maximum subset-search depth for the JoinMarket detector (default: 200000).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--joinmarket-min-base-fee": {
-          "aliases": [
-            "--joinmarket-min-base-fee"
-          ],
-          "choices": [],
-          "default": 5000,
-          "flag": "--joinmarket-min-base-fee",
-          "help": "Minimum base fee for the JoinMarket detector (default: 5000).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--joinmarket-percentage-fee": {
-          "aliases": [
-            "--joinmarket-percentage-fee"
-          ],
-          "choices": [],
-          "default": 4e-05,
-          "flag": "--joinmarket-percentage-fee",
-          "help": "Percentage fee for the JoinMarket detector (default: 4e-05).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--min-input-count": {
-          "aliases": [
-            "--min-input-count"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--min-input-count",
-          "help": "Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--run-dir": {
-          "aliases": [
-            "--run-dir"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--run-dir",
-          "help": "Emulation run folder name or path.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--scenario": {
-          "aliases": [
-            "--scenario"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--scenario",
-          "help": "Fallback scenario JSON if the run folder has no scenario.json.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--test-values": {
-          "aliases": [
-            "--test-values"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--test-values",
-          "help": "Use BlockSci test heuristic thresholds.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        }
-      }
-    },
-    "external analyze": {
-      "options": {
-        "--baseline": {
-          "aliases": [
-            "--baseline"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--baseline",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--bitcoin-datadir": {
-          "aliases": [
-            "--bitcoin-datadir"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--bitcoin-datadir",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--blocksci-image": {
-          "aliases": [
-            "--blocksci-image"
-          ],
-          "choices": [],
-          "default": "ghcr.io/ondrejman/blocksci-complete:latest",
-          "flag": "--blocksci-image",
-          "help": "BlockSci container image used for parsing and reporting.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--coinjoin-type": {
-          "aliases": [
-            "--coinjoin-type"
-          ],
-          "choices": [
-            "wasabi2",
-            "joinmarket"
-          ],
-          "default": "wasabi2",
-          "flag": "--coinjoin-type",
-          "help": "BlockSci CoinJoin heuristic family (default: wasabi2).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--dry-run": {
-          "aliases": [
-            "--dry-run"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--dry-run",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--false-cjtxs": {
-          "aliases": [
-            "--false-cjtxs"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--false-cjtxs",
-          "help": "Confirmed false-positive JSON file; repeat for fragments. By default, false_cjtxs.json* files next to --baseline are imported automatically.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--min-free-gb": {
-          "aliases": [
-            "--min-free-gb"
-          ],
-          "choices": [],
-          "default": 20,
-          "flag": "--min-free-gb",
-          "help": "Minimum free space required for the persistent BlockSci index (default: 20 GiB).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--network": {
-          "aliases": [
-            "--network"
-          ],
-          "choices": [
-            "bitcoin"
-          ],
-          "default": "bitcoin",
-          "flag": "--network",
-          "help": "Blockchain network interpreted by BlockSci (default: bitcoin).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--resume": {
-          "aliases": [
-            "--resume"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--resume",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--run-id": {
-          "aliases": [
-            "--run-id"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--run-id",
-          "help": "",
-          "metavar": null,
-          "required": true,
-          "takes_value": true
-        }
-      }
-    },
-    "full-run": {
-      "options": {
-        "--analysisPbs": {
-          "aliases": [
-            "--analysisPbs"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--analysisPbs",
-          "help": "Submit coinjoin-analysis as a PBS job on MetaCentrum.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--artifact-backend": {
-          "aliases": [
-            "--artifact-backend"
-          ],
-          "choices": [
-            "shared-storage",
-            "s3"
-          ],
-          "default": "shared-storage",
-          "flag": "--artifact-backend",
-          "help": "Artifact transport backend (default: shared-storage).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--artifact-uri": {
-          "aliases": [
-            "--artifact-uri"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--artifact-uri",
-          "help": "S3-compatible run prefix, for example s3://bucket/runs.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--blocksci-script": {
-          "aliases": [
-            "--blocksci-script",
-            "--blocksciScript"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--blocksci-script",
-          "help": "Run a Python script after BlockSci parsing. The script receives ACTIVE_RUN_ID, BLOCKSCI_CONFIG, and BLOCKSCI_RUN_DIR in its environment and runs with the run directory as cwd.",
-          "metavar": "PATH",
-          "required": false,
-          "takes_value": true
-        },
-        "--blocksciPbs": {
-          "aliases": [
-            "--blocksciPbs"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--blocksciPbs",
-          "help": "Submit BlockSci analysis as a PBS job on MetaCentrum.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--coinjoin-infrastructure-local-build": {
-          "aliases": [
-            "--coinjoin-infrastructure-local-build"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--coinjoin-infrastructure-local-build",
-          "help": "Build btc-node, JoinMarket client-server, and IRC server locally inside the emulator runtime.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--coinjoin-type": {
-          "aliases": [
-            "--coinjoin-type"
-          ],
-          "choices": [
-            "wasabi2",
-            "joinmarket"
-          ],
-          "default": "wasabi2",
-          "flag": "--coinjoin-type",
-          "help": "BlockSci CoinJoin heuristic family (default: wasabi2).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--copy-to-host": {
-          "aliases": [
-            "--copy-to-host"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--copy-to-host",
-          "help": "Use the legacy pod-to-wrapper Bitcoin datadir download instead of writing directly to shared storage.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--driver": {
-          "aliases": [
-            "--driver"
-          ],
-          "choices": [
-            "docker",
-            "kubernetes"
-          ],
-          "default": "docker",
-          "flag": "--driver",
-          "help": "Container orchestration driver for the emulation step. 'docker' uses Docker-in-Docker via compose (default). 'kubernetes' runs the emulation pods on a Kubernetes cluster.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--dry-run": {
-          "aliases": [
-            "--dry-run"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--dry-run",
-          "help": "Print the selected pipeline stages and exit without side effects.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--emulation-timeout": {
-          "aliases": [
-            "--emulation-timeout"
-          ],
-          "choices": [],
-          "default": 21600,
-          "flag": "--emulation-timeout",
-          "help": "Seconds to wait for the Kubernetes S3-compatible emulation upload marker (S3 backend only).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--engine": {
-          "aliases": [
-            "--engine"
-          ],
-          "choices": [
-            "wasabi",
-            "joinmarket"
-          ],
-          "default": null,
-          "flag": "--engine",
-          "help": "CoinJoin emulator engine to run. Select explicitly: wasabi or joinmarket.",
-          "metavar": null,
-          "required": true,
-          "takes_value": true
-        },
-        "--image-prefix": {
-          "aliases": [
-            "--image-prefix"
-          ],
-          "choices": [],
-          "default": "ghcr.io/ondrejman/",
-          "flag": "--image-prefix",
-          "help": "Image registry prefix for Kubernetes pods (default: ghcr.io/ondrejman/).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--joinmarket-detector": {
-          "aliases": [
-            "--joinmarket-detector"
-          ],
-          "choices": [
-            "possible",
-            "definite"
-          ],
-          "default": "definite",
-          "flag": "--joinmarket-detector",
-          "help": "BlockSci JoinMarket subset detector to use when --coinjoin-type joinmarket (default: definite).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--joinmarket-max-depth": {
-          "aliases": [
-            "--joinmarket-max-depth"
-          ],
-          "choices": [],
-          "default": 200000,
-          "flag": "--joinmarket-max-depth",
-          "help": "Maximum subset-search depth for the JoinMarket detector (default: 200000).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--joinmarket-min-base-fee": {
-          "aliases": [
-            "--joinmarket-min-base-fee"
-          ],
-          "choices": [],
-          "default": 5000,
-          "flag": "--joinmarket-min-base-fee",
-          "help": "Minimum base fee for the JoinMarket detector (default: 5000).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--joinmarket-percentage-fee": {
-          "aliases": [
-            "--joinmarket-percentage-fee"
-          ],
-          "choices": [],
-          "default": 4e-05,
-          "flag": "--joinmarket-percentage-fee",
-          "help": "Percentage fee for the JoinMarket detector (default: 4e-05).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--kubeconfig": {
-          "aliases": [
-            "--kubeconfig"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--kubeconfig",
-          "help": "Path to kubeconfig file (default: ~/.kube/config).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--kubernetes-btc-datadir": {
-          "aliases": [
-            "--kubernetes-btc-datadir"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--kubernetes-btc-datadir",
-          "help": "Shared absolute Bitcoin Core datadir mounted directly into the Kubernetes btc-node pod. Defaults to --pbs-bitcoin-datadir when set.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-coordination-fee-rate": {
-          "aliases": [
-            "--mapping-coordination-fee-rate"
-          ],
-          "choices": [],
-          "default": 0.003,
-          "flag": "--mapping-coordination-fee-rate",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-max-decomposition-fee": {
-          "aliases": [
-            "--mapping-max-decomposition-fee"
-          ],
-          "choices": [],
-          "default": 6000,
-          "flag": "--mapping-max-decomposition-fee",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-mining-fee-rate": {
-          "aliases": [
-            "--mapping-mining-fee-rate"
-          ],
-          "choices": [],
-          "default": 1,
-          "flag": "--mapping-mining-fee-rate",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-mode": {
-          "aliases": [
-            "--mapping-mode"
-          ],
-          "choices": [
-            "numeric",
-            "all"
-          ],
-          "default": "numeric",
-          "flag": "--mapping-mode",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-retry-timeout": {
-          "aliases": [
-            "--mapping-retry-timeout"
-          ],
-          "choices": [],
-          "default": 600,
-          "flag": "--mapping-retry-timeout",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-timeout": {
-          "aliases": [
-            "--mapping-timeout"
-          ],
-          "choices": [],
-          "default": 60,
-          "flag": "--mapping-timeout",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mappingsPbs": {
-          "aliases": [
-            "--mappingsPbs"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--mappingsPbs",
-          "help": "Submit the Wasabi mapping enumerator and Sake as one PBS job.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--min-input-count": {
-          "aliases": [
-            "--min-input-count"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--min-input-count",
-          "help": "Minimum transaction input count considered by detection (default: BlockSci height/test-mode threshold).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--namespace": {
-          "aliases": [
-            "--namespace"
-          ],
-          "choices": [],
-          "default": "coinjoin",
-          "flag": "--namespace",
-          "help": "Kubernetes namespace for emulation pods (default: coinjoin).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--parallel": {
-          "aliases": [
-            "--parallel"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--parallel",
-          "help": "Run BlockSci and coinjoin-analysis concurrently after emulation.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--pbs-bitcoin-datadir": {
-          "aliases": [
-            "--pbs-bitcoin-datadir"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-bitcoin-datadir",
-          "help": "Shared /storage Bitcoin Core datadir for BlockSci PBS jobs. It must contain regtest/blocks. Can also be set with PBS_BITCOIN_DATADIR.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-blocksci-image": {
-          "aliases": [
-            "--pbs-blocksci-image"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-blocksci-image",
-          "help": "Singularity image for BlockSci PBS jobs (default: docker://ghcr.io/ondrejman/blocksci-complete:latest).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-coinjoin-analysis-image": {
-          "aliases": [
-            "--pbs-coinjoin-analysis-image"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-coinjoin-analysis-image",
-          "help": "Singularity image for coinjoin-analysis PBS jobs (default: docker://ghcr.io/ondrejman/coinjoin-analysis:latest).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-image": {
-          "aliases": [
-            "--pbs-image"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-image",
-          "help": "Singularity image override for either PBS stage.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-mappings-enumerator-image": {
-          "aliases": [
-            "--pbs-mappings-enumerator-image"
-          ],
-          "choices": [],
-          "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:latest",
-          "flag": "--pbs-mappings-enumerator-image",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-mem": {
-          "aliases": [
-            "--pbs-mem"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-mem",
-          "help": "Memory for the PBS job (default: 64gb for BlockSci, 16gb for coinjoin-analysis).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-ncpus": {
-          "aliases": [
-            "--pbs-ncpus"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-ncpus",
-          "help": "Number of CPUs for the PBS job (default: 8 for BlockSci, 4 for coinjoin-analysis).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-sake-image": {
-          "aliases": [
-            "--pbs-sake-image"
-          ],
-          "choices": [],
-          "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-sake:latest",
-          "flag": "--pbs-sake-image",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-scratch": {
-          "aliases": [
-            "--pbs-scratch"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-scratch",
-          "help": "Scratch storage for the PBS job (default: 100gb for BlockSci, 50gb for coinjoin-analysis).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-unified-report-mem": {
-          "aliases": [
-            "--pbs-unified-report-mem"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-unified-report-mem",
-          "help": "Memory for the unified-report PBS job (default: 8gb; overrides --pbs-mem).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-unified-report-ncpus": {
-          "aliases": [
-            "--pbs-unified-report-ncpus"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-unified-report-ncpus",
-          "help": "CPU count for the unified-report PBS job (default: 2; overrides --pbs-ncpus).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-unified-report-scratch": {
-          "aliases": [
-            "--pbs-unified-report-scratch"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-unified-report-scratch",
-          "help": "Scratch storage for the unified-report PBS job (default: 100gb; overrides --pbs-scratch).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-unified-report-walltime": {
-          "aliases": [
-            "--pbs-unified-report-walltime"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-unified-report-walltime",
-          "help": "Walltime for the unified-report PBS job (default: 24:00:00; overrides --pbs-walltime).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-walltime": {
-          "aliases": [
-            "--pbs-walltime"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-walltime",
-          "help": "Walltime for the PBS job (default: 24:00:00 for BlockSci, 04:00:00 for coinjoin-analysis).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--reuse-namespace": {
-          "aliases": [
-            "--reuse-namespace"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--reuse-namespace",
-          "help": "Reuse an existing Kubernetes namespace instead of creating a new one.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--run-id": {
-          "aliases": [
-            "--run-id"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--run-id",
-          "help": "Deterministic artifact run identifier.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--run-timezone": {
-          "aliases": [
-            "--run-timezone"
-          ],
-          "choices": [],
-          "default": "Europe/Prague",
-          "flag": "--run-timezone",
-          "help": "IANA timezone used in newly created run directory names (default: Europe/Prague).",
-          "metavar": "IANA_ZONE",
-          "required": false,
-          "takes_value": true
-        },
-        "--s3-credentials-file": {
-          "aliases": [
-            "--s3-credentials-file"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--s3-credentials-file",
-          "help": "Absolute s5cmd credentials-file path for PBS jobs.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--s3-endpoint-url": {
-          "aliases": [
-            "--s3-endpoint-url"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--s3-endpoint-url",
-          "help": "CESNET/MetaCentrum S3-compatible endpoint URL.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--s3-profile": {
-          "aliases": [
-            "--s3-profile"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--s3-profile",
-          "help": "Named profile in the s5cmd credentials file.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--s3-secret-name": {
-          "aliases": [
-            "--s3-secret-name"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--s3-secret-name",
-          "help": "Pre-created Kubernetes Secret for S3-compatible upload.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--sake-seed": {
-          "aliases": [
-            "--sake-seed"
-          ],
-          "choices": [],
-          "default": 20260704,
-          "flag": "--sake-seed",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--scenario": {
-          "aliases": [
-            "--scenario"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--scenario",
-          "help": "JSON scenario path.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--test-values": {
-          "aliases": [
-            "--test-values"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--test-values",
-          "help": "Use BlockSci test heuristic thresholds.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        }
-      }
-    },
-    "initialize": {
-      "options": {
-        "--dry-run": {
-          "aliases": [
-            "--dry-run"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--dry-run",
-          "help": "Print the selected pipeline stages and exit without side effects.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        }
-      }
-    },
-    "mappings": {
-      "options": {
-        "--analysisPbs": {
-          "aliases": [
-            "--analysisPbs"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--analysisPbs",
-          "help": "Submit coinjoin-analysis as a PBS job on MetaCentrum.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--blocksciPbs": {
-          "aliases": [
-            "--blocksciPbs"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--blocksciPbs",
-          "help": "Submit BlockSci analysis as a PBS job on MetaCentrum.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--coinjoin-type": {
-          "aliases": [
-            "--coinjoin-type"
-          ],
-          "choices": [
-            "wasabi2",
-            "joinmarket"
-          ],
-          "default": "wasabi2",
-          "flag": "--coinjoin-type",
-          "help": "BlockSci CoinJoin heuristic family (default: wasabi2).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--dry-run": {
-          "aliases": [
-            "--dry-run"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--dry-run",
-          "help": "Print the selected pipeline stages and exit without side effects.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--engine": {
-          "aliases": [
-            "--engine"
-          ],
-          "choices": [
-            "wasabi",
-            "joinmarket"
-          ],
-          "default": null,
-          "flag": "--engine",
-          "help": "CoinJoin emulator engine to run. Select explicitly: wasabi or joinmarket.",
-          "metavar": null,
-          "required": true,
-          "takes_value": true
-        },
-        "--mapping-coordination-fee-rate": {
-          "aliases": [
-            "--mapping-coordination-fee-rate"
-          ],
-          "choices": [],
-          "default": 0.003,
-          "flag": "--mapping-coordination-fee-rate",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-max-decomposition-fee": {
-          "aliases": [
-            "--mapping-max-decomposition-fee"
-          ],
-          "choices": [],
-          "default": 6000,
-          "flag": "--mapping-max-decomposition-fee",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-mining-fee-rate": {
-          "aliases": [
-            "--mapping-mining-fee-rate"
-          ],
-          "choices": [],
-          "default": 1,
-          "flag": "--mapping-mining-fee-rate",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-mode": {
-          "aliases": [
-            "--mapping-mode"
-          ],
-          "choices": [
-            "numeric",
-            "all"
-          ],
-          "default": "numeric",
-          "flag": "--mapping-mode",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-retry-timeout": {
-          "aliases": [
-            "--mapping-retry-timeout"
-          ],
-          "choices": [],
-          "default": 600,
-          "flag": "--mapping-retry-timeout",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-timeout": {
-          "aliases": [
-            "--mapping-timeout"
-          ],
-          "choices": [],
-          "default": 60,
-          "flag": "--mapping-timeout",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mappingsPbs": {
-          "aliases": [
-            "--mappingsPbs"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--mappingsPbs",
-          "help": "Submit the Wasabi mapping enumerator and Sake as one PBS job.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--pbs-bitcoin-datadir": {
-          "aliases": [
-            "--pbs-bitcoin-datadir"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-bitcoin-datadir",
-          "help": "Shared /storage Bitcoin Core datadir for BlockSci PBS jobs. It must contain regtest/blocks. Can also be set with PBS_BITCOIN_DATADIR.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-blocksci-image": {
-          "aliases": [
-            "--pbs-blocksci-image"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-blocksci-image",
-          "help": "Singularity image for BlockSci PBS jobs (default: docker://ghcr.io/ondrejman/blocksci-complete:latest).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-coinjoin-analysis-image": {
-          "aliases": [
-            "--pbs-coinjoin-analysis-image"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-coinjoin-analysis-image",
-          "help": "Singularity image for coinjoin-analysis PBS jobs (default: docker://ghcr.io/ondrejman/coinjoin-analysis:latest).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-image": {
-          "aliases": [
-            "--pbs-image"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-image",
-          "help": "Singularity image override for either PBS stage.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-mappings-enumerator-image": {
-          "aliases": [
-            "--pbs-mappings-enumerator-image"
-          ],
-          "choices": [],
-          "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:latest",
-          "flag": "--pbs-mappings-enumerator-image",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-mem": {
-          "aliases": [
-            "--pbs-mem"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-mem",
-          "help": "Memory for the PBS job (default: 64gb for BlockSci, 16gb for coinjoin-analysis).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-ncpus": {
-          "aliases": [
-            "--pbs-ncpus"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-ncpus",
-          "help": "Number of CPUs for the PBS job (default: 8 for BlockSci, 4 for coinjoin-analysis).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-sake-image": {
-          "aliases": [
-            "--pbs-sake-image"
-          ],
-          "choices": [],
-          "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-sake:latest",
-          "flag": "--pbs-sake-image",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-scratch": {
-          "aliases": [
-            "--pbs-scratch"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-scratch",
-          "help": "Scratch storage for the PBS job (default: 100gb for BlockSci, 50gb for coinjoin-analysis).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-walltime": {
-          "aliases": [
-            "--pbs-walltime"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-walltime",
-          "help": "Walltime for the PBS job (default: 24:00:00 for BlockSci, 04:00:00 for coinjoin-analysis).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--run-dir": {
-          "aliases": [
-            "--run-dir"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--run-dir",
-          "help": "",
-          "metavar": null,
-          "required": true,
-          "takes_value": true
-        },
-        "--sake-seed": {
-          "aliases": [
-            "--sake-seed"
-          ],
-          "choices": [],
-          "default": 20260704,
-          "flag": "--sake-seed",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        }
-      }
-    },
-    "pbs-from-s3": {
-      "options": {
-        "--analysisPbs": {
-          "aliases": [
-            "--analysisPbs"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--analysisPbs",
-          "help": "Submit coinjoin-analysis as a PBS job on MetaCentrum.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--artifact-backend": {
-          "aliases": [
-            "--artifact-backend"
-          ],
-          "choices": [
-            "shared-storage",
-            "s3"
-          ],
-          "default": "shared-storage",
-          "flag": "--artifact-backend",
-          "help": "Artifact transport backend (default: shared-storage).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--artifact-uri": {
-          "aliases": [
-            "--artifact-uri"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--artifact-uri",
-          "help": "S3-compatible run prefix, for example s3://bucket/runs.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--blocksciPbs": {
-          "aliases": [
-            "--blocksciPbs"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--blocksciPbs",
-          "help": "Submit BlockSci analysis as a PBS job on MetaCentrum.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--coinjoin-type": {
-          "aliases": [
-            "--coinjoin-type"
-          ],
-          "choices": [
-            "wasabi2",
-            "joinmarket"
-          ],
-          "default": "wasabi2",
-          "flag": "--coinjoin-type",
-          "help": "BlockSci CoinJoin heuristic family (default: wasabi2).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--dry-run": {
-          "aliases": [
-            "--dry-run"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--dry-run",
-          "help": "Print the selected pipeline stages and exit without side effects.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--engine": {
-          "aliases": [
-            "--engine"
-          ],
-          "choices": [
-            "wasabi",
-            "joinmarket"
-          ],
-          "default": null,
-          "flag": "--engine",
-          "help": "CoinJoin emulator engine to run. Select explicitly: wasabi or joinmarket.",
-          "metavar": null,
-          "required": true,
-          "takes_value": true
-        },
-        "--joinmarket-detector": {
-          "aliases": [
-            "--joinmarket-detector"
-          ],
-          "choices": [
-            "possible",
-            "definite"
-          ],
-          "default": "definite",
-          "flag": "--joinmarket-detector",
-          "help": "BlockSci JoinMarket subset detector to use when --coinjoin-type joinmarket (default: definite).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--joinmarket-max-depth": {
-          "aliases": [
-            "--joinmarket-max-depth"
-          ],
-          "choices": [],
-          "default": 200000,
-          "flag": "--joinmarket-max-depth",
-          "help": "Maximum subset-search depth for the JoinMarket detector (default: 200000).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--joinmarket-min-base-fee": {
-          "aliases": [
-            "--joinmarket-min-base-fee"
-          ],
-          "choices": [],
-          "default": 5000,
-          "flag": "--joinmarket-min-base-fee",
-          "help": "Minimum base fee for the JoinMarket detector (default: 5000).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--joinmarket-percentage-fee": {
-          "aliases": [
-            "--joinmarket-percentage-fee"
-          ],
-          "choices": [],
-          "default": 4e-05,
-          "flag": "--joinmarket-percentage-fee",
-          "help": "Percentage fee for the JoinMarket detector (default: 4e-05).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-coordination-fee-rate": {
-          "aliases": [
-            "--mapping-coordination-fee-rate"
-          ],
-          "choices": [],
-          "default": 0.003,
-          "flag": "--mapping-coordination-fee-rate",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-max-decomposition-fee": {
-          "aliases": [
-            "--mapping-max-decomposition-fee"
-          ],
-          "choices": [],
-          "default": 6000,
-          "flag": "--mapping-max-decomposition-fee",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-mining-fee-rate": {
-          "aliases": [
-            "--mapping-mining-fee-rate"
-          ],
-          "choices": [],
-          "default": 1,
-          "flag": "--mapping-mining-fee-rate",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-mode": {
-          "aliases": [
-            "--mapping-mode"
-          ],
-          "choices": [
-            "numeric",
-            "all"
-          ],
-          "default": "numeric",
-          "flag": "--mapping-mode",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-retry-timeout": {
-          "aliases": [
-            "--mapping-retry-timeout"
-          ],
-          "choices": [],
-          "default": 600,
-          "flag": "--mapping-retry-timeout",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mapping-timeout": {
-          "aliases": [
-            "--mapping-timeout"
-          ],
-          "choices": [],
-          "default": 60,
-          "flag": "--mapping-timeout",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--mappingsPbs": {
-          "aliases": [
-            "--mappingsPbs"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--mappingsPbs",
-          "help": "Submit the Wasabi mapping enumerator and Sake as one PBS job.",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        },
-        "--min-input-count": {
-          "aliases": [
-            "--min-input-count"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--min-input-count",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-bitcoin-datadir": {
-          "aliases": [
-            "--pbs-bitcoin-datadir"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-bitcoin-datadir",
-          "help": "Shared /storage Bitcoin Core datadir for BlockSci PBS jobs. It must contain regtest/blocks. Can also be set with PBS_BITCOIN_DATADIR.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-blocksci-image": {
-          "aliases": [
-            "--pbs-blocksci-image"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-blocksci-image",
-          "help": "Singularity image for BlockSci PBS jobs (default: docker://ghcr.io/ondrejman/blocksci-complete:latest).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-coinjoin-analysis-image": {
-          "aliases": [
-            "--pbs-coinjoin-analysis-image"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-coinjoin-analysis-image",
-          "help": "Singularity image for coinjoin-analysis PBS jobs (default: docker://ghcr.io/ondrejman/coinjoin-analysis:latest).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-image": {
-          "aliases": [
-            "--pbs-image"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-image",
-          "help": "Singularity image override for either PBS stage.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-mappings-enumerator-image": {
-          "aliases": [
-            "--pbs-mappings-enumerator-image"
-          ],
-          "choices": [],
-          "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:latest",
-          "flag": "--pbs-mappings-enumerator-image",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-mem": {
-          "aliases": [
-            "--pbs-mem"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-mem",
-          "help": "Memory for the PBS job (default: 64gb for BlockSci, 16gb for coinjoin-analysis).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-ncpus": {
-          "aliases": [
-            "--pbs-ncpus"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-ncpus",
-          "help": "Number of CPUs for the PBS job (default: 8 for BlockSci, 4 for coinjoin-analysis).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-sake-image": {
-          "aliases": [
-            "--pbs-sake-image"
-          ],
-          "choices": [],
-          "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-sake:latest",
-          "flag": "--pbs-sake-image",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-scratch": {
-          "aliases": [
-            "--pbs-scratch"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-scratch",
-          "help": "Scratch storage for the PBS job (default: 100gb for BlockSci, 50gb for coinjoin-analysis).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-unified-report-mem": {
-          "aliases": [
-            "--pbs-unified-report-mem"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-unified-report-mem",
-          "help": "Memory for the unified-report PBS job (default: 8gb; overrides --pbs-mem).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-unified-report-ncpus": {
-          "aliases": [
-            "--pbs-unified-report-ncpus"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-unified-report-ncpus",
-          "help": "CPU count for the unified-report PBS job (default: 2; overrides --pbs-ncpus).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-unified-report-scratch": {
-          "aliases": [
-            "--pbs-unified-report-scratch"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-unified-report-scratch",
-          "help": "Scratch storage for the unified-report PBS job (default: 100gb; overrides --pbs-scratch).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-unified-report-walltime": {
-          "aliases": [
-            "--pbs-unified-report-walltime"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-unified-report-walltime",
-          "help": "Walltime for the unified-report PBS job (default: 24:00:00; overrides --pbs-walltime).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--pbs-walltime": {
-          "aliases": [
-            "--pbs-walltime"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--pbs-walltime",
-          "help": "Walltime for the PBS job (default: 24:00:00 for BlockSci, 04:00:00 for coinjoin-analysis).",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--run-id": {
-          "aliases": [
-            "--run-id"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--run-id",
-          "help": "Deterministic artifact run identifier.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--s3-credentials-file": {
-          "aliases": [
-            "--s3-credentials-file"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--s3-credentials-file",
-          "help": "Absolute s5cmd credentials-file path for PBS jobs.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--s3-endpoint-url": {
-          "aliases": [
-            "--s3-endpoint-url"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--s3-endpoint-url",
-          "help": "CESNET/MetaCentrum S3-compatible endpoint URL.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--s3-profile": {
-          "aliases": [
-            "--s3-profile"
-          ],
-          "choices": [],
-          "default": null,
-          "flag": "--s3-profile",
-          "help": "Named profile in the s5cmd credentials file.",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--sake-seed": {
-          "aliases": [
-            "--sake-seed"
-          ],
-          "choices": [],
-          "default": 20260704,
-          "flag": "--sake-seed",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": true
-        },
-        "--test-values": {
-          "aliases": [
-            "--test-values"
-          ],
-          "choices": [],
-          "default": false,
-          "flag": "--test-values",
-          "help": "",
-          "metavar": null,
-          "required": false,
-          "takes_value": false
-        }
-      }
-    },
-    "recreate": {
+    "emulate": {
       "options": {
         "--artifact-backend": {
           "aliases": [
@@ -2655,6 +1194,18 @@
           "required": false,
           "takes_value": true
         },
+        "--s3-credentials-file": {
+          "aliases": [
+            "--s3-credentials-file"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--s3-credentials-file",
+          "help": "Absolute s5cmd credentials-file path for PBS jobs.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
         "--s3-endpoint-url": {
           "aliases": [
             "--s3-endpoint-url"
@@ -2663,6 +1214,18 @@
           "default": null,
           "flag": "--s3-endpoint-url",
           "help": "CESNET/MetaCentrum S3-compatible endpoint URL.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--s3-profile": {
+          "aliases": [
+            "--s3-profile"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--s3-profile",
+          "help": "Named profile in the s5cmd credentials file.",
           "metavar": null,
           "required": false,
           "takes_value": true
@@ -2687,6 +1250,2530 @@
           "default": null,
           "flag": "--scenario",
           "help": "JSON scenario path.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--unified-report-image": {
+          "aliases": [
+            "--unified-report-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--unified-report-image",
+          "help": "Override the pinned Python image for the PBS unified-report step (default: container/unified-report.image).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--uploader-image": {
+          "aliases": [
+            "--uploader-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--uploader-image",
+          "help": "Override the in-cluster uploader/preflight image (default: container/uploader.image).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        }
+      }
+    },
+    "export": {
+      "options": {
+        "--coinjoin-type": {
+          "aliases": [
+            "--coinjoin-type"
+          ],
+          "choices": [
+            "wasabi2",
+            "joinmarket"
+          ],
+          "default": "wasabi2",
+          "flag": "--coinjoin-type",
+          "help": "BlockSci CoinJoin heuristic family (default: wasabi2).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--dry-run": {
+          "aliases": [
+            "--dry-run"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--dry-run",
+          "help": "Print the selected pipeline stages and exit without side effects.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--engine": {
+          "aliases": [
+            "--engine"
+          ],
+          "choices": [
+            "wasabi",
+            "joinmarket"
+          ],
+          "default": null,
+          "flag": "--engine",
+          "help": "CoinJoin emulator engine to run. Select explicitly: wasabi or joinmarket.",
+          "metavar": null,
+          "required": true,
+          "takes_value": true
+        },
+        "--joinmarket-detector": {
+          "aliases": [
+            "--joinmarket-detector"
+          ],
+          "choices": [
+            "possible",
+            "definite"
+          ],
+          "default": "definite",
+          "flag": "--joinmarket-detector",
+          "help": "BlockSci JoinMarket subset detector to use when --coinjoin-type joinmarket (default: definite).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--joinmarket-max-depth": {
+          "aliases": [
+            "--joinmarket-max-depth"
+          ],
+          "choices": [],
+          "default": 200000,
+          "flag": "--joinmarket-max-depth",
+          "help": "Maximum subset-search depth for the JoinMarket detector (default: 200000).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--joinmarket-min-base-fee": {
+          "aliases": [
+            "--joinmarket-min-base-fee"
+          ],
+          "choices": [],
+          "default": 5000,
+          "flag": "--joinmarket-min-base-fee",
+          "help": "Minimum base fee for the JoinMarket detector (default: 5000).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--joinmarket-percentage-fee": {
+          "aliases": [
+            "--joinmarket-percentage-fee"
+          ],
+          "choices": [],
+          "default": 4e-05,
+          "flag": "--joinmarket-percentage-fee",
+          "help": "Percentage fee for the JoinMarket detector (default: 4e-05).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--min-input-count": {
+          "aliases": [
+            "--min-input-count"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--min-input-count",
+          "help": "Minimum transaction input count considered by detection (default: BlockSci height-aware threshold).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--run-dir": {
+          "aliases": [
+            "--run-dir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--run-dir",
+          "help": "Emulation run folder name or path.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--scenario": {
+          "aliases": [
+            "--scenario"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--scenario",
+          "help": "Fallback scenario JSON if the run folder has no scenario.json.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        }
+      }
+    },
+    "external analyze": {
+      "options": {
+        "--baseline": {
+          "aliases": [
+            "--baseline"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--baseline",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--bitcoin-datadir": {
+          "aliases": [
+            "--bitcoin-datadir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--bitcoin-datadir",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-image": {
+          "aliases": [
+            "--blocksci-image"
+          ],
+          "choices": [],
+          "default": "ghcr.io/ondrejman/blocksci-complete:latest",
+          "flag": "--blocksci-image",
+          "help": "BlockSci container image used for parsing and reporting.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--coinjoin-type": {
+          "aliases": [
+            "--coinjoin-type"
+          ],
+          "choices": [
+            "wasabi2",
+            "joinmarket"
+          ],
+          "default": "wasabi2",
+          "flag": "--coinjoin-type",
+          "help": "BlockSci CoinJoin heuristic family (default: wasabi2).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--dry-run": {
+          "aliases": [
+            "--dry-run"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--dry-run",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--false-cjtxs": {
+          "aliases": [
+            "--false-cjtxs"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--false-cjtxs",
+          "help": "Confirmed false-positive JSON file; repeat for fragments. By default, false_cjtxs.json* files next to --baseline are imported automatically.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--min-free-gb": {
+          "aliases": [
+            "--min-free-gb"
+          ],
+          "choices": [],
+          "default": 20,
+          "flag": "--min-free-gb",
+          "help": "Minimum free space required for the persistent BlockSci index (default: 20 GiB).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--network": {
+          "aliases": [
+            "--network"
+          ],
+          "choices": [
+            "bitcoin"
+          ],
+          "default": "bitcoin",
+          "flag": "--network",
+          "help": "Blockchain network interpreted by BlockSci (default: bitcoin).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--resume": {
+          "aliases": [
+            "--resume"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--resume",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--run-id": {
+          "aliases": [
+            "--run-id"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--run-id",
+          "help": "",
+          "metavar": null,
+          "required": true,
+          "takes_value": true
+        }
+      }
+    },
+    "full-run": {
+      "options": {
+        "--analysisPbs": {
+          "aliases": [
+            "--analysisPbs"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--analysisPbs",
+          "help": "Submit coinjoin-analysis as a PBS job on MetaCentrum.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--artifact-backend": {
+          "aliases": [
+            "--artifact-backend"
+          ],
+          "choices": [
+            "shared-storage",
+            "s3"
+          ],
+          "default": "shared-storage",
+          "flag": "--artifact-backend",
+          "help": "Artifact transport backend (default: shared-storage).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--artifact-uri": {
+          "aliases": [
+            "--artifact-uri"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--artifact-uri",
+          "help": "S3-compatible run prefix, for example s3://bucket/runs.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-bitcoin-blocks-uri": {
+          "aliases": [
+            "--blocksci-bitcoin-blocks-uri"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-bitcoin-blocks-uri",
+          "help": "S3 prefix produced by bitcoin-block-archive containing archive-manifest.json, blk*.dat, and SHA-256 sidecars.",
+          "metavar": "S3_URI",
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-cache-source-run-id": {
+          "aliases": [
+            "--blocksci-cache-source-run-id"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-cache-source-run-id",
+          "help": "Existing S3 run ID whose verified blocksci-parse_data cache is the input to --blocksci-task update. The updated cache is written to --run-id.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-external-bitcoin-datadir": {
+          "aliases": [
+            "--blocksci-external-bitcoin-datadir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-external-bitcoin-datadir",
+          "help": "Parse an external Bitcoin Core coin directory under /storage; the directory must contain blocks/.",
+          "metavar": "PATH",
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-external-blocksci-dir": {
+          "aliases": [
+            "--blocksci-external-blocksci-dir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-external-blocksci-dir",
+          "help": "Import an existing BlockSci directory under /storage containing config.json and parsed/.",
+          "metavar": "PATH",
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-max-block": {
+          "aliases": [
+            "--blocksci-max-block"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-max-block",
+          "help": "Inclusive maximum block height for external Bitcoin parsing.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-network": {
+          "aliases": [
+            "--blocksci-network"
+          ],
+          "choices": [
+            "bitcoin",
+            "bitcoin_testnet",
+            "bitcoin_regtest"
+          ],
+          "default": null,
+          "flag": "--blocksci-network",
+          "help": "BlockSci network for --blocksci-external-bitcoin-datadir.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-notebook-port": {
+          "aliases": [
+            "--blocksci-notebook-port"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-notebook-port",
+          "help": "Jupyter port on the assigned PBS node (default: 8888).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-notebooks-dir": {
+          "aliases": [
+            "--blocksci-notebooks-dir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-notebooks-dir",
+          "help": "Optional shared /storage directory mounted read-write as /mnt/notebooks; otherwise notebooks are uploaded under blocksci-notebooks_data/.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-script": {
+          "aliases": [
+            "--blocksci-script",
+            "--blocksciScript"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-script",
+          "help": "Run a Python script after BlockSci parsing. The script receives ACTIVE_RUN_ID, BLOCKSCI_CONFIG, and BLOCKSCI_RUN_DIR in its environment and runs with the run directory as cwd.",
+          "metavar": "PATH",
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-task": {
+          "aliases": [
+            "--blocksci-task"
+          ],
+          "choices": [
+            "detect",
+            "parse",
+            "update",
+            "script",
+            "notebook",
+            "external"
+          ],
+          "default": "detect",
+          "flag": "--blocksci-task",
+          "help": "BlockSci work to run; parse publishes a reusable cache and update incrementally advances an external-Bitcoin cache; external builds a BlockSci-vs-Dumplings mainnet report (default: detect).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-workflow": {
+          "aliases": [
+            "--blocksci-workflow"
+          ],
+          "choices": [
+            "combined",
+            "reusable",
+            "cached"
+          ],
+          "default": "combined",
+          "flag": "--blocksci-workflow",
+          "help": "BlockSci S3 workflow: combined parses and analyzes in one PBS job; reusable publishes a cache then submits dependent work; cached reuses an already published blocksci-parse_data cache.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksciPbs": {
+          "aliases": [
+            "--blocksciPbs"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--blocksciPbs",
+          "help": "Submit BlockSci analysis as a PBS job on MetaCentrum.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--coinjoin-infrastructure-local-build": {
+          "aliases": [
+            "--coinjoin-infrastructure-local-build"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--coinjoin-infrastructure-local-build",
+          "help": "Build btc-node, JoinMarket client-server, and IRC server locally inside the emulator runtime.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--coinjoin-type": {
+          "aliases": [
+            "--coinjoin-type"
+          ],
+          "choices": [
+            "wasabi2",
+            "joinmarket"
+          ],
+          "default": "wasabi2",
+          "flag": "--coinjoin-type",
+          "help": "BlockSci CoinJoin heuristic family (default: wasabi2).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--copy-to-host": {
+          "aliases": [
+            "--copy-to-host"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--copy-to-host",
+          "help": "Use the legacy pod-to-wrapper Bitcoin datadir download instead of writing directly to shared storage.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--driver": {
+          "aliases": [
+            "--driver"
+          ],
+          "choices": [
+            "docker",
+            "kubernetes"
+          ],
+          "default": "docker",
+          "flag": "--driver",
+          "help": "Container orchestration driver for the emulation step. 'docker' uses Docker-in-Docker via compose (default). 'kubernetes' runs the emulation pods on a Kubernetes cluster.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--dry-run": {
+          "aliases": [
+            "--dry-run"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--dry-run",
+          "help": "Print the selected pipeline stages and exit without side effects.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--emulation-timeout": {
+          "aliases": [
+            "--emulation-timeout"
+          ],
+          "choices": [],
+          "default": 21600,
+          "flag": "--emulation-timeout",
+          "help": "Seconds to wait for the Kubernetes S3-compatible emulation upload marker (S3 backend only).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--engine": {
+          "aliases": [
+            "--engine"
+          ],
+          "choices": [
+            "wasabi",
+            "joinmarket"
+          ],
+          "default": null,
+          "flag": "--engine",
+          "help": "CoinJoin emulator engine to run. Select explicitly: wasabi or joinmarket.",
+          "metavar": null,
+          "required": true,
+          "takes_value": true
+        },
+        "--external-baseline-uri": {
+          "aliases": [
+            "--external-baseline-uri"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--external-baseline-uri",
+          "help": "S3 object containing Dumplings coinjoin_tx_info.json for --blocksci-task external.",
+          "metavar": "S3_URI",
+          "required": false,
+          "takes_value": true
+        },
+        "--image-prefix": {
+          "aliases": [
+            "--image-prefix"
+          ],
+          "choices": [],
+          "default": "ghcr.io/ondrejman/",
+          "flag": "--image-prefix",
+          "help": "Image registry prefix for Kubernetes pods (default: ghcr.io/ondrejman/).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--joinmarket-detector": {
+          "aliases": [
+            "--joinmarket-detector"
+          ],
+          "choices": [
+            "possible",
+            "definite"
+          ],
+          "default": "definite",
+          "flag": "--joinmarket-detector",
+          "help": "BlockSci JoinMarket subset detector to use when --coinjoin-type joinmarket (default: definite).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--joinmarket-max-depth": {
+          "aliases": [
+            "--joinmarket-max-depth"
+          ],
+          "choices": [],
+          "default": 200000,
+          "flag": "--joinmarket-max-depth",
+          "help": "Maximum subset-search depth for the JoinMarket detector (default: 200000).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--joinmarket-min-base-fee": {
+          "aliases": [
+            "--joinmarket-min-base-fee"
+          ],
+          "choices": [],
+          "default": 5000,
+          "flag": "--joinmarket-min-base-fee",
+          "help": "Minimum base fee for the JoinMarket detector (default: 5000).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--joinmarket-percentage-fee": {
+          "aliases": [
+            "--joinmarket-percentage-fee"
+          ],
+          "choices": [],
+          "default": 4e-05,
+          "flag": "--joinmarket-percentage-fee",
+          "help": "Percentage fee for the JoinMarket detector (default: 4e-05).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--kubeconfig": {
+          "aliases": [
+            "--kubeconfig"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--kubeconfig",
+          "help": "Path to kubeconfig file (default: ~/.kube/config).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--kubernetes-btc-datadir": {
+          "aliases": [
+            "--kubernetes-btc-datadir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--kubernetes-btc-datadir",
+          "help": "Shared absolute Bitcoin Core datadir mounted directly into the Kubernetes btc-node pod. Defaults to --pbs-bitcoin-datadir when set.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-coordination-fee-rate": {
+          "aliases": [
+            "--mapping-coordination-fee-rate"
+          ],
+          "choices": [],
+          "default": 0.003,
+          "flag": "--mapping-coordination-fee-rate",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-max-decomposition-fee": {
+          "aliases": [
+            "--mapping-max-decomposition-fee"
+          ],
+          "choices": [],
+          "default": 6000,
+          "flag": "--mapping-max-decomposition-fee",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-mining-fee-rate": {
+          "aliases": [
+            "--mapping-mining-fee-rate"
+          ],
+          "choices": [],
+          "default": 1,
+          "flag": "--mapping-mining-fee-rate",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-mode": {
+          "aliases": [
+            "--mapping-mode"
+          ],
+          "choices": [
+            "numeric",
+            "all"
+          ],
+          "default": "numeric",
+          "flag": "--mapping-mode",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-retry-timeout": {
+          "aliases": [
+            "--mapping-retry-timeout"
+          ],
+          "choices": [],
+          "default": 600,
+          "flag": "--mapping-retry-timeout",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-timeout": {
+          "aliases": [
+            "--mapping-timeout"
+          ],
+          "choices": [],
+          "default": 60,
+          "flag": "--mapping-timeout",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mappingsPbs": {
+          "aliases": [
+            "--mappingsPbs"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--mappingsPbs",
+          "help": "Submit the Wasabi mapping enumerator and Sake as one PBS job.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--min-input-count": {
+          "aliases": [
+            "--min-input-count"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--min-input-count",
+          "help": "Minimum transaction input count considered by detection (default: BlockSci height-aware threshold).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--namespace": {
+          "aliases": [
+            "--namespace"
+          ],
+          "choices": [],
+          "default": "coinjoin",
+          "flag": "--namespace",
+          "help": "Kubernetes namespace for emulation pods (default: coinjoin).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--parallel": {
+          "aliases": [
+            "--parallel"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--parallel",
+          "help": "Run BlockSci and coinjoin-analysis concurrently after emulation.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--pbs-analysis-mem": {
+          "aliases": [
+            "--pbs-analysis-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-mem",
+          "help": "Memory for the coinjoin-analysis PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-ncpus": {
+          "aliases": [
+            "--pbs-analysis-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-ncpus",
+          "help": "CPU count for the coinjoin-analysis PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-scratch": {
+          "aliases": [
+            "--pbs-analysis-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-scratch",
+          "help": "Scratch storage for the coinjoin-analysis PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-walltime": {
+          "aliases": [
+            "--pbs-analysis-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-walltime",
+          "help": "Walltime for the coinjoin-analysis PBS job (default: 04:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-bitcoin-datadir": {
+          "aliases": [
+            "--pbs-bitcoin-datadir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-bitcoin-datadir",
+          "help": "Shared /storage Bitcoin Core datadir for BlockSci PBS jobs. It must contain regtest/blocks. Can also be set with PBS_BITCOIN_DATADIR.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-image": {
+          "aliases": [
+            "--pbs-blocksci-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-image",
+          "help": "Singularity image for BlockSci PBS jobs (default: docker://ghcr.io/ondrejman/blocksci-complete:latest).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-mem": {
+          "aliases": [
+            "--pbs-blocksci-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-mem",
+          "help": "Memory for the blocksci PBS job (default: 64gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-ncpus": {
+          "aliases": [
+            "--pbs-blocksci-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-ncpus",
+          "help": "CPU count for the blocksci PBS job (default: 8; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-scratch": {
+          "aliases": [
+            "--pbs-blocksci-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-scratch",
+          "help": "Scratch storage for the blocksci PBS job (default: 100gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-walltime": {
+          "aliases": [
+            "--pbs-blocksci-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-walltime",
+          "help": "Walltime for the blocksci PBS job (default: 24:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-coinjoin-analysis-image": {
+          "aliases": [
+            "--pbs-coinjoin-analysis-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-coinjoin-analysis-image",
+          "help": "Singularity image for coinjoin-analysis PBS jobs (default: docker://ghcr.io/ondrejman/coinjoin-analysis:latest).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-image": {
+          "aliases": [
+            "--pbs-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-image",
+          "help": "Singularity image override for either PBS stage.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-enumerator-image": {
+          "aliases": [
+            "--pbs-mappings-enumerator-image"
+          ],
+          "choices": [],
+          "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:latest",
+          "flag": "--pbs-mappings-enumerator-image",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-mem": {
+          "aliases": [
+            "--pbs-mappings-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-mem",
+          "help": "Memory for the mappings PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-ncpus": {
+          "aliases": [
+            "--pbs-mappings-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-ncpus",
+          "help": "CPU count for the mappings PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-scratch": {
+          "aliases": [
+            "--pbs-mappings-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-scratch",
+          "help": "Scratch storage for the mappings PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-walltime": {
+          "aliases": [
+            "--pbs-mappings-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-walltime",
+          "help": "Walltime for the mappings PBS job (default: 04:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mem": {
+          "aliases": [
+            "--pbs-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mem",
+          "help": "Memory for the PBS job (default: 64gb for BlockSci, 16gb for coinjoin-analysis).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-ncpus": {
+          "aliases": [
+            "--pbs-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-ncpus",
+          "help": "Number of CPUs for the PBS job (default: 8 for BlockSci, 4 for coinjoin-analysis).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-sake-image": {
+          "aliases": [
+            "--pbs-sake-image"
+          ],
+          "choices": [],
+          "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-sake:latest",
+          "flag": "--pbs-sake-image",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-scratch": {
+          "aliases": [
+            "--pbs-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-scratch",
+          "help": "Scratch storage for the PBS job (default: 100gb for BlockSci, 50gb for coinjoin-analysis).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-unified-report-mem": {
+          "aliases": [
+            "--pbs-unified-report-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-unified-report-mem",
+          "help": "Memory for the unified-report PBS job (default: 8gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-unified-report-ncpus": {
+          "aliases": [
+            "--pbs-unified-report-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-unified-report-ncpus",
+          "help": "CPU count for the unified-report PBS job (default: 2; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-unified-report-scratch": {
+          "aliases": [
+            "--pbs-unified-report-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-unified-report-scratch",
+          "help": "Scratch storage for the unified-report PBS job (default: 10gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-unified-report-walltime": {
+          "aliases": [
+            "--pbs-unified-report-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-unified-report-walltime",
+          "help": "Walltime for the unified-report PBS job (default: 01:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-walltime": {
+          "aliases": [
+            "--pbs-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-walltime",
+          "help": "Walltime for the PBS job (default: 24:00:00 for BlockSci, 04:00:00 for coinjoin-analysis).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--reuse-namespace": {
+          "aliases": [
+            "--reuse-namespace"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--reuse-namespace",
+          "help": "Reuse an existing Kubernetes namespace instead of creating a new one.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--run-id": {
+          "aliases": [
+            "--run-id"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--run-id",
+          "help": "Deterministic artifact run identifier.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--run-timezone": {
+          "aliases": [
+            "--run-timezone"
+          ],
+          "choices": [],
+          "default": "Europe/Prague",
+          "flag": "--run-timezone",
+          "help": "IANA timezone used in newly created run directory names (default: Europe/Prague).",
+          "metavar": "IANA_ZONE",
+          "required": false,
+          "takes_value": true
+        },
+        "--s3-credentials-file": {
+          "aliases": [
+            "--s3-credentials-file"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--s3-credentials-file",
+          "help": "Absolute s5cmd credentials-file path for PBS jobs.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--s3-endpoint-url": {
+          "aliases": [
+            "--s3-endpoint-url"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--s3-endpoint-url",
+          "help": "CESNET/MetaCentrum S3-compatible endpoint URL.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--s3-profile": {
+          "aliases": [
+            "--s3-profile"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--s3-profile",
+          "help": "Named profile in the s5cmd credentials file.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--s3-secret-name": {
+          "aliases": [
+            "--s3-secret-name"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--s3-secret-name",
+          "help": "Pre-created Kubernetes Secret for S3-compatible upload.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--sake-seed": {
+          "aliases": [
+            "--sake-seed"
+          ],
+          "choices": [],
+          "default": 20260704,
+          "flag": "--sake-seed",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--scenario": {
+          "aliases": [
+            "--scenario"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--scenario",
+          "help": "JSON scenario path.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--unified-report-image": {
+          "aliases": [
+            "--unified-report-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--unified-report-image",
+          "help": "Override the pinned Python image for the PBS unified-report step (default: container/unified-report.image).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--uploader-image": {
+          "aliases": [
+            "--uploader-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--uploader-image",
+          "help": "Override the in-cluster uploader/preflight image (default: container/uploader.image).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        }
+      }
+    },
+    "initialize": {
+      "options": {
+        "--dry-run": {
+          "aliases": [
+            "--dry-run"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--dry-run",
+          "help": "Print the selected pipeline stages and exit without side effects.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        }
+      }
+    },
+    "mappings": {
+      "options": {
+        "--analysisPbs": {
+          "aliases": [
+            "--analysisPbs"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--analysisPbs",
+          "help": "Submit coinjoin-analysis as a PBS job on MetaCentrum.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--blocksciPbs": {
+          "aliases": [
+            "--blocksciPbs"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--blocksciPbs",
+          "help": "Submit BlockSci analysis as a PBS job on MetaCentrum.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--coinjoin-type": {
+          "aliases": [
+            "--coinjoin-type"
+          ],
+          "choices": [
+            "wasabi2",
+            "joinmarket"
+          ],
+          "default": "wasabi2",
+          "flag": "--coinjoin-type",
+          "help": "BlockSci CoinJoin heuristic family (default: wasabi2).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--dry-run": {
+          "aliases": [
+            "--dry-run"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--dry-run",
+          "help": "Print the selected pipeline stages and exit without side effects.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--engine": {
+          "aliases": [
+            "--engine"
+          ],
+          "choices": [
+            "wasabi",
+            "joinmarket"
+          ],
+          "default": null,
+          "flag": "--engine",
+          "help": "CoinJoin emulator engine to run. Select explicitly: wasabi or joinmarket.",
+          "metavar": null,
+          "required": true,
+          "takes_value": true
+        },
+        "--mapping-coordination-fee-rate": {
+          "aliases": [
+            "--mapping-coordination-fee-rate"
+          ],
+          "choices": [],
+          "default": 0.003,
+          "flag": "--mapping-coordination-fee-rate",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-max-decomposition-fee": {
+          "aliases": [
+            "--mapping-max-decomposition-fee"
+          ],
+          "choices": [],
+          "default": 6000,
+          "flag": "--mapping-max-decomposition-fee",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-mining-fee-rate": {
+          "aliases": [
+            "--mapping-mining-fee-rate"
+          ],
+          "choices": [],
+          "default": 1,
+          "flag": "--mapping-mining-fee-rate",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-mode": {
+          "aliases": [
+            "--mapping-mode"
+          ],
+          "choices": [
+            "numeric",
+            "all"
+          ],
+          "default": "numeric",
+          "flag": "--mapping-mode",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-retry-timeout": {
+          "aliases": [
+            "--mapping-retry-timeout"
+          ],
+          "choices": [],
+          "default": 600,
+          "flag": "--mapping-retry-timeout",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-timeout": {
+          "aliases": [
+            "--mapping-timeout"
+          ],
+          "choices": [],
+          "default": 60,
+          "flag": "--mapping-timeout",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mappingsPbs": {
+          "aliases": [
+            "--mappingsPbs"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--mappingsPbs",
+          "help": "Submit the Wasabi mapping enumerator and Sake as one PBS job.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--pbs-analysis-mem": {
+          "aliases": [
+            "--pbs-analysis-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-mem",
+          "help": "Memory for the coinjoin-analysis PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-ncpus": {
+          "aliases": [
+            "--pbs-analysis-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-ncpus",
+          "help": "CPU count for the coinjoin-analysis PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-scratch": {
+          "aliases": [
+            "--pbs-analysis-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-scratch",
+          "help": "Scratch storage for the coinjoin-analysis PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-walltime": {
+          "aliases": [
+            "--pbs-analysis-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-walltime",
+          "help": "Walltime for the coinjoin-analysis PBS job (default: 04:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-bitcoin-datadir": {
+          "aliases": [
+            "--pbs-bitcoin-datadir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-bitcoin-datadir",
+          "help": "Shared /storage Bitcoin Core datadir for BlockSci PBS jobs. It must contain regtest/blocks. Can also be set with PBS_BITCOIN_DATADIR.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-image": {
+          "aliases": [
+            "--pbs-blocksci-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-image",
+          "help": "Singularity image for BlockSci PBS jobs (default: docker://ghcr.io/ondrejman/blocksci-complete:latest).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-mem": {
+          "aliases": [
+            "--pbs-blocksci-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-mem",
+          "help": "Memory for the blocksci PBS job (default: 64gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-ncpus": {
+          "aliases": [
+            "--pbs-blocksci-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-ncpus",
+          "help": "CPU count for the blocksci PBS job (default: 8; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-scratch": {
+          "aliases": [
+            "--pbs-blocksci-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-scratch",
+          "help": "Scratch storage for the blocksci PBS job (default: 100gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-walltime": {
+          "aliases": [
+            "--pbs-blocksci-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-walltime",
+          "help": "Walltime for the blocksci PBS job (default: 24:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-coinjoin-analysis-image": {
+          "aliases": [
+            "--pbs-coinjoin-analysis-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-coinjoin-analysis-image",
+          "help": "Singularity image for coinjoin-analysis PBS jobs (default: docker://ghcr.io/ondrejman/coinjoin-analysis:latest).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-image": {
+          "aliases": [
+            "--pbs-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-image",
+          "help": "Singularity image override for either PBS stage.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-enumerator-image": {
+          "aliases": [
+            "--pbs-mappings-enumerator-image"
+          ],
+          "choices": [],
+          "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:latest",
+          "flag": "--pbs-mappings-enumerator-image",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-mem": {
+          "aliases": [
+            "--pbs-mappings-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-mem",
+          "help": "Memory for the mappings PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-ncpus": {
+          "aliases": [
+            "--pbs-mappings-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-ncpus",
+          "help": "CPU count for the mappings PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-scratch": {
+          "aliases": [
+            "--pbs-mappings-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-scratch",
+          "help": "Scratch storage for the mappings PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-walltime": {
+          "aliases": [
+            "--pbs-mappings-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-walltime",
+          "help": "Walltime for the mappings PBS job (default: 04:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mem": {
+          "aliases": [
+            "--pbs-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mem",
+          "help": "Memory for the PBS job (default: 64gb for BlockSci, 16gb for coinjoin-analysis).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-ncpus": {
+          "aliases": [
+            "--pbs-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-ncpus",
+          "help": "Number of CPUs for the PBS job (default: 8 for BlockSci, 4 for coinjoin-analysis).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-sake-image": {
+          "aliases": [
+            "--pbs-sake-image"
+          ],
+          "choices": [],
+          "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-sake:latest",
+          "flag": "--pbs-sake-image",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-scratch": {
+          "aliases": [
+            "--pbs-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-scratch",
+          "help": "Scratch storage for the PBS job (default: 100gb for BlockSci, 50gb for coinjoin-analysis).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-walltime": {
+          "aliases": [
+            "--pbs-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-walltime",
+          "help": "Walltime for the PBS job (default: 24:00:00 for BlockSci, 04:00:00 for coinjoin-analysis).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--run-dir": {
+          "aliases": [
+            "--run-dir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--run-dir",
+          "help": "",
+          "metavar": null,
+          "required": true,
+          "takes_value": true
+        },
+        "--sake-seed": {
+          "aliases": [
+            "--sake-seed"
+          ],
+          "choices": [],
+          "default": 20260704,
+          "flag": "--sake-seed",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        }
+      }
+    },
+    "pbs-from-s3": {
+      "options": {
+        "--analysisPbs": {
+          "aliases": [
+            "--analysisPbs"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--analysisPbs",
+          "help": "Submit coinjoin-analysis as a PBS job on MetaCentrum.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--artifact-backend": {
+          "aliases": [
+            "--artifact-backend"
+          ],
+          "choices": [
+            "shared-storage",
+            "s3"
+          ],
+          "default": "shared-storage",
+          "flag": "--artifact-backend",
+          "help": "Artifact transport backend (default: shared-storage).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--artifact-uri": {
+          "aliases": [
+            "--artifact-uri"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--artifact-uri",
+          "help": "S3-compatible run prefix, for example s3://bucket/runs.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-bitcoin-blocks-uri": {
+          "aliases": [
+            "--blocksci-bitcoin-blocks-uri"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-bitcoin-blocks-uri",
+          "help": "S3 prefix produced by bitcoin-block-archive containing archive-manifest.json, blk*.dat, and SHA-256 sidecars.",
+          "metavar": "S3_URI",
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-cache-source-run-id": {
+          "aliases": [
+            "--blocksci-cache-source-run-id"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-cache-source-run-id",
+          "help": "Existing S3 run ID whose verified blocksci-parse_data cache is the input to --blocksci-task update. The updated cache is written to --run-id.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-external-bitcoin-datadir": {
+          "aliases": [
+            "--blocksci-external-bitcoin-datadir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-external-bitcoin-datadir",
+          "help": "Parse an external Bitcoin Core coin directory under /storage; the directory must contain blocks/.",
+          "metavar": "PATH",
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-external-blocksci-dir": {
+          "aliases": [
+            "--blocksci-external-blocksci-dir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-external-blocksci-dir",
+          "help": "Import an existing BlockSci directory under /storage containing config.json and parsed/.",
+          "metavar": "PATH",
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-max-block": {
+          "aliases": [
+            "--blocksci-max-block"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-max-block",
+          "help": "Inclusive maximum block height for external Bitcoin parsing.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-network": {
+          "aliases": [
+            "--blocksci-network"
+          ],
+          "choices": [
+            "bitcoin",
+            "bitcoin_testnet",
+            "bitcoin_regtest"
+          ],
+          "default": null,
+          "flag": "--blocksci-network",
+          "help": "BlockSci network for --blocksci-external-bitcoin-datadir.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-notebook-port": {
+          "aliases": [
+            "--blocksci-notebook-port"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-notebook-port",
+          "help": "Jupyter port on the assigned PBS node (default: 8888).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-notebooks-dir": {
+          "aliases": [
+            "--blocksci-notebooks-dir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-notebooks-dir",
+          "help": "Optional shared /storage directory mounted read-write as /mnt/notebooks; otherwise notebooks are uploaded under blocksci-notebooks_data/.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-script": {
+          "aliases": [
+            "--blocksci-script",
+            "--blocksciScript"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--blocksci-script",
+          "help": "Run a Python script after BlockSci parsing. The script receives ACTIVE_RUN_ID, BLOCKSCI_CONFIG, and BLOCKSCI_RUN_DIR in its environment and runs with the run directory as cwd.",
+          "metavar": "PATH",
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-task": {
+          "aliases": [
+            "--blocksci-task"
+          ],
+          "choices": [
+            "detect",
+            "parse",
+            "update",
+            "script",
+            "notebook",
+            "external"
+          ],
+          "default": "detect",
+          "flag": "--blocksci-task",
+          "help": "BlockSci work to run; parse publishes a reusable cache and update incrementally advances an external-Bitcoin cache; external builds a BlockSci-vs-Dumplings mainnet report (default: detect).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksci-workflow": {
+          "aliases": [
+            "--blocksci-workflow"
+          ],
+          "choices": [
+            "combined",
+            "reusable",
+            "cached"
+          ],
+          "default": "combined",
+          "flag": "--blocksci-workflow",
+          "help": "BlockSci S3 workflow: combined parses and analyzes in one PBS job; reusable publishes a cache then submits dependent work; cached reuses an already published blocksci-parse_data cache.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--blocksciPbs": {
+          "aliases": [
+            "--blocksciPbs"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--blocksciPbs",
+          "help": "Submit BlockSci analysis as a PBS job on MetaCentrum.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--coinjoin-type": {
+          "aliases": [
+            "--coinjoin-type"
+          ],
+          "choices": [
+            "wasabi2",
+            "joinmarket"
+          ],
+          "default": "wasabi2",
+          "flag": "--coinjoin-type",
+          "help": "BlockSci CoinJoin heuristic family (default: wasabi2).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--dry-run": {
+          "aliases": [
+            "--dry-run"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--dry-run",
+          "help": "Print the selected pipeline stages and exit without side effects.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--engine": {
+          "aliases": [
+            "--engine"
+          ],
+          "choices": [
+            "wasabi",
+            "joinmarket"
+          ],
+          "default": null,
+          "flag": "--engine",
+          "help": "CoinJoin emulator engine to run. Select explicitly: wasabi or joinmarket.",
+          "metavar": null,
+          "required": true,
+          "takes_value": true
+        },
+        "--external-baseline-uri": {
+          "aliases": [
+            "--external-baseline-uri"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--external-baseline-uri",
+          "help": "S3 object containing Dumplings coinjoin_tx_info.json for --blocksci-task external.",
+          "metavar": "S3_URI",
+          "required": false,
+          "takes_value": true
+        },
+        "--joinmarket-detector": {
+          "aliases": [
+            "--joinmarket-detector"
+          ],
+          "choices": [
+            "possible",
+            "definite"
+          ],
+          "default": "definite",
+          "flag": "--joinmarket-detector",
+          "help": "BlockSci JoinMarket subset detector to use when --coinjoin-type joinmarket (default: definite).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--joinmarket-max-depth": {
+          "aliases": [
+            "--joinmarket-max-depth"
+          ],
+          "choices": [],
+          "default": 200000,
+          "flag": "--joinmarket-max-depth",
+          "help": "Maximum subset-search depth for the JoinMarket detector (default: 200000).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--joinmarket-min-base-fee": {
+          "aliases": [
+            "--joinmarket-min-base-fee"
+          ],
+          "choices": [],
+          "default": 5000,
+          "flag": "--joinmarket-min-base-fee",
+          "help": "Minimum base fee for the JoinMarket detector (default: 5000).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--joinmarket-percentage-fee": {
+          "aliases": [
+            "--joinmarket-percentage-fee"
+          ],
+          "choices": [],
+          "default": 4e-05,
+          "flag": "--joinmarket-percentage-fee",
+          "help": "Percentage fee for the JoinMarket detector (default: 4e-05).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-coordination-fee-rate": {
+          "aliases": [
+            "--mapping-coordination-fee-rate"
+          ],
+          "choices": [],
+          "default": 0.003,
+          "flag": "--mapping-coordination-fee-rate",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-max-decomposition-fee": {
+          "aliases": [
+            "--mapping-max-decomposition-fee"
+          ],
+          "choices": [],
+          "default": 6000,
+          "flag": "--mapping-max-decomposition-fee",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-mining-fee-rate": {
+          "aliases": [
+            "--mapping-mining-fee-rate"
+          ],
+          "choices": [],
+          "default": 1,
+          "flag": "--mapping-mining-fee-rate",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-mode": {
+          "aliases": [
+            "--mapping-mode"
+          ],
+          "choices": [
+            "numeric",
+            "all"
+          ],
+          "default": "numeric",
+          "flag": "--mapping-mode",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-retry-timeout": {
+          "aliases": [
+            "--mapping-retry-timeout"
+          ],
+          "choices": [],
+          "default": 600,
+          "flag": "--mapping-retry-timeout",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mapping-timeout": {
+          "aliases": [
+            "--mapping-timeout"
+          ],
+          "choices": [],
+          "default": 60,
+          "flag": "--mapping-timeout",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--mappingsPbs": {
+          "aliases": [
+            "--mappingsPbs"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--mappingsPbs",
+          "help": "Submit the Wasabi mapping enumerator and Sake as one PBS job.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--min-input-count": {
+          "aliases": [
+            "--min-input-count"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--min-input-count",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-mem": {
+          "aliases": [
+            "--pbs-analysis-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-mem",
+          "help": "Memory for the coinjoin-analysis PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-ncpus": {
+          "aliases": [
+            "--pbs-analysis-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-ncpus",
+          "help": "CPU count for the coinjoin-analysis PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-scratch": {
+          "aliases": [
+            "--pbs-analysis-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-scratch",
+          "help": "Scratch storage for the coinjoin-analysis PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-analysis-walltime": {
+          "aliases": [
+            "--pbs-analysis-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-analysis-walltime",
+          "help": "Walltime for the coinjoin-analysis PBS job (default: 04:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-bitcoin-datadir": {
+          "aliases": [
+            "--pbs-bitcoin-datadir"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-bitcoin-datadir",
+          "help": "Shared /storage Bitcoin Core datadir for BlockSci PBS jobs. It must contain regtest/blocks. Can also be set with PBS_BITCOIN_DATADIR.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-image": {
+          "aliases": [
+            "--pbs-blocksci-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-image",
+          "help": "Singularity image for BlockSci PBS jobs (default: docker://ghcr.io/ondrejman/blocksci-complete:latest).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-mem": {
+          "aliases": [
+            "--pbs-blocksci-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-mem",
+          "help": "Memory for the blocksci PBS job (default: 64gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-ncpus": {
+          "aliases": [
+            "--pbs-blocksci-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-ncpus",
+          "help": "CPU count for the blocksci PBS job (default: 8; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-scratch": {
+          "aliases": [
+            "--pbs-blocksci-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-scratch",
+          "help": "Scratch storage for the blocksci PBS job (default: 100gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-blocksci-walltime": {
+          "aliases": [
+            "--pbs-blocksci-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-blocksci-walltime",
+          "help": "Walltime for the blocksci PBS job (default: 24:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-coinjoin-analysis-image": {
+          "aliases": [
+            "--pbs-coinjoin-analysis-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-coinjoin-analysis-image",
+          "help": "Singularity image for coinjoin-analysis PBS jobs (default: docker://ghcr.io/ondrejman/coinjoin-analysis:latest).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-image": {
+          "aliases": [
+            "--pbs-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-image",
+          "help": "Singularity image override for either PBS stage.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-enumerator-image": {
+          "aliases": [
+            "--pbs-mappings-enumerator-image"
+          ],
+          "choices": [],
+          "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:latest",
+          "flag": "--pbs-mappings-enumerator-image",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-mem": {
+          "aliases": [
+            "--pbs-mappings-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-mem",
+          "help": "Memory for the mappings PBS job (default: 16gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-ncpus": {
+          "aliases": [
+            "--pbs-mappings-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-ncpus",
+          "help": "CPU count for the mappings PBS job (default: 4; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-scratch": {
+          "aliases": [
+            "--pbs-mappings-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-scratch",
+          "help": "Scratch storage for the mappings PBS job (default: 50gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mappings-walltime": {
+          "aliases": [
+            "--pbs-mappings-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mappings-walltime",
+          "help": "Walltime for the mappings PBS job (default: 04:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-mem": {
+          "aliases": [
+            "--pbs-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-mem",
+          "help": "Memory for the PBS job (default: 64gb for BlockSci, 16gb for coinjoin-analysis).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-ncpus": {
+          "aliases": [
+            "--pbs-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-ncpus",
+          "help": "Number of CPUs for the PBS job (default: 8 for BlockSci, 4 for coinjoin-analysis).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-sake-image": {
+          "aliases": [
+            "--pbs-sake-image"
+          ],
+          "choices": [],
+          "default": "docker://ghcr.io/ondrejman/coinjoin-mappings-sake:latest",
+          "flag": "--pbs-sake-image",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-scratch": {
+          "aliases": [
+            "--pbs-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-scratch",
+          "help": "Scratch storage for the PBS job (default: 100gb for BlockSci, 50gb for coinjoin-analysis).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-unified-report-mem": {
+          "aliases": [
+            "--pbs-unified-report-mem"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-unified-report-mem",
+          "help": "Memory for the unified-report PBS job (default: 8gb; overrides --pbs-mem).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-unified-report-ncpus": {
+          "aliases": [
+            "--pbs-unified-report-ncpus"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-unified-report-ncpus",
+          "help": "CPU count for the unified-report PBS job (default: 2; overrides --pbs-ncpus).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-unified-report-scratch": {
+          "aliases": [
+            "--pbs-unified-report-scratch"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-unified-report-scratch",
+          "help": "Scratch storage for the unified-report PBS job (default: 10gb; overrides --pbs-scratch).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-unified-report-walltime": {
+          "aliases": [
+            "--pbs-unified-report-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-unified-report-walltime",
+          "help": "Walltime for the unified-report PBS job (default: 01:00:00; overrides --pbs-walltime).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--pbs-walltime": {
+          "aliases": [
+            "--pbs-walltime"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--pbs-walltime",
+          "help": "Walltime for the PBS job (default: 24:00:00 for BlockSci, 04:00:00 for coinjoin-analysis).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--run-id": {
+          "aliases": [
+            "--run-id"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--run-id",
+          "help": "Deterministic artifact run identifier.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--s3-credentials-file": {
+          "aliases": [
+            "--s3-credentials-file"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--s3-credentials-file",
+          "help": "Absolute s5cmd credentials-file path for PBS jobs.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--s3-endpoint-url": {
+          "aliases": [
+            "--s3-endpoint-url"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--s3-endpoint-url",
+          "help": "CESNET/MetaCentrum S3-compatible endpoint URL.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--s3-profile": {
+          "aliases": [
+            "--s3-profile"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--s3-profile",
+          "help": "Named profile in the s5cmd credentials file.",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--sake-seed": {
+          "aliases": [
+            "--sake-seed"
+          ],
+          "choices": [],
+          "default": 20260704,
+          "flag": "--sake-seed",
+          "help": "",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--stage-exporters": {
+          "aliases": [
+            "--stage-exporters"
+          ],
+          "choices": [],
+          "default": false,
+          "flag": "--stage-exporters",
+          "help": "Upload the checkout's exporters into the run prefix even when the selected stages do not run them, so a later detect or report stage finds the tree this invocation was launched from.",
+          "metavar": null,
+          "required": false,
+          "takes_value": false
+        },
+        "--unified-report-image": {
+          "aliases": [
+            "--unified-report-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--unified-report-image",
+          "help": "Override the pinned Python image for the PBS unified-report step (default: container/unified-report.image).",
+          "metavar": null,
+          "required": false,
+          "takes_value": true
+        },
+        "--uploader-image": {
+          "aliases": [
+            "--uploader-image"
+          ],
+          "choices": [],
+          "default": null,
+          "flag": "--uploader-image",
+          "help": "Override the in-cluster uploader/preflight image (default: container/uploader.image).",
           "metavar": null,
           "required": false,
           "takes_value": true

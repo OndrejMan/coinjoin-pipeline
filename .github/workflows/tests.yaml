@@ -1,27 +1,72 @@
 name: Tests
 
+# Every branch and every pull request gets the full suite. The `gate` job below
+# keeps that from doubling the cost: once a branch has an open pull request, the
+# pull_request run is the one that counts and the branch push run bows out.
 on:
   push:
     branches:
-      - main
-      - master
+      - '**'
   pull_request:
-    branches:
-      - main
-      - master
   workflow_dispatch:
 
 permissions:
   contents: read
   packages: read
+  pull-requests: read
 
 concurrency:
-  group: coinjoin-pipeline-${{ github.ref }}
+  group: coinjoin-pipeline-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Root gate: every other root job hangs off this, and a skipped job skips its
+  # dependents, so one decision here governs the whole suite.
+  gate:
+    runs-on: [self-hosted, x64]
+    outputs:
+      should-run: ${{ steps.decide.outputs.should-run }}
+
+    steps:
+      - name: Decide whether this event owns the run
+        id: decide
+        uses: actions/github-script@v7
+        with:
+          script: |
+            if (context.eventName !== 'push') {
+              core.info(`${context.eventName} event: always runs.`);
+              core.setOutput('should-run', 'true');
+              return;
+            }
+
+            if (!context.ref.startsWith('refs/heads/')) {
+              core.info(`${context.ref} is not a branch: skipping.`);
+              core.setOutput('should-run', 'false');
+              return;
+            }
+
+            const branch = context.ref.slice('refs/heads/'.length);
+            const { data: pulls } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              head: `${context.repo.owner}:${branch}`,
+              per_page: 1,
+            });
+
+            if (pulls.length > 0) {
+              core.info(`Branch ${branch} is already covered by PR #${pulls[0].number}: skipping the push run.`);
+              core.setOutput('should-run', 'false');
+              return;
+            }
+
+            core.info(`Branch ${branch} has no open pull request: running.`);
+            core.setOutput('should-run', 'true');
+
   command-builder-unit-tests:
     runs-on: [self-hosted, x64]
+    needs: gate
+    if: needs.gate.outputs.should-run == 'true'
 
     steps:
       - name: Checkout repository
@@ -68,10 +113,8 @@ jobs:
     runs-on: [self-hosted, x64]
     needs: podman-wrapper
     env:
-      WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
       KUBECTL_VERSION: v1.35.6
       K3D_VERSION: v5.9.0
-      WRAPPER_PULL_POLICY: never
 
     steps:
       - name: Checkout repository
@@ -83,9 +126,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build current pipeline image
-        run: docker build -t "${WRAPPER_IMAGE}" .
 
       - name: Run overactive-local through real Docker
         env:
@@ -96,9 +136,6 @@ jobs:
   docker-joinmarket:
     runs-on: [self-hosted, x64]
     needs: podman-wrapper
-    env:
-      WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
-      WRAPPER_PULL_POLICY: never
 
     steps:
       - name: Checkout repository
@@ -110,9 +147,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build current pipeline image
-        run: docker build -t "${WRAPPER_IMAGE}" .
 
       - name: Run JoinMarket through real Docker with upstream images
         env:
@@ -123,9 +157,6 @@ jobs:
   docker-parallel:
     runs-on: [self-hosted, x64]
     needs: podman-wrapper
-    env:
-      WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
-      WRAPPER_PULL_POLICY: never
 
     steps:
       - name: Checkout repository
@@ -137,9 +168,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build current pipeline image
-        run: docker build -t "${WRAPPER_IMAGE}" .
 
       - name: Run overactive-local through real Docker with --parallel
         env:
@@ -154,10 +182,8 @@ jobs:
       - docker-joinmarket
       - docker-parallel
     env:
-      WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
       KUBECTL_VERSION: v1.35.6
       K3D_VERSION: v5.9.0
-      WRAPPER_PULL_POLICY: never
 
     steps:
       - name: Checkout repository
@@ -169,9 +195,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build current pipeline image
-        run: docker build -t "${WRAPPER_IMAGE}" .
 
       - name: Install kubectl
         run: |
@@ -197,6 +220,8 @@ jobs:
 
   pbs-apptainer-image:
     runs-on: [self-hosted, x64]
+    needs: gate
+    if: needs.gate.outputs.should-run == 'true'
 
     steps:
       - name: Checkout repository
@@ -251,16 +276,11 @@ jobs:
     runs-on: [self-hosted, x64]
     needs: pbs-fixture-analysis
     timeout-minutes: 90
-    env:
-      WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
-      WRAPPER_PULL_POLICY: never
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build current pipeline image
-        run: docker build -t "${WRAPPER_IMAGE}" .
 
       - name: Run Kubernetes+PBS analysis (wasabi)
         env:
@@ -279,16 +299,11 @@ jobs:
     runs-on: [self-hosted, x64]
     needs: kubernetes-pbs-wasabi
     timeout-minutes: 90
-    env:
-      WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
-      WRAPPER_PULL_POLICY: never
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build current pipeline image
-        run: docker build -t "${WRAPPER_IMAGE}" .
 
       - name: Run Kubernetes+PBS analysis (joinmarket)
         env:
@@ -306,9 +321,6 @@ jobs:
   kubernetes-pbs-parallel:
     runs-on: [self-hosted, x64]
     needs: kubernetes-pbs-joinmarket
-    env:
-      WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
-      WRAPPER_PULL_POLICY: never
 
     steps:
       - name: Checkout repository
@@ -320,9 +332,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build current pipeline image
-        run: docker build -t "${WRAPPER_IMAGE}" .
 
       - name: Install kubectl
         run: |
@@ -360,7 +369,6 @@ jobs:
     runs-on: [self-hosted, x64]
     needs: kubernetes-pbs-parallel
     env:
-      WRAPPER_IMAGE: ghcr.io/ondrejman/coinjoin-pipeline:latest
       KUBECTL_VERSION: v1.35.6
       K3D_VERSION: v5.9.0
 
@@ -374,9 +382,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build current pipeline image
-        run: docker build -t "${WRAPPER_IMAGE}" .
 
       - name: Install kubectl
         run: |
@@ -409,15 +414,39 @@ jobs:
           path: github-test-results/
           retention-days: 14
 
-  publish-pipeline-image:
-    needs:
-      - kubernetes-k3d
-      - kubernetes-pbs-parallel
-      - kubernetes-s3-minio
-    if: >-
-      ${{ success() && github.ref == 'refs/heads/main' &&
-          (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/publish-pipeline-image.yaml
+  bitcoin-block-archive-s3-minio:
+    runs-on: [self-hosted, x64]
+    needs: pbs-apptainer-image
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Checkout bitcoin-block-archive
+        uses: actions/checkout@v4
+        with:
+          repository: OndrejMan/bitcoin-block-archive
+          path: bitcoin-block-archive
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run bitcoin-block-archive -> MinIO -> PBS BlockSci e2e
+        env:
+          PBS_TEST_STORAGE_ROOT: /storage/github-runner
+          BITCOIN_BLOCK_ARCHIVE_S3_TIMEOUT: 35m
+          BITCOIN_BLOCK_ARCHIVE_DIR: ${{ github.workspace }}/bitcoin-block-archive
+          TEST_RESULT_DIR: ${{ github.workspace }}/github-test-results
+        run: ./tests/test-bitcoin-block-archive-s3-minio.sh
+
+      - name: Upload bitcoin-block-archive S3 e2e artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitcoin-block-archive-s3-minio-results
+          path: github-test-results/
+          retention-days: 14

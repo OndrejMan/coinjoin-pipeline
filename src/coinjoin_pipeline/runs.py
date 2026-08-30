@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import re
+import unicodedata
 from importlib.resources import files
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -12,12 +13,32 @@ from zoneinfo import ZoneInfo
 from .commands import option_value
 from .manifest import atomic_write
 
-# Mirrors the run-id validation in coinjoin-emulator's manager CLI.
-RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# Mirrors the run-id validation in commands.py and coinjoin-emulator's CLI.
+RUN_ID_PATTERN = re.compile(
+    r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?"
+)
+MAX_RUN_ID_LENGTH = 63
 
 
 def valid_run_id(run_id: str) -> bool:
-    return len(run_id) <= 63 and ".." not in run_id and RUN_ID_PATTERN.fullmatch(run_id) is not None
+    return (
+        len(run_id) <= MAX_RUN_ID_LENGTH
+        and ".." not in run_id
+        and RUN_ID_PATTERN.fullmatch(run_id) is not None
+    )
+
+
+def slugify_run_component(value: str, *, max_length: int) -> str:
+    """Return a lowercase ASCII run-ID component with alphanumeric edges."""
+    ascii_value = (
+        unicodedata.normalize("NFKD", value)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .lower()
+    )
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_value).strip("-")
+    slug = slug[:max_length].rstrip("-")
+    return slug or "scenario"
 
 
 def run_id_for(arguments: list[str]) -> str:
@@ -41,7 +62,11 @@ def run_id_for(arguments: list[str]) -> str:
         except (OSError, json.JSONDecodeError):
             scenario_name = candidate.stem
     timestamp = datetime.now(ZoneInfo(timezone)).strftime("%Y-%m-%d_%H-%M")
-    return f"{timestamp}_{scenario_name}"
+    slug = slugify_run_component(
+        scenario_name,
+        max_length=MAX_RUN_ID_LENGTH - len(timestamp) - 1,
+    )
+    return f"{timestamp}_{slug}"
 
 
 def manifest_target(
@@ -53,7 +78,7 @@ def manifest_target(
         if not target.is_absolute():
             target = runs_root / target
         return target / "research_manifest.json"
-    if action in {"full-run", "recreate"}:
+    if action in {"full-run", "emulate"}:
         return runs_root / (run_id or run_id_for(arguments)) / "research_manifest.json"
     return None
 

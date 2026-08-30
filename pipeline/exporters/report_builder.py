@@ -35,7 +35,6 @@ def build_report(
     coinjoin_type: str,
     scenario: JsonObject | None = None,
     min_input_count: int | None = None,
-    test_values: bool = False,
     first_wasabi2_block: int = DEFAULT_FIRST_WASABI2_BLOCK,
     emulator_data: JsonObject | None = None,
     predicted_address_clusters: dict[str, str] | None = None,
@@ -49,11 +48,13 @@ def build_report(
     blocksci_image: str | None = None,
     coinjoin_analysis_image: str | None = None,
     coinjoin_emulator_image: str | None = None,
-    wrapper_image: str | None = None,
+    uploader_image: str | None = None,
+    unified_report_image: str | None = None,
     blocksci_image_digest: str | None = None,
     coinjoin_analysis_image_digest: str | None = None,
     coinjoin_emulator_image_digest: str | None = None,
-    wrapper_image_digest: str | None = None,
+    uploader_image_digest: str | None = None,
+    unified_report_image_digest: str | None = None,
     emulator_git_commit: str | None = None,
     previous_run_manifest: JsonObject | None = None,
     integration_diagnostics: JsonObject | None = None,
@@ -79,7 +80,6 @@ def build_report(
         coinjoin_analysis,
         coinjoin_type,
         min_input_count=min_input_count,
-        test_values=test_values,
         first_wasabi2_block=first_wasabi2_block,
         joinmarket_detector=joinmarket_detector,
         joinmarket_min_base_fee=joinmarket_min_base_fee,
@@ -149,7 +149,6 @@ def build_report(
         mode == "emulator"
         and coinjoin_type == "wasabi2"
         and min_input_count is None
-        and not test_values
         and not blocksci_records
         and emulator_block_heights
         and max(emulator_block_heights) < WASABI2_THRESHOLD_CHANGE_BLOCK
@@ -159,8 +158,8 @@ def build_report(
                 "code": "wasabi_production_threshold_zero_detections",
                 "message": (
                     "BlockSci detected no Wasabi2 CoinJoins at regtest-height blocks while using "
-                    "the production minimum-input threshold. Use --test-values explicitly for "
-                    "small emulated rounds, or keep this run as a production-threshold comparison."
+                    "the production minimum-input threshold. Use an explicit --min-input-count "
+                    "for small emulated rounds, or keep this run as a production-threshold comparison."
                 ),
             }
         )
@@ -210,7 +209,6 @@ def build_report(
         coinjoin_type,
         engine,
         min_input_count,
-        test_values,
         first_wasabi2_block,
         joinmarket_detector,
         joinmarket_min_base_fee,
@@ -219,11 +217,13 @@ def build_report(
         blocksci_image=blocksci_image,
         coinjoin_analysis_image=coinjoin_analysis_image,
         coinjoin_emulator_image=coinjoin_emulator_image,
-        wrapper_image=wrapper_image,
+        uploader_image=uploader_image,
+        unified_report_image=unified_report_image,
         blocksci_image_digest=blocksci_image_digest,
         coinjoin_analysis_image_digest=coinjoin_analysis_image_digest,
         coinjoin_emulator_image_digest=coinjoin_emulator_image_digest,
-        wrapper_image_digest=wrapper_image_digest,
+        uploader_image_digest=uploader_image_digest,
+        unified_report_image_digest=unified_report_image_digest,
         emulator_git_commit=emulator_git_commit,
     )
     run_manifest["mode"] = mode
@@ -249,7 +249,6 @@ def build_report(
             "scenario_name": scenario.get("name") if scenario else None,
             "coinjoin_type": coinjoin_type,
             "blocksci_min_input_count": min_input_count,
-            "blocksci_test_values": test_values,
             "first_wasabi2_block": first_wasabi2_block if coinjoin_type == "wasabi2" else None,
             "joinmarket_detector": joinmarket_detector if coinjoin_type == "joinmarket" else None,
             "joinmarket_min_base_fee": joinmarket_min_base_fee if coinjoin_type == "joinmarket" else None,

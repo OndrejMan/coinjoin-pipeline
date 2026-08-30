@@ -5,7 +5,16 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from exporters.common import JsonObject, docker_image_digest, first_present, git_commit_for_path, nested_get
+from exporters.common import (
+    JsonObject,
+    digest_from_reference,
+    docker_image_digest,
+    first_present,
+    git_commit_for_path,
+    git_tree_is_dirty,
+    nested_get,
+    tree_sha256,
+)
 
 MANIFEST_COMPARE_FIELDS = (
     ("scenario.sha256", ("scenario", "sha256")),
@@ -15,13 +24,15 @@ MANIFEST_COMPARE_FIELDS = (
     ("images.blocksci", ("images", "blocksci")),
     ("images.coinjoin_analysis", ("images", "coinjoin_analysis")),
     ("images.coinjoin_emulator", ("images", "coinjoin_emulator")),
-    ("images.wrapper", ("images", "wrapper")),
+    ("images.uploader", ("images", "uploader")),
+    ("images.unified_report", ("images", "unified_report")),
     ("images.mappings_enumerator", ("images", "mappings_enumerator")),
     ("images.sake", ("images", "sake")),
     ("image_digests.blocksci", ("image_digests", "blocksci")),
     ("image_digests.coinjoin_analysis", ("image_digests", "coinjoin_analysis")),
     ("image_digests.coinjoin_emulator", ("image_digests", "coinjoin_emulator")),
-    ("image_digests.wrapper", ("image_digests", "wrapper")),
+    ("image_digests.uploader", ("image_digests", "uploader")),
+    ("image_digests.unified_report", ("image_digests", "unified_report")),
     ("image_digests.mappings_enumerator", ("image_digests", "mappings_enumerator")),
     ("image_digests.sake", ("image_digests", "sake")),
     ("mapping_parameters", ("mapping_parameters",)),
@@ -33,7 +44,6 @@ MANIFEST_COMPARE_FIELDS = (
 def build_detector_manifest(
     coinjoin_type: str,
     min_input_count: int | None,
-    test_values: bool,
     first_wasabi2_block: int,
     joinmarket_detector: str,
     joinmarket_min_base_fee: int,
@@ -43,7 +53,6 @@ def build_detector_manifest(
     detector: JsonObject = {
         "coinjoin_type": coinjoin_type,
         "blocksci_min_input_count": min_input_count,
-        "blocksci_test_values": test_values,
     }
     if coinjoin_type == "wasabi2":
         detector["first_wasabi2_block"] = first_wasabi2_block
@@ -65,7 +74,6 @@ def build_run_manifest(
     coinjoin_type: str,
     engine: str | None,
     min_input_count: int | None,
-    test_values: bool,
     first_wasabi2_block: int,
     joinmarket_detector: str,
     joinmarket_min_base_fee: int,
@@ -74,13 +82,16 @@ def build_run_manifest(
     blocksci_image: str | None = None,
     coinjoin_analysis_image: str | None = None,
     coinjoin_emulator_image: str | None = None,
-    wrapper_image: str | None = None,
+    uploader_image: str | None = None,
+    unified_report_image: str | None = None,
     blocksci_image_digest: str | None = None,
     coinjoin_analysis_image_digest: str | None = None,
     coinjoin_emulator_image_digest: str | None = None,
-    wrapper_image_digest: str | None = None,
+    uploader_image_digest: str | None = None,
+    unified_report_image_digest: str | None = None,
     emulator_git_commit: str | None = None,
 ) -> JsonObject:
+    exporters_root = Path(__file__).resolve().parent
     inferred_engine = engine or os.environ.get("COINJOIN_ENGINE")
     if not inferred_engine:
         inferred_engine = "joinmarket" if coinjoin_type == "joinmarket" else "wasabi"
@@ -96,7 +107,10 @@ def build_run_manifest(
             os.environ.get("COINJOIN_EMULATOR_IMAGE"),
             os.environ.get("EMULATOR_IMAGE"),
         ),
-        "wrapper": first_present(wrapper_image, os.environ.get("WRAPPER_IMAGE")),
+        "uploader": first_present(uploader_image, os.environ.get("COINJOIN_UPLOADER_IMAGE")),
+        "unified_report": first_present(
+            unified_report_image, os.environ.get("COINJOIN_UNIFIED_REPORT_IMAGE")
+        ),
     }
     return {
         "run_id": run_dir.name,
@@ -112,7 +126,6 @@ def build_run_manifest(
         "detector": build_detector_manifest(
             coinjoin_type,
             min_input_count,
-            test_values,
             first_wasabi2_block,
             joinmarket_detector,
             joinmarket_min_base_fee,
@@ -137,10 +150,18 @@ def build_run_manifest(
                 os.environ.get("EMULATOR_IMAGE_DIGEST"),
                 docker_image_digest(images.get("coinjoin_emulator")),
             ),
-            "wrapper": first_present(
-                wrapper_image_digest,
-                os.environ.get("WRAPPER_IMAGE_DIGEST"),
-                docker_image_digest(images.get("wrapper")),
+            # The lock files still carry floating tags, so the reference-only
+            # path yields null everywhere; the daemon lookup (a no-op on a
+            # Docker-less frontend) keeps provenance usable until they are pinned.
+            "uploader": first_present(
+                uploader_image_digest,
+                digest_from_reference(images.get("uploader")),
+                docker_image_digest(images.get("uploader")),
+            ),
+            "unified_report": first_present(
+                unified_report_image_digest,
+                digest_from_reference(images.get("unified_report")),
+                docker_image_digest(images.get("unified_report")),
             ),
         },
         "source_commits": {
@@ -148,7 +169,16 @@ def build_run_manifest(
                 emulator_git_commit,
                 os.environ.get("COINJOIN_EMULATOR_GIT_COMMIT"),
             ),
-            "exporters": git_commit_for_path(Path(__file__).resolve().parent),
+            "exporters": git_commit_for_path(exporters_root),
+        },
+        # The report can run from a tree that has no checkout behind it: the PBS
+        # node executes exporters downloaded from S3, where `git rev-parse`
+        # yields null. The tree hash names the exact code that produced the
+        # report in every case; `git_dirty` says whether the commit above is the
+        # whole story. Informational only — nothing branches on them.
+        "source_trees": {
+            "exporters_sha256": tree_sha256(exporters_root),
+            "exporters_git_dirty": git_tree_is_dirty(exporters_root),
         },
     }
 

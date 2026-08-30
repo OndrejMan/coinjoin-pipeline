@@ -57,12 +57,13 @@ PBS_CONTAINER_NAME="${PBS_CONTAINER_NAME:-pbs-${ENGINE}-parallel-itest-${RESOURC
 HOST_KUBECONFIG="${WORK_ROOT}/kubeconfig-host.yaml"
 CONTAINER_KUBECONFIG="${WORK_ROOT}/kubeconfig-container.yaml"
 IMAGE_PREFIX="${IMAGE_PREFIX:-ghcr.io/ondrejman/}"
-WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/coinjoin-pipeline:latest}"
 COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
-RESULT_DIR="${TEST_RESULT_DIR:-}"
+RESULT_DIR="${TEST_RESULT_DIR:-${PROJECT_DIR}/emulation_logs/_test-results/parallel-pbs-analysis-${RUN_TOKEN}}"
 KEEP_WORK="${KEEP_TEST_WORK:-0}"
 KUBERNETES_PBS_TIMEOUT="${KUBERNETES_PBS_TIMEOUT:-85m}"
 RUN_LOG="${WORK_ROOT}/runIt.parallel.log"
+POD_FAILURE_FILE="${WORK_ROOT}/pod-failures.txt"
+POD_WATCHER_PID=""
 # Optional offline mode: run a PBS analyzer from a local Docker image instead
 # of a registry-backed docker:// reference. Apptainer cannot see host Docker
 # tags, so the image is exported into the shared workspace with `docker save`
@@ -88,15 +89,55 @@ if [[ "${ENGINE}" == "wasabi" ]]; then
   SCENARIO="${SCENARIO:-overactive-local.json}"
   EXPECTED_SCENARIO="overactive-local"
   EXPECTED_COINJOIN_TYPE="wasabi2"
-  TEST_VALUES_ARGS=(--test-values --min-input-count 15)
+  MIN_INPUT_COUNT_ARGS=(--min-input-count 15)
 else
   SCENARIO="${SCENARIO:-defaultJoinMarket.json}"
   EXPECTED_SCENARIO="default-joinmarket"
   EXPECTED_COINJOIN_TYPE="joinmarket"
-  TEST_VALUES_ARGS=()
+  MIN_INPUT_COUNT_ARGS=()
 fi
 
+# The emulator tears its namespace down as soon as a run fails, so a pod that
+# died mid-run is already gone by the time the post-mortem dump runs - exactly
+# the pod whose logs and termination reason are needed. Record the evidence
+# while it still exists.
+watch_pod_failures() {
+  local seen=" " name phase
+  while :; do
+    while read -r name phase; do
+      [[ -n "${name}" ]] || continue
+      [[ "${phase}" == "Running" || "${phase}" == "Pending" ]] && continue
+      [[ "${seen}" == *" ${name} "* ]] && continue
+      seen+="${name} "
+      {
+        echo "===== ${name} left Running (phase=${phase}) at $(TZ=UTC date -Is) ====="
+        kubectl --kubeconfig "${HOST_KUBECONFIG}" describe pod -n "${NAMESPACE}" \
+          "${name}" || true
+        echo "===== final 500 log lines: ${name} ====="
+        kubectl --kubeconfig "${HOST_KUBECONFIG}" logs -n "${NAMESPACE}" "${name}" \
+          --all-containers --tail=500 --timestamps || true
+      } >>"${POD_FAILURE_FILE}" 2>&1
+    done < <(kubectl --kubeconfig "${HOST_KUBECONFIG}" get pods -n "${NAMESPACE}" \
+      -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.phase}{"\n"}{end}' \
+      2>/dev/null || true)
+    sleep "${POD_WATCH_INTERVAL_SECONDS:-5}"
+  done
+}
+
+stop_pod_watcher() {
+  [[ -n "${POD_WATCHER_PID}" ]] || return 0
+  kill "${POD_WATCHER_PID}" >/dev/null 2>&1 || true
+  wait "${POD_WATCHER_PID}" >/dev/null 2>&1 || true
+  POD_WATCHER_PID=""
+}
+
 dump_kubernetes_diagnostics() {
+  if [[ -s "${POD_FAILURE_FILE}" ]]; then
+    echo "===== pods that stopped running during the run (captured live) =====" >&2
+    cat "${POD_FAILURE_FILE}" >&2
+  else
+    echo "No pod left the Running phase while the pod watcher was active." >&2
+  fi
   [[ -s "${HOST_KUBECONFIG}" ]] || return 0
   echo "Kubernetes workflow failed; collecting diagnostics for namespace ${NAMESPACE}..." >&2
   kubectl --kubeconfig "${HOST_KUBECONFIG}" get pods -n "${NAMESPACE}" -o wide >&2 || true
@@ -119,6 +160,7 @@ dump_kubernetes_diagnostics() {
 cleanup() {
   local status=$?
   trap - EXIT
+  stop_pod_watcher
   if (( status != 0 )); then
     dump_kubernetes_diagnostics
     echo "===== runIt.sh parallel log tail =====" >&2
@@ -126,9 +168,11 @@ cleanup() {
   fi
   if [[ -n "${RESULT_DIR}" ]]; then
     mkdir -p "${RESULT_DIR}/${ENGINE}/pbs-logs"
-    find "${WORK_ROOT}" -type f \( -name '*.o[0-9]*' -o -name '*.e[0-9]*' \) \
+    find "${WORK_ROOT}" -type f \
+      \( -name '*.o[0-9]*' -o -name '*.e[0-9]*' -o -name '*.pbs.log' \) \
       -exec cp -t "${RESULT_DIR}/${ENGINE}/pbs-logs" {} + 2>/dev/null || true
     [[ -s "${RUN_LOG}" ]] && cp "${RUN_LOG}" "${RESULT_DIR}/${ENGINE}/runIt.parallel.log" || true
+    find "${RESULT_DIR}" -type d -empty -delete 2>/dev/null || true
   fi
   docker rm -f "${PBS_CONTAINER_NAME}" >/dev/null 2>&1 || true
   if [[ "${KEEP_CLUSTER:-0}" != 1 ]]; then
@@ -161,7 +205,6 @@ if [[ -n "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" ]]; then
   export_pbs_docker_archive "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" coinjoin-analysis --pbs-coinjoin-analysis-image
 fi
 
-CONTAINER_KUBE_HOST="${CONTAINER_KUBE_HOST:-$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')}"
 echo "Creating k3d cluster ${CLUSTER_NAME} with direct shared storage ${WORK_ROOT}..."
 k3d cluster create "${CLUSTER_NAME}" \
   --servers 1 --agents "${K3D_AGENTS:-2}" --wait --timeout "${K3D_WAIT_TIMEOUT:-240s}" \
@@ -169,13 +212,31 @@ k3d cluster create "${CLUSTER_NAME}" \
 k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
 kubectl --kubeconfig "${HOST_KUBECONFIG}" wait node --all --for=condition=Ready --timeout=240s
 
+# Both the Kubernetes API and the NodePort listeners belong to the k3d node
+# containers, not to the host's default Docker bridge. k3d publishes only the
+# API port, so an emulator manager on the bridge gateway cannot reach the
+# btc-node NodePort and its RPC wait times out. Put the manager in the cluster
+# network and address the server node directly.
+K3D_NETWORK="k3d-${CLUSTER_NAME}"
+K3D_SERVER="k3d-${CLUSTER_NAME}-server-0"
+K3D_SERVER_IP="$(python3 - "${K3D_SERVER}" "${K3D_NETWORK}" <<'PY'
+import json
+import subprocess
+import sys
+
+server, network = sys.argv[1:]
+container = json.loads(subprocess.check_output(["docker", "inspect", server]))[0]
+address = (container.get("NetworkSettings", {}).get("Networks", {}).get(network, {}).get("IPAddress", ""))
+if not address:
+    raise SystemExit(f"FAIL: could not determine {server}'s address on Docker network {network}")
+print(address)
+PY
+)"
+
 cp "${HOST_KUBECONFIG}" "${CONTAINER_KUBECONFIG}"
-API_SERVER="$(kubectl --kubeconfig "${HOST_KUBECONFIG}" config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
-API_PORT="${API_SERVER##*:}"
-API_PORT="${API_PORT%%/*}"
 KUBE_CLUSTER="$(kubectl --kubeconfig "${CONTAINER_KUBECONFIG}" config view --minify -o jsonpath='{.contexts[0].context.cluster}')"
 kubectl --kubeconfig "${CONTAINER_KUBECONFIG}" config set-cluster "${KUBE_CLUSTER}" \
-  --server="https://${CONTAINER_KUBE_HOST}:${API_PORT}" --insecure-skip-tls-verify=true >/dev/null
+  --server="https://${K3D_SERVER_IP}:6443" --insecure-skip-tls-verify=true >/dev/null
 kubectl --kubeconfig "${CONTAINER_KUBECONFIG}" config unset \
   "clusters.${KUBE_CLUSTER}.certificate-authority-data" >/dev/null 2>&1 || true
 
@@ -196,14 +257,17 @@ export PBS_CONTAINER_NAME PBS_WORKDIR_HOST="${WORK_ROOT}" PBS_WORKDIR_CONTAINER=
 source "${PBS_ENV}"
 
 export PBS_CLIENT_WORKDIR="${WORK_ROOT}"
-export PBS_FRONTEND_DIRECT=1
 export EMULATION_LOGS_DIR="${LOGS_ROOT}"
-export WRAPPER_IMAGE COINJOIN_EMULATOR_IMAGE
-export KUBERNETES_CONTROL_IP="${CONTAINER_KUBE_HOST}"
+export COINJOIN_EMULATOR_IMAGE
+export KUBERNETES_EMULATOR_CONTAINER_NETWORK="${K3D_NETWORK}"
+export KUBERNETES_CONTROL_IP="${K3D_SERVER_IP}"
 export KUBERNETES_STORAGE_UID="$(id -u)"
 export KUBERNETES_STORAGE_GID="$(id -g)"
+echo "Emulator manager network: ${K3D_NETWORK}; Kubernetes NodePort host: ${K3D_SERVER_IP}"
 
 echo "Running ${ENGINE} Kubernetes emulation followed by parallel PBS analyzers..."
+watch_pod_failures &
+POD_WATCHER_PID=$!
 set +e
 (
   cd "${PROJECT_DIR}"
@@ -217,7 +281,7 @@ set +e
     --kubernetes-btc-datadir "${BITCOIN_DATADIR}" \
     --analysisPbs \
     --blocksciPbs \
-    "${TEST_VALUES_ARGS[@]}" \
+    "${MIN_INPUT_COUNT_ARGS[@]}" \
     "${PBS_IMAGE_ARGS[@]}" \
     --parallel \
     --pbs-bitcoin-datadir "${BITCOIN_DATADIR}" \
@@ -228,6 +292,7 @@ set +e
 ) 2>&1 | tee "${RUN_LOG}"
 RUN_EXIT_CODE=${PIPESTATUS[0]}
 set -e
+stop_pod_watcher
 
 if [[ "${RUN_EXIT_CODE}" -ne 0 ]]; then
   echo "FAIL: parallel runIt.sh exited with code ${RUN_EXIT_CODE}" >&2
@@ -279,8 +344,15 @@ if run.get("scenario_name") != expected_scenario:
     raise SystemExit(f"FAIL: scenario {run.get('scenario_name')!r} != {expected_scenario!r}")
 if run.get("coinjoin_type") != expected_type:
     raise SystemExit(f"FAIL: coinjoin type {run.get('coinjoin_type')!r} != {expected_type!r}")
-if not baseline:
-    raise SystemExit("FAIL: coinjoin-analysis produced no records")
+baseline_coinjoins = baseline.get("coinjoins") or {}
+if not baseline_coinjoins:
+    raise SystemExit("FAIL: coinjoin-analysis produced no CoinJoin transactions")
+if summary.get("coinjoin_analysis_coinjoins") != len(baseline_coinjoins):
+    raise SystemExit(
+        "FAIL: report baseline count "
+        f"{summary.get('coinjoin_analysis_coinjoins')!r} != "
+        f"{len(baseline_coinjoins)} CoinJoins in coinjoin_tx_info.json"
+    )
 if summary.get("blocksci_detected_coinjoins", 0) < 1:
     raise SystemExit("FAIL: BlockSci detected no CoinJoin transactions")
 if "blocksci_agreement_rate" not in summary:
@@ -291,6 +363,6 @@ if expected_type == "joinmarket":
         raise SystemExit("FAIL: JoinMarket round events are missing")
 print(
     f"PASS: {expected_type} via Kubernetes→shared storage→parallel PBS; "
-    f"baseline={len(baseline)}, blocksci={summary['blocksci_detected_coinjoins']}"
+    f"baseline={len(baseline_coinjoins)}, blocksci={summary['blocksci_detected_coinjoins']}"
 )
 PY

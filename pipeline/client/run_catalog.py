@@ -70,6 +70,7 @@ REPORT_INPUT_PATHS = (
     "coinjoin_emulator_data",
     BASELINE_FILE,
     "blocksci_data/config.json",
+    "blocksci-analysis_data/blocksci_analysis.json",
     "coinjoin-mappings_data/coinjoin_mappings.json",
 )
 

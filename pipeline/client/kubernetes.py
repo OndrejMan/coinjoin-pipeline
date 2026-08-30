@@ -10,13 +10,28 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from client.artifacts import PROBE_RUNNING, PROBE_TERMINAL, PROBE_UNKNOWN
+from client.artifacts import PROBE_QUEUED, PROBE_RUNNING, PROBE_TERMINAL, PROBE_UNKNOWN
 
 S3_CONTROLLER_RESOURCE_REQUESTS = {"cpu": "250m", "memory": "512Mi"}
 S3_CONTROLLER_RESOURCE_LIMITS = {"cpu": "1", "memory": "1Gi"}
 S3_UPLOADER_RESOURCE_REQUESTS = {"cpu": "100m", "memory": "128Mi"}
 S3_UPLOADER_RESOURCE_LIMITS = {"cpu": "500m", "memory": "512Mi"}
 S3_JOB_TTL_SECONDS_AFTER_FINISHED = 3600
+S3_JOB_START_TIMEOUT_SECONDS = 1800
+S3_JOB_DEADLINE_GRACE_SECONDS = 60
+S3_JOB_OWNED_RESOURCE_TYPES = (
+    "serviceaccount",
+    "configmap",
+    "role.rbac.authorization.k8s.io",
+    "rolebinding.rbac.authorization.k8s.io",
+)
+CONTROLLER_LOG_TAIL_LINES = 100
+CONTROLLER_FATAL_SUMMARY_MARKERS = ("Kubernetes CPU quota exhausted",)
+
+
+def kubeconfig_path(value: str | None) -> Path:
+    """Resolve an optional kubeconfig argument using the established default."""
+    return Path(value).expanduser().resolve() if value else Path.home() / ".kube" / "config"
 
 
 def run_kubectl_preflight_command(command: list[str]) -> str:
@@ -103,7 +118,16 @@ def kubernetes_s3_auth_preflight(
         ("create", "serviceaccounts"),
         ("create", "roles.rbac.authorization.k8s.io"),
         ("create", "rolebindings.rbac.authorization.k8s.io"),
+        ("patch", "serviceaccounts"),
+        ("patch", "configmaps"),
+        ("patch", "roles.rbac.authorization.k8s.io"),
+        ("patch", "rolebindings.rbac.authorization.k8s.io"),
+        ("delete", "serviceaccounts"),
+        ("delete", "configmaps"),
+        ("delete", "roles.rbac.authorization.k8s.io"),
+        ("delete", "rolebindings.rbac.authorization.k8s.io"),
         ("get", "jobs.batch"),
+        ("delete", "jobs.batch"),
     ):
         kubectl_auth_can_i(kubeconfig_path, verb, resource, namespace)
     if reuse_namespace:
@@ -134,12 +158,67 @@ def s3_emulation_job_name(run_id: str) -> str:
     return f"{slug}-{digest}"
 
 
+# A pod that cannot start its containers keeps the Job "active" forever, so the
+# Job conditions alone never end the wait. The in-pod watchdog covers the
+# controller, but it cannot cover the image it runs in itself: an unpullable
+# uploader image would otherwise block the frontend until --emulation-timeout.
+UNSTARTABLE_WAITING_REASONS = frozenset(
+    {"ErrImagePull", "ImagePullBackOff", "InvalidImageName", "CreateContainerConfigError"}
+)
+
+
+def unstartable_pod_reason(pod: dict) -> str | None:
+    """Return the fatal waiting reason of any container in ``pod``, if present."""
+    status = pod.get("status") or {}
+    for key in ("initContainerStatuses", "containerStatuses"):
+        for container in status.get(key) or []:
+            reason = ((container.get("state") or {}).get("waiting") or {}).get("reason")
+            if reason in UNSTARTABLE_WAITING_REASONS:
+                return f"{container.get('name')}: {reason}"
+    return None
+
+
 def kubernetes_job_probe(kubeconfig_path: Path, namespace: str, job_name: str) -> Callable[[], str]:
     """Build a kubectl-backed liveness probe for ``wait_for_s3_marker``.
 
     kubectl errors are inconclusive so polling continues on ``PROBE_UNKNOWN``.
     """
     job_seen = False
+
+    def pod_state() -> str:
+        command = [
+            "kubectl", "--kubeconfig", str(kubeconfig_path), "get", "pods",
+            "--namespace", namespace, "--selector", f"job-name={job_name}", "-o", "json",
+        ]
+        try:
+            result = subprocess.run(command, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except FileNotFoundError:
+            return PROBE_UNKNOWN
+        if result.returncode != 0:
+            return PROBE_UNKNOWN
+        try:
+            pods = json.loads(result.stdout).get("items") or []
+        except json.JSONDecodeError:
+            return PROBE_UNKNOWN
+        if not pods:
+            return PROBE_QUEUED
+        for pod in pods:
+            reason = unstartable_pod_reason(pod)
+            if reason:
+                print(
+                    f"[kubernetes] Job {job_name} cannot start its containers ({reason})",
+                    file=sys.stderr,
+                )
+                return PROBE_TERMINAL
+        for pod in pods:
+            status = pod.get("status") or {}
+            if status.get("phase") == "Running":
+                return PROBE_RUNNING
+            for key in ("initContainerStatuses", "containerStatuses"):
+                for container in status.get(key) or []:
+                    if (container.get("state") or {}).get("running") is not None:
+                        return PROBE_RUNNING
+        return PROBE_QUEUED
 
     def probe() -> str:
         nonlocal job_seen
@@ -172,7 +251,7 @@ def kubernetes_job_probe(kubeconfig_path: Path, namespace: str, job_name: str) -
         for condition in status.get("conditions") or []:
             if condition.get("type") in {"Complete", "Failed"} and condition.get("status") == "True":
                 return PROBE_TERMINAL
-        return PROBE_RUNNING
+        return pod_state()
 
     return probe
 
@@ -182,7 +261,7 @@ def collect_s3_emulation_diagnostics(kubeconfig_path: Path, namespace: str, job_
     sections: list[str] = []
     for description, command in (
         ("job description", ["describe", "job", job_name]),
-        ("controller logs", ["logs", f"job/{job_name}", "-c", "controller", "--tail=100"]),
+        ("controller logs", ["logs", f"job/{job_name}", "-c", "controller", "--tail=-1"]),
         ("uploader logs", ["logs", f"job/{job_name}", "-c", "uploader", "--tail=100"]),
     ):
         full = ["kubectl", "--kubeconfig", str(kubeconfig_path), "--namespace", namespace, *command]
@@ -191,8 +270,92 @@ def collect_s3_emulation_diagnostics(kubeconfig_path: Path, namespace: str, job_
         except FileNotFoundError:
             return "kubectl unavailable; no Kubernetes diagnostics collected"
         output = (result.stdout or "").strip() or (result.stderr or "").strip() or "(no output)"
+        if description == "controller logs":
+            fatal_lines = [
+                line
+                for line in output.splitlines()
+                if any(marker in line for marker in CONTROLLER_FATAL_SUMMARY_MARKERS)
+            ]
+            if fatal_lines:
+                sections.append(f"--- controller failure summary ---\n{fatal_lines[-1]}")
+            output = "\n".join(output.splitlines()[-CONTROLLER_LOG_TAIL_LINES:])
         sections.append(f"--- {description} ---\n{output}")
     return "\n".join(sections)
+
+
+def delete_s3_emulation_job(kubeconfig_path: Path, namespace: str, job_name: str) -> None:
+    """Best-effort frontend cleanup after a failed or timed-out marker wait."""
+    command = [
+        "kubectl",
+        "--kubeconfig",
+        str(kubeconfig_path),
+        "--namespace",
+        namespace,
+        "delete",
+        "job",
+        job_name,
+        "--ignore-not-found",
+        "--wait=false",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        print(f"[WARN] kubectl unavailable; could not delete Job {job_name}", file=sys.stderr)
+        return
+    if result.returncode != 0:
+        print(
+            f"[WARN] failed to delete Kubernetes Job {job_name}: "
+            f"{(result.stderr or result.stdout or '').strip()}",
+            file=sys.stderr,
+        )
+
+
+def delete_s3_emulation_support_resources(
+    kubeconfig_path: Path,
+    namespace: str,
+    resource_name: str,
+) -> None:
+    """Best-effort rollback when owner references could not be installed."""
+    for resource_type in S3_JOB_OWNED_RESOURCE_TYPES:
+        command = [
+            "kubectl",
+            "--kubeconfig",
+            str(kubeconfig_path),
+            "--namespace",
+            namespace,
+            "delete",
+            resource_type,
+            resource_name,
+            "--ignore-not-found",
+            "--wait=false",
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except FileNotFoundError:
+            print(
+                f"[WARN] kubectl unavailable; could not delete "
+                f"{resource_type}/{resource_name}",
+                file=sys.stderr,
+            )
+            return
+        if result.returncode != 0:
+            print(
+                f"[WARN] failed to delete {resource_type}/{resource_name}: "
+                f"{(result.stderr or result.stdout or '').strip()}",
+                file=sys.stderr,
+            )
 
 
 def render_s3_emulation_resources(
@@ -207,18 +370,30 @@ def render_s3_emulation_resources(
     artifact_uri: str,
     endpoint_url: str,
     secret_name: str,
+    emulation_timeout_seconds: int = 21600,
+    scheduling_timeout_seconds: int = S3_JOB_START_TIMEOUT_SECONDS,
     reuse_namespace: bool = False,
+    distributor_startup_timeout: str | None = None,
+    btc_node_image: str | None = None,
+    kubernetes_image_pull_policy: str | None = None,
+    btc_node_initial_block_count: str | None = None,
 ) -> str:
     """Render a kubectl-compatible JSON resource list for in-cluster emulation."""
     name = s3_emulation_job_name(run_id)
     labels = {"app.kubernetes.io/name": "coinjoin-s3", "coinjoin.run-id": run_id}
+    joinmarket_fallback = (
+        " --joinmarket-descriptor-regtest-fallback" if engine == "joinmarket" else ""
+    )
+    btc_node_image_arg = ' --btc-node-image "$BTC_NODE_IMAGE"' if btc_node_image else ""
     controller = (
         'python manager.py --driver kubernetes --engine "$ENGINE" run '
         '--scenario /config/scenario.json --namespace "$NAMESPACE" --reuse-namespace '
-        '--disable-port-forward --image-prefix "$IMAGE_PREFIX" --run-id "$RUN_ID" '
+        '--disable-port-forward --image-prefix "$IMAGE_PREFIX" --run-id "$RUN_ID"'
+        f"{joinmarket_fallback} "
         '--btc-node-arg=-blocksxor=0 --download-btc-data "/app/logs/$RUN_ID/bitcoin_data" '
         "--controller-done-marker /app/logs/.controller.done "
         "--controller-failed-marker /app/logs/.controller.failed"
+        f"{btc_node_image_arg}"
     )
     prefix_preflight = r"""set -euo pipefail
 command -v s5cmd >/dev/null || { echo "s5cmd is required" >&2; exit 1; }
@@ -232,35 +407,61 @@ s5() {
     s5cmd --credentials-file /credentials/credentials \
     --profile coinjoin --endpoint-url "$S3_ENDPOINT_URL" "$@"
 }
+# The frontend stages .pipeline/exporters/ into this prefix before creating the
+# Job, so that path is expected here; anything else still means a reused run id.
+# The filter must survive both `s5cmd ls` output shapes: a recursive listing of
+# full keys (.pipeline/exporters/...) if the wildcard crosses "/", and a plain
+# "DIR .pipeline/" row if it does not. Matching on `.pipeline` alone covers both;
+# nothing else the pipeline writes carries that string, and a genuinely reused
+# prefix still shows its own rows.
 set +e
 listing="$(s5 ls "$ARTIFACT_URI/$RUN_ID/*" 2>&1)"
 status=$?
 set -e
-rm -f /credentials/credentials
 if [ "$status" -eq 0 ]; then
-  echo "run prefix $ARTIFACT_URI/$RUN_ID/ already contains artifacts; choose a fresh --run-id" >&2
-  exit 1
+  unexpected="$(printf '%s\n' "$listing" | grep -v '\.pipeline' || true)"
+  if [ -n "$unexpected" ]; then
+    echo "run prefix $ARTIFACT_URI/$RUN_ID/ already contains artifacts; choose a fresh --run-id" >&2
+    printf '%s\n' "$unexpected" >&2
+    rm -f /credentials/credentials
+    exit 1
+  fi
+elif ! printf '%s\n' "$listing" | grep -qi 'no object found'; then
+  printf '%s\n' "$listing" >&2
+  rm -f /credentials/credentials
+  exit "$status"
 fi
-if printf '%s\n' "$listing" | grep -qi 'no object found'; then
-  exit 0
-fi
-printf '%s\n' "$listing" >&2
-exit "$status"
+# Ignoring the exporters is only half the check: an empty or partial staging
+# step would pass it just as well, so verify both entry points are present.
+for required in unified_report.py blocksci_export/analysis.py; do
+  if ! s5 ls "$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/$required" >/dev/null 2>&1; then
+    echo "staged exporters are incomplete: missing $required" >&2
+    rm -f /credentials/credentials
+    exit 1
+  fi
+done
+rm -f /credentials/credentials
+exit 0
 """
     uploader = r"""set -euo pipefail
 command -v s5cmd >/dev/null || { echo "s5cmd is required" >&2; exit 1; }
-mkdir -p /credentials "/artifacts/$RUN_ID/.k8s" "/artifacts/$RUN_ID/.pipeline"
+mkdir -p /credentials "/artifacts/$RUN_ID/.k8s"
 umask 077
 printf '[coinjoin]\naws_access_key_id = %s\naws_secret_access_key = %s\n' \
   "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" > /credentials/credentials
-cp -R /app/exporters "/artifacts/$RUN_ID/.pipeline/exporters"
 s5() {
   env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
     -u AWS_PROFILE -u AWS_DEFAULT_PROFILE -u AWS_REGION -u AWS_DEFAULT_REGION \
     s5cmd --credentials-file /credentials/credentials \
     --profile coinjoin --endpoint-url "$S3_ENDPOINT_URL" "$@"
 }
+remaining="$EMULATION_TIMEOUT_SECONDS"
 while [ ! -f /artifacts/.controller.done ] && [ ! -f /artifacts/.controller.failed ]; do
+  if [ "$remaining" -le 0 ]; then
+    printf 'controller exceeded emulation timeout (%ss)\n' "$EMULATION_TIMEOUT_SECONDS" >&2
+    printf 'failed\n' > /artifacts/.controller.failed
+    break
+  fi
   terminated_exit="$(kubectl --namespace "$NAMESPACE" get pod "$POD_NAME" \
     -o 'jsonpath={.status.containerStatuses[?(@.name=="controller")].state.terminated.exitCode}' \
     2>/dev/null || true)"
@@ -280,6 +481,7 @@ while [ ! -f /artifacts/.controller.done ] && [ ! -f /artifacts/.controller.fail
       ;;
   esac
   sleep 2
+  remaining=$((remaining - 2))
 done
 if [ -f /artifacts/.controller.failed ]; then
   printf 'failed\n' > "/artifacts/$RUN_ID/.k8s/upload.failed"
@@ -298,6 +500,33 @@ rm -f /credentials/credentials"""
         {"name": "ENGINE", "value": engine},
         {"name": "IMAGE_PREFIX", "value": image_prefix},
     ]
+    # The controller runs in a separate Kubernetes container, so an override
+    # set on the frontend must be included explicitly in its environment.
+    # The emulator validates this optional value and falls back to its default
+    # when it is absent or invalid.
+    if distributor_startup_timeout:
+        env.append(
+            {
+                "name": "COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT",
+                "value": distributor_startup_timeout,
+            }
+        )
+    if btc_node_image:
+        env.append({"name": "BTC_NODE_IMAGE", "value": btc_node_image})
+    if kubernetes_image_pull_policy:
+        env.append(
+            {
+                "name": "KUBERNETES_IMAGE_PULL_POLICY",
+                "value": kubernetes_image_pull_policy,
+            }
+        )
+    if btc_node_initial_block_count:
+        env.append(
+            {
+                "name": "COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT",
+                "value": btc_node_initial_block_count,
+            }
+        )
     artifact_env = [
         {"name": "RUN_ID", "value": run_id},
         {"name": "ARTIFACT_URI", "value": artifact_uri},
@@ -314,6 +543,10 @@ rm -f /credentials/credentials"""
     ]
     uploader_env = [
         {"name": "NAMESPACE", "value": namespace},
+        {
+            "name": "EMULATION_TIMEOUT_SECONDS",
+            "value": str(emulation_timeout_seconds),
+        },
         {
             "name": "POD_NAME",
             "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}},
@@ -364,6 +597,11 @@ rm -f /credentials/credentials"""
             "metadata": {"name": name, "namespace": namespace, "labels": labels},
             "spec": {
                 "backoffLimit": 0,
+                "activeDeadlineSeconds": (
+                    scheduling_timeout_seconds
+                    + emulation_timeout_seconds
+                    + S3_JOB_DEADLINE_GRACE_SECONDS
+                ),
                 "ttlSecondsAfterFinished": S3_JOB_TTL_SECONDS_AFTER_FINISHED,
                 "template": {
                     "metadata": {"labels": labels},
@@ -450,7 +688,100 @@ rm -f /credentials/credentials"""
 
 
 def apply_s3_emulation_resources(manifest: str, kubeconfig_path: Path) -> None:
+    payload = json.loads(manifest)
+    jobs = [item for item in payload.get("items", []) if item.get("kind") == "Job"]
+    if len(jobs) != 1:
+        raise RuntimeError("S3 Kubernetes manifest must contain exactly one Job")
+    metadata = jobs[0].get("metadata") or {}
+    job_name = metadata.get("name")
+    namespace = metadata.get("namespace")
+    if not job_name or not namespace:
+        raise RuntimeError("S3 Kubernetes Job must declare metadata.name and namespace")
+
     command = ["kubectl", "--kubeconfig", str(kubeconfig_path), "apply", "-f", "-"]
     completed = subprocess.run(command, input=manifest, text=True, check=False)
     if completed.returncode:
+        # The manifest orders the support resources before the Job, so a partial
+        # apply can leave them behind with no Job to own them.
+        delete_s3_emulation_job(kubeconfig_path, namespace, job_name)
+        delete_s3_emulation_support_resources(
+            kubeconfig_path, namespace, job_name
+        )
         raise RuntimeError(f"kubectl apply failed with exit {completed.returncode}")
+
+    uid_command = [
+        "kubectl",
+        "--kubeconfig",
+        str(kubeconfig_path),
+        "--namespace",
+        namespace,
+        "get",
+        "job",
+        job_name,
+        "-o",
+        "jsonpath={.metadata.uid}",
+    ]
+    uid_result = subprocess.run(
+        uid_command,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    job_uid = (uid_result.stdout or "").strip()
+    if uid_result.returncode or not job_uid:
+        delete_s3_emulation_job(kubeconfig_path, namespace, job_name)
+        delete_s3_emulation_support_resources(
+            kubeconfig_path, namespace, job_name
+        )
+        raise RuntimeError(
+            f"could not read Kubernetes Job UID for lifecycle ownership: "
+            f"{(uid_result.stderr or uid_result.stdout or '').strip()}"
+        )
+
+    owner_patch = json.dumps(
+        {
+            "metadata": {
+                "ownerReferences": [
+                    {
+                        "apiVersion": "batch/v1",
+                        "kind": "Job",
+                        "name": job_name,
+                        "uid": job_uid,
+                        "controller": True,
+                        "blockOwnerDeletion": False,
+                    }
+                ]
+            }
+        }
+    )
+    for resource_type in S3_JOB_OWNED_RESOURCE_TYPES:
+        patch_command = [
+            "kubectl",
+            "--kubeconfig",
+            str(kubeconfig_path),
+            "--namespace",
+            namespace,
+            "patch",
+            resource_type,
+            job_name,
+            "--type=merge",
+            "-p",
+            owner_patch,
+        ]
+        patch_result = subprocess.run(
+            patch_command,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if patch_result.returncode:
+            delete_s3_emulation_job(kubeconfig_path, namespace, job_name)
+            delete_s3_emulation_support_resources(
+                kubeconfig_path, namespace, job_name
+            )
+            raise RuntimeError(
+                f"could not attach Job ownership to {resource_type}/{job_name}: "
+                f"{(patch_result.stderr or patch_result.stdout or '').strip()}"
+            )

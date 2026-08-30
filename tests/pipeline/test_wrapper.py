@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -7,6 +8,8 @@ import unittest
 from argparse import ArgumentTypeError, Namespace
 from pathlib import Path
 from unittest import mock
+
+import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2] / "pipeline"
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -19,11 +22,13 @@ from client.wrapper import (
     COINJOIN_ANALYSIS_TARGET_PATH_ENV,
     DEFAULT_RUN_TIMEZONE,
     RUNS_ROOT_CONTAINER,
+    S3PBSJobs,
     blocksci_output_exists,
     build_parser,
     captured_pipeline_stage,
     compose_command,
     compose_env,
+    command_lock_path,
     container_command,
     container_run_pull_args,
     container_runtime,
@@ -31,11 +36,14 @@ from client.wrapper import (
     export_command,
     host_scenario_path,
     export_preflight_error,
+    ensure_no_active_s3_pbs_submission,
     kubernetes_auth_preflight,
     kubernetes_emulator_command,
     normalize_argv,
     pipeline_stage,
     run_blocksci_docker_stage,
+    run_blocksci_export_pbs_stage,
+    run_blocksci_pbs_stage,
     run_coinjoin_analysis,
     run_command,
     run_dir_under_root,
@@ -44,18 +52,264 @@ from client.wrapper import (
     run_kubernetes_emulation,
     run_parallel_analysis,
     run_pbs_from_s3,
+    run_serial_analysis,
     run_timezone,
     stage_blocksci_script,
+    stage_pbs_exporters,
     stage_separator,
     terminal_supports_color,
+    wrapper_operations,
 )
 
 
 from client.artifacts import ArtifactTransportError
+from client.pbs import PBSError
+from exporters.artifact_paths import BLOCKSCI_ANALYSIS_DIR
+from exporters.blocksci_export.analysis import ARTIFACT_NAME
+
+
+def _write_required_exporters(root: Path) -> None:
+    (root / "blocksci_export").mkdir(parents=True)
+    (root / "unified_report.py").write_text("report\n", encoding="utf-8")
+    (root / "blocksci_export" / "analysis.py").write_text(
+        "analysis\n", encoding="utf-8"
+    )
+
+
+def test_stage_pbs_exporters_snapshots_checkout_under_shared_run(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "checkout-exporters"
+    run_dir = tmp_path / "run-a"
+    _write_required_exporters(source)
+    (source / "__pycache__").mkdir()
+    (source / "__pycache__" / "module.pyc").write_bytes(b"bytecode")
+
+    staged = stage_pbs_exporters(run_dir, source)
+
+    assert staged == run_dir / ".pipeline" / "exporters"
+    assert (staged / "unified_report.py").read_text(encoding="utf-8") == "report\n"
+    assert (staged / "blocksci_export" / "analysis.py").is_file()
+    assert not (staged / "__pycache__").exists()
+
+    (source / "newer.py").write_text("newer\n", encoding="utf-8")
+    assert stage_pbs_exporters(run_dir, source) == staged
+    assert not (staged / "newer.py").exists()
+
+
+def test_wrapper_operations_bind_the_compatibility_facade_at_invocation() -> None:
+    """The thin entrypoint must still observe wrapper-level test patch points."""
+    with mock.patch("client.wrapper.run_script") as run_script:
+        operations = wrapper_operations()
+
+    assert operations.run_script is run_script
+
+
+def test_stage_pbs_exporters_rejects_partial_existing_snapshot(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "checkout-exporters"
+    run_dir = tmp_path / "run-a"
+    _write_required_exporters(source)
+    partial = run_dir / ".pipeline" / "exporters"
+    partial.mkdir(parents=True)
+    (partial / "unified_report.py").write_text("report\n", encoding="utf-8")
+
+    with pytest.raises(PBSError, match="Failed to stage PBS exporters"):
+        stage_pbs_exporters(run_dir, source)
+
+
+def test_serial_analysis_preserves_legacy_analysis_script_dispatch() -> None:
+    """The serial refactor must retain the established Compose execution path."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        logs_root = Path(tmpdir)
+        run_dir = logs_root / "run-a"
+        run_dir.mkdir()
+        args = Namespace(
+            analysisPbs=False,
+            blocksciPbs=False,
+            mappingsPbs=False,
+            blocksci_script=None,
+            engine="wasabi",
+            coinjoin_type="wasabi2",
+            min_input_count=None,
+            scenario=None,
+            joinmarket_detector="definite",
+            joinmarket_min_base_fee=5000,
+            joinmarket_percentage_fee=0.00004,
+            joinmarket_max_depth=200000,
+        )
+        with mock.patch("client.wrapper.run_coinjoin_analysis") as baseline, mock.patch(
+            "client.wrapper.run_script"
+        ) as analysis_script:
+            run_serial_analysis(args, run_dir, logs_root)
+
+    baseline.assert_called_once_with("run-a")
+    assert analysis_script.call_args.args[0].name == "analysis.sh"
+    assert analysis_script.call_args.kwargs["active_run_id"] == "run-a"
+
+
+def test_blocksci_pbs_stage_submits_shared_staged_exporters(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-a"
+    run_dir.mkdir(parents=True)
+    bitcoin_datadir = tmp_path / "bitcoin"
+    args = build_parser().parse_args(
+        [
+            "analyze",
+            "--engine",
+            "wasabi",
+            "--run-dir",
+            "run-a",
+            "--blocksciPbs",
+            "--pbs-bitcoin-datadir",
+            str(bitcoin_datadir),
+        ]
+    )
+    staged = run_dir / ".pipeline" / "exporters"
+
+    with (
+        mock.patch(
+            "client.wrapper.compose_env",
+            return_value={
+                "EMULATION_LOGS_DIR": str(run_dir.parent),
+                "EXPORTERS_DIR": str(tmp_path / "checkout-exporters"),
+            },
+        ),
+        mock.patch(
+            "client.wrapper.stage_pbs_exporters",
+            return_value=staged,
+        ) as stage_mock,
+        mock.patch("client.wrapper.submit_blocksci_pbs") as submit_mock,
+        mock.patch("client.wrapper.wait_for_pbs_marker"),
+    ):
+        run_blocksci_pbs_stage(args, run_dir)
+
+    stage_mock.assert_called_once_with(
+        run_dir,
+        (tmp_path / "checkout-exporters").resolve(),
+    )
+    assert submit_mock.call_args.kwargs["exporters_dir"] == staged
+
+
+def _blocksci_pbs_commands(
+    args: Namespace, run_dir: Path, tmp_path: Path, *, include_report: bool
+) -> tuple[str, str]:
+    """Return the (BlockSci, unified-report) commands the parallel pair submits."""
+    with (
+        mock.patch(
+            "client.wrapper.compose_env",
+            return_value={
+                "EMULATION_LOGS_DIR": str(run_dir.parent),
+                "EXPORTERS_DIR": str(tmp_path / "checkout-exporters"),
+            },
+        ),
+        mock.patch(
+            "client.wrapper.stage_pbs_exporters",
+            return_value=run_dir / ".pipeline" / "exporters",
+        ),
+        mock.patch("client.wrapper.submit_blocksci_pbs") as submit_mock,
+        mock.patch("client.wrapper.wait_for_pbs_marker"),
+    ):
+        run_blocksci_pbs_stage(
+            args, run_dir, wait=False, include_report=include_report
+        )
+        blocksci_command = submit_mock.call_args.kwargs["command"]
+        submit_mock.reset_mock()
+        run_blocksci_export_pbs_stage(args, run_dir)
+        report_command = submit_mock.call_args.kwargs["command"]
+    return blocksci_command, report_command
+
+
+def _parallel_pbs_args(run_dir: Path, tmp_path: Path) -> Namespace:
+    return build_parser().parse_args(
+        [
+            "analyze",
+            "--engine",
+            "wasabi",
+            "--run-dir",
+            run_dir.name,
+            "--blocksciPbs",
+            "--pbs-bitcoin-datadir",
+            str(tmp_path / "bitcoin"),
+        ]
+    )
+
+
+def test_deferred_report_pbs_pair_agrees_on_the_analysis_artifact(
+    tmp_path: Path,
+) -> None:
+    """The BlockSci job must write the artifact the unified-report job reads.
+
+    With --parallel --blocksciPbs the report is deferred to its own PBS job,
+    which consumes blocksci_analysis.json instead of querying BlockSci. Nothing
+    else produces that file, so a BlockSci job that only parses leaves the
+    report job to die on a missing path.
+    """
+    run_dir = tmp_path / "runs" / "run-a"
+    run_dir.mkdir(parents=True)
+    args = _parallel_pbs_args(run_dir, tmp_path)
+
+    blocksci_command, report_command = _blocksci_pbs_commands(
+        args, run_dir, tmp_path, include_report=False
+    )
+
+    consumed = re.search(r"--blocksci-analysis (\S+)", report_command)
+    assert consumed is not None, report_command
+    produced_run_dir = re.search(
+        r"blocksci_export/analysis\.py --config \S+ --run-dir (\S+)", blocksci_command
+    )
+    assert produced_run_dir is not None, blocksci_command
+    assert consumed.group(1) == (
+        f"{produced_run_dir.group(1)}/{BLOCKSCI_ANALYSIS_DIR}/{ARTIFACT_NAME}"
+    )
+    assert "unified_report.py" not in blocksci_command
+
+
+def test_self_contained_blocksci_pbs_stage_skips_the_analysis_artifact(
+    tmp_path: Path,
+) -> None:
+    """Serial mode reports from the same job, so it must not export the artifact."""
+    run_dir = tmp_path / "runs" / "run-a"
+    run_dir.mkdir(parents=True)
+    args = _parallel_pbs_args(run_dir, tmp_path)
+
+    blocksci_command, _ = _blocksci_pbs_commands(
+        args, run_dir, tmp_path, include_report=True
+    )
+
+    assert "blocksci_export/analysis.py" not in blocksci_command
+    assert "unified_report.py" in blocksci_command
 
 
 def _kubectl_cmd(*parts: str) -> list[str]:
     return ["kubectl", "--kubeconfig", "/kube/config", *parts]
+
+
+def test_pbs_from_s3_uses_a_run_specific_submission_lock(tmp_path: Path) -> None:
+    args = Namespace(action="pbs-from-s3", run_id="run-1")
+
+    assert command_lock_path(args, tmp_path) == (
+        tmp_path / "run-1" / ".pbs-submit.lock"
+    )
+
+
+def test_pbs_from_s3_refuses_a_recorded_active_graph(tmp_path: Path) -> None:
+    marker_dir = tmp_path / ".pbs"
+    marker_dir.mkdir()
+    (marker_dir / "blocksci.jobid").write_text(
+        "blocksci.server\n", encoding="utf-8"
+    )
+
+    with (
+        mock.patch(
+            "client.wrapper.pbs_job_probe",
+            return_value=lambda: "running",
+        ),
+        pytest.raises(RuntimeError, match="still active"),
+    ):
+        ensure_no_active_s3_pbs_submission(tmp_path)
 
 
 def _full_run_s3_args(**overrides) -> Namespace:
@@ -73,6 +327,7 @@ def _full_run_s3_args(**overrides) -> Namespace:
         emulation_timeout=3600,
         analysisPbs=True,
         blocksciPbs=True,
+        mappingsPbs=False,
         pbs_walltime=None,
     )
     values.update(overrides)
@@ -88,6 +343,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
                 "s3_access_preflight",
                 "ensure_empty_run_prefix",
                 "kubernetes_s3_auth_preflight",
+                "upload_exporters",
                 "run_kubernetes_s3_emulation",
                 "run_pbs_from_s3",
                 "wait_for_s3_marker",
@@ -95,6 +351,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
                 "kubernetes_job_probe",
                 "qdel_pbs_job",
                 "collect_s3_emulation_diagnostics",
+                "delete_s3_emulation_job",
             )
         }
 
@@ -102,16 +359,20 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}
         self.addCleanup(mock.patch.stopall)
-        mocks["run_pbs_from_s3"].return_value = (
-            "analysis.job",
-            "blocksci.job",
-            "report.job",
+        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
+            coinjoin_analysis="analysis.job",
+            blocksci_work="blocksci.job",
+            unified_report="report.job",
         )
         calls: list[str] = []
         mocks["run_kubernetes_s3_emulation"].side_effect = lambda *a, **k: calls.append("emulate")
         mocks["run_pbs_from_s3"].side_effect = lambda *a, **k: (
             calls.append("submit-pbs"),
-            ("analysis.job", "blocksci.job", "report.job"),
+            S3PBSJobs(
+                coinjoin_analysis="analysis.job",
+                blocksci_work="blocksci.job",
+                unified_report="report.job",
+            ),
         )[1]
         mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(f"wait:{stage}")
 
@@ -142,15 +403,44 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
 
         mocks["run_pbs_from_s3"].assert_not_called()
         mocks["collect_s3_emulation_diagnostics"].assert_called_once()
+        mocks["delete_s3_emulation_job"].assert_called_once()
+
+    def test_full_run_s3_waits_for_mappings_before_report(self):
+        patches = self._patches()
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        self.addCleanup(mock.patch.stopall)
+        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
+            coinjoin_analysis="analysis.job",
+            coinjoin_mappings="mappings.job",
+            blocksci_work="blocksci.job",
+            unified_report="report.job",
+        )
+        calls: list[str] = []
+        mocks["wait_for_s3_marker"].side_effect = (
+            lambda stage, *a, **k: calls.append(stage)
+        )
+
+        run_full_run_s3(_full_run_s3_args(mappingsPbs=True))
+
+        self.assertEqual(
+            calls,
+            [
+                "kubernetes-emulation",
+                "coinjoin-analysis",
+                "blocksci",
+                "coinjoin-mappings",
+                "unified-report",
+            ],
+        )
 
     def test_full_run_s3_analysis_failure_cancels_dependent_report_job(self):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}
         self.addCleanup(mock.patch.stopall)
-        mocks["run_pbs_from_s3"].return_value = (
-            "analysis.job",
-            "blocksci.job",
-            "report.job",
+        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
+            coinjoin_analysis="analysis.job",
+            blocksci_work="blocksci.job",
+            unified_report="report.job",
         )
 
         def wait(stage, *arguments, **keywords):
@@ -164,14 +454,39 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
 
         mocks["qdel_pbs_job"].assert_called_once_with("report.job")
 
+    def test_full_run_s3_analysis_failure_cancels_mappings_and_report(self):
+        patches = self._patches()
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        self.addCleanup(mock.patch.stopall)
+        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
+            coinjoin_analysis="analysis.job",
+            coinjoin_mappings="mappings.job",
+            blocksci_work="blocksci.job",
+            unified_report="report.job",
+        )
+
+        def wait(stage, *arguments, **keywords):
+            if stage == "coinjoin-analysis":
+                raise ArtifactTransportError("analysis failed")
+
+        mocks["wait_for_s3_marker"].side_effect = wait
+
+        with self.assertRaises(ArtifactTransportError):
+            run_full_run_s3(_full_run_s3_args(mappingsPbs=True))
+
+        self.assertEqual(
+            mocks["qdel_pbs_job"].call_args_list,
+            [mock.call("mappings.job"), mock.call("report.job")],
+        )
+
     def test_full_run_s3_blocksci_failure_cancels_dependent_report_job(self):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}
         self.addCleanup(mock.patch.stopall)
-        mocks["run_pbs_from_s3"].return_value = (
-            "analysis.job",
-            "blocksci.job",
-            "report.job",
+        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
+            coinjoin_analysis="analysis.job",
+            blocksci_work="blocksci.job",
+            unified_report="report.job",
         )
 
         def wait(stage, *arguments, **keywords):
@@ -185,10 +500,65 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
 
         mocks["qdel_pbs_job"].assert_called_once_with("report.job")
 
+    def test_full_run_s3_parse_failure_cancels_the_whole_blocksci_branch(self):
+        # A reusable workflow inserts blocksci-parse before the analyzer, so a
+        # failed cache invalidates both the analyzer and the report that joins
+        # it, while the independent baseline keeps running.
+        patches = self._patches()
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        self.addCleanup(mock.patch.stopall)
+        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
+            coinjoin_analysis="analysis.job",
+            blocksci_parse="parse.job",
+            blocksci_work="analyze.job",
+            unified_report="report.job",
+        )
+
+        def wait(stage, *arguments, **keywords):
+            if stage == "blocksci-parse":
+                raise ArtifactTransportError("parse failed")
+
+        mocks["wait_for_s3_marker"].side_effect = wait
+
+        with self.assertRaises(ArtifactTransportError):
+            run_full_run_s3(_full_run_s3_args(blocksci_workflow="reusable"))
+
+        self.assertEqual(
+            mocks["qdel_pbs_job"].call_args_list,
+            [mock.call("analyze.job"), mock.call("report.job")],
+        )
+
+    def test_full_run_s3_mappings_failure_cancels_dependent_report_job(self):
+        patches = self._patches()
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        self.addCleanup(mock.patch.stopall)
+        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
+            coinjoin_analysis="analysis.job",
+            coinjoin_mappings="mappings.job",
+            blocksci_work="blocksci.job",
+            unified_report="report.job",
+        )
+
+        def wait(stage, *arguments, **keywords):
+            if stage == "coinjoin-mappings":
+                raise ArtifactTransportError("mappings failed")
+
+        mocks["wait_for_s3_marker"].side_effect = wait
+
+        with self.assertRaises(ArtifactTransportError):
+            run_full_run_s3(_full_run_s3_args(mappingsPbs=True))
+
+        mocks["qdel_pbs_job"].assert_called_once_with("report.job")
+
 
 class WrapperExportTest(unittest.TestCase):
     def test_pbs_from_s3_submits_parallel_analyzers_then_report(self):
+        # run_pbs_from_s3 takes <submission-dir>/.pbs-submit.lock and persists
+        # job IDs there; keep both out of the real runs root.
+        submission_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(submission_dir.cleanup)
         args = Namespace(
+            pbs_submission_dir=Path(submission_dir.name),
             artifact_uri="s3://bucket/runs",
             run_id="run-1",
             s3_endpoint_url="https://s3.cl4.du.cesnet.cz",
@@ -210,9 +580,11 @@ class WrapperExportTest(unittest.TestCase):
             joinmarket_min_base_fee=5000,
             joinmarket_percentage_fee=0.00004,
             joinmarket_max_depth=200000,
-            test_values=False,
         )
         with (
+            # The run prefix check before submission is covered in test_s3_backend.
+            mock.patch("client.wrapper.ensure_staged_exporters"),
+            mock.patch("client.wrapper.clear_s3_stage_markers"),
             mock.patch(
                 "client.wrapper.submit_coinjoin_analysis_s3_pbs",
                 return_value="analysis.job",
@@ -227,7 +599,14 @@ class WrapperExportTest(unittest.TestCase):
             ) as report,
         ):
             job_ids = run_pbs_from_s3(args)
-        self.assertEqual(job_ids, ("analysis.job", "blocksci.job", "report.job"))
+        self.assertEqual(
+            job_ids,
+            S3PBSJobs(
+                coinjoin_analysis="analysis.job",
+                blocksci_work="blocksci.job",
+                unified_report="report.job",
+            ),
+        )
         self.assertNotIn("dependency_job_id", blocksci.call_args.kwargs)
         self.assertEqual(
             report.call_args.kwargs["dependency_job_ids"],
@@ -252,17 +631,6 @@ class WrapperExportTest(unittest.TestCase):
                 container_path,
                 "/runs/emulation/logs/run-a/.pipeline/blocksci-script.py",
             )
-
-    def test_wrapper_image_includes_pbs_module(self):
-        dockerfile = (PROJECT_ROOT / "client" / "Dockerfile").read_text(encoding="utf-8")
-
-        self.assertIn("COPY client/pbs.py /app/client/pbs.py", dockerfile)
-
-    def test_wrapper_image_includes_refactored_client_modules(self):
-        dockerfile = (PROJECT_ROOT / "client" / "Dockerfile").read_text(encoding="utf-8")
-
-        for module in ("cli_options.py", "kubernetes.py", "pipeline_logging.py", "runtime.py"):
-            self.assertIn(f"COPY client/{module} /app/client/{module}", dockerfile)
 
     def test_terminal_colors_are_disabled_for_plain_streams(self):
         stream = io.StringIO()
@@ -359,12 +727,6 @@ class WrapperExportTest(unittest.TestCase):
             ["full-run", "--scenario", "overactive-local.json"],
         )
 
-    def test_normalize_argv_defaults_to_full_run_with_test_values(self):
-        self.assertEqual(
-            normalize_argv(["--test-values", "--scenario", "overactive-local.json"]),
-            ["full-run", "--test-values", "--scenario", "overactive-local.json"],
-        )
-
     def test_normalize_argv_defaults_to_full_run_with_parallel(self):
         self.assertEqual(
             normalize_argv(["--parallel", "--engine", "joinmarket"]),
@@ -411,7 +773,6 @@ class WrapperExportTest(unittest.TestCase):
                 coinjoin_type="joinmarket",
                 min_input_count=1,
                 scenario=None,
-                test_values=False,
                 joinmarket_detector="definite",
                 joinmarket_min_base_fee=5000,
                 joinmarket_percentage_fee=0.00004,
@@ -493,7 +854,9 @@ class WrapperExportTest(unittest.TestCase):
                 side_effect=lambda *_args, **_kwargs: events.append("blocksci"),
             ), mock.patch(
                 "client.wrapper.run_mappings_pbs_stage",
-                side_effect=lambda *_args: events.append("mappings"),
+                side_effect=lambda *_args, **_kwargs: events.append("mappings"),
+            ), mock.patch(
+                "client.wrapper.wait_for_pbs_marker",
             ), mock.patch(
                 "client.wrapper.run_export_only",
                 side_effect=lambda *_args: events.append("export"),
@@ -505,8 +868,8 @@ class WrapperExportTest(unittest.TestCase):
 
     def test_normalize_argv_keeps_explicit_action(self):
         self.assertEqual(
-            normalize_argv(["recreate", "--scenario", "overactive-local.json"]),
-            ["recreate", "--scenario", "overactive-local.json"],
+            normalize_argv(["emulate", "--scenario", "overactive-local.json"]),
+            ["emulate", "--scenario", "overactive-local.json"],
         )
 
     def test_normalize_argv_keeps_help_without_default_action(self):
@@ -541,7 +904,7 @@ class WrapperExportTest(unittest.TestCase):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
         self.assertEqual(result.returncode, 2)
-        self.assertIn("supported only by full-run and mappings", result.stderr)
+        self.assertIn("pbs-from-s3", result.stderr)
 
     def test_mappings_pbs_requires_wasabi2_coinjoin_type(self):
         result = subprocess.run(
@@ -661,6 +1024,7 @@ class WrapperExportTest(unittest.TestCase):
             result = subprocess.run(
                 self._full_run_s3_argv(
                     "--scenario", "scenario.json",
+                    "--mappingsPbs",
                     "--pbs-unified-report-ncpus", "1",
                     "--pbs-unified-report-mem", "2gb",
                     "--pbs-unified-report-scratch", "3gb",
@@ -673,20 +1037,26 @@ class WrapperExportTest(unittest.TestCase):
         self.assertIn("Kubernetes S3-compatible resources", result.stdout)
         self.assertIn("PBS S3-compatible script for coinjoin-analysis", result.stdout)
         self.assertIn("PBS S3-compatible script for blocksci", result.stdout)
+        self.assertIn("PBS S3-compatible script for coinjoin-mappings", result.stdout)
         self.assertIn("PBS S3-compatible script for unified-report", result.stdout)
         self.assertIn("#PBS -l select=1:ncpus=1:mem=2gb:scratch_local=3gb", result.stdout)
         self.assertIn("#PBS -l walltime=00:15:00", result.stdout)
         self.assertIn("Would wait for s3://bucket/runs/run-1/.k8s/upload.done", result.stdout)
         self.assertIn("Would wait for s3://bucket/runs/run-1/.pbs/coinjoin-analysis.done", result.stdout)
         self.assertIn("Would wait for s3://bucket/runs/run-1/.pbs/blocksci.done", result.stdout)
+        self.assertIn("Would wait for s3://bucket/runs/run-1/.pbs/coinjoin-mappings.done", result.stdout)
         self.assertIn("Would wait for s3://bucket/runs/run-1/.pbs/unified-report.done", result.stdout)
 
     def test_kubernetes_s3_rejects_shared_storage_flags(self):
         result = subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"), "recreate",
+            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"), "emulate",
              "--engine", "wasabi", "--driver", "kubernetes", "--artifact-backend", "s3",
              "--artifact-uri", "s3://bucket/runs", "--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz",
              "--s3-secret-name", "coinjoin-s3", "--run-id", "run-1",
+             # Otherwise the missing frontend credentials are rejected first and
+             # this stops testing the flag incompatibility it is named after.
+             "--s3-credentials-file", "/storage/user/.aws/credentials",
+             "--s3-profile", "coinjoin",
              "--reuse-namespace",
              "--copy-to-host", "--dry-run"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -721,11 +1091,6 @@ class WrapperExportTest(unittest.TestCase):
         }
 
         self.assertEqual(compose_command(env), ["podman-compose"])
-
-    def test_compose_env_sets_test_values_flag(self):
-        env = compose_env(test_values=True)
-
-        self.assertEqual(env["BLOCKSCI_TEST_VALUES"], "true")
 
     def test_compose_env_uses_blocksci_detector_default_input_count(self):
         self.assertEqual(compose_env()["BLOCKSCI_MIN_INPUT_COUNT"], "default")
@@ -780,7 +1145,26 @@ class WrapperExportTest(unittest.TestCase):
         self.assertNotIn(COINJOIN_ANALYSIS_TARGET_PATH_ENV, env)
         self.assertNotIn(COINJOIN_ANALYSIS_INPUT_DATA_PATH_ENV, env)
 
-    def test_export_command_includes_test_values_when_enabled(self):
+    def test_export_command_uses_explicit_minimum_input_count(self):
+        env = {
+            "SCENARIO_FALLBACK_PATH": "/mnt/scenarios/defaultCoinJoin.json",
+            "BLOCKSCI_COINJOIN_TYPE": "wasabi2",
+            "BLOCKSCI_MIN_INPUT_COUNT": "1",
+            "BLOCKSCI_JOINMARKET_DETECTOR": "definite",
+            "BLOCKSCI_JOINMARKET_MIN_BASE_FEE": "5000",
+            "BLOCKSCI_JOINMARKET_PERCENTAGE_FEE": "0.00004",
+            "BLOCKSCI_JOINMARKET_MAX_DEPTH": "200000",
+        }
+
+        command = export_command("run-a", env)
+
+        self.assertIn("--min-input-count 1", command)
+        self.assertIn("--markdown", command)
+        self.assertIn("--joinmarket-detector", command)
+        self.assertIn(f"{RUNS_ROOT_CONTAINER}/run-a/blocksci_data/config.json", command)
+        self.assertIn(f"{RUNS_ROOT_CONTAINER}/run-a", command)
+
+    def test_export_command_does_not_accept_test_value_environment(self):
         env = {
             "SCENARIO_FALLBACK_PATH": "/mnt/scenarios/defaultCoinJoin.json",
             "BLOCKSCI_COINJOIN_TYPE": "wasabi2",
@@ -792,27 +1176,33 @@ class WrapperExportTest(unittest.TestCase):
             "BLOCKSCI_JOINMARKET_MAX_DEPTH": "200000",
         }
 
-        command = export_command("run-a", env)
-
-        self.assertIn("--test-values", command)
-        self.assertIn("--markdown", command)
-        self.assertIn("--joinmarket-detector", command)
-        self.assertIn(f"{RUNS_ROOT_CONTAINER}/run-a/blocksci_data/config.json", command)
-        self.assertIn(f"{RUNS_ROOT_CONTAINER}/run-a", command)
-
-    def test_export_command_omits_test_values_by_default(self):
-        env = {
-            "SCENARIO_FALLBACK_PATH": "/mnt/scenarios/defaultCoinJoin.json",
-            "BLOCKSCI_COINJOIN_TYPE": "wasabi2",
-            "BLOCKSCI_MIN_INPUT_COUNT": "1",
-            "BLOCKSCI_TEST_VALUES": "false",
-            "BLOCKSCI_JOINMARKET_DETECTOR": "definite",
-            "BLOCKSCI_JOINMARKET_MIN_BASE_FEE": "5000",
-            "BLOCKSCI_JOINMARKET_PERCENTAGE_FEE": "0.00004",
-            "BLOCKSCI_JOINMARKET_MAX_DEPTH": "200000",
-        }
-
         self.assertNotIn("--test-values", export_command("run-a", env))
+
+    @unittest.skipIf(os.geteuid() == 0, "root can read every directory")
+    def test_blocksci_output_survives_a_root_only_parsed_directory(self):
+        # blocksci_parser creates parsed/ with mode 0700 while the container runs
+        # as root. The bare wrapper checks it as the invoking user, and is_file()
+        # reports EACCES as False — a finished run then looks like it never ran.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "2026-07-26_07-25_overactive-local"
+            (run_dir / "blocksci_data").mkdir(parents=True)
+            (run_dir / "blocksci_data" / "config.json").write_text("{}", encoding="utf-8")
+            parsed = run_dir / "blocksci_data" / "parsed" / "chain"
+            parsed.mkdir(parents=True)
+            (parsed / "block.dat").write_bytes(b"chain")
+            parsed.parent.chmod(0o000)
+            try:
+                self.assertTrue(blocksci_output_exists(run_dir))
+            finally:
+                parsed.parent.chmod(0o700)
+
+    def test_blocksci_output_still_missing_when_the_stage_never_ran(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run-1"
+            (run_dir / "blocksci_data").mkdir(parents=True)
+            (run_dir / "blocksci_data" / "config.json").write_text("{}", encoding="utf-8")
+
+            self.assertFalse(blocksci_output_exists(run_dir))
 
     def test_export_preflight_all_ready(self):
         error = export_preflight_error(
@@ -1340,6 +1730,37 @@ class WrapperExportTest(unittest.TestCase):
             self.assertIn("KUBERNETES_STORAGE_GID=5678", docker_cmd)
             populate_mock.assert_called_once_with((root / "btc-data" / "data").resolve())
             self.assertNotIn(f"{scenarios_dir.resolve()}:/app/scenarios:ro", docker_cmd)
+
+    def test_kubernetes_emulation_uses_requested_container_network(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            host_client_dir = root / "client"
+            scenarios_dir = host_client_dir / "scenarios"
+            kubeconfig = root / "kubeconfig.yaml"
+            scenarios_dir.mkdir(parents=True)
+            kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+
+            env = {
+                "HOST_CLIENT_DIR": str(host_client_dir),
+                "CONTAINER_RUNTIME": "docker",
+                "COINJOIN_EMULATOR_IMAGE": "coinjoin-emulator:test",
+                "KUBERNETES_EMULATOR_CONTAINER_NETWORK": "k3d-coinjoin-test",
+            }
+            with mock.patch.dict(os.environ, env, clear=False), \
+                mock.patch("client.wrapper.run_command") as run_mock, \
+                mock.patch("client.wrapper.populate_btc_data_volume"), \
+                mock.patch("client.wrapper.kubernetes_auth_preflight"):
+                run_kubernetes_emulation(
+                    scenario="overactive-local.json",
+                    namespace="coinjoin-test",
+                    kubeconfig=str(kubeconfig),
+                )
+
+            docker_cmd = run_mock.call_args.args[0]
+            self.assertEqual(
+                docker_cmd[docker_cmd.index("--network") + 1],
+                "k3d-coinjoin-test",
+            )
 
     def test_kubernetes_emulation_copy_to_host_preserves_download_flow(self):
         with tempfile.TemporaryDirectory() as tmpdir:

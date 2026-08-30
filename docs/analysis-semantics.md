@@ -71,20 +71,22 @@ External mode has no emulator labels and retains
 
 The Wasabi 2 heuristic chooses an internal minimum input count when its
 optional `inputCount` argument is absent. For pre-height-850237 transactions,
-that internal minimum is 50 in production mode and 20 with test values; newer
-transactions use 20.
+that internal minimum is 50; newer transactions use 20.
 
-The wrapper and exporter now leave the option unset by default. Thus
-`--test-values` affects the internal threshold as designed. An explicit
-`--min-input-count N` still overrides the internal height/test-mode threshold,
-and the run manifest records that override as `N`; no override is recorded as
-`null`. Overrides must be positive integers; zero, negative, and non-numeric
-values are command-line errors.
+The wrapper and exporter leave the option unset by default, so BlockSci uses
+the height-aware production threshold. An explicit `--min-input-count N`
+overrides that threshold, and the run manifest records that override as `N`;
+no override is recorded as `null`. Overrides must be positive integers; zero,
+negative, and non-numeric values are command-line errors.
 
-Small regtest Wasabi rounds generally need an explicit `--test-values`. When
-production thresholds are used on pre-850237 emulator blocks and BlockSci
-detects zero transactions, the JSON and Markdown reports carry a
-`wasabi_production_threshold_zero_detections` warning.
+When supplied, the override is passed both to the raw BlockSci detector and to
+`CoinjoinClusterManager`, so report detection and clustering use the same
+Wasabi 2 input threshold.
+
+Small regtest Wasabi rounds generally need an explicit
+`--min-input-count`. When production thresholds are used on pre-850237
+emulator blocks and BlockSci detects zero transactions, the JSON and Markdown
+reports carry a `wasabi_production_threshold_zero_detections` warning.
 
 ## BlockSci bulk detector APIs
 
@@ -94,12 +96,39 @@ detects zero transactions, the JSON and Markdown reports carry a
 - `filter_coinjoin_txes` is a separate linked-transaction API. It returns both
   endpoints of connections between matched transactions and excludes isolated
   matches. It is useful for linked-chain analysis, not detector metrics.
-- `filter_joinmarket_txes` directly scans the range with the selected
-  JoinMarket subset detector and returns `(detected, skipped)`. `skipped`
-  records searches that reached the configured depth limit.
+- `scan_coinjoins_by_subset_matching` directly scans the range with the
+  selected subset-matching detector (`possible` / `definite`) and returns
+  `(detected, skipped)`. `skipped` records searches that reached the
+  configured depth limit. This detector is not protocol-specific: it matches
+  equal-value outputs fundable by distinct input subsets and does not exclude
+  Wasabi, Whirlpool or Ashigaru.
 
 The exporter fails with a rebuild instruction when the installed BlockSci
 module lacks the raw binding; it never silently substitutes the linked subset.
+
+In the parallel S3 PBS graph, these detector results and the associated
+integration diagnostics and clustering assignments are persisted as
+`blocksci-analysis_data/blocksci_analysis.json` (schema 1.0). Report assembly
+requires the artifact's run ID and detector parameters to exactly match the
+requested report; a mismatched or stale artifact fails rather than being
+silently combined with a different baseline.
+
+The optional reusable S3 workflow separates that analyzer artifact from the
+parser cache. `blocksci-parse_data/manifest.json` schema 1.0 identifies the
+run, BlockSci image, exported maximum block, archive name, and archive SHA-256.
+Consumers verify the accompanying checksum before extracting the index and
+never treat a successful S3 download alone as proof that the parsed chain is
+valid. Standard detector output retains the same
+`blocksci-analysis_data/blocksci_analysis.json` contract regardless of whether
+it came from the combined or reusable workflow, so report semantics do not
+change.
+
+The same cache schema can represent emulator data, an external Bitcoin Core
+coin directory, or an imported BlockSci index; `source_kind` and `network` in
+the manifest preserve that provenance. Notebook and custom-script consumers
+operate only on the verified index. The standard detector remains tied to
+emulator label and exported-block inputs, so importing external chain data
+does not by itself create a unified emulator-comparison report.
 
 ## PBS template inputs
 

@@ -20,4 +20,11 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/generate-command-metadata.py \
   --check \
   --wrapper-root "${WRAPPER_ROOT}"
 
+# The packaged snapshot is the one `coinjoin_pipeline.commands` validates argv
+# against, so a stale copy rejects options the live parsers accept.
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/generate-command-metadata.py \
+  --check \
+  --wrapper-root "${WRAPPER_ROOT}" \
+  --output "${PROJECT_DIR}/src/coinjoin_pipeline/metadata/command_metadata.json"
+
 echo "PASS: command builder metadata matches the wrapper and research parsers."

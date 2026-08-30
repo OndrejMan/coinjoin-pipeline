@@ -1,12 +1,19 @@
 services:
   # The Python Manager that controls the emulator
   dind:
-      profiles: ["recreate"]
+      profiles: ["emulate"]
       image: docker:29-dind
       pull_policy: always
       container_name: isolated_docker_daemon
       privileged: true # REQUIRED for a container to run its own Docker daemon
       command: ["--tls=false"]
+      sysctls:
+        # The emulator publishes fixed Wasabi ports (37127-37260) inside this
+        # daemon's network namespace, and those sit in the kernel's ephemeral
+        # port range: an outbound connection can grab one first and then the
+        # container start fails with "failed to bind host port ...: address
+        # already in use". Reserving the block keeps the ports available.
+        - net.ipv4.ip_local_reserved_ports=37127-37260
       environment:
         - DOCKER_TLS_CERTDIR= # Disables TLS for easier local networking
       volumes:
@@ -22,7 +29,7 @@ services:
         retries: 10
 
   data_wiper:
-      profiles: ["recreate"]
+      profiles: ["emulate"]
       image: alpine
       pull_policy: always
       container_name: btc_data_wiper
@@ -38,7 +45,7 @@ services:
           condition: service_healthy
 
   dind_image_prefetch:
-      profiles: ["recreate"]
+      profiles: ["emulate"]
       image: docker:29-cli
       pull_policy: always
       container_name: dind_image_prefetch
@@ -84,7 +91,7 @@ services:
                     "
 
   manager:
-    profiles: ["recreate"]
+    profiles: ["emulate"]
     image: ${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}
     pull_policy: ${COINJOIN_EMULATOR_PULL_POLICY:-always}
     container_name: emulator_manager
@@ -97,6 +104,11 @@ services:
       - PYTHONUNBUFFERED=1
       - RUN_TIMEZONE=${RUN_TIMEZONE:-Europe/Prague}
       - PIPELINE_RUN_ID=${PIPELINE_RUN_ID:-}
+      # Empty means "use the emulator's own default". The Docker path starts
+      # from the chain baked into the btc-node image, so the distributor has
+      # ~1000 block filters to download before its wallet answers; raise this
+      # when a loaded host pushes that past the default.
+      - COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT=${COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT:-}
     depends_on:
       dind:
         condition: service_healthy
@@ -124,7 +136,6 @@ services:
         - ACTIVE_RUN_ID=${ACTIVE_RUN_ID:-}
         - BLOCKSCI_COINJOIN_TYPE=${BLOCKSCI_COINJOIN_TYPE:-wasabi2}
         - BLOCKSCI_MIN_INPUT_COUNT=${BLOCKSCI_MIN_INPUT_COUNT:-default}
-        - BLOCKSCI_TEST_VALUES=${BLOCKSCI_TEST_VALUES:-false}
         - BLOCKSCI_JOINMARKET_DETECTOR=${BLOCKSCI_JOINMARKET_DETECTOR:-definite}
         - BLOCKSCI_JOINMARKET_MIN_BASE_FEE=${BLOCKSCI_JOINMARKET_MIN_BASE_FEE:-5000}
         - BLOCKSCI_JOINMARKET_PERCENTAGE_FEE=${BLOCKSCI_JOINMARKET_PERCENTAGE_FEE:-0.00004}
@@ -138,9 +149,8 @@ services:
         - COINJOIN_EMULATOR_IMAGE=${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}
         - COINJOIN_EMULATOR_IMAGE_ID=${COINJOIN_EMULATOR_IMAGE_ID:-}
         - COINJOIN_EMULATOR_IMAGE_DIGEST=${COINJOIN_EMULATOR_IMAGE_DIGEST:-}
-        - WRAPPER_IMAGE=${WRAPPER_IMAGE:-}
-        - WRAPPER_IMAGE_ID=${WRAPPER_IMAGE_ID:-}
-        - WRAPPER_IMAGE_DIGEST=${WRAPPER_IMAGE_DIGEST:-}
+        - COINJOIN_UPLOADER_IMAGE=${COINJOIN_UPLOADER_IMAGE:-}
+        - COINJOIN_UNIFIED_REPORT_IMAGE=${COINJOIN_UNIFIED_REPORT_IMAGE:-}
         - COINJOIN_EMULATOR_GIT_COMMIT=${COINJOIN_EMULATOR_GIT_COMMIT:-}
         - REPRODUCTION_COMMAND=${REPRODUCTION_COMMAND:-}
         - SCENARIO_FALLBACK_PATH=${SCENARIO_FALLBACK_PATH:-/mnt/scenarios/overactive-local.json}
@@ -168,6 +178,12 @@ services:
           blocksci_parser "/runs/emulation/logs/${ACTIVE_RUN_ID}/blocksci_data/config.json" generate-config bitcoin_regtest "/runs/emulation/logs/${ACTIVE_RUN_ID}/blocksci_data/parsed" --disk /mnt/data/regtest --max-block "$$BLOCKSCI_MAX_BLOCK" &&
           blocksci_parser "/runs/emulation/logs/${ACTIVE_RUN_ID}/blocksci_data/config.json" update &&
 
+          # blocksci_parser creates parsed/ with mode 0700 and this container runs
+          # as root. The wrapper now runs as the invoking user, who would not be
+          # able to read its own run's parsed chain (nor stat it, which reads as
+          # "BlockSci never ran"). Hand the artifacts back before going on.
+          chmod -R a+rX "/runs/emulation/logs/${ACTIVE_RUN_ID}/blocksci_data" &&
+
           # Run an optional user-supplied Python analysis staged inside this run.
           if [ -n "${BLOCKSCI_SCRIPT:-}" ]; then
             cd "/runs/emulation/logs/${ACTIVE_RUN_ID}" &&
@@ -178,10 +194,6 @@ services:
           fi &&
 
           # 5. Export deterministic JSON that compares BlockSci detection against coinjoin-analysis output
-          TEST_VALUES_ARGS="" &&
-          if [ "${BLOCKSCI_TEST_VALUES:-false}" = "true" ]; then
-            TEST_VALUES_ARGS="--test-values";
-          fi &&
           if [ "${BLOCKSCI_EXPORT_REPORT:-true}" = "true" ] && [ -n "${ACTIVE_RUN_ID:-}" ]; then
             python3 /mnt/exporters/unified_report.py \
               --config "/runs/emulation/logs/${ACTIVE_RUN_ID}/blocksci_data/config.json" \
@@ -194,8 +206,7 @@ services:
               --joinmarket-min-base-fee "${BLOCKSCI_JOINMARKET_MIN_BASE_FEE:-5000}" \
               --joinmarket-percentage-fee "${BLOCKSCI_JOINMARKET_PERCENTAGE_FEE:-0.00004}" \
               --joinmarket-max-depth "${BLOCKSCI_JOINMARKET_MAX_DEPTH:-200000}" \
-              --markdown \
-              $${TEST_VALUES_ARGS};
+              --markdown;
           fi &&
           
           # 6. Optionally launch the interactive BlockSci notebook environment.
