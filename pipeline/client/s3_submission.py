@@ -39,7 +39,12 @@ from client.pbs_settings import (
 )
 from client.s3_staging import pbs_stages_need_exporters
 from client.s3_workflow import S3PBSJobs, s3_full_run_plan_from_args
-from client.stages import combined_blocksci_exports_analysis
+from client.stages import (
+    StageGraph,
+    StageKind,
+    StagePlan,
+    combined_blocksci_exports_analysis,
+)
 
 
 @dataclass(frozen=True)
@@ -138,6 +143,284 @@ class S3StageSubmissionOperations:
     submit_report: Callable[..., str | None]
 
 
+@dataclass
+class S3StageRunner:
+    """Submit the PBS implementation selected by a declarative stage graph.
+
+    ``StagePlan`` deliberately carries only logical identity, runner, and
+    dependencies.  This adapter is the one place that translates a stage kind
+    into the concrete PBS command and submission boundary, so planning never
+    becomes a service locator with a callable embedded in each plan node.
+    """
+
+    args: argparse.Namespace
+    target: S3Target
+    plan: StageGraph
+    tracker: S3SubmissionTracker
+    operations: S3StageSubmissionOperations
+
+    _SUBMISSION_ORDER = (
+        StageKind.BASELINE,
+        StageKind.MAPPINGS,
+        StageKind.BLOCKSCI_UPDATE,
+        StageKind.BLOCKSCI_PARSE,
+        StageKind.BLOCKSCI_WORK,
+        StageKind.REPORT,
+    )
+
+    @property
+    def common(self) -> dict[str, object]:
+        return {"target": self.target, "dry_run": self.args.dry_run}
+
+    @property
+    def task(self) -> str:
+        return getattr(self.args, "blocksci_task", "detect")
+
+    @property
+    def mappings_pbs(self) -> bool:
+        return getattr(self.args, "mappingsPbs", False)
+
+    @property
+    def separate_combined_report(self) -> bool:
+        return combined_blocksci_exports_analysis(
+            analysis_pbs=self.args.analysisPbs,
+            blocksci_pbs=self.args.blocksciPbs,
+            mappings_pbs=self.mappings_pbs,
+            blocksci_task=self.task,
+        )
+
+    def submit_all(self) -> None:
+        """Submit the selected graph nodes in the established qsub order."""
+        for kind in self._SUBMISSION_ORDER:
+            stage = self.plan.of_kind(kind)
+            if stage is not None:
+                self.submit(stage)
+
+    def submit(self, stage: StagePlan) -> None:
+        """Dispatch one logical stage through its concrete PBS adapter."""
+        handler = {
+            StageKind.BASELINE: self._submit_analysis,
+            StageKind.MAPPINGS: self._submit_mappings,
+            StageKind.BLOCKSCI_UPDATE: self._submit_update,
+            StageKind.BLOCKSCI_PARSE: self._submit_parse,
+            StageKind.BLOCKSCI_WORK: self._submit_blocksci_work,
+            StageKind.REPORT: self._submit_report,
+        }.get(stage.kind)
+        if handler is None:
+            raise PBSError(f"No PBS submission adapter for stage {stage.name}")
+        handler(stage)
+
+    def _submit_analysis(self, stage: StagePlan) -> None:
+        resources = stage_pbs_resources(self.args, "analysis")
+        self.tracker.submit(
+            stage.name,
+            lambda: self.operations.submit_analysis(
+                **self.common,
+                image=resolve_pbs_image(
+                    self.args,
+                    DEFAULT_COINJOIN_ANALYSIS_IMAGE,
+                    "pbs_coinjoin_analysis_image",
+                ),
+                command=coinjoin_analysis_pbs_command("collect_docker"),
+                **resources,
+            ),
+        )
+
+    def _submit_mappings(self, stage: StagePlan) -> None:
+        resources = stage_pbs_resources(self.args, "mappings")
+        self.tracker.submit(
+            stage.name,
+            lambda: self.operations.submit_mappings(
+                **self.common,
+                enumerator_image=resolve_pbs_image(
+                    self.args,
+                    DEFAULT_MAPPINGS_ENUMERATOR_IMAGE,
+                    "pbs_mappings_enumerator_image",
+                ),
+                sake_image=resolve_pbs_image(
+                    self.args, DEFAULT_SAKE_IMAGE, "pbs_sake_image"
+                ),
+                mining_fee_rate=getattr(self.args, "mapping_mining_fee_rate", 1),
+                coordination_fee_rate=getattr(
+                    self.args, "mapping_coordination_fee_rate", 0.003
+                ),
+                max_decomposition_fee=getattr(
+                    self.args, "mapping_max_decomposition_fee", 6000
+                ),
+                mode=getattr(self.args, "mapping_mode", "numeric"),
+                timeout=getattr(self.args, "mapping_timeout", 60),
+                retry_timeout=getattr(self.args, "mapping_retry_timeout", 600),
+                sake_seed=getattr(self.args, "sake_seed", 20260704),
+                **resources,
+                dependency_job_id=self.plan.dependency_id(stage.name, self.tracker.jobs),
+            ),
+        )
+
+    def _blocksci_resources(self) -> tuple[str, dict[str, object]]:
+        return (
+            resolve_pbs_image(
+                self.args, DEFAULT_BLOCKSCI_IMAGE, "pbs_blocksci_image"
+            ),
+            stage_pbs_resources(self.args, "blocksci"),
+        )
+
+    def _submit_update(self, stage: StagePlan) -> None:
+        image, resources = self._blocksci_resources()
+        self.tracker.submit(
+            stage.name,
+            lambda: self.operations.submit_update(
+                **self.common,
+                source_run_id=self.args.blocksci_cache_source_run_id,
+                image=image,
+                command=blocksci_update_pbs_command(self.target.run_id),
+                external_bitcoin_datadir=Path(self.args.blocksci_external_bitcoin_datadir),
+                external_network=self.args.blocksci_network,
+                external_max_block=self.args.blocksci_max_block,
+                **resources,
+            ),
+        )
+
+    def _submit_parse(self, stage: StagePlan) -> None:
+        image, resources = self._blocksci_resources()
+        external_bitcoin = getattr(self.args, "blocksci_external_bitcoin_datadir", None)
+        bitcoin_blocks_uri = getattr(self.args, "blocksci_bitcoin_blocks_uri", None)
+        external_index = getattr(self.args, "blocksci_external_blocksci_dir", None)
+        command = blocksci_parse_pbs_command(self.target.run_id)
+        if external_bitcoin or bitcoin_blocks_uri:
+            command = blocksci_parse_pbs_command(
+                self.target.run_id,
+                coin_type=self.args.blocksci_network,
+                disk_path="/mnt/data",
+                max_block_expression=str(self.args.blocksci_max_block + 1),
+            )
+        self.tracker.submit(
+            stage.name,
+            lambda: self.operations.submit_parse(
+                **self.common,
+                image=image,
+                command=command,
+                external_bitcoin_datadir=(
+                    Path(external_bitcoin) if external_bitcoin else None
+                ),
+                bitcoin_blocks_uri=bitcoin_blocks_uri,
+                external_blocksci_dir=(Path(external_index) if external_index else None),
+                external_network=getattr(self.args, "blocksci_network", None),
+                external_max_block=getattr(self.args, "blocksci_max_block", None),
+                **resources,
+            ),
+        )
+
+    def _submit_blocksci_work(self, stage: StagePlan) -> None:
+        image, resources = self._blocksci_resources()
+        if stage.name == "blocksci":
+            self.tracker.submit(
+                stage.name,
+                lambda: self.operations.submit_blocksci(
+                    **self.common,
+                    image=image,
+                    command=blocksci_pbs_command(
+                        self.target.run_id,
+                        self.args.coinjoin_type,
+                        self.args.min_input_count,
+                        self.args.joinmarket_detector,
+                        self.args.joinmarket_min_base_fee,
+                        self.args.joinmarket_percentage_fee,
+                        self.args.joinmarket_max_depth,
+                        include_report=not self.separate_combined_report,
+                        export_analysis=self.separate_combined_report,
+                    ),
+                    **resources,
+                    include_report=not self.separate_combined_report,
+                    export_analysis=self.separate_combined_report,
+                ),
+            )
+            return
+        command = self._blocksci_work_command()
+        self.tracker.submit(
+            stage.name,
+            lambda: self.operations.submit_blocksci_work(
+                **self.common,
+                image=image,
+                command=command,
+                mode=stage.name,
+                user_script=(
+                    Path(self.args.blocksci_script) if self.task == "script" else None
+                ),
+                external_baseline_uri=(
+                    self.args.external_baseline_uri if self.task == "external" else None
+                ),
+                notebooks_dir=(
+                    Path(self.args.blocksci_notebooks_dir)
+                    if self.task == "notebook"
+                    and getattr(self.args, "blocksci_notebooks_dir", None)
+                    else None
+                ),
+                notebook_port=getattr(self.args, "blocksci_notebook_port", None) or 8888,
+                dependency_job_id=self.plan.dependency_id(stage.name, self.tracker.jobs),
+                **resources,
+            ),
+        )
+
+    def _blocksci_work_command(self) -> str:
+        parameters = (
+            self.target.run_id,
+            self.args.coinjoin_type,
+            self.args.min_input_count,
+            self.args.joinmarket_detector,
+            self.args.joinmarket_min_base_fee,
+            self.args.joinmarket_percentage_fee,
+            self.args.joinmarket_max_depth,
+        )
+        if self.task == "detect":
+            return blocksci_analysis_pbs_command(*parameters)
+        if self.task == "external":
+            return blocksci_external_report_pbs_command(*parameters)
+        if self.task == "script":
+            return blocksci_script_pbs_command(*parameters)
+        return blocksci_notebook_pbs_command(
+            getattr(self.args, "blocksci_notebook_port", None) or 8888
+        )
+
+    def _submit_report(self, stage: StagePlan) -> None:
+        dependency_job_ids = self.plan.dependency_ids(stage.name, self.tracker.jobs)
+        if not self.args.dry_run and len(dependency_job_ids) != len(stage.dependencies):
+            raise PBSError(
+                "Could not obtain analyzer job IDs for the unified report dependency"
+            )
+        self.tracker.submit(
+            stage.name,
+            lambda: self.operations.submit_report(
+                **self.common,
+                image=resolve_unified_report_pbs_image(self.args),
+                command=blocksci_export_pbs_command(
+                    self.target.run_id,
+                    self.args.coinjoin_type,
+                    self.args.min_input_count,
+                    self.args.joinmarket_detector,
+                    self.args.joinmarket_min_base_fee,
+                    self.args.joinmarket_percentage_fee,
+                    self.args.joinmarket_max_depth,
+                    uploader_image=resolve_uploader_image(self.args),
+                    unified_report_image=unified_report_image_reference(self.args),
+                ),
+                ncpus=resolve_unified_report_pbs_resource(
+                    self.args, "ncpus", DEFAULT_UNIFIED_REPORT_NCPUS
+                ),
+                mem=resolve_unified_report_pbs_resource(
+                    self.args, "mem", DEFAULT_UNIFIED_REPORT_MEM
+                ),
+                scratch=resolve_unified_report_pbs_resource(
+                    self.args, "scratch", DEFAULT_UNIFIED_REPORT_SCRATCH
+                ),
+                walltime=resolve_unified_report_pbs_resource(
+                    self.args, "walltime", DEFAULT_UNIFIED_REPORT_WALLTIME
+                ),
+                dependency_job_ids=dependency_job_ids,
+                include_mappings=self.mappings_pbs,
+            ),
+        )
+
+
 def submit_s3_pbs_graph(
     args: argparse.Namespace,
     operations: S3SubmissionLifecycleOperations,
@@ -179,10 +462,6 @@ def submit_s3_pbs_stages(
         submitted_jobs,
         operations.tracker_operations,
     )
-    common = dict(target=target, dry_run=args.dry_run)
-    analysis_resources = stage_pbs_resources(args, "analysis")
-    mappings_resources = stage_pbs_resources(args, "mappings")
-    workflow = getattr(args, "blocksci_workflow", "combined")
     task = getattr(args, "blocksci_task", "detect")
     if task == "update" and not args.dry_run:
         source_run_id = args.blocksci_cache_source_run_id
@@ -195,11 +474,10 @@ def submit_s3_pbs_stages(
                 f"source BlockSci cache manifest does not exist for run {source_run_id}"
             )
         operations.ensure_empty_prefix(access, target.artifact_uri, target.run_id)
-    mappings_pbs = getattr(args, "mappingsPbs", False)
     if (
         not args.dry_run
         and not args.analysisPbs
-        and (mappings_pbs or (args.blocksciPbs and task == "detect"))
+        and (getattr(args, "mappingsPbs", False) or (args.blocksciPbs and task == "detect"))
     ):
         operations.s3_preflight(access, target.artifact_uri)
         if not operations.object_exists(
@@ -214,211 +492,5 @@ def submit_s3_pbs_stages(
         getattr(args, "stage_exporters", False) or pbs_stages_need_exporters(args)
     ):
         operations.ensure_exporters(args)
-    separate_combined_report = combined_blocksci_exports_analysis(
-        analysis_pbs=args.analysisPbs,
-        blocksci_pbs=args.blocksciPbs,
-        mappings_pbs=mappings_pbs,
-        blocksci_task=task,
-    )
-    if args.analysisPbs:
-        tracker.submit(
-            "coinjoin-analysis",
-            lambda: operations.submit_analysis(
-                **common,
-                image=resolve_pbs_image(
-                    args, DEFAULT_COINJOIN_ANALYSIS_IMAGE, "pbs_coinjoin_analysis_image"
-                ),
-                command=coinjoin_analysis_pbs_command("collect_docker"),
-                **analysis_resources,
-            ),
-        )
-    if mappings_pbs:
-        tracker.submit(
-            "coinjoin-mappings",
-            lambda: operations.submit_mappings(
-                **common,
-                enumerator_image=resolve_pbs_image(
-                    args,
-                    DEFAULT_MAPPINGS_ENUMERATOR_IMAGE,
-                    "pbs_mappings_enumerator_image",
-                ),
-                sake_image=resolve_pbs_image(args, DEFAULT_SAKE_IMAGE, "pbs_sake_image"),
-                mining_fee_rate=getattr(args, "mapping_mining_fee_rate", 1),
-                coordination_fee_rate=getattr(args, "mapping_coordination_fee_rate", 0.003),
-                max_decomposition_fee=getattr(args, "mapping_max_decomposition_fee", 6000),
-                mode=getattr(args, "mapping_mode", "numeric"),
-                timeout=getattr(args, "mapping_timeout", 60),
-                retry_timeout=getattr(args, "mapping_retry_timeout", 600),
-                sake_seed=getattr(args, "sake_seed", 20260704),
-                **mappings_resources,
-                dependency_job_id=plan.dependency_id(
-                        "coinjoin-mappings", tracker.jobs
-                    ),
-            ),
-        )
-    if args.blocksciPbs:
-        blocksci_resources = stage_pbs_resources(args, "blocksci")
-        blocksci_image = resolve_pbs_image(
-            args, DEFAULT_BLOCKSCI_IMAGE, "pbs_blocksci_image"
-        )
-        if task == "update":
-            tracker.submit(
-                "blocksci-update",
-                lambda: operations.submit_update(
-                    **common,
-                    source_run_id=args.blocksci_cache_source_run_id,
-                    image=blocksci_image,
-                    command=blocksci_update_pbs_command(target.run_id),
-                    external_bitcoin_datadir=Path(args.blocksci_external_bitcoin_datadir),
-                    external_network=args.blocksci_network,
-                    external_max_block=args.blocksci_max_block,
-                    **blocksci_resources,
-                ),
-            )
-        elif workflow == "combined":
-            tracker.submit(
-                "blocksci",
-                lambda: operations.submit_blocksci(
-                    **common,
-                    image=blocksci_image,
-                    command=blocksci_pbs_command(
-                        target.run_id,
-                        args.coinjoin_type,
-                        args.min_input_count,
-                        args.joinmarket_detector,
-                        args.joinmarket_min_base_fee,
-                        args.joinmarket_percentage_fee,
-                        args.joinmarket_max_depth,
-                        include_report=not separate_combined_report,
-                        export_analysis=separate_combined_report,
-                    ),
-                    **blocksci_resources,
-                    include_report=not separate_combined_report,
-                    export_analysis=separate_combined_report,
-                ),
-            )
-        else:
-            if workflow == "reusable":
-                external_bitcoin = getattr(args, "blocksci_external_bitcoin_datadir", None)
-                bitcoin_blocks_uri = getattr(args, "blocksci_bitcoin_blocks_uri", None)
-                external_index = getattr(args, "blocksci_external_blocksci_dir", None)
-                parse_command = blocksci_parse_pbs_command(target.run_id)
-                if external_bitcoin or bitcoin_blocks_uri:
-                    parse_command = blocksci_parse_pbs_command(
-                        target.run_id,
-                        coin_type=args.blocksci_network,
-                        disk_path="/mnt/data",
-                        max_block_expression=str(args.blocksci_max_block + 1),
-                    )
-                tracker.submit(
-                    "blocksci-parse",
-                    lambda: operations.submit_parse(
-                        **common,
-                        image=blocksci_image,
-                        command=parse_command,
-                        external_bitcoin_datadir=(
-                            Path(external_bitcoin) if external_bitcoin else None
-                        ),
-                        bitcoin_blocks_uri=bitcoin_blocks_uri,
-                        external_blocksci_dir=(Path(external_index) if external_index else None),
-                        external_network=getattr(args, "blocksci_network", None),
-                        external_max_block=getattr(args, "blocksci_max_block", None),
-                        **blocksci_resources,
-                    ),
-                )
-            if task != "parse":
-                mode = f"blocksci-{task if task != 'detect' else 'analyze'}"
-                if task == "detect":
-                    work_command = blocksci_analysis_pbs_command(
-                        target.run_id,
-                        args.coinjoin_type,
-                        args.min_input_count,
-                        args.joinmarket_detector,
-                        args.joinmarket_min_base_fee,
-                        args.joinmarket_percentage_fee,
-                        args.joinmarket_max_depth,
-                    )
-                elif task == "external":
-                    work_command = blocksci_external_report_pbs_command(
-                        target.run_id,
-                        args.coinjoin_type,
-                        args.min_input_count,
-                        args.joinmarket_detector,
-                        args.joinmarket_min_base_fee,
-                        args.joinmarket_percentage_fee,
-                        args.joinmarket_max_depth,
-                    )
-                elif task == "script":
-                    work_command = blocksci_script_pbs_command(
-                        target.run_id,
-                        args.coinjoin_type,
-                        args.min_input_count,
-                        args.joinmarket_detector,
-                        args.joinmarket_min_base_fee,
-                        args.joinmarket_percentage_fee,
-                        args.joinmarket_max_depth,
-                    )
-                else:
-                    work_command = blocksci_notebook_pbs_command(
-                        getattr(args, "blocksci_notebook_port", None) or 8888
-                    )
-                tracker.submit(
-                    mode,
-                    lambda: operations.submit_blocksci_work(
-                        **common,
-                        image=blocksci_image,
-                        command=work_command,
-                        mode=mode,
-                        user_script=Path(args.blocksci_script) if task == "script" else None,
-                        external_baseline_uri=(
-                            args.external_baseline_uri if task == "external" else None
-                        ),
-                        notebooks_dir=(
-                            Path(args.blocksci_notebooks_dir)
-                            if task == "notebook"
-                            and getattr(args, "blocksci_notebooks_dir", None)
-                            else None
-                        ),
-                        notebook_port=getattr(args, "blocksci_notebook_port", None) or 8888,
-                        dependency_job_id=plan.dependency_id(mode, tracker.jobs),
-                        **blocksci_resources,
-                    ),
-                )
-    report_stage = plan.get("unified-report")
-    if report_stage is not None:
-        dependency_job_ids = plan.dependency_ids("unified-report", tracker.jobs)
-        if not args.dry_run and len(dependency_job_ids) != len(report_stage.dependencies):
-            raise PBSError("Could not obtain analyzer job IDs for the unified report dependency")
-        tracker.submit(
-            "unified-report",
-            lambda: operations.submit_report(
-                **common,
-                image=resolve_unified_report_pbs_image(args),
-                command=blocksci_export_pbs_command(
-                    target.run_id,
-                    args.coinjoin_type,
-                    args.min_input_count,
-                    args.joinmarket_detector,
-                    args.joinmarket_min_base_fee,
-                    args.joinmarket_percentage_fee,
-                    args.joinmarket_max_depth,
-                    uploader_image=resolve_uploader_image(args),
-                    unified_report_image=unified_report_image_reference(args),
-                ),
-                ncpus=resolve_unified_report_pbs_resource(
-                    args, "ncpus", DEFAULT_UNIFIED_REPORT_NCPUS
-                ),
-                mem=resolve_unified_report_pbs_resource(
-                    args, "mem", DEFAULT_UNIFIED_REPORT_MEM
-                ),
-                scratch=resolve_unified_report_pbs_resource(
-                    args, "scratch", DEFAULT_UNIFIED_REPORT_SCRATCH
-                ),
-                walltime=resolve_unified_report_pbs_resource(
-                    args, "walltime", DEFAULT_UNIFIED_REPORT_WALLTIME
-                ),
-                dependency_job_ids=dependency_job_ids,
-                include_mappings=mappings_pbs,
-            ),
-        )
+    S3StageRunner(args, target, plan, tracker, operations).submit_all()
     return S3PBSJobs.from_plan(plan, tracker.jobs)

@@ -8,35 +8,66 @@ while this code has no dependency on that wide import surface.
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Callable, ContextManager
 
-from client.artifacts import ArtifactTransportError
+from client.artifacts import ArtifactTransportError, S3Access
 from client.pbs import PBSError
+from client.pipeline_logging import StageLog
 
 
 @dataclass(frozen=True)
 class WrapperOperations:
     """Concrete boundaries required to execute one parsed wrapper command.
 
-    A mapping keeps the entrypoint independent of the legacy façade while
-    allowing ``wrapper`` to bind its historical patch points at invocation
-    time.  Tests and downstream callers can therefore retain their imports
-    from ``client.wrapper`` during the transition.
+    ``wrapper`` binds these fields at invocation time, preserving its
+    historical monkeypatch points without making the entrypoint depend on the
+    compatibility façade.  The explicit field list is deliberate: changing a
+    boundary now fails type checking instead of turning into a late dynamic
+    attribute error.
     """
 
-    values: Mapping[str, Any]
-
-    def __getattr__(self, name: str) -> Any:
-        try:
-            return self.values[name]
-        except KeyError as error:
-            raise AttributeError(name) from error
+    install_termination_handlers: Callable[[], None]
+    build_parser: Callable[[], argparse.ArgumentParser]
+    normalize_argv: Callable[[list[str]], list[str]]
+    validate_artifact_arguments: Callable[[argparse.ArgumentParser, argparse.Namespace], None]
+    default_driver: str
+    default_coinjoin_type: str
+    container_runtime_env: str
+    compose_env: Callable[..., dict[str, str]]
+    compose_env_from_args: Callable[..., dict[str, str]]
+    command_lock_path: Callable[[argparse.Namespace, Path], Path]
+    acquire_lock: Callable[[Path], object]
+    truthy_env: Callable[[str], bool]
+    run_dirs: Callable[[Path], set[Path]]
+    detect_active_run: Callable[[Path, set[Path]], Path | None]
+    pipeline_run_id_env: Callable[[], str]
+    captured_pipeline_stage: Callable[..., ContextManager[StageLog]]
+    run_script: Callable[..., None]
+    emulate_script: Path
+    analysis_script: Path
+    delete_script: Path
+    s3_access_from_args: Callable[[argparse.Namespace], S3Access]
+    stage_kubernetes_s3_run: Callable[[argparse.Namespace, S3Access], None]
+    run_kubernetes_s3_emulation: Callable[[argparse.Namespace], None]
+    run_kubernetes_emulation: Callable[..., None]
+    run_pbs_from_s3: Callable[[argparse.Namespace], object]
+    run_mappings_pbs_stage: Callable[[argparse.Namespace, Path], None]
+    run_blocksci_pbs_stage: Callable[[argparse.Namespace, Path], None]
+    stage_blocksci_script: Callable[[str | None, Path], str | None]
+    resolve_run_id: Callable[[str | None, dict[str, str]], str | None]
+    run_export_only: Callable[[argparse.Namespace], None]
+    run_coinjoin_analysis_pbs_stage: Callable[[argparse.Namespace, Path], None]
+    run_coinjoin_analysis: Callable[[str | None, bool, str], None]
+    initialize_images: Callable[[], None]
+    run_full_run_s3: Callable[[argparse.Namespace], None]
+    run_parallel_analysis: Callable[[argparse.Namespace, Path, Path], None]
+    run_serial_analysis: Callable[[argparse.Namespace, Path, Path], None]
 
 
 def _error_and_exit(error: Exception) -> None:
@@ -46,8 +77,8 @@ def _error_and_exit(error: Exception) -> None:
 
 def _validate_request(
     operations: WrapperOperations,
-    parser: Any,
-    args: Any,
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
     normalized_argv: list[str],
 ) -> None:
     """Apply public CLI, artifact, and cross-stage validation."""
@@ -98,7 +129,7 @@ def _validate_request(
         parser.error("mappings requires --mappingsPbs")
 
 
-def _print_dry_run(operations: WrapperOperations, args: Any) -> bool:
+def _print_dry_run(operations: WrapperOperations, args: argparse.Namespace) -> bool:
     """Print dry-run intent and return whether dispatch must continue."""
     use_pbs_dry_run = (
         (args.action == "analyze" and getattr(args, "blocksciPbs", False))
@@ -128,7 +159,9 @@ def _print_dry_run(operations: WrapperOperations, args: Any) -> bool:
     return False
 
 
-def _prepare_execution(operations: WrapperOperations, args: Any) -> tuple[Path, bool]:
+def _prepare_execution(
+    operations: WrapperOperations, args: argparse.Namespace
+) -> tuple[Path, bool]:
     """Acquire the command lock and derive the execution backend."""
     logs_root = Path(operations.compose_env().get("EMULATION_LOGS_DIR", ".")).expanduser().resolve()
     lock_path = operations.command_lock_path(args, logs_root)
@@ -155,7 +188,11 @@ def _prepare_execution(operations: WrapperOperations, args: Any) -> tuple[Path, 
 
 
 def _run_emulate(
-    operations: WrapperOperations, args: Any, logs_root: Path, use_kubernetes: bool, local_build: bool
+    operations: WrapperOperations,
+    args: argparse.Namespace,
+    logs_root: Path,
+    use_kubernetes: bool,
+    local_build: bool,
 ) -> None:
     if use_kubernetes and getattr(args, "artifact_backend", "shared-storage") == "s3":
         try:
@@ -203,7 +240,11 @@ def _run_emulate(
 
 
 def _run_full_run(
-    operations: WrapperOperations, args: Any, logs_root: Path, use_kubernetes: bool, local_build: bool
+    operations: WrapperOperations,
+    args: argparse.Namespace,
+    logs_root: Path,
+    use_kubernetes: bool,
+    local_build: bool,
 ) -> None:
     env = operations.compose_env_from_args(args)
     emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
