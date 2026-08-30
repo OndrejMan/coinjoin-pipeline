@@ -58,6 +58,7 @@ from client.wrapper import (
     stage_pbs_exporters,
     stage_separator,
     terminal_supports_color,
+    wrapper_operations,
 )
 
 
@@ -94,6 +95,14 @@ def test_stage_pbs_exporters_snapshots_checkout_under_shared_run(
     (source / "newer.py").write_text("newer\n", encoding="utf-8")
     assert stage_pbs_exporters(run_dir, source) == staged
     assert not (staged / "newer.py").exists()
+
+
+def test_wrapper_operations_bind_the_compatibility_facade_at_invocation() -> None:
+    """The thin entrypoint must still observe wrapper-level test patch points."""
+    with mock.patch("client.wrapper.run_script") as run_script:
+        operations = wrapper_operations()
+
+    assert operations.run_script is run_script
 
 
 def test_stage_pbs_exporters_rejects_partial_existing_snapshot(

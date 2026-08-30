@@ -80,6 +80,7 @@ from client.cli_validation import (
     positive_int,
     run_timezone,
 )
+from client.cli_entrypoint import WrapperOperations, run_main
 from client.kubernetes import (
     S3_JOB_START_TIMEOUT_SECONDS,
     apply_s3_emulation_resources,
@@ -1702,325 +1703,53 @@ def run_full_run_s3(args: argparse.Namespace) -> None:
     run_s3_full_run(args, operations)
 
 
+def wrapper_operations() -> WrapperOperations:
+    """Bind the executable entrypoint to wrapper's compatibility patch points."""
+    return WrapperOperations(
+        {
+            "install_termination_handlers": install_termination_handlers,
+            "build_parser": build_parser,
+            "normalize_argv": normalize_argv,
+            "validate_artifact_arguments": validate_artifact_arguments,
+            "default_driver": DEFAULT_DRIVER,
+            "default_coinjoin_type": DEFAULT_COINJOIN_TYPE,
+            "container_runtime_env": CONTAINER_RUNTIME_ENV,
+            "compose_env": compose_env,
+            "compose_env_from_args": compose_env_from_args,
+            "command_lock_path": command_lock_path,
+            "acquire_lock": acquire_lock,
+            "truthy_env": truthy_env,
+            "run_dirs": run_dirs,
+            "detect_active_run": detect_active_run,
+            "pipeline_run_id_env": pipeline_run_id_env,
+            "captured_pipeline_stage": captured_pipeline_stage,
+            "run_script": run_script,
+            "emulate_script": EMULATE_SCRIPT,
+            "analysis_script": ANALYSIS_SCRIPT,
+            "delete_script": DELETE_SCRIPT,
+            "s3_access_from_args": s3_access_from_args,
+            "stage_kubernetes_s3_run": stage_kubernetes_s3_run,
+            "run_kubernetes_s3_emulation": run_kubernetes_s3_emulation,
+            "run_kubernetes_emulation": run_kubernetes_emulation,
+            "run_pbs_from_s3": run_pbs_from_s3,
+            "run_mappings_pbs_stage": run_mappings_pbs_stage,
+            "run_blocksci_pbs_stage": run_blocksci_pbs_stage,
+            "stage_blocksci_script": stage_blocksci_script,
+            "resolve_run_id": resolve_run_id,
+            "run_export_only": run_export_only,
+            "run_coinjoin_analysis_pbs_stage": run_coinjoin_analysis_pbs_stage,
+            "run_coinjoin_analysis": run_coinjoin_analysis,
+            "initialize_images": initialize_images,
+            "run_full_run_s3": run_full_run_s3,
+            "run_parallel_analysis": run_parallel_analysis,
+            "run_serial_analysis": run_serial_analysis,
+        }
+    )
+
+
 def main() -> None:
-    install_termination_handlers()
-    parser = build_parser()
-
-    normalized_argv = normalize_argv(sys.argv[1:])
-    from coinjoin_pipeline.commands import action_from, validate_passthrough
-
-    args = parser.parse_args(normalized_argv)
-    public_errors = validate_passthrough(normalized_argv, action_from(normalized_argv))
-    if public_errors:
-        parser.error("; ".join(public_errors))
-    validate_artifact_arguments(parser, args)
-    if getattr(args, "blocksci_script", None):
-        script_path = Path(args.blocksci_script).expanduser().resolve()
-        if not script_path.is_file():
-            parser.error(f"BlockSci script does not exist or is not a file: {script_path}")
-        args.blocksci_script = str(script_path)
-    if args.action == "clean" and not args.dry_run and not args.yes:
-        parser.error("clean is destructive; pass --yes or use --dry-run")
-    direct_kubernetes_pbs = (
-        args.action == "full-run"
-        and getattr(args, "driver", DEFAULT_DRIVER) == "kubernetes"
-        and getattr(args, "blocksciPbs", False)
-        and not getattr(args, "copy_to_host", False)
-    )
-    if direct_kubernetes_pbs:
-        kubernetes_datadir = getattr(args, "kubernetes_btc_datadir", None)
-        pbs_datadir = getattr(args, "pbs_bitcoin_datadir", None)
-        if (
-            kubernetes_datadir
-            and pbs_datadir
-            and Path(kubernetes_datadir).expanduser().resolve() != Path(pbs_datadir).expanduser().resolve()
-        ):
-            parser.error(
-                "direct Kubernetes storage requires --kubernetes-btc-datadir and "
-                "--pbs-bitcoin-datadir to identify the same directory"
-            )
-    if getattr(args, "engine", None) == "joinmarket" and hasattr(args, "coinjoin_type"):
-        if args.coinjoin_type == DEFAULT_COINJOIN_TYPE:
-            args.coinjoin_type = "joinmarket"
-    if getattr(args, "mappingsPbs", False) and getattr(args, "engine", None) != "wasabi":
-        parser.error("--mappingsPbs is supported only with --engine wasabi")
-    if getattr(args, "mappingsPbs", False) and args.action not in (
-        "full-run",
-        "mappings",
-        "pbs-from-s3",
-    ):
-        parser.error(
-            "--mappingsPbs is supported only by full-run, mappings, and pbs-from-s3"
-        )
-    if getattr(args, "mappingsPbs", False) and getattr(args, "coinjoin_type", None) != "wasabi2":
-        parser.error("--mappingsPbs requires --coinjoin-type wasabi2")
-    if args.action == "mappings" and not getattr(args, "mappingsPbs", False):
-        parser.error("mappings requires --mappingsPbs")
-    os.environ[CONTAINER_RUNTIME_ENV] = args.runtime
-
-    use_pbs_dry_run = (
-        (args.action == "analyze" and getattr(args, "blocksciPbs", False))
-        or (args.action in ("coinjoin-analysis", "coinjoin") and getattr(args, "analysisPbs", False))
-        or (args.action == "mappings" and getattr(args, "mappingsPbs", False))
-        or args.action == "pbs-from-s3"
-        or (
-            args.action in ("emulate", "full-run")
-            and getattr(args, "artifact_backend", "shared-storage") == "s3"
-        )
-    )
-    if args.dry_run:
-        print(f"[dry-run] action: {args.action}")
-        print(f"[dry-run] runtime: {args.runtime}")
-        if hasattr(args, "engine"):
-            print(f"[dry-run] engine: {args.engine}")
-        if use_pbs_dry_run:
-            if args.action == "emulate":
-                print("[dry-run] Kubernetes resources will be rendered but not applied with kubectl.")
-            elif args.action == "full-run":
-                print("[dry-run] Kubernetes resources and PBS job scripts will be rendered but not submitted.")
-            else:
-                print("[dry-run] PBS job script will be rendered but not submitted with qsub.")
-        else:
-            print("[dry-run] No containers, files, reports, or Kubernetes resources will be created.")
-            return
-
-    logs_root = Path(compose_env().get("EMULATION_LOGS_DIR", ".")).expanduser().resolve()
-    lock_path = command_lock_path(args, logs_root)
-    # A dry-run of the decomposed S3 submission must remain side-effect free.
-    if not (args.action == "pbs-from-s3" and args.dry_run):
-        try:
-            _lock = acquire_lock(lock_path)
-        except RuntimeError as error:
-            print(f"[ERROR] {error}", file=sys.stderr)
-            sys.exit(2)
-    # run_pbs_from_s3() acquires the per-run .pbs-submit.lock and runs the
-    # active-graph check under it, for both this action and full-run.
-    if args.action == "pbs-from-s3" and not args.dry_run:
-        args.pbs_submission_dir = lock_path.parent
-    elif (
-        args.action == "full-run"
-        and getattr(args, "artifact_backend", "shared-storage") == "s3"
-        and not args.dry_run
-    ):
-        args.pbs_submission_dir = logs_root / args.run_id
-
-    coinjoin_infrastructure_local_build = getattr(
-        args,
-        "coinjoin_infrastructure_local_build",
-        False,
-    ) or truthy_env("COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD")
-
-    if coinjoin_infrastructure_local_build:
-        os.environ["COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD"] = "1"
-    # Helper to detect if the user requested Kubernetes mode
-    use_kubernetes = getattr(args, "driver", DEFAULT_DRIVER) == "kubernetes"
-
-    if args.action == "pbs-from-s3":
-        try:
-            run_pbs_from_s3(args)
-        except (ArtifactTransportError, OSError, PBSError, RuntimeError) as error:
-            print(f"[ERROR] {error}", file=sys.stderr)
-            sys.exit(2)
-    elif args.action == "emulate":
-        logs_root = Path(compose_env().get("EMULATION_LOGS_DIR", ".")).expanduser().resolve()
-        if use_kubernetes and getattr(args, "artifact_backend", "shared-storage") == "s3":
-            try:
-                if not args.dry_run:
-                    # Same staging path as full-run; standalone emulate used to
-                    # skip every preflight and never staged the exporters.
-                    stage_kubernetes_s3_run(args, s3_access_from_args(args))
-                run_kubernetes_s3_emulation(args)
-            except (ArtifactTransportError, RuntimeError) as error:
-                print(f"[ERROR] {error}", file=sys.stderr)
-                sys.exit(2)
-        elif use_kubernetes:
-            before = run_dirs(logs_root)
-            with captured_pipeline_stage(logs_root, "Kubernetes emulation") as stage_log:
-                run_kubernetes_emulation(
-                    scenario=args.scenario,
-                    engine=args.engine,
-                    namespace=args.namespace,
-                    reuse_namespace=args.reuse_namespace,
-                    image_prefix=args.image_prefix,
-                    kubeconfig=args.kubeconfig,
-                    coinjoin_infrastructure_local_build=coinjoin_infrastructure_local_build,
-                    run_timezone_name=args.run_timezone,
-                    kubernetes_btc_datadir=args.kubernetes_btc_datadir,
-                    copy_to_host=args.copy_to_host,
-                )
-            active_run = detect_active_run(logs_root, before)
-            if active_run is not None:
-                stage_log.relocate_to_run(active_run)
-            else:
-                stage_log.relocate(logs_root / "_failed")
-                if pipeline_run_id_env():
-                    print("[ERROR] Emulator did not produce the expected run directory.", file=sys.stderr)
-                    sys.exit(2)
-        else:
-            with captured_pipeline_stage(logs_root, "Docker emulation") as stage_log:
-                env = compose_env(engine=args.engine)
-                emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
-                before = run_dirs(emulation_logs_dir)
-                run_script(
-                    EMULATE_SCRIPT,
-                    *(["--scenario", args.scenario] if args.scenario else []),
-                    engine=args.engine,
-                    run_timezone_name=args.run_timezone,
-                )
-                latest = detect_active_run(emulation_logs_dir, before)
-                if latest:
-                    print(f"Active run: {latest.name}")
-                    stage_log.relocate_to_run(latest)
-                else:
-                    stage_log.relocate(logs_root / "_failed")
-                    if pipeline_run_id_env():
-                        print("[ERROR] Emulator did not produce the expected run directory.", file=sys.stderr)
-                        sys.exit(2)
-    elif args.action == "clean":
-        with captured_pipeline_stage(logs_root, "Clean containers and volumes", logs_root / "_maintenance"):
-            run_script(DELETE_SCRIPT)
-    elif args.action == "mappings":
-        env = compose_env(engine=args.engine)
-        run_dir = Path(args.run_dir).expanduser()
-        if not run_dir.is_absolute():
-            run_dir = Path(env["EMULATION_LOGS_DIR"]) / run_dir
-        try:
-            with captured_pipeline_stage(logs_root, "CoinJoin mappings (PBS)", run_dir.resolve()):
-                run_mappings_pbs_stage(args, run_dir.resolve())
-        except PBSError as error:
-            print(f"[ERROR] {error}", file=sys.stderr)
-            sys.exit(2)
-    elif args.action == "analyze":
-        env = compose_env_from_args(args, include_scenario=False)
-        active_run_id = resolve_run_id(args.run_dir, env)
-        if not active_run_id:
-            print("[ERROR] No grouped emulation run folder found.", file=sys.stderr)
-            sys.exit(2)
-        run_dir = (Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve() / active_run_id).resolve()
-        if getattr(args, "blocksciPbs", False):
-            try:
-                with captured_pipeline_stage(logs_root, "BlockSci analysis (PBS)", run_dir):
-                    run_blocksci_pbs_stage(args, run_dir)
-            except PBSError as error:
-                print(f"[ERROR] {error}", file=sys.stderr)
-                sys.exit(2)
-        else:
-            try:
-                staged_script = stage_blocksci_script(args.blocksci_script, run_dir)
-            except ValueError as error:
-                parser.error(str(error))
-            with captured_pipeline_stage(logs_root, "BlockSci analysis", logs_root / active_run_id):
-                run_script(
-                    ANALYSIS_SCRIPT,
-                    active_run_id=active_run_id,
-                    engine=args.engine,
-                    coinjoin_type=args.coinjoin_type,
-                    min_input_count=args.min_input_count,
-                    scenario=args.scenario,
-                    joinmarket_detector=args.joinmarket_detector,
-                    joinmarket_min_base_fee=args.joinmarket_min_base_fee,
-                    joinmarket_percentage_fee=args.joinmarket_percentage_fee,
-                    joinmarket_max_depth=args.joinmarket_max_depth,
-                    blocksci_script=staged_script,
-                )
-    elif args.action == "export":
-        active_run_id = resolve_run_id(args.run_dir, compose_env())
-        if not active_run_id:
-            print("[ERROR] No grouped emulation run folder found.", file=sys.stderr)
-            sys.exit(2)
-        with captured_pipeline_stage(logs_root, "Unified report export", logs_root / active_run_id):
-            run_export_only(args)
-    elif args.action in ("coinjoin-analysis", "coinjoin"):
-        if getattr(args, "analysisPbs", False):
-            env = compose_env()
-            active_run_id = resolve_run_id(args.run_dir, env)
-            if not active_run_id:
-                print("[ERROR] No grouped emulation run folder found.", file=sys.stderr)
-                sys.exit(2)
-            run_dir = (Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve() / active_run_id).resolve()
-            try:
-                with captured_pipeline_stage(logs_root, "coinjoin-analysis (PBS)", run_dir):
-                    run_coinjoin_analysis_pbs_stage(args, run_dir)
-            except PBSError as error:
-                print(f"[ERROR] {error}", file=sys.stderr)
-                sys.exit(2)
-        else:
-            run_coinjoin_analysis(args.run_dir, args.all_runs, args.analysis_action)
-    elif args.action == "initialize":
-        with captured_pipeline_stage(logs_root, "Initialize container images", logs_root / "_maintenance"):
-            initialize_images()
-    elif args.action == "full-run":
-        env = compose_env_from_args(args)
-        emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
-        if getattr(args, "artifact_backend", "shared-storage") == "s3":
-            # S3 full-run: k8s emulation → S3 markers → PBS analysis chain, all in the bucket
-            try:
-                run_full_run_s3(args)
-            except (PBSError, RuntimeError) as error:
-                print(f"[ERROR] {error}", file=sys.stderr)
-                sys.exit(2)
-        elif use_kubernetes:
-            # Kubernetes full-run: clean → k8s emulation → local analysis
-            with captured_pipeline_stage(logs_root, "Clean containers and volumes", logs_root / "_maintenance"):
-                run_script(DELETE_SCRIPT)
-            before = run_dirs(emulation_logs_dir)
-            with captured_pipeline_stage(logs_root, "Kubernetes emulation") as emulation_log:
-                run_kubernetes_emulation(
-                    scenario=args.scenario,
-                    engine=args.engine,
-                    namespace=args.namespace,
-                    reuse_namespace=args.reuse_namespace,
-                    image_prefix=args.image_prefix,
-                    kubeconfig=args.kubeconfig,
-                    coinjoin_infrastructure_local_build=coinjoin_infrastructure_local_build,
-                    run_timezone_name=args.run_timezone,
-                    kubernetes_btc_datadir=(args.kubernetes_btc_datadir or args.pbs_bitcoin_datadir),
-                    copy_to_host=args.copy_to_host,
-                    prepare_local_analysis=not getattr(args, "blocksciPbs", False),
-                )
-            active_run = detect_active_run(emulation_logs_dir, before)
-            if active_run is None:
-                emulation_log.relocate(logs_root / "_failed")
-                print("[ERROR] Emulator completed without creating a run directory.", file=sys.stderr)
-                sys.exit(2)
-            active_run_id = active_run.name
-            print(f"Active run: {active_run_id}")
-            emulation_log.relocate_to_run(active_run)
-            try:
-                if args.parallel:
-                    run_parallel_analysis(args, active_run, logs_root)
-                else:
-                    run_serial_analysis(args, active_run, logs_root)
-            except (PBSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
-                print(f"[ERROR] {error}", file=sys.stderr)
-                sys.exit(2)
-        else:
-            with captured_pipeline_stage(logs_root, "Clean containers and volumes", logs_root / "_maintenance"):
-                run_script(DELETE_SCRIPT)
-            before = run_dirs(emulation_logs_dir)
-            with captured_pipeline_stage(logs_root, "Docker emulation") as emulation_log:
-                run_script(
-                    EMULATE_SCRIPT,
-                    *(["--scenario", args.scenario] if args.scenario else []),
-                    engine=args.engine,
-                    run_timezone_name=args.run_timezone,
-                )
-            active_run = detect_active_run(emulation_logs_dir, before)
-            if active_run is None:
-                emulation_log.relocate(logs_root / "_failed")
-                print("[ERROR] Emulator completed without creating a run directory.", file=sys.stderr)
-                sys.exit(2)
-            active_run_id = active_run.name
-            print(f"Active run: {active_run_id}")
-            emulation_log.relocate_to_run(active_run)
-            try:
-                if args.parallel:
-                    run_parallel_analysis(args, active_run, logs_root)
-                else:
-                    run_serial_analysis(args, active_run, logs_root)
-            except (PBSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
-                print(f"[ERROR] {error}", file=sys.stderr)
-                sys.exit(2)
+    """Keep the executable wrapper to parser, operation binding, and dispatch."""
+    run_main(wrapper_operations())
 
 
 if __name__ == "__main__":
