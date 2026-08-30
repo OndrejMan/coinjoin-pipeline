@@ -16,6 +16,7 @@ from client.pbs import (
     DEFAULT_COINJOIN_ANALYSIS_NCPUS,
     DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
     DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+    DEFAULT_UNIFIED_REPORT_WALLTIME,
     walltime_to_seconds,
 )
 
@@ -150,6 +151,22 @@ def stage_pbs_resources(args: argparse.Namespace, stage: str) -> PBSResources:
         "scratch": resolve_stage_pbs_resource(args, stage, "scratch", scratch),
         "walltime": resolve_stage_pbs_resource(args, stage, "walltime", walltime),
     }
+
+
+def stage_pbs_walltime(args: argparse.Namespace, group: str) -> str:
+    """Resolve the walltime of one planned stage from its resource group.
+
+    The unified report has its own override namespace; every other group
+    resolves through the shared stage/PBS fallback chain.
+    """
+    if group == "report":
+        return cast(
+            str,
+            resolve_unified_report_pbs_resource(
+                args, "walltime", DEFAULT_UNIFIED_REPORT_WALLTIME
+            ),
+        )
+    return cast(str, stage_pbs_resources(args, group)["walltime"])
 
 
 def pbs_wait_timeout(walltime: str) -> int:

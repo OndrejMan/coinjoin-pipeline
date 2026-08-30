@@ -313,6 +313,7 @@ from client.stage_executor import (
     execute_parallel_analysis,
     execute_serial_analysis,
 )
+from client.stages import StageKind
 from client.workflow import (
     SharedStorageOperations,
     SharedStorageStageRunner,
@@ -1483,7 +1484,8 @@ def run_parallel_analysis(args: argparse.Namespace, run_dir: Path, logs_root: Pa
         execute_parallel_analysis(plan, runner)
 
     with captured_pipeline_stage(logs_root, "Unified report export", run_dir):
-        if plan.report is not None and plan.report.runner == "pbs":
+        report = plan.of_kind(StageKind.REPORT)
+        if report is not None and report.runner == "pbs":
             run_blocksci_export_pbs_stage(args, run_dir)
         else:
             args.run_dir = str(run_dir)
@@ -1584,48 +1586,26 @@ def _run_pbs_from_s3(
 
 
 def s3_stage_submission_operations() -> S3StageSubmissionOperations:
-    """Bind the S3 PBS DAG to historical wrapper patch points."""
+    """Bind the S3 PBS DAG to the historical wrapper patch points.
+
+    Only the graph's side effects are bound here; command construction, image
+    and resource resolution are imported by the graph itself.
+    """
     return S3StageSubmissionOperations(
-        make_access=s3_access_from_target,
         tracker_operations=S3SubmissionOperations(
             clear_stage_markers=clear_s3_stage_markers,
-            persist_job_id=persist_pbs_job_id,
         ),
-        stage_resources=stage_pbs_resources,
         s3_preflight=s3_access_preflight,
         object_exists=s3_object_exists,
         ensure_empty_prefix=ensure_empty_run_prefix,
-        stages_need_exporters=pbs_stages_need_exporters,
         ensure_exporters=ensure_staged_exporters,
-        resolve_image=resolve_pbs_image,
-        analysis_command=coinjoin_analysis_pbs_command,
         submit_analysis=submit_coinjoin_analysis_s3_pbs,
         submit_mappings=submit_mappings_s3_pbs,
-        update_command=blocksci_update_pbs_command,
         submit_update=submit_blocksci_update_s3_pbs,
-        blocksci_command=blocksci_pbs_command,
         submit_blocksci=submit_blocksci_s3_pbs,
-        parse_command=blocksci_parse_pbs_command,
         submit_parse=submit_blocksci_parse_s3_pbs,
-        blocksci_analysis_command=blocksci_analysis_pbs_command,
-        blocksci_external_command=blocksci_external_report_pbs_command,
-        blocksci_script_command=blocksci_script_pbs_command,
-        blocksci_notebook_command=blocksci_notebook_pbs_command,
         submit_blocksci_work=submit_blocksci_analyze_s3_pbs,
-        resolve_report_image=resolve_unified_report_pbs_image,
-        report_command=blocksci_export_pbs_command,
-        report_resource=resolve_unified_report_pbs_resource,
-        resolve_uploader_image=resolve_uploader_image,
-        unified_report_image_reference=unified_report_image_reference,
         submit_report=submit_unified_report_s3_pbs,
-        default_analysis_image=DEFAULT_PBS_COINJOIN_ANALYSIS_IMAGE,
-        default_blocksci_image=DEFAULT_PBS_BLOCKSCI_IMAGE,
-        default_mappings_enumerator_image=DEFAULT_MAPPINGS_ENUMERATOR_IMAGE,
-        default_sake_image=DEFAULT_SAKE_IMAGE,
-        default_report_ncpus=DEFAULT_UNIFIED_REPORT_NCPUS,
-        default_report_mem=DEFAULT_UNIFIED_REPORT_MEM,
-        default_report_scratch=DEFAULT_UNIFIED_REPORT_SCRATCH,
-        default_report_walltime=DEFAULT_UNIFIED_REPORT_WALLTIME,
     )
 
 
@@ -1717,12 +1697,6 @@ def run_full_run_s3(args: argparse.Namespace) -> None:
         submit_pbs=run_pbs_from_s3,
         wait_for_pbs_stage=wait_for_s3_pbs_stage,
         cancel_dependent_pbs_job=cancel_dependent_pbs_job,
-        analysis_walltime=lambda values: stage_pbs_resources(values, "analysis")["walltime"],
-        mappings_walltime=lambda values: stage_pbs_resources(values, "mappings")["walltime"],
-        blocksci_walltime=lambda values: stage_pbs_resources(values, "blocksci")["walltime"],
-        report_walltime=lambda values: resolve_unified_report_pbs_resource(
-            values, "walltime", DEFAULT_UNIFIED_REPORT_WALLTIME
-        ),
         emulation_start_timeout=S3_JOB_START_TIMEOUT_SECONDS,
     )
     run_s3_full_run(args, operations)

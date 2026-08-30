@@ -491,6 +491,34 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
 
         mocks["qdel_pbs_job"].assert_called_once_with("report.job")
 
+    def test_full_run_s3_parse_failure_cancels_the_whole_blocksci_branch(self):
+        # A reusable workflow inserts blocksci-parse before the analyzer, so a
+        # failed cache invalidates both the analyzer and the report that joins
+        # it, while the independent baseline keeps running.
+        patches = self._patches()
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        self.addCleanup(mock.patch.stopall)
+        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
+            coinjoin_analysis="analysis.job",
+            blocksci_parse="parse.job",
+            blocksci_work="analyze.job",
+            unified_report="report.job",
+        )
+
+        def wait(stage, *arguments, **keywords):
+            if stage == "blocksci-parse":
+                raise ArtifactTransportError("parse failed")
+
+        mocks["wait_for_s3_marker"].side_effect = wait
+
+        with self.assertRaises(ArtifactTransportError):
+            run_full_run_s3(_full_run_s3_args(blocksci_workflow="reusable"))
+
+        self.assertEqual(
+            mocks["qdel_pbs_job"].call_args_list,
+            [mock.call("analyze.job"), mock.call("report.job")],
+        )
+
     def test_full_run_s3_mappings_failure_cancels_dependent_report_job(self):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}

@@ -41,6 +41,25 @@ class SharedStoragePBSOperations:
     wait_for_marker: Callable[..., None]
 
 
+def _wait_for_stage(
+    operations: SharedStoragePBSOperations,
+    args: argparse.Namespace,
+    run_dir: Path,
+    stage: str,
+    walltime: str,
+    *,
+    wait: bool,
+) -> None:
+    """Block on a stage marker unless the caller submits without joining.
+
+    A dry run submits nothing, so there is never a marker to wait for.
+    """
+    if wait and not args.dry_run:
+        operations.wait_for_marker(
+            run_dir, stage, timeout_seconds=pbs_wait_timeout(walltime)
+        )
+
+
 def run_blocksci_stage(
     args: argparse.Namespace,
     run_dir: Path,
@@ -83,10 +102,9 @@ def run_blocksci_stage(
         **resources,
         dry_run=args.dry_run,
     )
-    if wait and not args.dry_run:
-        operations.wait_for_marker(
-            run_dir, "blocksci", timeout_seconds=pbs_wait_timeout(resources["walltime"])
-        )
+    _wait_for_stage(
+        operations, args, run_dir, "blocksci", resources["walltime"], wait=wait
+    )
 
 
 def run_coinjoin_analysis_stage(
@@ -113,12 +131,9 @@ def run_coinjoin_analysis_stage(
         **resources,
         dry_run=args.dry_run,
     )
-    if wait and not args.dry_run:
-        operations.wait_for_marker(
-            run_dir,
-            "coinjoin-analysis",
-            timeout_seconds=pbs_wait_timeout(resources["walltime"]),
-        )
+    _wait_for_stage(
+        operations, args, run_dir, "coinjoin-analysis", resources["walltime"], wait=wait
+    )
 
 
 def run_mappings_stage(
@@ -146,12 +161,9 @@ def run_mappings_stage(
         **resources,
         dry_run=args.dry_run,
     )
-    if wait and not args.dry_run:
-        operations.wait_for_marker(
-            run_dir,
-            "coinjoin-mappings",
-            timeout_seconds=pbs_wait_timeout(resources["walltime"]),
-        )
+    _wait_for_stage(
+        operations, args, run_dir, "coinjoin-mappings", resources["walltime"], wait=wait
+    )
 
 
 def run_blocksci_export_stage(
@@ -192,7 +204,6 @@ def run_blocksci_export_stage(
         stage="unified-report",
         job_name="blocksci_unified_report",
     )
-    if wait and not args.dry_run:
-        operations.wait_for_marker(
-            run_dir, "unified-report", timeout_seconds=pbs_wait_timeout(walltime)
-        )
+    _wait_for_stage(
+        operations, args, run_dir, "unified-report", walltime, wait=wait
+    )

@@ -13,7 +13,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from client.stage_executor import StageSubmission
-from client.stages import AnalysisPlan, StagePlan, analysis_plan
+from client.stages import (
+    StageGraph,
+    StageKind,
+    StagePlan,
+    analysis_plan,
+    resource_group,
+)
 
 
 @dataclass(frozen=True)
@@ -38,7 +44,7 @@ def shared_storage_analysis_plan(
     args: argparse.Namespace,
     *,
     parallel: bool,
-) -> AnalysisPlan:
+) -> StageGraph:
     """Select shared-storage runners and dependencies from execution flags."""
     return analysis_plan(
         analysis_pbs=getattr(args, "analysisPbs", False),
@@ -65,20 +71,24 @@ class SharedStorageStageRunner:
         self.operations = operations
 
     def submit(self, stage: StagePlan) -> StageSubmission:
-        if stage.name == "coinjoin-analysis":
-            return self._submit_baseline(stage)
-        if stage.name == "coinjoin-mappings":
-            return self._submit_mappings(stage)
-        if stage.name == "blocksci":
-            return self._submit_blocksci(stage)
-        raise ValueError(f"Unsupported shared-storage stage: {stage.name}")
+        submit = {
+            StageKind.BASELINE: self._submit_baseline,
+            StageKind.MAPPINGS: self._submit_mappings,
+            StageKind.BLOCKSCI_WORK: self._submit_blocksci,
+        }.get(stage.kind)
+        if submit is None:
+            raise ValueError(f"Unsupported shared-storage stage: {stage.name}")
+        return submit(stage)
 
     def _pbs_submission(
         self,
         stage: StagePlan,
         submit: Callable[[], None],
-        timeout_seconds: int,
     ) -> StageSubmission:
+        """Submit one stage to PBS and wait for it within its own budget."""
+        timeout_seconds = self.operations.stage_wait_timeout(
+            self.args, resource_group(stage.kind)
+        )
         submit()
         return StageSubmission(
             stage,
@@ -106,14 +116,12 @@ class SharedStorageStageRunner:
             lambda: self.operations.run_coinjoin_analysis_pbs(
                 self.args, self.run_dir, wait=False
             ),
-            self.operations.stage_wait_timeout(self.args, "analysis"),
         )
 
     def _submit_mappings(self, stage: StagePlan) -> StageSubmission:
         return self._pbs_submission(
             stage,
             lambda: self.operations.run_mappings_pbs(self.args, self.run_dir, wait=False),
-            self.operations.stage_wait_timeout(self.args, "mappings"),
         )
 
     def _submit_blocksci(self, stage: StagePlan) -> StageSubmission:
@@ -136,7 +144,6 @@ class SharedStorageStageRunner:
                 wait=False,
                 include_report=stage.produces_report,
             ),
-            self.operations.stage_wait_timeout(self.args, "blocksci"),
         )
 
     def _run_legacy_local_analysis(self) -> None:

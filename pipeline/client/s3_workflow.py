@@ -1,22 +1,30 @@
 """High-level Kubernetes-to-S3-to-PBS full-run orchestration.
 
 The module owns only ordering, marker waiting, and the deliberately asymmetric
-cancellation policy.  The wrapper injects concrete Kubernetes, PBS, and S3
-operations so it remains the executable compatibility facade while the lower
-level S3 submission code is extracted in later steps.
+cancellation policy — and it derives all three from the declared stage graph
+rather than from a second, hand-maintained copy of the pipeline.  The wrapper
+injects concrete Kubernetes, PBS, and S3 operations so it remains the
+executable compatibility facade.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from client.artifacts import ArtifactTransportError, S3Access
 from client.pbs import PBSError
-from client.stages import s3_full_run_plan
+from client.pbs_settings import stage_pbs_walltime
+from client.stages import (
+    StageGraph,
+    StageKind,
+    StagePlan,
+    resource_group,
+    s3_full_run_plan,
+)
 
 
 @dataclass(frozen=True)
@@ -29,6 +37,39 @@ class S3PBSJobs:
     blocksci_update: str | None = None
     blocksci_work: str | None = None
     unified_report: str | None = None
+
+    @classmethod
+    def from_plan(
+        cls, plan: StageGraph, jobs: Mapping[str, str]
+    ) -> "S3PBSJobs":
+        """Collect the jobs submitted for one planned graph, keyed by kind."""
+        by_kind = {
+            stage.kind: jobs[stage.name] for stage in plan if stage.name in jobs
+        }
+        return cls(
+            coinjoin_analysis=by_kind.get(StageKind.BASELINE),
+            coinjoin_mappings=by_kind.get(StageKind.MAPPINGS),
+            blocksci_parse=by_kind.get(StageKind.BLOCKSCI_PARSE),
+            blocksci_update=by_kind.get(StageKind.BLOCKSCI_UPDATE),
+            blocksci_work=by_kind.get(StageKind.BLOCKSCI_WORK),
+            unified_report=by_kind.get(StageKind.REPORT),
+        )
+
+    def job_for(self, stage: StagePlan) -> str | None:
+        """Return the job submitted for ``stage``, or ``None`` when skipped.
+
+        Lookup is by stage kind rather than by stage name: one BlockSci work
+        job carries the name of whichever task produced it (``blocksci``,
+        ``blocksci-analyze``, ``blocksci-script``, …).
+        """
+        return {
+            StageKind.BASELINE: self.coinjoin_analysis,
+            StageKind.MAPPINGS: self.coinjoin_mappings,
+            StageKind.BLOCKSCI_PARSE: self.blocksci_parse,
+            StageKind.BLOCKSCI_UPDATE: self.blocksci_update,
+            StageKind.BLOCKSCI_WORK: self.blocksci_work,
+            StageKind.REPORT: self.unified_report,
+        }.get(stage.kind)
 
 
 @dataclass(frozen=True)
@@ -47,44 +88,58 @@ class S3FullRunOperations:
     submit_pbs: Callable[[argparse.Namespace], S3PBSJobs]
     wait_for_pbs_stage: Callable[..., None]
     cancel_dependent_pbs_job: Callable[[str, str], bool]
-    analysis_walltime: Callable[[argparse.Namespace], str]
-    mappings_walltime: Callable[[argparse.Namespace], str]
-    blocksci_walltime: Callable[[argparse.Namespace], str]
-    report_walltime: Callable[[argparse.Namespace], str]
     emulation_start_timeout: int
+
+
+def s3_full_run_plan_from_args(args: argparse.Namespace) -> StageGraph:
+    """Build the stage graph this invocation submits, waits for, and cancels."""
+    return s3_full_run_plan(
+        analysis_pbs=getattr(args, "analysisPbs", False),
+        blocksci_pbs=getattr(args, "blocksciPbs", False),
+        mappings_pbs=getattr(args, "mappingsPbs", False),
+        blocksci_workflow=getattr(args, "blocksci_workflow", "combined"),
+        blocksci_task=getattr(args, "blocksci_task", "detect"),
+    )
 
 
 def _wait_for_pbs_stage(
     *,
     operations: S3FullRunOperations,
-    stage: str,
+    plan: StageGraph,
+    stage: StagePlan,
     job_id: str,
+    pending: tuple[tuple[StagePlan, str], ...],
     run_prefix: str,
     access: S3Access,
     walltime: str,
-    dependent_jobs: tuple[tuple[str, str | None], ...] = (),
-    independent_job: str | None = None,
 ) -> None:
-    """Wait for a PBS marker and cancel only declared dependent jobs on failure."""
+    """Wait for a PBS marker and cancel only the stages the graph blocks.
+
+    A failure invalidates exactly the transitive dependents of the failed
+    stage.  Everything else still queued is deliberately left running: those
+    jobs publish artifacts of their own, so cancelling them would throw away
+    work the failure did not affect.
+    """
     try:
         operations.wait_for_pbs_stage(
-            stage=stage,
+            stage=stage.name,
             job_id=job_id,
             run_prefix=run_prefix,
             access=access,
             walltime=walltime,
         )
     except (ArtifactTransportError, PBSError):
-        for dependent_stage, dependent_job_id in dependent_jobs:
-            if dependent_job_id:
-                operations.cancel_dependent_pbs_job(dependent_stage, dependent_job_id)
-        if independent_job:
-            print(
-                f"[full-run] BlockSci work PBS job {independent_job} is left running; "
-                "its results still upload to the bucket "
-                f"(cancel with: qdel {independent_job})",
-                file=sys.stderr,
-            )
+        blocked = {dependent.name for dependent in plan.dependents_of(stage.name)}
+        for pending_stage, pending_job_id in pending:
+            if pending_stage.name in blocked:
+                operations.cancel_dependent_pbs_job(pending_stage.name, pending_job_id)
+            else:
+                print(
+                    f"[full-run] {pending_stage.name} PBS job {pending_job_id} is left "
+                    "running; its results still upload to the bucket "
+                    f"(cancel with: qdel {pending_job_id})",
+                    file=sys.stderr,
+                )
         raise
 
 
@@ -98,10 +153,7 @@ def run_s3_full_run(args: argparse.Namespace, operations: S3FullRunOperations) -
         else Path.home() / ".kube/config"
     )
     job_name = operations.kubernetes_job_name(args.run_id)
-    stage_plan = s3_full_run_plan(
-        mappings_pbs=getattr(args, "mappingsPbs", False),
-        blocksci_workflow=getattr(args, "blocksci_workflow", "combined"),
-    )
+    plan = s3_full_run_plan_from_args(args)
 
     if args.dry_run:
         operations.run_kubernetes_emulation(args)
@@ -110,7 +162,7 @@ def run_s3_full_run(args: argparse.Namespace, operations: S3FullRunOperations) -
             f"(timeout {args.emulation_timeout}s)"
         )
         operations.submit_pbs(args)
-        for stage in stage_plan[1:]:
+        for stage in plan.scheduled():
             print(f"[dry-run] Would wait for {run_prefix}/.pbs/{stage.name}.done")
         return
 
@@ -144,65 +196,21 @@ def run_s3_full_run(args: argparse.Namespace, operations: S3FullRunOperations) -
         raise
 
     jobs = operations.submit_pbs(args)
-    analysis_walltime = operations.analysis_walltime(args)
-    mappings_walltime = operations.mappings_walltime(args)
-    blocksci_walltime = operations.blocksci_walltime(args)
-    report_walltime = operations.report_walltime(args)
-    if jobs.coinjoin_analysis:
+    submitted: list[tuple[StagePlan, str]] = [
+        (stage, job_id)
+        for stage in plan.scheduled()
+        if (job_id := jobs.job_for(stage)) is not None
+    ]
+    for index, (stage, job_id) in enumerate(submitted):
         _wait_for_pbs_stage(
             operations=operations,
-            stage="coinjoin-analysis",
-            job_id=jobs.coinjoin_analysis,
+            plan=plan,
+            stage=stage,
+            job_id=job_id,
+            pending=tuple(submitted[index + 1 :]),
             run_prefix=run_prefix,
             access=access,
-            walltime=analysis_walltime,
-            dependent_jobs=(
-                ("coinjoin-mappings", jobs.coinjoin_mappings),
-                ("unified-report", jobs.unified_report),
-            ),
-            independent_job=jobs.blocksci_work,
-        )
-    if jobs.blocksci_parse:
-        _wait_for_pbs_stage(
-            operations=operations,
-            stage="blocksci-parse",
-            job_id=jobs.blocksci_parse,
-            run_prefix=run_prefix,
-            access=access,
-            walltime=blocksci_walltime,
-            dependent_jobs=(
-                ("BlockSci work", jobs.blocksci_work),
-                ("unified-report", jobs.unified_report),
-            ),
-        )
-    if jobs.blocksci_work:
-        blocksci_stage = "blocksci-analyze" if jobs.blocksci_parse else "blocksci"
-        _wait_for_pbs_stage(
-            operations=operations,
-            stage=blocksci_stage,
-            job_id=jobs.blocksci_work,
-            run_prefix=run_prefix,
-            access=access,
-            walltime=blocksci_walltime,
-            dependent_jobs=(("unified-report", jobs.unified_report),),
-        )
-    if jobs.coinjoin_mappings:
-        _wait_for_pbs_stage(
-            operations=operations,
-            stage="coinjoin-mappings",
-            job_id=jobs.coinjoin_mappings,
-            run_prefix=run_prefix,
-            access=access,
-            walltime=mappings_walltime,
-            dependent_jobs=(("unified-report", jobs.unified_report),),
-        )
-    if jobs.unified_report:
-        operations.wait_for_pbs_stage(
-            stage="unified-report",
-            job_id=jobs.unified_report,
-            run_prefix=run_prefix,
-            access=access,
-            walltime=report_walltime,
+            walltime=stage_pbs_walltime(args, resource_group(stage.kind)),
         )
     print(
         f"[full-run] Completed; results under {run_prefix}/ "

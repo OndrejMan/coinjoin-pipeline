@@ -28,25 +28,33 @@ validation plan.
 Work is in `/home/administrator/diplomka/coinjoin-pipeline` on `fullS3`.  Do
 not commit or push the changes from this handoff automatically.
 
-The tree contains pre-existing user work plus these refactor modules:
+The tree contains pre-existing user work plus these refactor modules
+(sizes as of the stage-graph pass, `wc -l`):
 
-- `pipeline/client/stages.py`
-- `pipeline/client/stage_executor.py`
-- `pipeline/client/artifact_validation.py`
-- `pipeline/client/locks.py`
-- `pipeline/client/run_context.py`
-- `pipeline/client/workflow.py`
-- `pipeline/client/pbs_settings.py`
-- `pipeline/client/s3_markers.py`
-- `pipeline/client/s3_emulation.py`
-- `pipeline/client/s3_staging.py`
-- `pipeline/client/s3_submission.py`
-- `pipeline/client/s3_workflow.py`
-- `pipeline/client/shared_storage_pbs.py`
-- focused tests under `tests/pipeline/`
+| module | lines | owns |
+| --- | --- | --- |
+| `client/stages.py` | 369 | `StageKind`, `StagePlan`, `StageGraph`, both plan builders |
+| `client/stage_executor.py` | 107 | backend-neutral serial/parallel graph traversal |
+| `client/workflow.py` | 166 | shared-storage plan + `SharedStorageStageRunner` |
+| `client/shared_storage_pbs.py` | 209 | concrete shared-storage PBS stage adapters |
+| `client/s3_workflow.py` | 220 | `S3PBSJobs`, full-run sequence, wait/cancel policy |
+| `client/s3_submission.py` | 424 | the concrete S3 qsub graph, tracker, lock/rollback |
+| `client/s3_markers.py` | 97 | marker waiting, dependent cancellation, rollback |
+| `client/s3_staging.py` | 81 | exporter staging and Kubernetes-to-S3 run staging |
+| `client/s3_emulation.py` | 72 | Kubernetes S3 emulation-job sequence |
+| `client/pbs_settings.py` | 174 | pure image/resource/walltime resolution |
+| `client/artifact_validation.py` | 218 | cross-option artifact argument validation |
+| `client/locks.py` | 105 | advisory locks, active-submission detection |
+| `client/run_context.py` | 92 | run-directory resolution and discovery |
+| `client/cli_*.py` | 768 | declaration-only CLI surface |
+| `client/pbs/` | 2,149 | defaults, validation, commands, templates, submission |
+| `client/wrapper.py` | 2,027 | executable entry, Compose environment, compatibility façade |
 
-At this point `wrapper.py` is about 2,674 lines, roughly 1,080 lines smaller
-than the tracked base, while preserving its public/patchable surface.
+`wrapper.py` is 2,027 lines: 1,272 fewer than the pre-refactor snapshot in
+`ab3b0e9` (3,299) and 26 fewer than the last commit `66fcfb3` (2,053), while
+preserving its public/patchable surface.  This pass moved coordination, not
+line count: the reduction it produced is in the number of places that encode
+the pipeline, not in `wc -l`.
 
 ### PBS package follow-up
 
@@ -72,13 +80,17 @@ template or scheduler behavior.
 
 ### Plans and generic execution
 
-`stages.py` owns immutable stage/analysis plans.  In particular the combined
-S3 `blocksci` stage now explicitly depends on `kubernetes-emulation`; this is
-covered by `test_s3_combined_plan_waits_for_the_emulation_upload`.
+`stages.py` owns the immutable stage graph and is the single declaration of
+the pipeline; see "Follow-up: one stage graph as the source of truth" below
+for what derives from it.  Both plan builders (`analysis_plan` for
+shared storage, `s3_full_run_plan` for Kubernetes -> S3 -> PBS) return a
+`StageGraph`.  The combined S3 `blocksci` stage explicitly depends on
+`kubernetes-emulation`; this is covered by
+`test_s3_combined_plan_waits_for_the_emulation_upload`.
 
-`stage_executor.py` owns serial/parallel plan traversal and records submitted
-stage job ids.  The wrapper supplies its existing submit/wait functions, so
-tests that patch wrapper names continue to work.
+`stage_executor.py` owns serial/parallel graph traversal and knows no stage by
+name.  The wrapper supplies its existing submit/wait functions, so tests that
+patch wrapper names continue to work.
 
 ### Shared-storage analysis orchestration
 
@@ -224,16 +236,11 @@ changes deliberately avoid those behavioural areas.
 
 ## Next implementation steps
 
-1. Treat the current behavior-preserving extraction pass as structurally
-   complete.  `compose_env` remains intentionally in the executable wrapper:
-   it is the single environment contract shared by every remaining
-   host/Compose action.  Splitting it would add a large callback bundle with
-   no clearer ownership.
-2. Retain the focused unit/type/lint checks and obtain the local PBS integration
-   result before any PBS-template or shell behaviour is touched.
-3. Once that integration gate is recorded, make a separate decision
-   document for retiring legacy/shared-storage paths.  Do not silently fold
-   that product change into this work.
+Superseded by "Resume here" at the end of this document, which reflects the
+stage-graph pass.  `compose_env` remains intentionally in the executable
+wrapper: it is the single environment contract shared by every remaining
+host/Compose action, and splitting it would add a large callback bundle with
+no clearer ownership.
 
 ## Closing audit (current pass)
 
@@ -286,3 +293,122 @@ Ruff: all checks passed
 Mypy: no issues found in 13 source files
 git diff --check: clean
 ```
+
+## Follow-up: one stage graph as the source of truth
+
+The earlier passes left the pipeline declared in one place and *executed* from
+three others: `stages.py` described the DAG (used only for `--dry-run`),
+`s3_submission.py` wired qsub dependencies by hand, and `s3_workflow.py`
+repeated the same edges again as wait order plus a hand-listed cancellation
+policy.  Those three could drift.  They are now one declaration.
+
+- `client.stages` owns `StageKind`, `StagePlan`, and `StageGraph`
+  (`get`, `of_kind`, `scheduled`, `dependents_of`, `dependency_ids`,
+  `dependency_id`).  `s3_full_run_plan()` takes the full flag matrix
+  (`--analysisPbs`, `--blocksciPbs`, `--mappingsPbs`, `--blocksci-workflow`,
+  `--blocksci-task`), so the graph describes exactly the stages an invocation
+  submits, in the order they are waited for.
+- `s3_workflow.run_s3_full_run` iterates `plan.scheduled()` instead of five
+  hand-written `if jobs.X:` blocks.  Cancellation is derived:
+  `plan.dependents_of(failed_stage)` is cancelled, everything else still
+  queued keeps running and is reported as such.  The established policy is
+  unchanged; it is now a consequence of the declared edges rather than a
+  parallel list.
+- `s3_submission.submit_s3_pbs_stages` derives every scheduler dependency from
+  the same graph (`dependency_id` for mappings and BlockSci work,
+  `dependency_ids` plus the expected-count check for the report), and returns
+  `S3PBSJobs.from_plan(...)`.  Stage submission goes through
+  `S3SubmissionTracker.submit()`, which clears stale markers, submits, and
+  records the job as one step.
+- `StageKind` replaces stringly-typed dispatch: `SharedStorageStageRunner`
+  and `S3PBSJobs.job_for` key on the kind, so a renamed marker cannot silently
+  miss a dispatch branch.  `RESOURCE_GROUPS`/`resource_group()` map a kind to
+  its PBS budget, and `pbs_settings.stage_pbs_walltime` resolves the wait
+  budget for both orchestrators.
+- `AnalysisPlan` is gone: `analysis_plan()` returns a `StageGraph` too, and
+  `stage_executor` schedules whatever the graph declares ready instead of
+  naming baseline/BlockSci/mappings.  The shared-storage parallel run keeps its
+  broader cancellation policy (a failure cancels every running sibling,
+  because its single report needs all analyzers), which is deliberately not
+  the S3 dependents-only policy.
+
+Injection was narrowed to real boundaries: `S3StageSubmissionOperations` went
+from 37 fields to 12 (bucket preflight/staging plus the `submit_*` calls).
+Command construction, image/resource resolution, defaults and
+`persist_pbs_job_id` are imported directly, and `S3FullRunOperations` lost its
+four walltime callables.  The wrapper patch surface used by the tests
+(`client.wrapper.submit_*`, marker and preflight helpers) is unchanged.
+
+One behaviour difference is intentional: a full run that submits
+`--blocksci-task update` now waits for the `blocksci-update` marker.  The
+previous wait chain had no branch for that job and reported "Completed" while
+it was still running.
+
+New regression cover: `StageGraph` queries and flag-driven plans
+(`tests/pipeline/test_stages.py`), reusable-workflow cancellation
+(`tests/pipeline/test_wrapper.py`), and the executor's dependency gating,
+refused submissions, sibling cancellation and "no cancel for finished work"
+(`tests/pipeline/test_stage_executor.py`).
+
+```text
+494 pipeline/unit tests passed
+Ruff: all checks passed
+```
+
+Still outstanding: `./tests/test-local-pbs-analysis.sh` (the local PBS
+integration gate) has not been run in this session, and mypy is not installed
+in the checkout's `.venv`.
+
+## Resume here (next session)
+
+Everything below reflects the state after the stage-graph pass.  Nothing is
+committed; `git status` should show modified files under `pipeline/client/`,
+`tests/pipeline/` and this document, on branch `fullS3`.
+
+### How to verify quickly
+
+The checkout's virtualenv has pytest and ruff (no mypy):
+
+```bash
+cd /home/administrator/diplomka/coinjoin-pipeline
+.venv/bin/python -m pytest tests/pipeline tests/unit -q   # 494 passed
+.venv/bin/ruff check pipeline tests                       # All checks passed
+```
+
+### Where the pipeline is declared
+
+`client/stages.py` is the only place that declares stages and edges.  Read
+`s3_full_run_plan()` and `analysis_plan()` first; `StageGraph.dependents_of`
+is the cancellation policy, `dependency_ids` is the qsub wiring, and
+`scheduled()` is the wait/dry-run order.
+
+### Work items, in the order they should be taken
+
+1. **Run the local PBS integration gate.**  `./tests/test-local-pbs-analysis.sh`
+   still has no recorded result in this refactor.  Do this before touching
+   PBS templates, resource semantics, or shell submission behaviour -- and
+   before item 2, which is the first change that would benefit from it.
+2. **Give `StagePlan` an operation (the remaining architectural debt).**
+   `s3_submission.submit_s3_pbs_stages()` is still a ~250-line `if` chain that
+   selects a command builder and a submit function per stage.  The graph
+   already knows which stages exist and how they depend on each other, so the
+   chain can become a per-kind operation the graph carries, leaving one
+   submission loop.  Do not start this without item 1: it is the first pass
+   whose failure mode is a wrong PBS script rather than a failing unit test.
+   Acceptance criterion: rendered PBS scripts stay byte-identical.
+3. **Only then consider retiring the wrapper façade.**  `client.wrapper.*` is
+   still the monkeypatch surface the test suite targets; removing the
+   re-exports is a test-migration project, not a refactor step.  Until then,
+   treat the façade as migration debt, not as architecture.
+
+### Rules that still hold
+
+- Never commit or push automatically; the user commits.
+- New modules must not import `client.wrapper`; they take operation bundles.
+- Inject only real side effects (bucket I/O, qsub, Compose/Kubernetes).  Pure
+  helpers -- command construction, image/resource resolution, defaults -- are
+  imported directly.  `S3StageSubmissionOperations` is the reference for the
+  size such a bundle should stay at (12 fields, all side effects).
+- Preserve marker/key layout, command strings, lock and rollback behaviour,
+  dry-run output and the two distinct cancellation policies (S3:
+  dependents-only; shared-storage parallel: every running sibling).
