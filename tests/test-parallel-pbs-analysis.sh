@@ -205,12 +205,39 @@ if [[ -n "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" ]]; then
   export_pbs_docker_archive "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" coinjoin-analysis --pbs-coinjoin-analysis-image
 fi
 
+# k3d can report a cluster as created while its embedded k3s API server is
+# still settling. Retry the readiness probe so a transient ServiceUnavailable
+# does not abort the JoinMarket parallel-PBS workflow before it starts.
+wait_for_kubernetes_nodes() {
+  local timeout_seconds="${K3D_NODE_READY_TIMEOUT:-240}"
+  local deadline=$((SECONDS + timeout_seconds))
+  local remaining
+
+  until (( SECONDS >= deadline )); do
+    if kubectl --kubeconfig "${HOST_KUBECONFIG}" get --raw='/readyz' >/dev/null 2>&1; then
+      remaining=$((deadline - SECONDS))
+      if kubectl --kubeconfig "${HOST_KUBECONFIG}" wait node --all \
+        --for=condition=Ready --timeout="${remaining}s"
+      then
+        return 0
+      fi
+    fi
+    sleep 2
+  done
+
+  echo "FAIL: Kubernetes API or all nodes did not become Ready within ${timeout_seconds}s" >&2
+  kubectl --kubeconfig "${HOST_KUBECONFIG}" get nodes -o wide >&2 || true
+  echo "===== k3s control-plane logs =====" >&2
+  docker logs --tail 200 "k3d-${CLUSTER_NAME}-server-0" >&2 || true
+  return 1
+}
+
 echo "Creating k3d cluster ${CLUSTER_NAME} with direct shared storage ${WORK_ROOT}..."
 k3d cluster create "${CLUSTER_NAME}" \
   --servers 1 --agents "${K3D_AGENTS:-2}" --wait --timeout "${K3D_WAIT_TIMEOUT:-240s}" \
   --volume "${WORK_ROOT}:${WORK_ROOT}@all"
 k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
-kubectl --kubeconfig "${HOST_KUBECONFIG}" wait node --all --for=condition=Ready --timeout=240s
+wait_for_kubernetes_nodes
 
 # Both the Kubernetes API and the NodePort listeners belong to the k3d node
 # containers, not to the host's default Docker bridge. k3d publishes only the
