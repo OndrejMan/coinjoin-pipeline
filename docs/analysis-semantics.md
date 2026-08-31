@@ -7,8 +7,10 @@ pipeline. It is the contract to use when interpreting a unified report.
 
 Emulator-mode labels are independent of `coinjoin-analysis` detector output:
 
-- JoinMarket positives come from `joinmarket_round_events.json` records that
-  match an exported transaction id or destination output.
+- JoinMarket positives come from `joinmarket_round_events.json` records with
+  exactly one reconciled `destination_matches` entry. A record with multiple
+  destination matches is ambiguous, makes the producer capture incomplete,
+  and therefore makes emulator labels unavailable.
 - Wasabi 2 positives come from successful-broadcast records in the exported
   coordinator `Logs.txt` (or the legacy combined backend log).
 - Every new emulator run includes `data/coinjoin_label_manifest.json`, which

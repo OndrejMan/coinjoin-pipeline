@@ -276,9 +276,17 @@ if execution.get("coinjoin_type") != "joinmarket":
 summary = report.get("summary") or {}
 emulator_summary = emulator_data.get("summary") or {}
 coinjoin_count = len(coinjoin_info.get("coinjoins") or {})
+
+
 confirmed_round_events = [
     event for event in round_events
-    if event.get("status") == "confirmed" and event.get("txid")
+    if (
+        event.get("status") == "confirmed"
+        and isinstance(event.get("destination_matches"), list)
+        and len(event["destination_matches"]) == 1
+        and isinstance(event["destination_matches"][0], dict)
+        and event["destination_matches"][0].get("txid")
+    )
 ]
 if not confirmed_round_events:
     raise SystemExit("FAIL: expected at least one confirmed JoinMarket round event")
