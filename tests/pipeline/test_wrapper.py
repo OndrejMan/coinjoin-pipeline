@@ -1539,6 +1539,14 @@ class WrapperExportTest(unittest.TestCase):
         self.assertNotIn("--joinmarket-client-server-image", command)
         self.assertNotIn("--irc-server-image", command)
 
+    def test_kubernetes_emulator_command_passes_btc_node_image_override(self):
+        with mock.patch.dict(os.environ, {"COINJOIN_BTC_NODE_IMAGE": "btc-node:test"}, clear=False):
+            command = kubernetes_emulator_command(
+                scenario="/app/scenarios/overactive-local.json",
+            )
+
+        self.assertEqual(command[command.index("--btc-node-image") + 1], "btc-node:test")
+
     def test_kubernetes_auth_preflight_checks_owned_namespace_permissions(self):
         calls: list[list[str]] = []
 
@@ -1702,6 +1710,7 @@ class WrapperExportTest(unittest.TestCase):
                 "COINJOIN_EMULATOR_IMAGE": "coinjoin-emulator:test",
                 "KUBERNETES_STORAGE_UID": "1234",
                 "KUBERNETES_STORAGE_GID": "5678",
+                "KUBERNETES_IMAGE_PULL_POLICY": "IfNotPresent",
             }
             with mock.patch.dict(os.environ, env, clear=False), \
                 mock.patch("client.wrapper.run_command") as run_mock, \
@@ -1735,6 +1744,7 @@ class WrapperExportTest(unittest.TestCase):
             self.assertNotIn(f"{(root / 'btc-data').resolve()}:/btc-data:rw", docker_cmd)
             self.assertIn("KUBERNETES_STORAGE_UID=1234", docker_cmd)
             self.assertIn("KUBERNETES_STORAGE_GID=5678", docker_cmd)
+            self.assertIn("KUBERNETES_IMAGE_PULL_POLICY=IfNotPresent", docker_cmd)
             populate_mock.assert_called_once_with((root / "btc-data" / "data").resolve())
             self.assertNotIn(f"{scenarios_dir.resolve()}:/app/scenarios:ro", docker_cmd)
 

@@ -72,6 +72,12 @@ if ! grep -q -- "run --rm --entrypoint /bin/bash blocksci-complete:local -lc " "
   exit 1
 fi
 
+if ! grep -q -- "build --build-arg UV_IMAGE=astral-uv:0.12.1 -t coinjoin-emulator:local ${ISOLATED_ROOT}/coinjoin-emulator " "${DOCKER_LOG}"; then
+  echo "FAIL: local sweep did not pass the daemon-local uv image to the emulator build" >&2
+  echo "Observed: $(cat "${DOCKER_LOG}")" >&2
+  exit 1
+fi
+
 : >"${DOCKER_LOG}"
 (
   cd "${ISOLATED_PROJECT}"

@@ -22,6 +22,10 @@ EMULATOR_IMAGE="${EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
 # selected for this test so local-image validation does not fall back to GHCR.
 COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-${EMULATOR_IMAGE}}"
 IMAGE_PREFIX="${IMAGE_PREFIX:-ghcr.io/ondrejman/}"
+COINJOIN_EMULATOR_SOURCE_DIR="${COINJOIN_EMULATOR_SOURCE_DIR:-${PROJECT_DIR}/../coinjoin-emulator}"
+BTC_NODE_IMAGE_REQUESTED="${COINJOIN_BTC_NODE_IMAGE:-}"
+BTC_NODE_IMAGE="${BTC_NODE_IMAGE_REQUESTED:-coinjoin-btc-node-k3d:${CLUSTER_NAME}}"
+BUILT_BTC_NODE_IMAGE=0
 KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
 PRE_CLEANUP="${PRE_CLEANUP:-1}"
 PRE_CLEANUP_PREFIX="${PRE_CLEANUP_PREFIX-coinjoin-k3d-}"
@@ -59,6 +63,9 @@ cleanup() {
   else
     echo "KEEP_CLUSTER=1; leaving k3d cluster '${CLUSTER_NAME}' running."
     echo "Host kubeconfig: ${HOST_KUBECONFIG}"
+  fi
+  if [[ "${BUILT_BTC_NODE_IMAGE}" == "1" ]]; then
+    docker image rm "${BTC_NODE_IMAGE}" >/dev/null 2>&1 || true
   fi
   if [[ "${KEEP_CLUSTER}" != "1" ]]; then
     rm -rf "${TMP_DIR}"
@@ -194,6 +201,24 @@ pull_image() {
   "${CONTAINER_RUNTIME}" pull "${image}"
 }
 
+prepare_btc_node_image() {
+  if docker image inspect "${BTC_NODE_IMAGE}" >/dev/null 2>&1; then
+    echo "Using existing btc-node image: ${BTC_NODE_IMAGE}"
+    return 0
+  fi
+  if [[ -n "${BTC_NODE_IMAGE_REQUESTED}" ]]; then
+    echo "FAIL: requested local btc-node image is missing: ${BTC_NODE_IMAGE}" >&2
+    exit 2
+  fi
+  if [[ ! -f "${COINJOIN_EMULATOR_SOURCE_DIR}/containers/btc-node/Dockerfile" ]]; then
+    echo "FAIL: btc-node Dockerfile not found under ${COINJOIN_EMULATOR_SOURCE_DIR}" >&2
+    exit 2
+  fi
+  echo "Building local btc-node image: ${BTC_NODE_IMAGE}"
+  docker build -t "${BTC_NODE_IMAGE}" "${COINJOIN_EMULATOR_SOURCE_DIR}/containers/btc-node"
+  BUILT_BTC_NODE_IMAGE=1
+}
+
 if [[ ! -f "${PROJECT_DIR}/scenarios/${SCENARIO}" && ! -f "${SCENARIO}" ]]; then
   echo "FAIL: scenario not found: ${SCENARIO}" >&2
   echo "Pass SCENARIO=<file> or keep it under ${PROJECT_DIR}/scenarios." >&2
@@ -232,7 +257,6 @@ for wallet in scenario.get("wallets", []):
     if wallet.get("version"):
         versions.add(wallet["version"])
 
-print(f"{image_prefix}btc-node")
 for version in sorted(versions):
     print(f"{image_prefix}wasabi-client:{version}")
 
@@ -245,6 +269,7 @@ PY
 )
 
 pull_image "${EMULATOR_IMAGE}"
+prepare_btc_node_image
 for image in "${ARTIFACT_IMAGES[@]}"; do
   pull_image "${image}"
 done
@@ -255,6 +280,11 @@ k3d cluster create "${CLUSTER_NAME}" \
   --agents "${AGENTS}" \
   --wait \
   --timeout "${WAIT_TIMEOUT}"
+
+echo "Importing local btc-node image into k3d and disabling registry pulls for it..."
+k3d image import --cluster "${CLUSTER_NAME}" "${BTC_NODE_IMAGE}"
+export COINJOIN_BTC_NODE_IMAGE="${BTC_NODE_IMAGE}"
+export KUBERNETES_IMAGE_PULL_POLICY=IfNotPresent
 
 k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
 

@@ -91,8 +91,8 @@ echo "Using scenario: ${SCENARIO_PATH}"
 echo "Using engine: ${COINJOIN_ENGINE}"
 
 # 1. Start the stack in the background
-SCENARIO_PATH="${SCENARIO_PATH}" COINJOIN_ENGINE="${COINJOIN_ENGINE}" "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile emulate up -d
 STACK_STARTED=true
+SCENARIO_PATH="${SCENARIO_PATH}" COINJOIN_ENGINE="${COINJOIN_ENGINE}" "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile emulate up -d
 
 # 2. Start streaming logs in the background 
 # The `-f` flag "follows" the logs in real-time.

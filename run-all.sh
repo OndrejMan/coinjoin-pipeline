@@ -379,7 +379,9 @@ if [[ "${BUILD_IMAGES}" == "1" ]]; then
 
   echo "Building local CoinJoin emulator image ${COINJOIN_EMULATOR_IMAGE}..."
   CURRENT_STEP_LABEL="building local CoinJoin emulator image ${COINJOIN_EMULATOR_IMAGE}"
-  run_step docker build -t "${COINJOIN_EMULATOR_IMAGE}" "${REPO_ROOT}/coinjoin-emulator"
+  run_step docker build \
+    --build-arg "UV_IMAGE=${LOCAL_UV_IMAGE}" \
+    -t "${COINJOIN_EMULATOR_IMAGE}" "${REPO_ROOT}/coinjoin-emulator"
 
   echo "Building local coinjoin-analysis image ${COINJOIN_ANALYSIS_IMAGE}..."
   CURRENT_STEP_LABEL="building local coinjoin-analysis image ${COINJOIN_ANALYSIS_IMAGE}"
@@ -429,6 +431,7 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
     "tests/test-command-builder-contract.sh"
     "tests/pipeline/test_emulate_exit_status.sh"
     "tests/pipeline/test_emulate_interrupt_cleanup.sh"
+    "tests/pipeline/test_delete_profiles.sh"
     "tests/test-run-all-local-failure-report.sh"
     "tests/test-runIt-overactive-local.sh"
     "tests/test-wrapper-signal-cleanup.sh"
@@ -543,9 +546,9 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
     elif [[ "${test_script}" == "tests/test-kubernetes-k3d.sh" ]]; then
       run_in_dir "${SCRIPT_DIR}" env \
         EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
-        IMAGE_PREFIX="${COINJOIN_EMULATOR_IMAGE_PREFIX_VALUE}" \
+        IMAGE_PREFIX="${UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX}" \
         EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
-        COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD_VALUE}" \
+        COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD= \
         RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
         bash "${test_script}"
     elif [[ "${test_script}" == "tests/test-runIt-overactive-local-docker.sh" ]]; then

@@ -23,13 +23,14 @@ mkdir -p "${FAKE_BIN}" "${LOGS_ROOT}"
 
 PEERS="blocksci_analyzer coinjoin_analysis emulator_manager btc_data_wiper dind_image_prefetch isolated_docker_daemon"
 
-# A docker stub that blocks on `compose` the way a real emulation would, so the
-# signal arrives while the wrapper is mid-stage.
+# A docker stub that blocks only while Compose starts the emulation, so the
+# signal arrives while the wrapper is mid-stage. Teardown commands must return
+# normally; the emulation script invokes `compose down` from its EXIT cleanup.
 cat >"${FAKE_BIN}/docker" <<'EOF'
 #!/usr/bin/env bash
 printf '%q ' "$@" >>"${DOCKER_LOG:?}"
 printf '\n' >>"${DOCKER_LOG:?}"
-if [[ "$1" == "compose" ]]; then
+if [[ "$1" == "compose" && " $* " == *" up -d "* ]]; then
   echo "$$" >"${STAGE_PID_FILE:?}"
   touch "${STAGE_STARTED:?}"
   while true; do sleep 1; done
@@ -79,11 +80,14 @@ PY
 
   (
     cd "${PROJECT_DIR}"
-    DOCKER_LOG="${docker_log}" \
-    STAGE_STARTED="${stage_started}" \
-    STAGE_PID_FILE="${stage_pid_file}" \
-    PATH="${FAKE_BIN}:${PATH}" \
-    bash "${command_file}"
+    export DOCKER_LOG="${docker_log}"
+    export STAGE_STARTED="${stage_started}"
+    export STAGE_PID_FILE="${stage_pid_file}"
+    export PATH="${FAKE_BIN}:${PATH}"
+    # Replace this asynchronous subshell with the wrapper. Otherwise `$!`
+    # identifies the signal-ignoring background shell rather than the
+    # wrapper process that owns the cleanup handlers.
+    exec bash "${command_file}"
   ) >"${output}" 2>&1 &
   local wrapper_pid=$!
 
@@ -100,10 +104,33 @@ PY
   done
 
   kill "-${signal}" "${wrapper_pid}"
+
+  # `wait` has no built-in timeout. Keep a broken signal path from freezing
+  # the complete local test suite and retain the wrapper diagnostics below.
+  local timeout_marker="${TMP_DIR}/wrapper-${signal}.timed-out"
+  (
+    sleep 5
+    if kill -0 "${wrapper_pid}" >/dev/null 2>&1; then
+      : >"${timeout_marker}"
+      kill -TERM "${wrapper_pid}" >/dev/null 2>&1 || true
+    fi
+  ) &
+  local watchdog_pid=$!
   set +e
   wait "${wrapper_pid}"
   local exit_code=$?
+  kill "${watchdog_pid}" >/dev/null 2>&1 || true
+  wait "${watchdog_pid}" >/dev/null 2>&1 || true
   set -e
+
+  if [[ -e "${timeout_marker}" ]]; then
+    echo "FAIL: [${signal}] wrapper did not exit within 5 seconds of the signal" >&2
+    echo "Wrapper output:" >&2
+    cat "${output}" >&2
+    echo "Docker calls:" >&2
+    cat "${docker_log}" >&2
+    exit 1
+  fi
 
   if [[ "${exit_code}" -ne 130 ]]; then
     echo "FAIL: [${signal}] expected exit 130, got ${exit_code}" >&2

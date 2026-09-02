@@ -1035,6 +1035,7 @@ def run_kubernetes_emulation(
     storage_uid = os.environ.get("KUBERNETES_STORAGE_UID", str(os.getuid()))
     storage_gid = os.environ.get("KUBERNETES_STORAGE_GID", str(os.getgid()))
     emulator_network = os.environ.get("KUBERNETES_EMULATOR_CONTAINER_NETWORK", "").strip()
+    kubernetes_image_pull_policy = os.environ.get("KUBERNETES_IMAGE_PULL_POLICY", "").strip()
     docker_cmd = [
         runtime,
         "run",
@@ -1057,6 +1058,8 @@ def run_kubernetes_emulation(
     ]
     if emulator_network:
         docker_cmd.extend(["--network", emulator_network])
+    if kubernetes_image_pull_policy:
+        docker_cmd.extend(["-e", f"KUBERNETES_IMAGE_PULL_POLICY={kubernetes_image_pull_policy}"])
     if copy_to_host:
         docker_cmd.extend(["-v", f"{local_btc_data_dir}:/btc-data:rw"])
     else:
@@ -1139,6 +1142,9 @@ def kubernetes_emulator_command(
         command.extend(["--run-id", pinned_run_id])
     if engine == "joinmarket":
         command.append("--joinmarket-descriptor-regtest-fallback")
+    btc_node_image = os.environ.get("COINJOIN_BTC_NODE_IMAGE", "").strip()
+    if btc_node_image:
+        command.extend(["--btc-node-image", btc_node_image])
     if copy_to_host:
         command.extend(["--download-btc-data", btc_data_path])
     else:

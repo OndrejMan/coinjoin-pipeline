@@ -26,6 +26,10 @@ if [[ "$1" == "compose" && "$*" == *" ps -q manager"* ]]; then
   exit 0
 fi
 
+if [[ "$1" == "compose" && "$*" == *" up -d"* && "${FAIL_COMPOSE_UP:-0}" == "1" ]]; then
+  exit 17
+fi
+
 if [[ "$1" == "compose" && "$*" == *" logs -f"* ]]; then
   while true; do sleep 1; done
 fi
@@ -79,4 +83,27 @@ if ! grep -q -- "compose -f ${PROJECT_DIR}/compose.yaml -p blocksci-emulator --p
   exit 1
 fi
 
-echo "PASS: emulate.sh cleans up the compose stack on interrupt."
+: >"${DOCKER_LOG}"
+set +e
+(
+  cd "${PROJECT_DIR}"
+  FAIL_COMPOSE_UP=1 PATH="${FAKE_BIN}:${PATH}" \
+    COMPOSE_FILE="${PROJECT_DIR}/compose.yaml" \
+    bash emulate.sh
+)
+UP_FAILURE_EXIT_CODE=$?
+set -e
+
+if [[ "${UP_FAILURE_EXIT_CODE}" -ne 17 ]]; then
+  echo "FAIL: expected emulate.sh to propagate compose up exit 17, got ${UP_FAILURE_EXIT_CODE}" >&2
+  echo "Observed: $(cat "${DOCKER_LOG}")" >&2
+  exit 1
+fi
+
+if ! grep -q -- "compose -f ${PROJECT_DIR}/compose.yaml -p blocksci-emulator --profile emulate down " "${DOCKER_LOG}"; then
+  echo "FAIL: expected emulate.sh to clean up a partially started stack after compose up failed" >&2
+  echo "Observed: $(cat "${DOCKER_LOG}")" >&2
+  exit 1
+fi
+
+echo "PASS: emulate.sh cleans up the compose stack on interrupt and startup failure."
