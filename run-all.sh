@@ -9,6 +9,10 @@ LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE:-blocksci-cj:${LOCAL_TAG}
 LOCAL_BLOCKSCI_IMAGE="${LOCAL_BLOCKSCI_IMAGE:-blocksci-complete:${LOCAL_TAG}}"
 LOCAL_COINJOIN_EMULATOR_IMAGE="${LOCAL_COINJOIN_EMULATOR_IMAGE:-coinjoin-emulator:${LOCAL_TAG}}"
 LOCAL_COINJOIN_ANALYSIS_IMAGE="${LOCAL_COINJOIN_ANALYSIS_IMAGE:-coinjoin-analysis:${LOCAL_TAG}}"
+# Keep the public uv build-stage image in the local Docker daemon for local
+# builds. This avoids resolving GHCR on every cached BlockSci build.
+UPSTREAM_UV_IMAGE="${UPSTREAM_UV_IMAGE:-ghcr.io/astral-sh/uv:0.12.1}"
+LOCAL_UV_IMAGE="${LOCAL_UV_IMAGE:-astral-uv:0.12.1}"
 
 UPSTREAM_BLOCKSCI_IMAGE="${UPSTREAM_BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-complete:latest}"
 UPSTREAM_COINJOIN_EMULATOR_IMAGE="${UPSTREAM_COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
@@ -47,6 +51,8 @@ Environment overrides:
     LOCAL_BLOCKSCI_BASE_IMAGE,
     LOCAL_COINJOIN_EMULATOR_IMAGE,
     LOCAL_COINJOIN_ANALYSIS_IMAGE           Local-mode defaults.
+  UPSTREAM_UV_IMAGE, LOCAL_UV_IMAGE         Source and daemon-local mirror
+                                              for the BlockSci uv build stage.
   UPSTREAM_BLOCKSCI_IMAGE,
     UPSTREAM_COINJOIN_EMULATOR_IMAGE,
     UPSTREAM_COINJOIN_ANALYSIS_IMAGE        Github-mode defaults.
@@ -302,6 +308,30 @@ verify_blocksci_image() {
     'command -v blocksci_parser >/dev/null && python3 -c "import blocksci"'
 }
 
+prepare_local_uv_image() {
+  if docker image inspect "${LOCAL_UV_IMAGE}" >/dev/null 2>&1; then
+    echo "Using cached local uv image ${LOCAL_UV_IMAGE}."
+    return 0
+  fi
+
+  # Do not inherit a stale GHCR credential for this public image. The temporary
+  # Docker config is used only to seed a local daemon tag; it never modifies
+  # the user's normal Docker login state.
+  local isolated_docker_config
+  isolated_docker_config="$(mktemp -d)"
+  echo "Seeding local uv image ${LOCAL_UV_IMAGE} from public ${UPSTREAM_UV_IMAGE}..."
+  CURRENT_STEP_LABEL="pulling public uv image ${UPSTREAM_UV_IMAGE}"
+  if ! run_step env "DOCKER_CONFIG=${isolated_docker_config}" docker pull "${UPSTREAM_UV_IMAGE}"; then
+    rm -rf "${isolated_docker_config}"
+    echo "ERROR: could not pull the public uv image needed for a local BlockSci build." >&2
+    return 1
+  fi
+  rm -rf "${isolated_docker_config}"
+
+  CURRENT_STEP_LABEL="tagging local uv image ${LOCAL_UV_IMAGE}"
+  run_step docker tag "${UPSTREAM_UV_IMAGE}" "${LOCAL_UV_IMAGE}"
+}
+
 if [[ "${RUN_SCENARIOS}" == "1" ]]; then
   require_command python3
 fi
@@ -321,12 +351,16 @@ fi
 trap handle_interrupt INT TERM
 
 if [[ "${BUILD_IMAGES}" == "1" ]]; then
+  prepare_local_uv_image
+
   echo "Building local BlockSci base image ${LOCAL_BLOCKSCI_BASE_IMAGE}..."
   CURRENT_STEP_LABEL="building local BlockSci base image ${LOCAL_BLOCKSCI_BASE_IMAGE}"
   # Always name the target: blocksci/Dockerfile carries the dependency stage,
   # the shipped `complete` stage and a validation-only `test` stage, and an
   # untargeted build would take the last one.
-  run_step docker build --target dependencies -t "${LOCAL_BLOCKSCI_BASE_IMAGE}" \
+  run_step docker build --target dependencies \
+    --build-arg "UV_IMAGE=${LOCAL_UV_IMAGE}" \
+    -t "${LOCAL_BLOCKSCI_BASE_IMAGE}" \
     -f "${REPO_ROOT}/blocksci/Dockerfile" "${REPO_ROOT}/blocksci"
 
   echo "Building local BlockSci complete image ${BLOCKSCI_IMAGE}..."
