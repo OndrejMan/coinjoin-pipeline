@@ -63,3 +63,90 @@ unifies the host manifest + emulation evidence into a single run directory.
 **Caveat:** coordinate with emulator commit `3a05b42` ("Allow no-log reruns with existing
 log directory"), which touched the same check; rebuild/publish `coinjoin-emulator:latest`
 so CI picks up the change.
+
+## 3. Consolidate run-directory layout knowledge (`run_catalog.py` and friends)
+
+**Status:** review findings only, nothing implemented. Scope: `coinjoin-pipeline`.
+Origin: architecture review of `pipeline/client/run_catalog.py` (2026-09-03).
+
+Baseline: the module itself is healthy — leaf module (stdlib only, no `wrapper`/`pbs`/
+`kubernetes` imports), pure functions, `frozen` `RunState`, single consumer
+(`research.py`). The items below are about the contract it encodes, not its style.
+
+### 3.1 Run-directory layout is not a single source of truth (highest impact)
+
+Constants are only half extracted: `MANIFEST_NAME`, `REPORT_DIR`, `BASELINE_FILE`,
+`FALSE_CJTXS_FILE` exist, but `"coinjoin_emulator_data"`, `"blocksci_data/config.json"`,
+`"coinjoin-mappings_data/coinjoin_mappings.json"` and `"unified_report.json"` are raw
+literals repeated in three places inside the module (`is_run_dir`, `stage_state`,
+`REPORT_INPUT_PATHS`) and again in `research.py`, `wrapper.py`,
+`exporters/emulator_data.py`, `pbs/templates_s3.py` and the shell templates
+(`unified_report_s3_template.sh`, `coinjoin_analysis_s3_template.sh`).
+
+The run-directory layout is the pipeline's actual contract; when one copy drifts,
+`runs list` reports `missing` for a stage that in fact completed.
+
+**Fix:** one `pipeline/client/run_layout.py` owning every relative path and marker set;
+`run_catalog`, `run_context`, `research` and the exporters read from it. Shell templates
+should receive the paths from Python rather than restating them.
+
+### 3.2 Two independent definitions of "what is a run dir"
+
+`run_catalog.is_run_dir()` hardcodes its markers; `run_context.is_run_dir(path,
+marker_files)` takes them as a parameter. Two answers to the same question that can
+diverge silently between run-time discovery and `runs list`.
+
+**Fix:** collapse onto the marker set from 3.1.
+
+### 3.3 mtime-based staleness is factually fragile, not just inelegant
+
+`report_is_stale()` compares `st_mtime` against `REPORT_INPUT_PATHS`. For
+`coinjoin_emulator_data` that is a **directory** mtime, which only changes when entries
+are added/removed directly in it — a rerun that overwrites nested files leaves the report
+looking fresh. `git checkout`, `rsync`, S3 downloads and container copies also reset or
+preserve mtimes arbitrarily.
+
+Inconsistent with the rest of the module: inputs are verified by `sha256_file` in
+`create_external_manifest`, but result validity is decided by filesystem metadata. For a
+thesis whose main claim is reproducibility, staleness should be derived from hashes
+recorded in the manifest.
+
+**Fix:** record input hashes when the report is written; compare hashes, not mtimes.
+Larger change than 3.1/3.2 but the one that affects defensibility of the results.
+
+### 3.4 `stage_state` conflates presence and freshness
+
+Every key means "exists" except `"report"`, which means "exists and is not stale" — so
+`False` cannot distinguish missing from stale and callers must consult `report_status`
+separately. `report_is_stale()` is also computed twice per run (once in `stage_state`,
+once in `report_status`), duplicating `stat()` work and allowing the two answers to
+straddle a concurrent write. `report_status` returns bare strings that
+`docs/analysis-semantics.md` documents as an API.
+
+**Fix:** return tri-state `missing|stale|present` per stage, compute staleness once, and
+type the status as a `Literal`/enum.
+
+### 3.5 One file, two incompatible manifest schemas
+
+`research_manifest.json` has two shapes: emulator runs contain only
+`{"host_launcher": {...}}` (written by `src/coinjoin_pipeline/runs.py:store_host_manifest`,
+which merges under that key), external runs are flat with top-level
+`schema_version`/`mode`/`run_id`/`inputs` (written by `create_external_manifest` +
+`write_manifest`). Consequence: `mode_for_run()` never finds `"mode"` on emulator runs and
+always falls back to sniffing `coinjoin_emulator_data/` — the declared schema does not
+actually work there. Verified across all manifests in `coinjoin-runs/`.
+
+`dict[str, object]` also forces every consumer to cast even though the schema is versioned.
+
+**Fix:** have the launcher write the top-level `mode`/`schema_version` too (keeping
+`host_launcher` as a sub-object), and parse the manifest into a `TypedDict`/dataclass once.
+
+### 3.6 Minor
+
+- `write_manifest()` raises an error mentioning the CLI flag `--resume` — the module knows
+  about the UX layer above it.
+- `write_manifest(overwrite=True)` is never called; dead parameter, and its `write_text`
+  would drop the `host_launcher` block that `store_host_manifest` otherwise merges.
+- `sha256_file()` is a generic utility living in a catalog module.
+
+**Suggested order:** 3.1 → 3.2 → 3.4 (mechanical, low risk), then 3.5, then 3.3.
