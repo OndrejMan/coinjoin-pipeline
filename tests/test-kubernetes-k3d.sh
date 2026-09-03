@@ -36,6 +36,7 @@ export KUBERNETES_COPY_TO_HOST_DIR="${KUBERNETES_COPY_TO_HOST_DIR:-${TMP_DIR}/bt
 
 HOST_KUBECONFIG="${TMP_DIR}/kubeconfig-host.yaml"
 CONTAINER_KUBECONFIG="${TMP_DIR}/kubeconfig-container.yaml"
+ANONYMOUS_DOCKER_CONFIG="${TMP_DIR}/docker-anonymous"
 
 dump_kubernetes_diagnostics() {
   if [[ ! -s "${HOST_KUBECONFIG}" ]]; then
@@ -198,7 +199,15 @@ pull_image() {
   fi
 
   echo "Pulling latest artifact image: ${image}"
-  "${CONTAINER_RUNTIME}" pull "${image}"
+  if [[ "${CONTAINER_RUNTIME}" == "docker" ]]; then
+    # Public GHCR pulls must not inherit a stale or under-scoped credential
+    # from the developer's normal Docker config. k3d/containerd pulls these
+    # same images anonymously inside the cluster.
+    mkdir -p "${ANONYMOUS_DOCKER_CONFIG}"
+    env DOCKER_CONFIG="${ANONYMOUS_DOCKER_CONFIG}" docker pull "${image}"
+  else
+    "${CONTAINER_RUNTIME}" pull "${image}"
+  fi
 }
 
 prepare_btc_node_image() {
