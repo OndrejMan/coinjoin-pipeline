@@ -180,7 +180,7 @@ def build_report(
             1.0 if coinjoin_analysis_count == 0 else 0.0,
         ),
         "coinjoin_analysis_coverage_by_blocksci": compute_rate(matched_by_both, coinjoin_analysis_count, 1.0),
-        "scenario_checks": build_scenario_checks(scenario, coinjoin_analysis),
+        "scenario_checks": build_scenario_checks(scenario, coinjoin_analysis, coinjoin_type),
     }
     if emulator_data:
         emulator_summary = emulator_data.get("summary") or {}

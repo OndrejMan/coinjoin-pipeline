@@ -29,6 +29,7 @@ from exporters.heuristics import WASABI2_BLOCKSCI_DENOMINATIONS
 from exporters.markdown_report import render_report
 from exporters.unified_report import (
     SCHEMA_VERSION,
+    build_scenario_checks,
     build_emulator_data,
     build_integration_diagnostics,
     build_report,
@@ -538,10 +539,13 @@ class UnifiedReportTest(unittest.TestCase):
             {
                 "scenario_wallet_count": 2,
                 "coinjoin_analysis_wallet_count": 1,
+                "wallet_count_rule": "exact",
                 "wallet_count_matches": False,
                 "coinjoin_analysis_input_sats": 150000,
+                "max_coinjoin_input_sats": 150000,
                 "scenario_initial_funds_sats": 3250000,
                 "input_sats_within_scenario_funds": True,
+                "coinjoin_input_sats_to_funds_ratio": 0.046,
                 "per_wallet_observed_counts": {
                     "wallet-000": {"input_count": 1, "output_count": 3},
                 },
@@ -2315,6 +2319,84 @@ class UnifiedReportTest(unittest.TestCase):
             report = build_report(Path(tmpdir) / "run", {}, {}, "wasabi2")
         self.assertIsNone(report["coinjoin_mappings"])
         self.assertNotIn("mapping_transactions", report["summary"])
+
+
+class ScenarioFundsCheckTest(unittest.TestCase):
+    """The funds bound is per CoinJoin; remixing makes the sum exceed the funding."""
+
+    @staticmethod
+    def _coinjoins(*input_sats):
+        return {
+            f"tx{index}": {"total_input_sats": value, "inputs": [], "outputs": []}
+            for index, value in enumerate(input_sats)
+        }
+
+    def test_remixed_rounds_may_exceed_total_funding(self):
+        checks = build_scenario_checks(
+            {"wallet_count": 2, "total_initial_funds_sats": 1000},
+            self._coinjoins(800, 700),
+        )
+
+        self.assertEqual(checks["coinjoin_analysis_input_sats"], 1500)
+        self.assertEqual(checks["max_coinjoin_input_sats"], 800)
+        self.assertTrue(checks["input_sats_within_scenario_funds"])
+        self.assertEqual(checks["coinjoin_input_sats_to_funds_ratio"], 1.5)
+
+    def test_single_coinjoin_above_funding_fails(self):
+        checks = build_scenario_checks(
+            {"wallet_count": 2, "total_initial_funds_sats": 1000},
+            self._coinjoins(400, 1200),
+        )
+
+        self.assertEqual(checks["max_coinjoin_input_sats"], 1200)
+        self.assertFalse(checks["input_sats_within_scenario_funds"])
+
+    def test_joinmarket_accepts_a_subset_of_the_scenario_wallets(self):
+        """A taker picks a few counterparties per round; unchosen makers never appear."""
+        coinjoins = {
+            "tx0": {
+                "total_input_sats": 100,
+                "inputs": [{"wallet_name": "wallet-000"}, {"wallet_name": "wallet-001"}],
+                "outputs": [],
+            }
+        }
+        checks = build_scenario_checks(
+            {"wallet_count": 10, "total_initial_funds_sats": 1000}, coinjoins, "joinmarket"
+        )
+
+        self.assertEqual(checks["wallet_count_rule"], "subset")
+        self.assertEqual(checks["coinjoin_analysis_wallet_count"], 2)
+        self.assertTrue(checks["wallet_count_matches"])
+
+    def test_wasabi_still_requires_every_wallet(self):
+        coinjoins = {
+            "tx0": {
+                "total_input_sats": 100,
+                "inputs": [{"wallet_name": "wallet-000"}],
+                "outputs": [],
+            }
+        }
+        checks = build_scenario_checks(
+            {"wallet_count": 10, "total_initial_funds_sats": 1000}, coinjoins, "wasabi2"
+        )
+
+        self.assertEqual(checks["wallet_count_rule"], "exact")
+        self.assertFalse(checks["wallet_count_matches"])
+
+    def test_joinmarket_without_any_observed_wallet_fails(self):
+        checks = build_scenario_checks(
+            {"wallet_count": 10, "total_initial_funds_sats": 1000},
+            self._coinjoins(100),
+            "joinmarket",
+        )
+
+        self.assertFalse(checks["wallet_count_matches"])
+
+    def test_without_scenario_funds_the_check_is_undefined(self):
+        checks = build_scenario_checks(None, self._coinjoins(400))
+
+        self.assertIsNone(checks["input_sats_within_scenario_funds"])
+        self.assertIsNone(checks["coinjoin_input_sats_to_funds_ratio"])
 
 
 if __name__ == "__main__":

@@ -19,6 +19,18 @@ UPSTREAM_COINJOIN_EMULATOR_IMAGE="${UPSTREAM_COINJOIN_EMULATOR_IMAGE:-ghcr.io/on
 UPSTREAM_COINJOIN_ANALYSIS_IMAGE="${UPSTREAM_COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}"
 UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX="${UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX:-ghcr.io/ondrejman/}"
 
+# s5cmd uploader used by the block-archive S3 test. There is no local build of
+# it, so both image modes take the pinned reference the pipeline itself uses;
+# container/uploader.image stays the single source of truth.
+# Only the S3 tests need the uploader pin, and they resolve it themselves when
+# it is empty. Reading the file unconditionally aborts the launcher in the
+# isolated fixture repo of tests/test-run-all-local-failure-report.sh, which
+# holds nothing but the launcher scripts.
+if [[ -z "${UPLOADER_IMAGE:-}" && -r "${SCRIPT_DIR}/container/uploader.image" ]]; then
+  UPLOADER_IMAGE="$(tr -d '[:space:]' <"${SCRIPT_DIR}/container/uploader.image")"
+fi
+UPLOADER_IMAGE="${UPLOADER_IMAGE:-}"
+
 EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR:-${SCRIPT_DIR}/emulation_logs}"
 RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS:-}"
 

@@ -11,23 +11,46 @@ PBS_SUPPORT_ROOT="${PBS_SUPPORT_ROOT:-${SCRIPT_DIR}/support/pbs}"
 PBS_HELPER="${PBS_HELPER:-${PBS_SUPPORT_ROOT}/local-pbs.sh}"
 PBS_ENV="${PBS_ENV:-${PBS_SUPPORT_ROOT}/pbs-env.sh}"
 
+# These checks run before the EXIT trap and before the work root exists, so a
+# failure here used to vanish with the terminal output — which is exactly what
+# happened in the 2026-09-04 suite, where this test died between two polls and
+# left nothing behind. Record preflight failures where the next reader looks.
+PREFLIGHT_LOG_DIR="${TEST_FAILED_LOGS_DIR:-${PROJECT_DIR}/emulation_logs/_failed}"
+
+fail_preflight() {
+  local message="$1"
+  mkdir -p "${PREFLIGHT_LOG_DIR}" 2>/dev/null || true
+  printf '%s FAIL(preflight): %s\n' "$(TZ=UTC date -Is)" "${message}" \
+    | tee -a "${PREFLIGHT_LOG_DIR}/$(TZ=UTC date +%Y%m%dT%H%M%S)Z-bitcoin-block-archive-preflight.log" >&2
+  exit 2
+}
+
+docker_ready() {
+  # Right after the previous S3 test tears down its k3d cluster and containers,
+  # the daemon can refuse `docker info` for a few seconds. One probe turned that
+  # into a suite failure, so give it a short grace period.
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    docker info >/dev/null 2>&1 && return 0
+    sleep 3
+  done
+  return 1
+}
+
 for command in docker python3 timeout; do
-  command -v "${command}" >/dev/null 2>&1 || { echo "FAIL: missing ${command}" >&2; exit 2; }
+  command -v "${command}" >/dev/null 2>&1 || fail_preflight "missing ${command}"
 done
-docker info >/dev/null 2>&1 || { echo "FAIL: Docker is unavailable" >&2; exit 2; }
-[[ -d "${ARCHIVE_PROJECT_DIR}/src/bitcoin_block_archive" ]] || {
-  echo "FAIL: bitcoin-block-archive source is unavailable: ${ARCHIVE_PROJECT_DIR}" >&2; exit 2;
-}
-[[ -x "${PBS_HELPER}" && -f "${PBS_ENV}" ]] || {
-  echo "FAIL: local PBS support is unavailable" >&2; exit 2;
-}
+docker_ready || fail_preflight "Docker is unavailable after 5 probes over ~15s"
+[[ -d "${ARCHIVE_PROJECT_DIR}/src/bitcoin_block_archive" ]] \
+  || fail_preflight "bitcoin-block-archive source is unavailable: ${ARCHIVE_PROJECT_DIR}"
+[[ -x "${PBS_HELPER}" && -f "${PBS_ENV}" ]] \
+  || fail_preflight "local PBS support is unavailable (${PBS_HELPER}, ${PBS_ENV})"
 
 RUN_TOKEN="$(TZ=Europe/Prague date +%Y%m%dT%H%M%S%Z)-$$-${RANDOM}"
 RESOURCE_ID="${GITHUB_RUN_ID:-$$}"
 STORAGE_BASE="${PBS_TEST_STORAGE_ROOT:-/storage/github-runner}"
-[[ -d "${STORAGE_BASE}" && -w "${STORAGE_BASE}" ]] || {
-  echo "FAIL: writable /storage root is required: ${STORAGE_BASE}" >&2; exit 2;
-}
+[[ -d "${STORAGE_BASE}" && -w "${STORAGE_BASE}" ]] \
+  || fail_preflight "writable /storage root is required: ${STORAGE_BASE}"
 WORK_ROOT="$(mktemp -d "${STORAGE_BASE}/bitcoin-block-archive-s3-${RUN_TOKEN}.XXXXXX")"
 LOGS_ROOT="${WORK_ROOT}/emulation_logs"
 PBS_CONTAINER_NAME="${PBS_CONTAINER_NAME:-pbs-block-archive-itest-${RESOURCE_ID}}"

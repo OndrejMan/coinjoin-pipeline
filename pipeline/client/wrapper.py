@@ -1773,6 +1773,12 @@ def wrapper_operations() -> WrapperOperations:
 
 def main() -> None:
     """Keep the executable wrapper to parser, operation binding, and dispatch."""
+    # Piped stdout is block-buffered, which hid stage progress until the process
+    # exited; keep the suite log live instead.
+    for _stream in (sys.stdout, sys.stderr):
+        _reconfigure = getattr(_stream, "reconfigure", None)
+        if _reconfigure is not None:
+            _reconfigure(line_buffering=True)
     run_main(wrapper_operations())
 
 

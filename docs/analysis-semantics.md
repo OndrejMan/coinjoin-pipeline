@@ -40,7 +40,7 @@ records, but its `coinjoins` keys never determine `is_coinjoin`. Every report
 records `label_provenance`, including source paths and
 `baseline_used_for_labels: false`.
 
-When independent labels are available, schema-1.7 reports evaluate both
+When independent labels are available, schema-1.8 reports evaluate both
 BlockSci and `coinjoin-analysis` against the same set of exported non-coinbase
 transactions. The two confusion matrices are stored under
 `detector_evaluations.blocksci` and
@@ -68,6 +68,38 @@ inferring completeness from file presence.
 
 External mode has no emulator labels and retains
 `evaluation_scope = "baseline_agreement_only"`.
+
+## Scenario funds check
+
+`summary.scenario_checks.input_sats_within_scenario_funds` bounds a **single**
+CoinJoin, not the sum of them: it holds when the largest detected CoinJoin's
+`total_input_sats` fits inside the scenario's `total_initial_funds_sats`. A
+multi-round scenario remixes the same coins, so every round after the first
+counts the same satoshis again and the aggregate legitimately exceeds the
+one-time funding — a 10-round `overactive-local` run sits around 1.5-2.3x, a
+3-round `default-joinmarket` run below 1x. Up to schema 1.7 the check compared
+that aggregate against the funding and therefore reported `false` on every
+multi-round Wasabi run; since schema 1.8 the aggregate is reported as
+`coinjoin_analysis_input_sats` with `coinjoin_input_sats_to_funds_ratio` (both
+informational, the ratio being the remix factor) and `max_coinjoin_input_sats`
+carries the value the check actually tests.
+
+## Scenario wallet-count check
+
+`summary.scenario_checks.wallet_count_matches` is protocol-dependent, and
+`wallet_count_rule` records which rule was applied:
+
+- **Wasabi (`exact`)** — every scenario wallet registers over the run, so the
+  observed wallet count must equal `scenario_wallet_count`.
+- **JoinMarket (`subset`)** — a taker picks a fixed number of counterparties per
+  round (4 by default), so makers that are never chosen never appear in a
+  CoinJoin. `default-joinmarket` runs 2 takers and 8 makers over 3 rounds and has
+  legitimately produced 7 to 10 observed wallets. The check therefore only
+  requires `0 < observed <= scenario_wallet_count`.
+
+Before schema 1.8 the rule was equality for both protocols, so JoinMarket runs
+reported `wallet_count_matches: false` on nearly every run; in an older report
+that `false` is a false negative, not a finding.
 
 ## Wasabi threshold precedence
 

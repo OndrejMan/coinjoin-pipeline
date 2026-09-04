@@ -101,7 +101,21 @@ Host options:
 """)
 
 
+def use_line_buffered_output() -> None:
+    """Emit progress while a stage runs, not when the process exits.
+
+    Python block-buffers stdout whenever it is a pipe or a file, so a long
+    Kubernetes/PBS stage looked frozen in `tee`d suite logs for tens of minutes
+    and only flushed at the end.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(line_buffering=True)
+
+
 def main(argv: list[str] | None = None) -> int:
+    use_line_buffered_output()
     original_raw = list(sys.argv[1:] if argv is None else argv)
     try:
         raw, configuration_path = expand_configuration(original_raw)

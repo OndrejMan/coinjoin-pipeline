@@ -310,6 +310,16 @@ cleanup() {
       \( -name '*.o[0-9]*' -o -name '*.e[0-9]*' -o -name '*.pbs.log' \) \
       -exec cp -t "${RESULT_DIR}/${ENGINE}/pbs-logs" {} + 2>/dev/null || true
     copy_analysis_artifacts || true
+    # The work root is deleted below; copy out everything a post-mortem needs.
+    [[ -s "${POD_FAILURE_FILE}" ]] \
+      && cp "${POD_FAILURE_FILE}" "${RESULT_DIR}/${ENGINE}/pod-failures.txt" || true
+    [[ -s "${PIPELINE_OUTPUT_FILE}" ]] \
+      && cp "${PIPELINE_OUTPUT_FILE}" "${RESULT_DIR}/${ENGINE}/pipeline-output.log" || true
+    for run_logs in "${LOGS_ROOT}"/*/logs; do
+      [[ -d "${run_logs}" ]] || continue
+      mkdir -p "${RESULT_DIR}/${ENGINE}/stage-logs"
+      cp -r "${run_logs}"/. "${RESULT_DIR}/${ENGINE}/stage-logs/" 2>/dev/null || true
+    done
     if [[ -s "${KUBERNETES_DIAGNOSTICS_FILE}" ]]; then
       mkdir -p "${RESULT_DIR}/${ENGINE}/kubernetes-diagnostics"
       cp "${KUBERNETES_DIAGNOSTICS_FILE}" \

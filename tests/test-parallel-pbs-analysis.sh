@@ -172,6 +172,16 @@ cleanup() {
       \( -name '*.o[0-9]*' -o -name '*.e[0-9]*' -o -name '*.pbs.log' \) \
       -exec cp -t "${RESULT_DIR}/${ENGINE}/pbs-logs" {} + 2>/dev/null || true
     [[ -s "${RUN_LOG}" ]] && cp "${RUN_LOG}" "${RESULT_DIR}/${ENGINE}/runIt.parallel.log" || true
+    # The work root is deleted below, so anything worth reading after the test
+    # has to be copied out now: pod post-mortems, cluster diagnostics, and the
+    # run's own stage logs.
+    [[ -s "${POD_FAILURE_FILE}" ]] \
+      && cp "${POD_FAILURE_FILE}" "${RESULT_DIR}/${ENGINE}/pod-failures.txt" || true
+    for run_logs in "${LOGS_ROOT}"/*/logs; do
+      [[ -d "${run_logs}" ]] || continue
+      mkdir -p "${RESULT_DIR}/${ENGINE}/stage-logs"
+      cp -r "${run_logs}"/. "${RESULT_DIR}/${ENGINE}/stage-logs/" 2>/dev/null || true
+    done
     find "${RESULT_DIR}" -type d -empty -delete 2>/dev/null || true
   fi
   docker rm -f "${PBS_CONTAINER_NAME}" >/dev/null 2>&1 || true
