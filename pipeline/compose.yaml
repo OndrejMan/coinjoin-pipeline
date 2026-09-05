@@ -49,6 +49,11 @@ services:
       environment:
         - DOCKER_HOST=tcp://dind:2375
         - DOCKER_DEFAULT_PLATFORM=${COINJOIN_EMULATOR_DOCKER_PLATFORM:-}
+      volumes:
+        # DinD has its own (empty) registry auth, so a build inside it cannot pull
+        # a private base image. Hand this container the host's credentials so it
+        # can warm those images into DinD's cache before the manager builds.
+        - ${COINJOIN_REGISTRY_CONFIG:-./anonymous-docker-config.json}:/root/.docker/config.json:ro
       depends_on:
         dind:
           condition: service_healthy
@@ -72,7 +77,8 @@ services:
                       if [ -z \"${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-}\" ]; then
                         pull_image \"$${PREFIX}joinmarket-client-server\";
                       else
-                        echo 'Skipping joinmarket-client-server pull; local build requested';
+                        echo 'Prefetching JoinMarket base for the manager container build' &&
+                        pull_image ghcr.io/ondrejman/joinmarket-base:latest;
                       fi &&
                       if [ -z \"${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-}\" ]; then
                         pull_image \"$${PREFIX}irc-server:latest\";
@@ -80,9 +86,13 @@ services:
                         echo 'Skipping irc-server pull; local build requested';
                       fi;
                     else
-                      pull_image ghcr.io/ondrejman/wasabi-client:2.6.0 &&
-                      pull_image ghcr.io/ondrejman/wasabi-backend:2.6.0 &&
-                      pull_image ghcr.io/ondrejman/wasabi-coordinator:2.6.0;
+                      if [ -z \"${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-}\" ]; then
+                        pull_image ghcr.io/ondrejman/wasabi-client:2.6.0 &&
+                        pull_image ghcr.io/ondrejman/wasabi-backend:2.6.0 &&
+                        pull_image ghcr.io/ondrejman/wasabi-coordinator:2.6.0;
+                      else
+                        echo 'Skipping Wasabi image pulls; the manager builds them from source';
+                      fi;
                     fi &&
                     echo 'Image prefetching complete!'
                     "

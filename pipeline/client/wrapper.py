@@ -591,6 +591,23 @@ def blocksci_host_port(host_root_dir: Path) -> str:
     return str(20000 + int(checkout_hash[:8], 16) % 10000)
 
 
+def host_registry_config() -> Path | None:
+    """Path to the host's Docker registry credentials, when there are any.
+
+    The image prefetch container mounts this so it can warm private base images
+    into DinD's cache; DinD carries no credentials of its own, so a build inside
+    it fails on a private FROM with "error from registry: denied".
+    """
+    override = os.environ.get("COINJOIN_REGISTRY_CONFIG")
+    if override:
+        candidate = Path(override).expanduser()
+        return candidate if candidate.is_file() else None
+    docker_config_dir = os.environ.get("DOCKER_CONFIG")
+    base = Path(docker_config_dir) if docker_config_dir else Path.home() / ".docker"
+    candidate = base.expanduser() / "config.json"
+    return candidate if candidate.is_file() else None
+
+
 def compose_env(
     active_run_id: str | None = None,
     engine: str = DEFAULT_ENGINE,
@@ -663,6 +680,11 @@ def compose_env(
         env.pop(COINJOIN_ANALYSIS_MOUNT_PATH_ENV, None)
         env.pop(COINJOIN_ANALYSIS_TARGET_PATH_ENV, None)
         env.pop(COINJOIN_ANALYSIS_INPUT_DATA_PATH_ENV, None)
+    registry_config = host_registry_config()
+    if registry_config is not None:
+        env["COINJOIN_REGISTRY_CONFIG"] = str(registry_config)
+    else:
+        env.pop("COINJOIN_REGISTRY_CONFIG", None)
     return env
 
 
