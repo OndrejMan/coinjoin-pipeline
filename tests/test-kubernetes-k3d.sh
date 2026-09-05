@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=tests/support/local-images.sh
+source "${SCRIPT_DIR}/support/local-images.sh"
 TMP_DIR="$(mktemp -d)"
 
 CLUSTER_NAME="${CLUSTER_NAME:-coinjoin-k3d-$$}"
@@ -284,6 +286,8 @@ for image in "${ARTIFACT_IMAGES[@]}"; do
 done
 
 echo "Creating k3d cluster '${CLUSTER_NAME}' with ${SERVERS} server(s) and ${AGENTS} worker agent(s)..."
+local_images_build "${ENGINE:-wasabi}" "${SCENARIO_PATH}"
+
 k3d cluster create "${CLUSTER_NAME}" \
   --servers "${SERVERS}" \
   --agents "${AGENTS}" \
@@ -296,6 +300,7 @@ export COINJOIN_BTC_NODE_IMAGE="${BTC_NODE_IMAGE}"
 export KUBERNETES_IMAGE_PULL_POLICY=IfNotPresent
 
 k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
+local_images_import "${CLUSTER_NAME}"
 
 echo "Waiting for all Kubernetes nodes to be Ready..."
 kubectl --kubeconfig "${HOST_KUBECONFIG}" \

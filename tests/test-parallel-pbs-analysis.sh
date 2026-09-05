@@ -9,6 +9,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=tests/support/local-images.sh
+source "${SCRIPT_DIR}/support/local-images.sh"
 PBS_SUPPORT_ROOT="${PBS_SUPPORT_ROOT:-${SCRIPT_DIR}/support/pbs}"
 PBS_HELPER="${PBS_HELPER:-${PBS_SUPPORT_ROOT}/local-pbs.sh}"
 PBS_ENV="${PBS_ENV:-${PBS_SUPPORT_ROOT}/pbs-env.sh}"
@@ -243,10 +245,13 @@ wait_for_kubernetes_nodes() {
 }
 
 echo "Creating k3d cluster ${CLUSTER_NAME} with direct shared storage ${WORK_ROOT}..."
+local_images_build "${ENGINE}" "${PROJECT_DIR}/scenarios/${SCENARIO}"
+
 k3d cluster create "${CLUSTER_NAME}" \
   --servers 1 --agents "${K3D_AGENTS:-2}" --wait --timeout "${K3D_WAIT_TIMEOUT:-240s}" \
   --volume "${WORK_ROOT}:${WORK_ROOT}@all"
 k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
+local_images_import "${CLUSTER_NAME}"
 wait_for_kubernetes_nodes
 
 # Both the Kubernetes API and the NodePort listeners belong to the k3d node

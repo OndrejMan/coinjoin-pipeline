@@ -8,6 +8,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=tests/support/local-images.sh
+source "${SCRIPT_DIR}/support/local-images.sh"
 PBS_SUPPORT_ROOT="${PBS_SUPPORT_ROOT:-${SCRIPT_DIR}/support/pbs}"
 PBS_HELPER="${PBS_HELPER:-${PBS_SUPPORT_ROOT}/local-pbs.sh}"
 PBS_ENV="${PBS_ENV:-${PBS_SUPPORT_ROOT}/pbs-env.sh}"
@@ -292,6 +294,8 @@ s5 ls >/dev/null || { echo "FAIL: MinIO did not become ready" >&2; exit 1; }
 s5 mb "s3://${BUCKET}" >/dev/null
 
 echo "Creating k3d cluster ${CLUSTER_NAME} (no shared storage needed in S3 mode)..."
+local_images_build "${ENGINE}" "${PROJECT_DIR}/scenarios/${SCENARIO}"
+
 k3d cluster create "${CLUSTER_NAME}" \
   --servers 1 --agents "${K3D_AGENTS:-2}" --wait --timeout "${K3D_WAIT_TIMEOUT:-240s}"
 echo "Importing wrapper, emulator, and btc-node images into ${CLUSTER_NAME}..."
@@ -315,6 +319,7 @@ COINJOIN_EMULATOR_IMAGE="${K3D_COINJOIN_EMULATOR_IMAGE}"
 COINJOIN_BTC_NODE_IMAGE="${K3D_BTC_NODE_IMAGE}"
 KUBERNETES_IMAGE_PULL_POLICY="${KUBERNETES_IMAGE_PULL_POLICY:-IfNotPresent}"
 k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
+local_images_import "${CLUSTER_NAME}"
 kubectl --kubeconfig "${HOST_KUBECONFIG}" wait node --all --for=condition=Ready --timeout=240s
 
 kubectl --kubeconfig "${HOST_KUBECONFIG}" create namespace "${NAMESPACE}"

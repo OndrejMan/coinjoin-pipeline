@@ -171,6 +171,8 @@ if [[ "${IMAGE_MODE}" == "local" ]]; then
 else
   BUILD_IMAGES="${BUILD_IMAGES:-0}"
   PULL_IMAGES="${PULL_IMAGES:-1}"
+  # Kubernetes tests must also exercise published infrastructure in github mode.
+  export SKIP_LOCAL_IMAGE_BUILD=1
   if [[ "${BUILD_IMAGES}" != "0" ]]; then
     echo "ERROR: github mode does not build local images; use local mode instead" >&2
     exit 2
