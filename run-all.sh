@@ -441,6 +441,16 @@ if [[ "${RUN_SCENARIOS}" == "1" ]]; then
 fi
 
 if [[ "${RUN_TESTS}" == "1" ]]; then
+  # Answer "can this machine run the suite at all" before spending hours on it:
+  # unreachable images, an expired registry credential, a full disk, leftovers
+  # from a crashed test, or a competing suite. Set PREFLIGHT_SKIP=1 to bypass.
+  if [[ -z "${PREFLIGHT_SKIP:-}" && -x "${SCRIPT_DIR}/tests/support/preflight.sh" ]]; then
+    if ! "${SCRIPT_DIR}/tests/support/preflight.sh" "${IMAGE_MODE}"; then
+      echo "ERROR: preflight failed; not starting the test suite." >&2
+      exit 2
+    fi
+  fi
+
   tests=(
     "tests/test-command-builder-contract.sh"
     "tests/pipeline/test_emulate_exit_status.sh"
