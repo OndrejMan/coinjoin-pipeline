@@ -24,12 +24,10 @@ if [[ $# -gt 1 || ( "${IMAGE_MODE}" != "upstream" && "${IMAGE_MODE}" != "local" 
 fi
 
 LOCAL_TAG="${LOCAL_TAG:-coinjoin-pipeline-local}"
-LOCAL_WRAPPER_IMAGE="${LOCAL_WRAPPER_IMAGE:-coinjoin-pipeline:${LOCAL_TAG}}"
 LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE:-blocksci-cj:${LOCAL_TAG}}"
 LOCAL_BLOCKSCI_IMAGE="${LOCAL_BLOCKSCI_IMAGE:-blocksci-complete:${LOCAL_TAG}}"
 LOCAL_EMULATOR_IMAGE="${LOCAL_EMULATOR_IMAGE:-coinjoin-emulator:${LOCAL_TAG}}"
 LOCAL_COINJOIN_ANALYSIS_IMAGE="${LOCAL_COINJOIN_ANALYSIS_IMAGE:-coinjoin-analysis:${LOCAL_TAG}}"
-WRAPPER_SOURCE_DIR="${WRAPPER_SOURCE_DIR:-${PROJECT_DIR}}"
 BLOCKSCI_SOURCE_DIR="${BLOCKSCI_SOURCE_DIR:-${REPO_ROOT}/blocksci}"
 EMULATOR_SOURCE_DIR="${EMULATOR_SOURCE_DIR:-${REPO_ROOT}/coinjoin-emulator}"
 COINJOIN_ANALYSIS_SOURCE_DIR="${COINJOIN_ANALYSIS_SOURCE_DIR:-${REPO_ROOT}/coinjoin-analysis}"
@@ -78,14 +76,11 @@ if [[ "${IMAGE_MODE}" == "local" ]]; then
     echo "Building local CoinJoin emulator image ${LOCAL_EMULATOR_IMAGE} from ${EMULATOR_SOURCE_DIR}..."
     docker build -t "${LOCAL_EMULATOR_IMAGE}" "${EMULATOR_SOURCE_DIR}"
 
-    echo "Building local wrapper image ${LOCAL_WRAPPER_IMAGE} from ${WRAPPER_SOURCE_DIR}..."
-    docker build -t "${LOCAL_WRAPPER_IMAGE}" -f "${WRAPPER_SOURCE_DIR}/Dockerfile" "${WRAPPER_SOURCE_DIR}"
 
     echo "Building local coinjoin-analysis image ${LOCAL_COINJOIN_ANALYSIS_IMAGE} from ${COINJOIN_ANALYSIS_SOURCE_DIR}..."
     docker build -t "${LOCAL_COINJOIN_ANALYSIS_IMAGE}" -f "${COINJOIN_ANALYSIS_SOURCE_DIR}/docker/analysis.Dockerfile" "${COINJOIN_ANALYSIS_SOURCE_DIR}"
   fi
 
-  WRAPPER_IMAGE="${LOCAL_WRAPPER_IMAGE}"
   BLOCKSCI_IMAGE="${LOCAL_BLOCKSCI_IMAGE}"
   COINJOIN_EMULATOR_IMAGE="${LOCAL_EMULATOR_IMAGE}"
   COINJOIN_ANALYSIS_IMAGE="${LOCAL_COINJOIN_ANALYSIS_IMAGE}"
@@ -95,7 +90,6 @@ if [[ "${IMAGE_MODE}" == "local" ]]; then
   COINJOIN_EMULATOR_IMAGE_PREFIX=""
   COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD=1
 else
-  WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/coinjoin-pipeline:latest}"
   BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-complete:latest}"
   COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
   COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}"
@@ -113,12 +107,11 @@ if [[ "${IMAGE_MODE}" == "local" ]]; then
 fi
 
 echo "Running real Docker --parallel workflow in ${IMAGE_MODE} image mode with logs in ${LOGS_DIR}..."
-echo "Using wrapper image ${WRAPPER_IMAGE}, BlockSci image ${BLOCKSCI_IMAGE}, emulator image ${COINJOIN_EMULATOR_IMAGE}, and analyzer image ${COINJOIN_ANALYSIS_IMAGE}."
+echo "Using BlockSci image ${BLOCKSCI_IMAGE}, emulator image ${COINJOIN_EMULATOR_IMAGE}, and analyzer image ${COINJOIN_ANALYSIS_IMAGE}."
 (
   (
     cd "${PROJECT_DIR}"
     EMULATION_LOGS_DIR="${LOGS_DIR}" \
-    WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
     BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
     BLOCKSCI_PULL_POLICY="${BLOCKSCI_PULL_POLICY}" \
     COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
@@ -128,7 +121,7 @@ echo "Using wrapper image ${WRAPPER_IMAGE}, BlockSci image ${BLOCKSCI_IMAGE}, em
     COINJOIN_EMULATOR_IMAGE_PREFIX="${COINJOIN_EMULATOR_IMAGE_PREFIX}" \
     COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD}" \
     bash runIt.sh --engine wasabi --scenario scenarios/overactive-local.json \
-      --test-values --min-input-count 15 --parallel
+      --min-input-count 15 --parallel
   ) 2>&1 | tee "${RUN_LOG}"
 ) &
 RUN_PID=$!
@@ -239,8 +232,15 @@ if run.get("coinjoin_type") != "wasabi2":
     raise SystemExit(f"FAIL: expected report coinjoin_type wasabi2, got {run.get('coinjoin_type')!r}")
 
 summary = report.get("summary") or {}
-if not baseline:
-    raise SystemExit("FAIL: coinjoin-analysis produced no records")
+baseline_coinjoins = baseline.get("coinjoins") or {}
+if not baseline_coinjoins:
+    raise SystemExit("FAIL: coinjoin-analysis produced no CoinJoin transactions")
+if summary.get("coinjoin_analysis_coinjoins") != len(baseline_coinjoins):
+    raise SystemExit(
+        "FAIL: report baseline count "
+        f"{summary.get('coinjoin_analysis_coinjoins')!r} != "
+        f"{len(baseline_coinjoins)} CoinJoins in coinjoin_tx_info.json"
+    )
 if summary.get("blocksci_detected_coinjoins", 0) < 1:
     raise SystemExit("FAIL: BlockSci detected no CoinJoin transactions")
 if "blocksci_agreement_rate" not in summary:

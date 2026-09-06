@@ -20,6 +20,7 @@ DONE_MARKER="$RUN_WORK/.pbs/blocksci.done"
 on_exit() {{
   status=$?
   trap - EXIT TERM
+  set +e
   if [ "$status" -eq 0 ]; then
     printf 'done\n' > "$DONE_MARKER"
     {upload_done}
@@ -48,12 +49,15 @@ test -d "$RUN_WORK/.pipeline/exporters"
 EXPORTED_MAX_BLOCK="$(find "$RUN_WORK/coinjoin_emulator_data/data/btc-node" -maxdepth 1 -type f -name 'block_*.json' -printf '%f\n' | sed -nE 's/^block_([0-9]+)\.json$/\1/p' | sort -n | tail -n 1)"
 test -n "$EXPORTED_MAX_BLOCK"
 singularity exec \
+  --cleanenv \
   --bind "$RUNS_ROOT:/runs/emulation/logs:rw" \
   --bind "$BITCOIN_DATADIR:/mnt/data:ro" \
   --bind "$RUN_WORK/.pipeline/exporters:/mnt/exporters:ro" \
   --env PBS_RUN_ID="$RUN_ID" --env PBS_EXPORTED_MAX_BLOCK="$EXPORTED_MAX_BLOCK" "$IMAGE" \
   bash -c 'cd "/runs/emulation/logs/$PBS_RUN_ID" && EXPORTED_MAX_BLOCK="$PBS_EXPORTED_MAX_BLOCK" && {command}'
 {report_output_check}
+{analysis_output_check}
 {upload_blocksci}
+{upload_analysis}
 {upload_report}
 {upload_logs}

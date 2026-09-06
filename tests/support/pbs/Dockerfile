@@ -41,6 +41,10 @@ RUN ln -sf /usr/bin/apptainer /usr/local/bin/singularity \
     && mkdir -p /var/spool/pbs /scratch /opt/local-pbs \
     && chmod 1777 /scratch
 
+COPY patch-datastore-race.sh /opt/local-pbs/patch-datastore-race.sh
+RUN chmod 0755 /opt/local-pbs/patch-datastore-race.sh \
+    && /opt/local-pbs/patch-datastore-race.sh
+
 COPY entrypoint.sh /opt/local-pbs/entrypoint.sh
 COPY local_scratch_hook.py /opt/local-pbs/local_scratch_hook.py
 RUN chmod 0755 /opt/local-pbs/entrypoint.sh

@@ -530,7 +530,27 @@ def load_joinmarket_round_labels(path: Path) -> list[JsonObject]:
         data = json.load(file)
     if not isinstance(data, list) or any(not isinstance(item, dict) for item in data):
         raise ValueError(f"JoinMarket round labels must be a JSON list of objects: {path}")
-    return data
+
+    # JoinMarket artifacts keep reconciliation details in
+    # ``destination_matches``. A positive is only the sole match of a
+    # confirmed event; flatten that txid for the existing label consumer.
+    labels: list[JsonObject] = []
+    for item in data:
+        label = dict(item)
+        matches = label.get("destination_matches")
+        label.pop("txid", None)
+        if (
+            label.get("status") == "confirmed"
+            and isinstance(matches, list)
+            and len(matches) == 1
+            and isinstance(matches[0], dict)
+            and matches[0].get("txid")
+        ):
+            label["txid"] = str(matches[0]["txid"])
+            if matches[0].get("block_height") is not None:
+                label["block_height"] = matches[0]["block_height"]
+        labels.append(label)
+    return labels
 
 
 def load_wasabi_round_labels(run_dir: Path, log_paths: list[Path]) -> list[JsonObject]:

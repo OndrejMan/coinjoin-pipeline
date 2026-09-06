@@ -11,6 +11,7 @@ MANIFEST_NAME = "research_manifest.json"
 REPORT_DIR = "coinjoinPipeline_data"
 BASELINE_FILE = "coinjoin-analysis_data/coinjoin_tx_info.json"
 FALSE_CJTXS_FILE = "coinjoin-analysis_data/false_cjtxs.json"
+BYTES_IN_MEGABYTE = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -24,7 +25,7 @@ class RunState:
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        for chunk in iter(lambda: stream.read(BYTES_IN_MEGABYTE), b""):
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -70,6 +71,7 @@ REPORT_INPUT_PATHS = (
     "coinjoin_emulator_data",
     BASELINE_FILE,
     "blocksci_data/config.json",
+    "blocksci-analysis_data/blocksci_analysis.json",
     "coinjoin-mappings_data/coinjoin_mappings.json",
 )
 

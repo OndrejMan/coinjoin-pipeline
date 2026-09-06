@@ -363,7 +363,6 @@ def blocksci_pbs_command(
     joinmarket_min_base_fee: int,
     joinmarket_percentage_fee: float,
     joinmarket_max_depth: int,
-    test_values: bool,
     markdown: bool = True,
     include_report: bool = True,
     blocksci_script: str | None = None,
@@ -399,8 +398,6 @@ def blocksci_pbs_command(
             "--joinmarket-percentage-fee {joinmarket_percentage_fee} "
             "--joinmarket-max-depth {joinmarket_max_depth}",
         )
-    if include_report and test_values:
-        parts[-1] += " --test-values"
     if include_report and markdown:
         parts[-1] += " --markdown"
     return " && ".join(parts).format(
@@ -426,7 +423,6 @@ def blocksci_export_pbs_command(
     joinmarket_min_base_fee: int,
     joinmarket_percentage_fee: float,
     joinmarket_max_depth: int,
-    test_values: bool,
 ) -> str:
     """Build the report-only command used after parallel analysis stages."""
     config = f"/runs/emulation/logs/{run_id}/blocksci_data/config.json"
@@ -441,8 +437,6 @@ def blocksci_export_pbs_command(
         f"--joinmarket-percentage-fee {joinmarket_percentage_fee} "
         f"--joinmarket-max-depth {joinmarket_max_depth} --markdown"
     )
-    if test_values:
-        command += " --test-values"
     return command
 
 

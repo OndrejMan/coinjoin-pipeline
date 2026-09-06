@@ -56,10 +56,10 @@ def address_type_rule(name: str, records: list[JsonObject]) -> JsonObject:
     return rule_result(name, not invalid, ", ".join(observed), expected)
 
 
-def wasabi2_default_input_threshold(block_height: int | None, test_values: bool) -> int:
+def wasabi2_default_input_threshold(block_height: int | None) -> int:
     if block_height is not None and block_height >= WASABI2_THRESHOLD_CHANGE_BLOCK:
         return 20
-    return 20 if test_values else 50
+    return 50
 
 
 def wasabi2_blocksci_denominations() -> set[int]:
@@ -107,7 +107,6 @@ def wasabi2_denomination_ratio(block_height: int | None) -> float:
 def explain_wasabi2_heuristic(
     record: JsonObject,
     min_input_count: int | None = None,
-    test_values: bool = False,
     first_wasabi2_block: int = DEFAULT_FIRST_WASABI2_BLOCK,
 ) -> JsonObject:
     inputs = record.get("inputs", [])
@@ -116,7 +115,7 @@ def explain_wasabi2_heuristic(
     input_threshold = (
         min_input_count
         if min_input_count is not None
-        else wasabi2_default_input_threshold(block_height, test_values)
+        else wasabi2_default_input_threshold(block_height)
     )
     input_threshold_source = "--min-input-count" if min_input_count is not None else "BlockSci default"
     input_addresses = unique_addresses(inputs)
@@ -496,7 +495,6 @@ def add_blocksci_heuristic_explanations(
     records: dict[str, JsonObject],
     coinjoin_type: str,
     min_input_count: int | None = None,
-    test_values: bool = False,
     first_wasabi2_block: int = DEFAULT_FIRST_WASABI2_BLOCK,
     joinmarket_detector: str = DEFAULT_JOINMARKET_DETECTOR,
     joinmarket_min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE,
@@ -508,7 +506,6 @@ def add_blocksci_heuristic_explanations(
             record["blocksci_heuristic_explanation"] = explain_wasabi2_heuristic(
                 record,
                 min_input_count=min_input_count,
-                test_values=test_values,
                 first_wasabi2_block=first_wasabi2_block,
             )
     elif coinjoin_type == "joinmarket" and joinmarket_detector == "definite":

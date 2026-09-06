@@ -7,7 +7,6 @@ import re
 
 
 IMAGE_NAMES = {
-    "pipeline": "ghcr.io/ondrejman/coinjoin-pipeline",
     "emulator": "ghcr.io/ondrejman/coinjoin-emulator",
     "coinjoin_analysis": "ghcr.io/ondrejman/coinjoin-analysis",
     "blocksci": "ghcr.io/ondrejman/blocksci-complete",
@@ -24,7 +23,6 @@ IMAGE_RE = re.compile(
 
 @dataclass(frozen=True)
 class Images:
-    pipeline: str
     emulator: str
     coinjoin_analysis: str
     blocksci: str

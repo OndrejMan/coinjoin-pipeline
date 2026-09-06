@@ -90,7 +90,7 @@ class CommandBuilderTests(unittest.TestCase):
     def test_leading_env_assignments_round_trip_through_render(self) -> None:
         source = (
             "CONTAINER_SOCKET=/run/podman/podman.sock "
-            "WRAPPER_IMAGE=ghcr.io/ondrejman/coinjoin-pipeline:latest "
+            "BLOCKSCI_IMAGE=ghcr.io/ondrejman/blocksci-complete:latest "
             "./runIt.sh container podman full-run \\\n"
             "  --engine joinmarket \\\n"
             "  --analysisPbs"
@@ -100,14 +100,14 @@ class CommandBuilderTests(unittest.TestCase):
             command.env,
             [
                 ("CONTAINER_SOCKET", "/run/podman/podman.sock"),
-                ("WRAPPER_IMAGE", "ghcr.io/ondrejman/coinjoin-pipeline:latest"),
+                ("BLOCKSCI_IMAGE", "ghcr.io/ondrejman/blocksci-complete:latest"),
             ],
         )
         rendered = MODULE.render_command(command)
         self.assertTrue(
             rendered.startswith(
                 "CONTAINER_SOCKET=/run/podman/podman.sock "
-                "WRAPPER_IMAGE=ghcr.io/ondrejman/coinjoin-pipeline:latest "
+                "BLOCKSCI_IMAGE=ghcr.io/ondrejman/blocksci-complete:latest "
                 "coinjoin-pipeline --runtime podman full-run"
             ),
             rendered,
@@ -150,8 +150,50 @@ class CommandBuilderTests(unittest.TestCase):
                 ("--reuse-namespace", None),
                 ("--analysisPbs", None),
                 ("--blocksciPbs", None),
+                ("--mappingsPbs", None),
             ],
         )
+        self.assertEqual(MODULE.validate_command(command).errors, [])
+
+    def test_s3_mappings_and_blocksci_allow_report_resource_overrides(self) -> None:
+        command = MODULE.Command(
+            action="pbs-from-s3",
+            options=[
+                ("--run-id", "run-1"),
+                ("--artifact-uri", "s3://bucket/runs"),
+                ("--s3-endpoint-url", "https://s3.example.test"),
+                ("--s3-credentials-file", "/storage/user/.aws/credentials"),
+                ("--s3-profile", "coinjoin"),
+                ("--engine", "wasabi"),
+                ("--coinjoin-type", "wasabi2"),
+                ("--blocksciPbs", None),
+                ("--mappingsPbs", None),
+                ("--pbs-unified-report-ncpus", "1"),
+            ],
+        )
+
+        self.assertEqual(MODULE.validate_command(command).errors, [])
+
+    def test_validation_accepts_versioned_s3_blocksci_update(self) -> None:
+        command = MODULE.Command(
+            action="pbs-from-s3",
+            options=[
+                ("--engine", "joinmarket"),
+                ("--artifact-uri", "s3://bucket/runs"),
+                ("--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz"),
+                ("--s3-credentials-file", "/storage/user/.aws/credentials"),
+                ("--s3-profile", "coinjoin"),
+                ("--run-id", "mainnet-850100"),
+                ("--blocksciPbs", None),
+                ("--blocksci-workflow", "cached"),
+                ("--blocksci-task", "update"),
+                ("--blocksci-cache-source-run-id", "mainnet-850000"),
+                ("--blocksci-external-bitcoin-datadir", "/storage/user/bitcoin"),
+                ("--blocksci-network", "bitcoin"),
+                ("--blocksci-max-block", "850100"),
+            ],
+        )
+
         self.assertEqual(MODULE.validate_command(command).errors, [])
 
     def test_validation_requires_s3_full_run_transport_and_stages(self) -> None:
@@ -193,9 +235,9 @@ class CommandBuilderTests(unittest.TestCase):
         self.assertTrue(any("--parallel" in error for error in errors))
         self.assertTrue(any("--copy-to-host" in error for error in errors))
 
-    def test_validation_requires_existing_namespace_for_s3_recreate(self) -> None:
+    def test_validation_requires_existing_namespace_for_s3_emulate(self) -> None:
         command = MODULE.Command(
-            action="recreate",
+            action="emulate",
             options=[
                 ("--engine", "wasabi"),
                 ("--driver", "kubernetes"),
@@ -338,6 +380,21 @@ class CommandBuilderTests(unittest.TestCase):
                 for error in errors)
         )
 
+    def test_stage_specific_pbs_resource_requires_matching_stage(self) -> None:
+        command = MODULE.Command(
+            action="full-run",
+            options=[
+                ("--engine", "wasabi"),
+                ("--analysisPbs", None),
+                ("--pbs-analysis-mem", "32gb"),
+                ("--pbs-blocksci-mem", "2tb"),
+            ],
+        )
+        errors = MODULE.validate_command(command).errors
+        self.assertTrue(
+            any("blocksci-specific PBS resources require --blocksciPbs" in error for error in errors)
+        )
+
     def test_mappings_pbs_requires_wasabi_and_wasabi2(self) -> None:
         wrong_engine = MODULE.Command(
             action="full-run",
@@ -417,6 +474,43 @@ class CommandBuilderTests(unittest.TestCase):
         errors = MODULE.validate_command(missing).errors
         self.assertTrue(any("--blocksci-script not found or not a file" in error for error in errors))
 
+    def test_reusable_blocksci_parse_from_s3_is_valid(self) -> None:
+        command = MODULE.Command(
+            action="pbs-from-s3",
+            options=[
+                ("--run-id", "run-1"),
+                ("--artifact-uri", "s3://bucket/runs"),
+                ("--s3-endpoint-url", "https://s3.example.invalid"),
+                ("--s3-credentials-file", "/storage/user/.aws/credentials"),
+                ("--s3-profile", "coinjoin"),
+                ("--engine", "wasabi"),
+                ("--blocksciPbs", None),
+                ("--blocksci-workflow", "reusable"),
+                ("--blocksci-task", "parse"),
+            ],
+        )
+        self.assertEqual(MODULE.validate_command(command).errors, [])
+
+    def test_external_bitcoin_parse_from_s3_is_valid(self) -> None:
+        command = MODULE.Command(
+            action="pbs-from-s3",
+            options=[
+                ("--run-id", "run-1"),
+                ("--artifact-uri", "s3://bucket/runs"),
+                ("--s3-endpoint-url", "https://s3.example.invalid"),
+                ("--s3-credentials-file", "/storage/user/.aws/credentials"),
+                ("--s3-profile", "coinjoin"),
+                ("--engine", "wasabi"),
+                ("--blocksciPbs", None),
+                ("--blocksci-workflow", "reusable"),
+                ("--blocksci-task", "parse"),
+                ("--blocksci-external-bitcoin-datadir", "/storage/external/bitcoin"),
+                ("--blocksci-network", "bitcoin"),
+                ("--blocksci-max-block", "850000"),
+            ],
+        )
+        self.assertEqual(MODULE.validate_command(command).errors, [])
+
     def test_external_analyze_validates_network_and_coinjoin_type_choices(self) -> None:
         valid = MODULE.Command(
             action="external analyze",
@@ -451,7 +545,7 @@ class CommandBuilderTests(unittest.TestCase):
         self.assertEqual(
             set(metadata),
             {
-                "recreate", "clean", "analyze", "export", "coinjoin-analysis", "mappings",
+                "emulate", "clean", "analyze", "export", "coinjoin-analysis", "mappings",
                 "initialize", "full-run", "pbs-from-s3", "runs list", "runs inspect", "runs validate",
                 "scenarios list", "scenarios show", "scenarios validate", "external analyze",
             },
@@ -613,7 +707,7 @@ class CommandBuilderTests(unittest.TestCase):
         command = MODULE.Command(
             action="full-run",
             options=[("--engine", "joinmarket")],
-            env=[("WRAPPER_IMAGE", "example/wrapper:test")],
+            env=[("BLOCKSCI_IMAGE", "example/blocksci:test")],
         )
         completed = mock.Mock(returncode=0)
         with mock.patch.object(MODULE.subprocess, "run", return_value=completed) as run:
@@ -621,7 +715,7 @@ class CommandBuilderTests(unittest.TestCase):
         argv = run.call_args.args[0]
         self.assertEqual(argv[-1], "--dry-run")
         self.assertNotIn("shell", run.call_args.kwargs)
-        self.assertEqual(run.call_args.kwargs["env"]["WRAPPER_IMAGE"], "example/wrapper:test")
+        self.assertEqual(run.call_args.kwargs["env"]["BLOCKSCI_IMAGE"], "example/blocksci:test")
 
     def test_completion_discovers_run_ids_kubeconfig_and_images(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

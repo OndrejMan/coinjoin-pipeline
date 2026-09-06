@@ -19,7 +19,7 @@ except ImportError:
         Blockchain=lambda *_args, **_kwargs: (_ for _ in ()).throw(
             RuntimeError("BlockSci is required for export_blocksci_records integration tests.")
         ),
-        heuristics=types.SimpleNamespace(set_test_values_enabled=lambda *_args, **_kwargs: None),
+        heuristics=types.SimpleNamespace(),
     )
 else:
     _ = _blocksci
@@ -29,6 +29,7 @@ from exporters.heuristics import WASABI2_BLOCKSCI_DENOMINATIONS
 from exporters.markdown_report import render_report
 from exporters.unified_report import (
     SCHEMA_VERSION,
+    build_scenario_checks,
     build_emulator_data,
     build_integration_diagnostics,
     build_report,
@@ -287,7 +288,6 @@ def complete_image_ids():
         "blocksci": "sha256:blocksci-id",
         "coinjoin_analysis": "sha256:analysis-id",
         "coinjoin_emulator": "sha256:emulator-id",
-        "wrapper": "sha256:wrapper-id",
     }
 
 
@@ -296,7 +296,7 @@ def complete_image_digests():
         "blocksci": "ghcr.io/ondrejman/blocksci-complete@sha256:blocksci",
         "coinjoin_analysis": "ghcr.io/ondrejman/coinjoin-analysis@sha256:analysis",
         "coinjoin_emulator": "ghcr.io/ondrejman/coinjoin-emulator@sha256:emulator",
-        "wrapper": "ghcr.io/ondrejman/coinjoin-pipeline@sha256:wrapper",
+        "uploader": "ghcr.io/ondrejman/coinjoin-pipeline-uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     }
 
 
@@ -305,7 +305,8 @@ def complete_image_refs():
         "blocksci": "blocksci:test",
         "coinjoin_analysis": "coinjoin-analysis:test",
         "coinjoin_emulator": "coinjoin-emulator:test",
-        "wrapper": "wrapper:test",
+        "uploader": "uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "unified_report": "python:3.12-slim-bookworm",
     }
 
 
@@ -354,15 +355,14 @@ class UnifiedReportTest(unittest.TestCase):
     def test_run_manifest_records_reproduction_command(self):
         with mock.patch.dict(os.environ, {"REPRODUCTION_COMMAND": "./runIt.sh full-run --engine joinmarket"}):
             manifest = build_run_manifest(
-                Path("/tmp/run"), None, "joinmarket", "joinmarket", 1, False, 0,
+                Path("/tmp/run"), None, "joinmarket", "joinmarket", 1, 0,
                 "definite", 5000, 0.00004, 200000,
             )
         self.assertEqual(manifest["execution"]["reproduction_command"], "./runIt.sh full-run --engine joinmarket")
 
-    def test_parse_args_accepts_test_values(self):
-        args = parse_args(["--test-values"])
-
-        self.assertTrue(args.test_values)
+    def test_parse_args_rejects_removed_test_values(self):
+        with self.assertRaises(SystemExit):
+            parse_args(["--test-values"])
 
     def test_min_input_count_requires_a_positive_integer_or_default(self):
         self.assertIsNone(parse_min_input_count("default"))
@@ -406,8 +406,10 @@ class UnifiedReportTest(unittest.TestCase):
             "coinjoin-analysis:test",
             "--coinjoin-emulator-image",
             "coinjoin-emulator:test",
-            "--wrapper-image",
-            "wrapper:test",
+            "--uploader-image",
+            "uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--unified-report-image",
+            "python:3.12-slim-bookworm",
             "--emulator-git-commit",
             "abc123",
         ])
@@ -415,7 +417,8 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(args.blocksci_image, "blocksci:test")
         self.assertEqual(args.coinjoin_analysis_image, "coinjoin-analysis:test")
         self.assertEqual(args.coinjoin_emulator_image, "coinjoin-emulator:test")
-        self.assertEqual(args.wrapper_image, "wrapper:test")
+        self.assertEqual(args.uploader_image, "uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        self.assertEqual(args.unified_report_image, "python:3.12-slim-bookworm")
         self.assertEqual(args.emulator_git_commit, "abc123")
 
     def test_run_manifest_comparison_reports_changed_provenance(self):
@@ -425,7 +428,6 @@ class UnifiedReportTest(unittest.TestCase):
             "joinmarket",
             "joinmarket",
             1,
-            True,
             0,
             "definite",
             5000,
@@ -434,7 +436,7 @@ class UnifiedReportTest(unittest.TestCase):
             blocksci_image="blocksci:old",
             coinjoin_analysis_image="coinjoin-analysis:old",
             coinjoin_emulator_image="coinjoin-emulator:old",
-            wrapper_image="wrapper:old",
+            uploader_image="uploader:old",
             emulator_git_commit="old-commit",
         )
         current = build_run_manifest(
@@ -443,7 +445,6 @@ class UnifiedReportTest(unittest.TestCase):
             "joinmarket",
             "joinmarket",
             1,
-            True,
             0,
             "possible",
             5000,
@@ -452,7 +453,7 @@ class UnifiedReportTest(unittest.TestCase):
             blocksci_image="blocksci:new",
             coinjoin_analysis_image="coinjoin-analysis:old",
             coinjoin_emulator_image="coinjoin-emulator:old",
-            wrapper_image="wrapper:old",
+            uploader_image="uploader:old",
             emulator_git_commit="old-commit",
         )
 
@@ -474,7 +475,6 @@ class UnifiedReportTest(unittest.TestCase):
                 "wasabi2",
                 "wasabi",
                 1,
-                False,
                 0,
                 "definite",
                 5000,
@@ -539,10 +539,13 @@ class UnifiedReportTest(unittest.TestCase):
             {
                 "scenario_wallet_count": 2,
                 "coinjoin_analysis_wallet_count": 1,
+                "wallet_count_rule": "exact",
                 "wallet_count_matches": False,
                 "coinjoin_analysis_input_sats": 150000,
+                "max_coinjoin_input_sats": 150000,
                 "scenario_initial_funds_sats": 3250000,
                 "input_sats_within_scenario_funds": True,
+                "coinjoin_input_sats_to_funds_ratio": 0.046,
                 "per_wallet_observed_counts": {
                     "wallet-000": {"input_count": 1, "output_count": 3},
                 },
@@ -617,13 +620,13 @@ class UnifiedReportTest(unittest.TestCase):
                 blocksci_image_digest="sha256:blocksci",
                 coinjoin_analysis_image_digest="sha256:analysis",
                 coinjoin_emulator_image_digest="sha256:emulator",
-                wrapper_image_digest="sha256:wrapper",
+                uploader_image_digest="sha256:uploader",
             )
 
         self.assertEqual(report["run_manifest"]["image_digests"]["blocksci"], "sha256:blocksci")
         self.assertEqual(report["run_manifest"]["image_digests"]["coinjoin_analysis"], "sha256:analysis")
         self.assertEqual(report["run_manifest"]["image_digests"]["coinjoin_emulator"], "sha256:emulator")
-        self.assertEqual(report["run_manifest"]["image_digests"]["wrapper"], "sha256:wrapper")
+        self.assertEqual(report["run_manifest"]["image_digests"]["uploader"], "sha256:uploader")
 
     def test_build_report_includes_integration_diagnostics(self):
         diagnostics = {"status": "ok", "problems": [], "images": {}, "chain": {}, "target_txids": {}, "detector": {}}
@@ -1174,7 +1177,7 @@ class UnifiedReportTest(unittest.TestCase):
                         "taker": "jcs-000",
                         "candidate_makers": ["jcs-001", "jcs-002"],
                         "destination_address": "output-a0",
-                        "txid": "txA",
+                        "destination_matches": [{"txid": "txA", "block_height": 0}],
                     },
                     {
                         "round_id": 2,
@@ -1230,6 +1233,48 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(tx["input_owners"], ["wallet-000"])
         self.assertEqual(tx["output_owners"], ["wallet-000"])
         self.assertFalse(emulator_data["transactions"]["txB"]["is_coinjoin"])
+
+    def test_build_emulator_data_reads_reconciled_joinmarket_round_labels(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
+            block_dir.mkdir(parents=True)
+            label_path = (
+                run_dir / "coinjoin_emulator_data" / "data" / "joinmarket_round_events.json"
+            )
+            save_json(
+                label_path,
+                [
+                    {
+                        "round_id": 1,
+                        "status": "confirmed",
+                        "taker": "jcs-000",
+                        "destination_matches": [{"txid": "txA", "block_height": 7}],
+                    }
+                ],
+            )
+            write_producer_label_manifest(
+                run_dir / "coinjoin_emulator_data",
+                "joinmarket",
+                ["joinmarket_round_events.json"],
+                positive_count=1,
+            )
+            save_json(
+                block_dir / "block_7.json",
+                {
+                    "height": 7,
+                    "tx": [
+                        {"txid": "funding", "vin": [{"coinbase": "00"}], "vout": []},
+                        {"txid": "txA", "vin": [{"txid": "funding", "vout": 0}], "vout": []},
+                    ],
+                },
+            )
+
+            emulator_data = build_emulator_data(run_dir, coinjoin_analysis_fixture(), "joinmarket")
+
+        self.assertTrue(emulator_data["label_provenance"]["independent"])
+        self.assertTrue(emulator_data["transactions"]["txA"]["is_coinjoin"])
+        self.assertEqual(emulator_data["summary"]["producer_positive_labels"], 1)
 
     def test_build_emulator_data_rejects_malformed_joinmarket_label_source(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1464,8 +1509,11 @@ class UnifiedReportTest(unittest.TestCase):
                 return FakeCluster(0, 0)
 
         class FakeCoinjoinClusterManager:
+            arguments = None
+
             @staticmethod
-            def create_clustering(**_kwargs):
+            def create_clustering(**kwargs):
+                FakeCoinjoinClusterManager.arguments = kwargs
                 return FakeClusterer()
 
         class FakeClusterBlockchain:
@@ -1494,12 +1542,14 @@ class UnifiedReportTest(unittest.TestCase):
                 },
                 "wasabi2",
                 Path("/tmp/clusters"),
+                min_input_count=10,
             )
         finally:
             unified_report.blocksci = previous_blocksci
 
         self.assertIsNone(error)
         self.assertEqual(predicted, {"known-a": "7"})
+        self.assertEqual(FakeCoinjoinClusterManager.arguments["min_input_count"], 10)
 
     def test_export_blocksci_cluster_assignments_creates_output_parent(self):
         class FakeHeuristic:
@@ -1620,7 +1670,7 @@ class UnifiedReportTest(unittest.TestCase):
 
     def test_wasabi2_default_threshold_fails_small_current_missed_shape(self):
         records = normalize_coinjoin_analysis(coinjoin_analysis_fixture_with_block_height(226))
-        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=None, test_values=True)
+        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=None)
 
         input_count_rule = next(rule for rule in explanation["rules"] if rule["name"] == "input_count")
         self.assertFalse(input_count_rule["passed"])
@@ -1628,7 +1678,7 @@ class UnifiedReportTest(unittest.TestCase):
 
     def test_wasabi2_low_min_input_count_can_pass_input_count_rule(self):
         records = normalize_coinjoin_analysis(coinjoin_analysis_fixture_with_block_height(226))
-        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=1, test_values=True)
+        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=1)
 
         input_count_rule = next(rule for rule in explanation["rules"] if rule["name"] == "input_count")
         self.assertTrue(input_count_rule["passed"])
@@ -1657,7 +1707,7 @@ class UnifiedReportTest(unittest.TestCase):
             ],
         }
 
-        explanation = explain_wasabi2_heuristic(record, min_input_count=1, test_values=True)
+        explanation = explain_wasabi2_heuristic(record, min_input_count=1)
 
         denom_rule = next(rule for rule in explanation["rules"] if rule["name"] == "wasabi2_denominations")
         self.assertIn(5_000_000, WASABI2_BLOCKSCI_DENOMINATIONS)
@@ -1671,14 +1721,14 @@ class UnifiedReportTest(unittest.TestCase):
         record["inputs"][1]["value"] = 6000
         record["outputs"][1]["value"] = 2000
 
-        explanation = explain_wasabi2_heuristic(record, min_input_count=1, test_values=True)
+        explanation = explain_wasabi2_heuristic(record, min_input_count=1)
 
         self.assertIn("input_values_descending", explanation["failed_rules"])
         self.assertIn("output_values_descending", explanation["failed_rules"])
 
     def test_wasabi2_fewer_than_five_unique_addresses_fail(self):
         records = normalize_coinjoin_analysis(coinjoin_analysis_fixture_with_block_height(226))
-        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=1, test_values=True)
+        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=1)
 
         self.assertIn("unique_input_addresses", explanation["failed_rules"])
         self.assertIn("unique_output_addresses", explanation["failed_rules"])
@@ -1866,7 +1916,6 @@ class UnifiedReportTest(unittest.TestCase):
                 blocksci_fixture("txB"),
                 "wasabi2",
                 min_input_count=1,
-                test_values=True,
             )
 
         tx_record = report["transactions"]["txA"]["coinjoin_analysis"]
@@ -1945,7 +1994,6 @@ class UnifiedReportTest(unittest.TestCase):
                 "blocksci": {"status": "ok"},
                 "coinjoin_analysis": {"status": "ok"},
                 "coinjoin_emulator": {"status": "ok"},
-                "wrapper": {"status": "ok"},
             },
             "chain": {
                 "status": "ok",
@@ -1990,7 +2038,6 @@ class UnifiedReportTest(unittest.TestCase):
                 "blocksci": {"status": "ok"},
                 "coinjoin_analysis": {"status": "ok"},
                 "coinjoin_emulator": {"status": "ok"},
-                "wrapper": {"status": "ok"},
             },
             "chain": {
                 "status": "not_ok",
@@ -2038,7 +2085,6 @@ class UnifiedReportTest(unittest.TestCase):
                 blocksci_fixture("txB"),
                 "wasabi2",
                 min_input_count=1,
-                test_values=True,
             )
 
         markdown = render_report(report)
@@ -2273,6 +2319,84 @@ class UnifiedReportTest(unittest.TestCase):
             report = build_report(Path(tmpdir) / "run", {}, {}, "wasabi2")
         self.assertIsNone(report["coinjoin_mappings"])
         self.assertNotIn("mapping_transactions", report["summary"])
+
+
+class ScenarioFundsCheckTest(unittest.TestCase):
+    """The funds bound is per CoinJoin; remixing makes the sum exceed the funding."""
+
+    @staticmethod
+    def _coinjoins(*input_sats):
+        return {
+            f"tx{index}": {"total_input_sats": value, "inputs": [], "outputs": []}
+            for index, value in enumerate(input_sats)
+        }
+
+    def test_remixed_rounds_may_exceed_total_funding(self):
+        checks = build_scenario_checks(
+            {"wallet_count": 2, "total_initial_funds_sats": 1000},
+            self._coinjoins(800, 700),
+        )
+
+        self.assertEqual(checks["coinjoin_analysis_input_sats"], 1500)
+        self.assertEqual(checks["max_coinjoin_input_sats"], 800)
+        self.assertTrue(checks["input_sats_within_scenario_funds"])
+        self.assertEqual(checks["coinjoin_input_sats_to_funds_ratio"], 1.5)
+
+    def test_single_coinjoin_above_funding_fails(self):
+        checks = build_scenario_checks(
+            {"wallet_count": 2, "total_initial_funds_sats": 1000},
+            self._coinjoins(400, 1200),
+        )
+
+        self.assertEqual(checks["max_coinjoin_input_sats"], 1200)
+        self.assertFalse(checks["input_sats_within_scenario_funds"])
+
+    def test_joinmarket_accepts_a_subset_of_the_scenario_wallets(self):
+        """A taker picks a few counterparties per round; unchosen makers never appear."""
+        coinjoins = {
+            "tx0": {
+                "total_input_sats": 100,
+                "inputs": [{"wallet_name": "wallet-000"}, {"wallet_name": "wallet-001"}],
+                "outputs": [],
+            }
+        }
+        checks = build_scenario_checks(
+            {"wallet_count": 10, "total_initial_funds_sats": 1000}, coinjoins, "joinmarket"
+        )
+
+        self.assertEqual(checks["wallet_count_rule"], "subset")
+        self.assertEqual(checks["coinjoin_analysis_wallet_count"], 2)
+        self.assertTrue(checks["wallet_count_matches"])
+
+    def test_wasabi_still_requires_every_wallet(self):
+        coinjoins = {
+            "tx0": {
+                "total_input_sats": 100,
+                "inputs": [{"wallet_name": "wallet-000"}],
+                "outputs": [],
+            }
+        }
+        checks = build_scenario_checks(
+            {"wallet_count": 10, "total_initial_funds_sats": 1000}, coinjoins, "wasabi2"
+        )
+
+        self.assertEqual(checks["wallet_count_rule"], "exact")
+        self.assertFalse(checks["wallet_count_matches"])
+
+    def test_joinmarket_without_any_observed_wallet_fails(self):
+        checks = build_scenario_checks(
+            {"wallet_count": 10, "total_initial_funds_sats": 1000},
+            self._coinjoins(100),
+            "joinmarket",
+        )
+
+        self.assertFalse(checks["wallet_count_matches"])
+
+    def test_without_scenario_funds_the_check_is_undefined(self):
+        checks = build_scenario_checks(None, self._coinjoins(400))
+
+        self.assertIsNone(checks["input_sats_within_scenario_funds"])
+        self.assertIsNone(checks["coinjoin_input_sats_to_funds_ratio"])
 
 
 if __name__ == "__main__":

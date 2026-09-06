@@ -1,0 +1,38 @@
+action: pbs-from-s3
+engine: joinmarket
+coinjoin_type: joinmarket
+
+# Must be the successful cache-producing run from metacentrum-mainnet-s3-blocks-parse.yaml.
+run_id: mainnet-s3-archive-900000
+
+images:
+  version: latest
+
+artifacts:
+  backend: s3
+  uri: s3://coinjoin-thesis/runs
+  endpoint_url: https://s3.cl4.du.cesnet.cz
+  credentials_file: /storage/brno2/home/<login>/.aws/credentials
+  profile: coinjoin
+
+stages:
+  blocksci: true
+
+blocksci:
+  workflow: cached
+  task: external
+  # Object produced by Dumplings + coinjoin-analysis parse_dumplings.py.
+  external_baseline_uri: s3://xman-coinjoin/dumplings/joinmarket/coinjoin_tx_info.json
+
+joinmarket:
+  detector: definite
+  min_base_fee: 5000
+  percentage_fee: 0.00004
+  max_depth: 200000
+
+pbs:
+  blocksci:
+    ncpus: 8
+    mem: 64gb
+    scratch: 2tb
+    walltime: "24:00:00"

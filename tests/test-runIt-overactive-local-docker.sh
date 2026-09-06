@@ -19,20 +19,24 @@ if [[ $# -gt 1 || ( "${IMAGE_MODE}" != "upstream" && "${IMAGE_MODE}" != "local" 
 fi
 
 LOCAL_TAG="${LOCAL_TAG:-coinjoin-pipeline-local}"
-LOCAL_WRAPPER_IMAGE="${LOCAL_WRAPPER_IMAGE:-coinjoin-pipeline:${LOCAL_TAG}}"
 LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE:-blocksci-cj:${LOCAL_TAG}}"
 LOCAL_BLOCKSCI_IMAGE="${LOCAL_BLOCKSCI_IMAGE:-blocksci-complete:${LOCAL_TAG}}"
 LOCAL_EMULATOR_IMAGE="${LOCAL_EMULATOR_IMAGE:-coinjoin-emulator:${LOCAL_TAG}}"
 LOCAL_COINJOIN_ANALYSIS_IMAGE="${LOCAL_COINJOIN_ANALYSIS_IMAGE:-coinjoin-analysis:${LOCAL_TAG}}"
-WRAPPER_SOURCE_DIR="${WRAPPER_SOURCE_DIR:-${PROJECT_DIR}}"
 BLOCKSCI_SOURCE_DIR="${BLOCKSCI_SOURCE_DIR:-${REPO_ROOT}/blocksci}"
 EMULATOR_SOURCE_DIR="${EMULATOR_SOURCE_DIR:-${REPO_ROOT}/coinjoin-emulator}"
 COINJOIN_ANALYSIS_SOURCE_DIR="${COINJOIN_ANALYSIS_SOURCE_DIR:-${REPO_ROOT}/coinjoin-analysis}"
 LOCAL_IMAGES_PREBUILT="${LOCAL_IMAGES_PREBUILT:-0}"
+COMPOSE_PROJECT="cjp-overactive-local-${RANDOM}"
+
+stop_blocksci() {
+  docker compose -f "${PROJECT_DIR}/pipeline/compose.yaml" -p "${COMPOSE_PROJECT}" \
+    stop blocksci >/dev/null 2>&1 || true
+}
 
 cleanup() {
   if [[ -n "${RUN_PID}" ]] && kill -0 "${RUN_PID}" >/dev/null 2>&1; then
-    docker stop blocksci_analyzer >/dev/null 2>&1 || true
+    stop_blocksci
     wait "${RUN_PID}" >/dev/null 2>&1 || true
   fi
   rm -f "${BEFORE_FILE}" "${AFTER_FILE}" "${RUN_LOG}"
@@ -73,14 +77,11 @@ if [[ "${IMAGE_MODE}" == "local" ]]; then
     echo "Building local CoinJoin emulator image ${LOCAL_EMULATOR_IMAGE} from ${EMULATOR_SOURCE_DIR}..."
     docker build -t "${LOCAL_EMULATOR_IMAGE}" "${EMULATOR_SOURCE_DIR}"
 
-    echo "Building local wrapper image ${LOCAL_WRAPPER_IMAGE} from ${WRAPPER_SOURCE_DIR}..."
-    docker build -t "${LOCAL_WRAPPER_IMAGE}" -f "${WRAPPER_SOURCE_DIR}/Dockerfile" "${WRAPPER_SOURCE_DIR}"
 
     echo "Building local coinjoin-analysis image ${LOCAL_COINJOIN_ANALYSIS_IMAGE} from ${COINJOIN_ANALYSIS_SOURCE_DIR}..."
     docker build -t "${LOCAL_COINJOIN_ANALYSIS_IMAGE}" -f "${COINJOIN_ANALYSIS_SOURCE_DIR}/docker/analysis.Dockerfile" "${COINJOIN_ANALYSIS_SOURCE_DIR}"
   fi
 
-  WRAPPER_IMAGE="${LOCAL_WRAPPER_IMAGE}"
   BLOCKSCI_IMAGE="${LOCAL_BLOCKSCI_IMAGE}"
   COINJOIN_EMULATOR_IMAGE="${LOCAL_EMULATOR_IMAGE}"
   COINJOIN_ANALYSIS_IMAGE="${LOCAL_COINJOIN_ANALYSIS_IMAGE}"
@@ -90,7 +91,6 @@ if [[ "${IMAGE_MODE}" == "local" ]]; then
   COINJOIN_EMULATOR_IMAGE_PREFIX=""
   COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD=1
 else
-  WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/coinjoin-pipeline:latest}"
   BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-complete:latest}"
   COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
   COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}"
@@ -108,12 +108,11 @@ if [[ "${IMAGE_MODE}" == "local" ]]; then
 fi
 
 echo "Running real Docker workflow in ${IMAGE_MODE} image mode with logs in ${LOGS_DIR}..."
-echo "Using wrapper image ${WRAPPER_IMAGE}, BlockSci image ${BLOCKSCI_IMAGE}, emulator image ${COINJOIN_EMULATOR_IMAGE}, and analyzer image ${COINJOIN_ANALYSIS_IMAGE}."
+echo "Using BlockSci image ${BLOCKSCI_IMAGE}, emulator image ${COINJOIN_EMULATOR_IMAGE}, and analyzer image ${COINJOIN_ANALYSIS_IMAGE}."
 (
   (
     cd "${PROJECT_DIR}"
     EMULATION_LOGS_DIR="${LOGS_DIR}" \
-    WRAPPER_IMAGE="${WRAPPER_IMAGE}" \
     BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
     BLOCKSCI_PULL_POLICY="${BLOCKSCI_PULL_POLICY}" \
     COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
@@ -122,8 +121,9 @@ echo "Using wrapper image ${WRAPPER_IMAGE}, BlockSci image ${BLOCKSCI_IMAGE}, em
     COINJOIN_EMULATOR_PULL_POLICY="${COINJOIN_EMULATOR_PULL_POLICY}" \
     COINJOIN_EMULATOR_IMAGE_PREFIX="${COINJOIN_EMULATOR_IMAGE_PREFIX}" \
     COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD}" \
+    COINJOIN_COMPOSE_PROJECT="${COMPOSE_PROJECT}" \
     bash runIt.sh --engine wasabi --scenario scenarios/overactive-local.json \
-      --test-values --min-input-count 15
+      --min-input-count 15
   ) 2>&1 | tee "${RUN_LOG}"
 ) &
 RUN_PID=$!
@@ -139,7 +139,7 @@ for ((elapsed = 0; elapsed < RUN_TIMEOUT_SECONDS; elapsed++)); do
     grep -q "http://127.0.0.1:8888/tree?token" "${RUN_LOG}"; then
     echo "FAIL: noninteractive runIt.sh launched the BlockSci Jupyter server" >&2
     echo "Expected BLOCKSCI_LAUNCH_JUPYTER=0 to make analysis exit after exports." >&2
-    docker stop blocksci_analyzer >/dev/null 2>&1 || true
+    stop_blocksci
     wait "${RUN_PID}" >/dev/null 2>&1 || true
     RUN_PID=""
     exit 1
@@ -150,7 +150,7 @@ done
 
 if [[ "${run_finished}" == "false" ]] && kill -0 "${RUN_PID}" >/dev/null 2>&1; then
   echo "FAIL: runIt.sh did not exit within ${RUN_TIMEOUT_SECONDS}s" >&2
-  docker stop blocksci_analyzer >/dev/null 2>&1 || true
+  stop_blocksci
   wait "${RUN_PID}" >/dev/null 2>&1 || true
   RUN_PID=""
   exit 1

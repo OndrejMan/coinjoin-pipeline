@@ -1,0 +1,61 @@
+#!/bin/bash
+#PBS -N blocksci-mainnet-coinjoin
+#PBS -l select=1:ncpus=8:mem=64gb:scratch_local=50gb
+#PBS -l walltime=24:00:00
+#PBS -j oe
+
+set -euo pipefail
+
+# Fill these paths after logging into MetaCentrum.
+# BTC_DATADIR must be a full, unpruned Bitcoin Core mainnet datadir containing blocks/.
+PROJECT_DIR="${PROJECT_DIR:-/storage/LOCATION/home/LOGIN/diplomka}"
+BTC_DATADIR="${BTC_DATADIR:-/storage/LOCATION/home/LOGIN/bitcoin-mainnet}"
+ANALYSIS_DIR="${ANALYSIS_DIR:-/storage/LOCATION/home/LOGIN/blocksci-mainnet-analysis}"
+IMAGE="${IMAGE:-docker://ghcr.io/ondrejman/blocksci-complete:latest}"
+# Optional smoke-test bounds. Use a separate ANALYSIS_DIR for a bounded parse;
+# a config generated with MAX_BLOCK cannot later be used as a full-chain index.
+MAX_BLOCK="${MAX_BLOCK:-}"
+SCAN_END_HEIGHT="${SCAN_END_HEIGHT:-}"
+
+CONFIG="${ANALYSIS_DIR}/config.json"
+BLOCKSCI_DATA="${ANALYSIS_DIR}/blocksci_data"
+OUTPUT_DIR="${ANALYSIS_DIR}/results"
+
+mkdir -p "${ANALYSIS_DIR}" "${BLOCKSCI_DATA}" "${OUTPUT_DIR}"
+
+export TMPDIR="${SCRATCHDIR:-/tmp}"
+export SINGULARITY_TMPDIR="${SCRATCHDIR:-/tmp}"
+export SINGULARITY_CACHEDIR="${SCRATCHDIR:-${ANALYSIS_DIR}/singularity-cache}"
+
+singularity exec \
+  --bind "${BTC_DATADIR}:/mnt/data:ro" \
+  --bind "${ANALYSIS_DIR}:/mnt/anal:rw" \
+  --bind "${PROJECT_DIR}:/mnt/project:ro" \
+  "${IMAGE}" \
+  bash -lc "
+    set -euo pipefail
+    if [ ! -f /mnt/anal/config.json ]; then
+      parser_args=(/mnt/anal/config.json generate-config bitcoin /mnt/anal/blocksci_data --disk /mnt/data)
+      if [ -n "\${MAX_BLOCK}" ]; then
+        parser_args+=(--max-block "\${MAX_BLOCK}")
+      fi
+      blocksci_parser "\${parser_args[@]}"
+    fi
+    blocksci_parser /mnt/anal/config.json update
+    scan_args=()
+    if [ -n "\${SCAN_END_HEIGHT}" ]; then
+      scan_args+=(--end-height "\${SCAN_END_HEIGHT}")
+    fi
+    python3 /mnt/project/coinjoin-pipeline/scripts/metacentrum_mainnet_coinjoin_scan.py \
+      --config /mnt/anal/config.json \
+      --coinjoin-type joinmarket \
+      --output /mnt/anal/results/joinmarket-mainnet-summary.json \
+      "\${scan_args[@]}"
+  "
+
+echo "Results:"
+echo "${OUTPUT_DIR}/joinmarket-mainnet-summary.json"
+
+if command -v clean_scratch >/dev/null 2>&1; then
+  clean_scratch
+fi

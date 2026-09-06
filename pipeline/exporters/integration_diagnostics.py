@@ -18,7 +18,12 @@ from exporters.common import (
 )
 from exporters.normalization import block_height_from_path, is_coinbase_tx
 
-IMAGE_COMPONENTS = ("blocksci", "coinjoin_analysis", "coinjoin_emulator", "wrapper")
+# Only the images the report can actually inspect. The uploader and the PBS
+# unified-report image are pulled by Kubernetes and Singularity, never by the
+# daemon this code can reach, so `docker image inspect` would always fail and
+# every run would report two spurious provenance problems. Their references and
+# digests still reach the manifest through build_run_manifest.
+IMAGE_COMPONENTS = ("blocksci", "coinjoin_analysis", "coinjoin_emulator")
 TARGET_DETAIL_LIMIT = 100
 
 

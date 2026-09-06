@@ -9,12 +9,24 @@ import sys
 from pathlib import Path
 
 from exporters.artifact_paths import coinjoin_analysis_dir, mappings_dir, report_dir
-from exporters.blocksci_export import blocksci, export_blocksci_cluster_assignments, export_blocksci_records
+from exporters.blocksci_export.analysis import (
+    detector_parameters as blocksci_detector_parameters,
+)
+from exporters.blocksci_export.analysis import (
+    load_analysis as load_blocksci_analysis,
+)
+from exporters.blocksci_export.detector import (
+    BLOCKSCI_IMPORT_ERROR,
+    blocksci,
+    export_blocksci_cluster_assignments,
+    export_blocksci_records,
+)
 from exporters.common import (
     DEFAULT_JOINMARKET_DETECTOR,
     DEFAULT_JOINMARKET_MAX_DEPTH,
     DEFAULT_JOINMARKET_MIN_BASE_FEE,
     DEFAULT_JOINMARKET_PERCENTAGE_FEE,
+    digest_from_reference,
     load_json,
     save_json,
 )
@@ -91,7 +103,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Override BlockSci detector min input count; use 'default' for BlockSci's default.",
     )
-    parser.add_argument("--test-values", action="store_true", help="Use BlockSci test heuristic thresholds.")
     parser.add_argument(
         "--joinmarket-detector",
         choices=("possible", "definite"),
@@ -123,7 +134,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--coinjoin-emulator-image",
         default=os.environ.get("COINJOIN_EMULATOR_IMAGE") or os.environ.get("EMULATOR_IMAGE"),
     )
-    parser.add_argument("--wrapper-image", default=os.environ.get("WRAPPER_IMAGE"))
+    parser.add_argument("--uploader-image", default=os.environ.get("COINJOIN_UPLOADER_IMAGE"))
+    parser.add_argument(
+        "--unified-report-image", default=os.environ.get("COINJOIN_UNIFIED_REPORT_IMAGE")
+    )
     parser.add_argument("--blocksci-image-digest", default=os.environ.get("BLOCKSCI_IMAGE_DIGEST"))
     parser.add_argument("--blocksci-image-id", default=os.environ.get("BLOCKSCI_IMAGE_ID"))
     parser.add_argument(
@@ -139,8 +153,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--coinjoin-emulator-image-id",
         default=os.environ.get("COINJOIN_EMULATOR_IMAGE_ID") or os.environ.get("EMULATOR_IMAGE_ID"),
     )
-    parser.add_argument("--wrapper-image-digest", default=os.environ.get("WRAPPER_IMAGE_DIGEST"))
-    parser.add_argument("--wrapper-image-id", default=os.environ.get("WRAPPER_IMAGE_ID"))
     parser.add_argument("--emulator-git-commit", default=os.environ.get("COINJOIN_EMULATOR_GIT_COMMIT"))
     parser.add_argument(
         "--cluster-output-dir",
@@ -151,6 +163,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--skip-clustering",
         action="store_true",
         help="Skip BlockSci cluster assignment export and only report detection metrics.",
+    )
+    parser.add_argument(
+        "--blocksci-analysis",
+        type=Path,
+        help="Consume a precomputed BlockSci analysis artifact instead of querying BlockSci.",
     )
     parser.add_argument(
         "--markdown",
@@ -191,61 +208,98 @@ def main(argv: list[str] | None = None) -> int:
         save_json(output_dir / "emulator_data.json", emulator_data)
 
     min_input_count = args.min_input_count
-    first_wasabi2_block = load_first_wasabi2_block(config_path)
-
-    blocksci.heuristics.set_test_values_enabled(args.test_values)
-    blocksci_records, blocksci_skipped_txids = export_blocksci_records(
-        config_path,
-        args.coinjoin_type,
-        min_input_count,
-        joinmarket_detector=args.joinmarket_detector,
-        joinmarket_min_base_fee=args.joinmarket_min_base_fee,
-        joinmarket_percentage_fee=args.joinmarket_percentage_fee,
-        joinmarket_max_depth=args.joinmarket_max_depth,
-    )
-    integration_diagnostics = None
-    if args.mode == "emulator":
-        integration_diagnostics = build_integration_diagnostics(
-            run_dir,
-            config_path,
-            blocksci,
-            blocksci_records,
-            args.coinjoin_type,
-            {
-                "blocksci": args.blocksci_image,
-                "coinjoin_analysis": args.coinjoin_analysis_image,
-                "coinjoin_emulator": args.coinjoin_emulator_image,
-                "wrapper": args.wrapper_image,
-            },
-            image_ids={
-                "blocksci": args.blocksci_image_id,
-                "coinjoin_analysis": args.coinjoin_analysis_image_id,
-                "coinjoin_emulator": args.coinjoin_emulator_image_id,
-                "wrapper": args.wrapper_image_id,
-            },
-            image_digests={
-                "blocksci": args.blocksci_image_digest,
-                "coinjoin_analysis": args.coinjoin_analysis_image_digest,
-                "coinjoin_emulator": args.coinjoin_emulator_image_digest,
-                "wrapper": args.wrapper_image_digest,
-            },
+    if args.blocksci_analysis is not None:
+        analysis_path = args.blocksci_analysis
+        if not analysis_path.is_absolute():
+            analysis_path = run_dir / analysis_path
+        analysis_args = argparse.Namespace(
+            coinjoin_type=args.coinjoin_type,
+            min_input_count=min_input_count,
             joinmarket_detector=args.joinmarket_detector,
             joinmarket_min_base_fee=args.joinmarket_min_base_fee,
             joinmarket_percentage_fee=args.joinmarket_percentage_fee,
             joinmarket_max_depth=args.joinmarket_max_depth,
         )
-    predicted_address_clusters = None
-    cluster_export_error = None
-    if not args.skip_clustering:
-        cluster_output_dir = args.cluster_output_dir or (
-            config_path.parent / "clustering" / f"{args.coinjoin_type}_emulator_report"
+        analysis = load_blocksci_analysis(
+            analysis_path,
+            run_id=run_dir.name,
+            expected_parameters=blocksci_detector_parameters(analysis_args),
         )
-        predicted_address_clusters, cluster_export_error = export_blocksci_cluster_assignments(
+        first_wasabi2_block = analysis.get("first_wasabi2_block")
+        blocksci_records = analysis["records"]
+        blocksci_skipped_txids = analysis["skipped_txids"]
+        integration_diagnostics = analysis.get("integration_diagnostics")
+        predicted_address_clusters = analysis.get("predicted_address_clusters")
+        cluster_export_error = analysis.get("cluster_export_error")
+        if args.skip_clustering:
+            predicted_address_clusters = None
+            cluster_export_error = "Clustering was explicitly skipped during report assembly."
+    else:
+        first_wasabi2_block = load_first_wasabi2_block(config_path)
+        if blocksci is None:
+            detail = (
+                f" Original import error: {BLOCKSCI_IMPORT_ERROR!r}."
+                if BLOCKSCI_IMPORT_ERROR is not None
+                else ""
+            )
+            raise RuntimeError(
+                "BlockSci Python module is required when no precomputed "
+                f"--blocksci-analysis artifact is provided.{detail}"
+            ) from BLOCKSCI_IMPORT_ERROR
+        blocksci_records, blocksci_skipped_txids = export_blocksci_records(
             config_path,
-            emulator_data,
             args.coinjoin_type,
-            cluster_output_dir,
+            min_input_count,
+            joinmarket_detector=args.joinmarket_detector,
+            joinmarket_min_base_fee=args.joinmarket_min_base_fee,
+            joinmarket_percentage_fee=args.joinmarket_percentage_fee,
+            joinmarket_max_depth=args.joinmarket_max_depth,
         )
+        integration_diagnostics = None
+        if args.mode == "emulator":
+            integration_diagnostics = build_integration_diagnostics(
+                run_dir,
+                config_path,
+                blocksci,
+                blocksci_records,
+                args.coinjoin_type,
+                {
+                    "blocksci": args.blocksci_image,
+                    "coinjoin_analysis": args.coinjoin_analysis_image,
+                    "coinjoin_emulator": args.coinjoin_emulator_image,
+                    "uploader": args.uploader_image,
+                    "unified_report": args.unified_report_image,
+                },
+                image_ids={
+                    "blocksci": args.blocksci_image_id,
+                    "coinjoin_analysis": args.coinjoin_analysis_image_id,
+                    "coinjoin_emulator": args.coinjoin_emulator_image_id,
+                },
+                image_digests={
+                    "blocksci": args.blocksci_image_digest,
+                    "coinjoin_analysis": args.coinjoin_analysis_image_digest,
+                    "coinjoin_emulator": args.coinjoin_emulator_image_digest,
+                    "uploader": digest_from_reference(args.uploader_image),
+                    "unified_report": digest_from_reference(args.unified_report_image),
+                },
+                joinmarket_detector=args.joinmarket_detector,
+                joinmarket_min_base_fee=args.joinmarket_min_base_fee,
+                joinmarket_percentage_fee=args.joinmarket_percentage_fee,
+                joinmarket_max_depth=args.joinmarket_max_depth,
+            )
+        predicted_address_clusters = None
+        cluster_export_error = None
+        if not args.skip_clustering:
+            cluster_output_dir = args.cluster_output_dir or (
+                config_path.parent / "clustering" / f"{args.coinjoin_type}_emulator_report"
+            )
+            predicted_address_clusters, cluster_export_error = export_blocksci_cluster_assignments(
+                config_path,
+                emulator_data,
+                args.coinjoin_type,
+                cluster_output_dir,
+                min_input_count=args.min_input_count,
+            )
     output_path = output_dir / args.output_name
     previous_run_manifest = None
     if output_path.exists():
@@ -260,7 +314,6 @@ def main(argv: list[str] | None = None) -> int:
         args.coinjoin_type,
         scenario,
         min_input_count=min_input_count,
-        test_values=args.test_values,
         first_wasabi2_block=first_wasabi2_block,
         emulator_data=emulator_data,
         predicted_address_clusters=predicted_address_clusters,
@@ -274,11 +327,16 @@ def main(argv: list[str] | None = None) -> int:
         blocksci_image=args.blocksci_image,
         coinjoin_analysis_image=args.coinjoin_analysis_image,
         coinjoin_emulator_image=args.coinjoin_emulator_image,
-        wrapper_image=args.wrapper_image,
+        uploader_image=args.uploader_image,
+        unified_report_image=args.unified_report_image,
         blocksci_image_digest=args.blocksci_image_digest,
         coinjoin_analysis_image_digest=args.coinjoin_analysis_image_digest,
         coinjoin_emulator_image_digest=args.coinjoin_emulator_image_digest,
-        wrapper_image_digest=args.wrapper_image_digest,
+        # Same derivation as the diagnostics block above; passing it explicitly
+        # keeps both call sites in one place instead of relying on the manifest
+        # builder repeating the fallback.
+        uploader_image_digest=digest_from_reference(args.uploader_image),
+        unified_report_image_digest=digest_from_reference(args.unified_report_image),
         emulator_git_commit=args.emulator_git_commit,
         previous_run_manifest=previous_run_manifest,
         integration_diagnostics=integration_diagnostics,

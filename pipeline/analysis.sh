@@ -5,8 +5,8 @@ if [[ -z "${HOST_CLIENT_DIR:-}" ]]; then
 	HOST_CLIENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/client" && pwd)"
 fi
 
-export SCENARIOS_DIR="${HOST_CLIENT_DIR}/scenarios"
-export NOTEBOOKS_DIR="${HOST_CLIENT_DIR}/notebooks"
+export SCENARIOS_DIR="${SCENARIOS_DIR:-${HOST_CLIENT_DIR}/scenarios}"
+export NOTEBOOKS_DIR="${NOTEBOOKS_DIR:-${HOST_CLIENT_DIR}/notebooks}"
 HOST_ROOT_DIR="$(dirname "${HOST_CLIENT_DIR}")"
 export EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR:-${HOST_ROOT_DIR}/emulation_logs}"
 export EXPORTERS_DIR="${EXPORTERS_DIR:-${HOST_ROOT_DIR}/exporters}"
@@ -37,10 +37,11 @@ else
 	COMPOSE_CMD=("${CONTAINER_RUNTIME}" "compose")
 fi
 
-"${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p blocksci-emulator --profile analysis rm -sf blocksci coinjoin_analysis
-"${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p blocksci-emulator --profile analysis up --build --force-recreate
+PROJECT_NAME="${COINJOIN_COMPOSE_PROJECT:-blocksci-emulator}"
+"${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile analysis rm -sf blocksci coinjoin_analysis
+"${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile analysis up --build --force-recreate
 
-BLOCKSCI_CONTAINER_ID="$("${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p blocksci-emulator --profile analysis ps -a -q blocksci)"
+BLOCKSCI_CONTAINER_ID="$("${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile analysis ps -a -q blocksci)"
 if [[ -z "${BLOCKSCI_CONTAINER_ID}" ]]; then
 	echo "ERROR: BlockSci analysis container was not created." >&2
 	exit 1

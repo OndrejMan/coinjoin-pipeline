@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=tests/support/local-images.sh
+source "${SCRIPT_DIR}/support/local-images.sh"
 TMP_DIR="$(mktemp -d)"
 
 CLUSTER_NAME="${CLUSTER_NAME:-coinjoin-k3d-$$}"
@@ -15,34 +17,28 @@ WAIT_TIMEOUT="${WAIT_TIMEOUT:-180s}"
 # the docker path takes.
 EMULATION_TIMEOUT="${EMULATION_TIMEOUT:-90m}"
 SCENARIO="${SCENARIO:-overactive-local.json}"
-ACTION="${ACTION:-recreate}"
+ACTION="${ACTION:-emulate}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
-WRAPPER_IMAGE="${WRAPPER_IMAGE:-ghcr.io/ondrejman/coinjoin-pipeline:latest}"
 EMULATOR_IMAGE="${EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
 # The wrapper reads COINJOIN_EMULATOR_IMAGE. Keep it aligned with the image
 # selected for this test so local-image validation does not fall back to GHCR.
 COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-${EMULATOR_IMAGE}}"
 IMAGE_PREFIX="${IMAGE_PREFIX:-ghcr.io/ondrejman/}"
+COINJOIN_EMULATOR_SOURCE_DIR="${COINJOIN_EMULATOR_SOURCE_DIR:-${PROJECT_DIR}/../coinjoin-emulator}"
+BTC_NODE_IMAGE_REQUESTED="${COINJOIN_BTC_NODE_IMAGE:-}"
+BTC_NODE_IMAGE="${BTC_NODE_IMAGE_REQUESTED:-coinjoin-btc-node-k3d:${CLUSTER_NAME}}"
+BUILT_BTC_NODE_IMAGE=0
 KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
 PRE_CLEANUP="${PRE_CLEANUP:-1}"
 PRE_CLEANUP_PREFIX="${PRE_CLEANUP_PREFIX-coinjoin-k3d-}"
 PRE_CLEANUP_CONTAINERS="${PRE_CLEANUP_CONTAINERS:-1}"
 
-if [[ -z "${CONTAINER_KUBE_HOST:-}" ]]; then
-  if [[ "${CONTAINER_RUNTIME}" == "docker" ]]; then
-    CONTAINER_KUBE_HOST="$("${CONTAINER_RUNTIME}" network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || true)"
-    CONTAINER_KUBE_HOST="${CONTAINER_KUBE_HOST:-host.docker.internal}"
-  else
-    CONTAINER_KUBE_HOST="host.containers.internal"
-  fi
-fi
-export WRAPPER_IMAGE
 export COINJOIN_EMULATOR_IMAGE
-export KUBERNETES_CONTROL_IP="${CONTAINER_KUBE_HOST}"
 export KUBERNETES_COPY_TO_HOST_DIR="${KUBERNETES_COPY_TO_HOST_DIR:-${TMP_DIR}/btc-data}"
 
 HOST_KUBECONFIG="${TMP_DIR}/kubeconfig-host.yaml"
 CONTAINER_KUBECONFIG="${TMP_DIR}/kubeconfig-container.yaml"
+ANONYMOUS_DOCKER_CONFIG="${TMP_DIR}/docker-anonymous"
 
 dump_kubernetes_diagnostics() {
   if [[ ! -s "${HOST_KUBECONFIG}" ]]; then
@@ -70,6 +66,9 @@ cleanup() {
   else
     echo "KEEP_CLUSTER=1; leaving k3d cluster '${CLUSTER_NAME}' running."
     echo "Host kubeconfig: ${HOST_KUBECONFIG}"
+  fi
+  if [[ "${BUILT_BTC_NODE_IMAGE}" == "1" ]]; then
+    docker image rm "${BTC_NODE_IMAGE}" >/dev/null 2>&1 || true
   fi
   if [[ "${KEEP_CLUSTER}" != "1" ]]; then
     rm -rf "${TMP_DIR}"
@@ -165,32 +164,24 @@ podman_socket() {
 rewrite_kubeconfig_for_container() {
   local source_kubeconfig="$1"
   local target_kubeconfig="$2"
-  local api_server
-  local api_port
+  local api_host="$3"
+  local api_port="$4"
   local cluster_name
 
   cp "${source_kubeconfig}" "${target_kubeconfig}"
 
-  api_server="$(kubectl --kubeconfig "${source_kubeconfig}" config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
-  api_port="${api_server##*:}"
-  api_port="${api_port%%/*}"
   cluster_name="$(kubectl --kubeconfig "${target_kubeconfig}" config view --minify -o jsonpath='{.contexts[0].context.cluster}')"
-
-  if [[ -z "${api_port}" || "${api_port}" == "${api_server}" ]]; then
-    echo "FAIL: could not extract API server port from kubeconfig server: ${api_server}" >&2
-    exit 1
-  fi
 
   kubectl --kubeconfig "${target_kubeconfig}" \
     config set-cluster "${cluster_name}" \
-    --server="https://${CONTAINER_KUBE_HOST}:${api_port}" \
+    --server="https://${api_host}:${api_port}" \
     --insecure-skip-tls-verify=true >/dev/null
   kubectl --kubeconfig "${target_kubeconfig}" \
     config unset "clusters.${cluster_name}.certificate-authority-data" >/dev/null 2>&1 || true
   kubectl --kubeconfig "${target_kubeconfig}" \
     config unset "clusters.${cluster_name}.certificate-authority" >/dev/null 2>&1 || true
 
-  echo "Container kubeconfig API server: https://${CONTAINER_KUBE_HOST}:${api_port}"
+  echo "Container kubeconfig API server: https://${api_host}:${api_port}"
 }
 
 require_command k3d
@@ -210,7 +201,33 @@ pull_image() {
   fi
 
   echo "Pulling latest artifact image: ${image}"
-  "${CONTAINER_RUNTIME}" pull "${image}"
+  if [[ "${CONTAINER_RUNTIME}" == "docker" ]]; then
+    # Public GHCR pulls must not inherit a stale or under-scoped credential
+    # from the developer's normal Docker config. k3d/containerd pulls these
+    # same images anonymously inside the cluster.
+    mkdir -p "${ANONYMOUS_DOCKER_CONFIG}"
+    env DOCKER_CONFIG="${ANONYMOUS_DOCKER_CONFIG}" docker pull "${image}"
+  else
+    "${CONTAINER_RUNTIME}" pull "${image}"
+  fi
+}
+
+prepare_btc_node_image() {
+  if docker image inspect "${BTC_NODE_IMAGE}" >/dev/null 2>&1; then
+    echo "Using existing btc-node image: ${BTC_NODE_IMAGE}"
+    return 0
+  fi
+  if [[ -n "${BTC_NODE_IMAGE_REQUESTED}" ]]; then
+    echo "FAIL: requested local btc-node image is missing: ${BTC_NODE_IMAGE}" >&2
+    exit 2
+  fi
+  if [[ ! -f "${COINJOIN_EMULATOR_SOURCE_DIR}/containers/btc-node/Dockerfile" ]]; then
+    echo "FAIL: btc-node Dockerfile not found under ${COINJOIN_EMULATOR_SOURCE_DIR}" >&2
+    exit 2
+  fi
+  echo "Building local btc-node image: ${BTC_NODE_IMAGE}"
+  docker build -t "${BTC_NODE_IMAGE}" "${COINJOIN_EMULATOR_SOURCE_DIR}/containers/btc-node"
+  BUILT_BTC_NODE_IMAGE=1
 }
 
 if [[ ! -f "${PROJECT_DIR}/scenarios/${SCENARIO}" && ! -f "${SCENARIO}" ]]; then
@@ -251,7 +268,6 @@ for wallet in scenario.get("wallets", []):
     if wallet.get("version"):
         versions.add(wallet["version"])
 
-print(f"{image_prefix}btc-node")
 for version in sorted(versions):
     print(f"{image_prefix}wasabi-client:{version}")
 
@@ -263,22 +279,28 @@ else:
 PY
 )
 
-if [[ "${WRAPPER_PULL_POLICY:-}" != never ]]; then
-  pull_image "${WRAPPER_IMAGE}"
-fi
 pull_image "${EMULATOR_IMAGE}"
+prepare_btc_node_image
 for image in "${ARTIFACT_IMAGES[@]}"; do
   pull_image "${image}"
 done
 
 echo "Creating k3d cluster '${CLUSTER_NAME}' with ${SERVERS} server(s) and ${AGENTS} worker agent(s)..."
+local_images_build "${ENGINE:-wasabi}" "${SCENARIO_PATH}"
+
 k3d cluster create "${CLUSTER_NAME}" \
   --servers "${SERVERS}" \
   --agents "${AGENTS}" \
   --wait \
   --timeout "${WAIT_TIMEOUT}"
 
+echo "Importing local btc-node image into k3d and disabling registry pulls for it..."
+k3d image import --cluster "${CLUSTER_NAME}" "${BTC_NODE_IMAGE}"
+export COINJOIN_BTC_NODE_IMAGE="${BTC_NODE_IMAGE}"
+export KUBERNETES_IMAGE_PULL_POLICY=IfNotPresent
+
 k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
+local_images_import "${CLUSTER_NAME}"
 
 echo "Waiting for all Kubernetes nodes to be Ready..."
 kubectl --kubeconfig "${HOST_KUBECONFIG}" \
@@ -295,7 +317,28 @@ fi
 echo "Cluster nodes:"
 kubectl --kubeconfig "${HOST_KUBECONFIG}" get nodes -o wide
 
-rewrite_kubeconfig_for_container "${HOST_KUBECONFIG}" "${CONTAINER_KUBECONFIG}"
+# Both the Kubernetes API and NodePort listeners belong to the k3d node
+# containers, not to the host's default Docker bridge. Put the external
+# emulator manager in that network and address the server node directly.
+K3D_NETWORK="k3d-${CLUSTER_NAME}"
+K3D_SERVER="k3d-${CLUSTER_NAME}-server-0"
+K3D_SERVER_IP="$(python3 - "${K3D_SERVER}" "${K3D_NETWORK}" <<'PY'
+import json
+import subprocess
+import sys
+
+server, network = sys.argv[1:]
+container = json.loads(subprocess.check_output(["docker", "inspect", server]))[0]
+address = (container.get("NetworkSettings", {}).get("Networks", {}).get(network, {}).get("IPAddress", ""))
+if not address:
+    raise SystemExit(f"FAIL: could not determine {server}'s address on Docker network {network}")
+print(address)
+PY
+)"
+rewrite_kubeconfig_for_container "${HOST_KUBECONFIG}" "${CONTAINER_KUBECONFIG}" "${K3D_SERVER_IP}" 6443
+export KUBERNETES_EMULATOR_CONTAINER_NETWORK="${K3D_NETWORK}"
+export KUBERNETES_CONTROL_IP="${K3D_SERVER_IP}"
+echo "Emulator manager network: ${K3D_NETWORK}; Kubernetes NodePort host: ${K3D_SERVER_IP}"
 
 echo "Running Kubernetes emulation test action '${ACTION}' in namespace '${NAMESPACE}'..."
 (

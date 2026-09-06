@@ -3,7 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTAINER_NAME="${PBS_CONTAINER_NAME:-pbs}"
-IMAGE="${PBS_IMAGE:-bitcoin-analysis/pbs-apptainer:23.06.06-1.5.1}"
+# Bump the -rN suffix whenever the image content changes: `start` only builds
+# when the tag is missing, so a stale local image would otherwise be reused.
+IMAGE="${PBS_IMAGE:-bitcoin-analysis/pbs-apptainer:23.06.06-1.5.1-r2}"
 HOSTNAME="${PBS_HOSTNAME:-pbs}"
 WORKDIR_HOST="${PBS_WORKDIR_HOST:-$PWD}"
 WORKDIR_CONTAINER="${PBS_WORKDIR_CONTAINER:-${WORKDIR_HOST}}"

@@ -9,11 +9,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pipeline"))
 
 from client.artifacts import (  # noqa: E402
+    PROBE_QUEUED,
     PROBE_RUNNING,
     PROBE_TERMINAL,
     PROBE_UNKNOWN,
     ArtifactTransportError,
     S3Access,
+    clear_s3_stage_markers,
     ensure_empty_run_prefix,
     render_s5cmd_sync,
     run_s5cmd,
@@ -49,7 +51,10 @@ def test_validates_s3_compatible_parameters() -> None:
     )
 
 
-@pytest.mark.parametrize("run_id", ["", "../run", "run/id", "run id", "run;id", "a..b"])
+@pytest.mark.parametrize(
+    "run_id",
+    ["", "../run", "run/id", "run id", "run;id", "a..b", "run-", "run_", "run."],
+)
 def test_rejects_unsafe_run_ids(run_id: str) -> None:
     with pytest.raises(ValueError):
         validate_run_id(run_id)
@@ -111,6 +116,41 @@ def test_ensure_empty_run_prefix_rejects_every_existing_artifact() -> None:
         ensure_empty_run_prefix(ACCESS, "s3://bucket/runs", "run-1")
 
 
+def test_clear_stage_markers_treats_missing_as_success_and_deletes_existing() -> None:
+    with (
+        mock.patch(
+            "client.artifacts.s3_object_exists",
+            side_effect=[False, True, False],
+        ) as exists,
+        mock.patch(
+            "client.artifacts.run_s5cmd",
+            return_value=_completed(0),
+        ) as s5cmd,
+    ):
+        clear_s3_stage_markers(
+            ACCESS, "s3://bucket/runs", "run-1", "blocksci"
+        )
+
+    s5cmd.assert_called_once_with(
+        ACCESS, "rm", "s3://bucket/runs/run-1/.pbs/blocksci.done"
+    )
+    assert exists.call_count == 3
+
+
+def test_clear_stage_markers_propagates_delete_errors() -> None:
+    with (
+        mock.patch("client.artifacts.s3_object_exists", return_value=True),
+        mock.patch(
+            "client.artifacts.run_s5cmd",
+            return_value=_completed(1, "AccessDenied"),
+        ),
+        pytest.raises(ArtifactTransportError, match="AccessDenied"),
+    ):
+        clear_s3_stage_markers(
+            ACCESS, "s3://bucket/runs", "run-1", "blocksci"
+        )
+
+
 def _wait(done: str, failed: str, exists, probe=None, timeout: int = 60) -> None:
     with mock.patch("client.artifacts.s3_object_exists", side_effect=exists):
         wait_for_s3_marker(
@@ -144,9 +184,8 @@ def test_wait_for_s3_marker_raises_after_terminal_probe_grace_cycle() -> None:
     assert probe_calls == ["probe"]  # one grace cycle after the terminal report
 
 
-def test_wait_for_s3_marker_extends_deadline_while_job_alive() -> None:
-    # Deadline already blown (timeout=0), but a live job must not fail: the
-    # loop extends and succeeds once the marker lands.
+def test_wait_for_s3_marker_extends_start_deadline_while_job_queued() -> None:
+    # Queue time does not consume the execution budget.
     outcomes = iter([False, False, True])
 
     def exists(access, uri) -> bool:
@@ -156,9 +195,37 @@ def test_wait_for_s3_marker_extends_deadline_while_job_alive() -> None:
         "s3://b/r/.done",
         "s3://b/r/.failed",
         exists,
-        probe=lambda: PROBE_RUNNING,
+        probe=lambda: PROBE_QUEUED,
         timeout=0,
     )
+
+
+def test_wait_for_s3_marker_enforces_explicit_queued_start_deadline() -> None:
+    with (
+        mock.patch("client.artifacts.s3_object_exists", return_value=False),
+        pytest.raises(ArtifactTransportError, match="Timed out"),
+    ):
+        wait_for_s3_marker(
+            "stage",
+            "s3://b/r/.done",
+            "s3://b/r/.failed",
+            ACCESS,
+            timeout_seconds=60,
+            start_timeout_seconds=0,
+            poll_interval=0,
+            probe=lambda: PROBE_QUEUED,
+        )
+
+
+def test_wait_for_s3_marker_does_not_extend_running_deadline() -> None:
+    with pytest.raises(ArtifactTransportError, match="Timed out"):
+        _wait(
+            "s3://b/r/.done",
+            "s3://b/r/.failed",
+            lambda access, uri: False,
+            probe=lambda: PROBE_RUNNING,
+            timeout=0,
+        )
 
 
 def test_wait_for_s3_marker_keeps_polling_on_unknown_probe() -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shutil
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -115,12 +116,37 @@ class StageLog:
                     yield
         except BaseException:
             if self.run_dir is None:
+                # Filing the log away must never replace the failure that caused it.
                 self.relocate(self.logs_root / "_failed")
             raise
 
     def relocate(self, destination_dir: Path) -> Path:
-        destination = new_stage_log_path(destination_dir, self.stage_name)
-        self.path.replace(destination)
+        """Move the log into destination_dir, keeping it where it is if that fails.
+
+        Relocation is bookkeeping: a log that cannot be moved (a destination
+        directory owned by another user, a full disk) must not turn into the
+        error the caller reports, because it would mask the real failure.
+        """
+        try:
+            destination = new_stage_log_path(destination_dir, self.stage_name)
+        except OSError as error:
+            print(f"[WARNING] Could not prepare {destination_dir}: {error}", file=sys.stderr)
+            return self.path
+        try:
+            self.path.replace(destination)
+        except OSError:
+            try:
+                shutil.copy2(self.path, destination)
+                self.path.unlink()
+            except OSError as error:
+                print(
+                    f"[WARNING] Could not move the {self.stage_name} log to {destination}: {error}. "
+                    f"It stays at {self.path}.",
+                    file=sys.stderr,
+                )
+                with contextlib.suppress(OSError):
+                    destination.unlink()
+                return self.path
         self.path = destination
         return destination
 

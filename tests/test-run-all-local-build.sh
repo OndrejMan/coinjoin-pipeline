@@ -24,6 +24,12 @@ cp "${PROJECT_DIR}/run-all.sh" "${ISOLATED_PROJECT}/run-all.sh"
 
 cat >"${FAKE_BIN}/docker" <<'EOF'
 #!/usr/bin/env bash
+if [[ "$1" == "image" && "$2" == "inspect" ]]; then
+  if [[ "${UV_IMAGE_CACHED:-0}" == "1" ]]; then
+    exit 0
+  fi
+  exit 1
+fi
 printf '%q ' "$@" >>"${DOCKER_LOG:?}"
 printf '\n' >>"${DOCKER_LOG:?}"
 exit 0
@@ -36,13 +42,25 @@ export DOCKER_LOG
   PATH="${FAKE_BIN}:${PATH}" bash run-all.sh local --build-only
 )
 
-if ! grep -q -- "build -t blocksci-cj:local -f ${ISOLATED_ROOT}/blocksci/Dockerfile ${ISOLATED_ROOT}/blocksci " "${DOCKER_LOG}"; then
+if ! grep -q -- "pull ghcr.io/astral-sh/uv:0.12.1 " "${DOCKER_LOG}"; then
+  echo "FAIL: local sweep did not seed the public uv image through the isolated Docker config" >&2
+  echo "Observed: $(cat "${DOCKER_LOG}")" >&2
+  exit 1
+fi
+
+if ! grep -q -- "tag ghcr.io/astral-sh/uv:0.12.1 astral-uv:0.12.1 " "${DOCKER_LOG}"; then
+  echo "FAIL: local sweep did not create the daemon-local uv image tag" >&2
+  echo "Observed: $(cat "${DOCKER_LOG}")" >&2
+  exit 1
+fi
+
+if ! grep -q -- "build --target dependencies --build-arg UV_IMAGE=astral-uv:0.12.1 -t blocksci-cj:local -f ${ISOLATED_ROOT}/blocksci/Dockerfile ${ISOLATED_ROOT}/blocksci " "${DOCKER_LOG}"; then
   echo "FAIL: local sweep did not build the BlockSci dependency image" >&2
   echo "Observed: $(cat "${DOCKER_LOG}")" >&2
   exit 1
 fi
 
-if ! grep -q -- "build --build-arg BLOCKSCI_BASE_IMAGE=blocksci-cj:local --build-arg NTHREADS=10 -t blocksci-complete:local -f ${ISOLATED_ROOT}/blocksci/Dockerfile_complete ${ISOLATED_ROOT}/blocksci " "${DOCKER_LOG}"; then
+if ! grep -q -- "build --target complete --build-arg DEPS_IMAGE=blocksci-cj:local --build-arg NTHREADS=10 -t blocksci-complete:local -f ${ISOLATED_ROOT}/blocksci/Dockerfile ${ISOLATED_ROOT}/blocksci " "${DOCKER_LOG}"; then
   echo "FAIL: local sweep did not build blocksci-complete from Dockerfile_complete" >&2
   echo "Observed: $(cat "${DOCKER_LOG}")" >&2
   exit 1
@@ -50,6 +68,30 @@ fi
 
 if ! grep -q -- "run --rm --entrypoint /bin/bash blocksci-complete:local -lc " "${DOCKER_LOG}"; then
   echo "FAIL: local sweep did not smoke-check the complete BlockSci image" >&2
+  echo "Observed: $(cat "${DOCKER_LOG}")" >&2
+  exit 1
+fi
+
+if ! grep -q -- "build --build-arg UV_IMAGE=astral-uv:0.12.1 -t coinjoin-emulator:local ${ISOLATED_ROOT}/coinjoin-emulator " "${DOCKER_LOG}"; then
+  echo "FAIL: local sweep did not pass the daemon-local uv image to the emulator build" >&2
+  echo "Observed: $(cat "${DOCKER_LOG}")" >&2
+  exit 1
+fi
+
+: >"${DOCKER_LOG}"
+(
+  cd "${ISOLATED_PROJECT}"
+  UV_IMAGE_CACHED=1 PATH="${FAKE_BIN}:${PATH}" bash run-all.sh local --build-only
+)
+
+if grep -q -- "\(pull\|tag\) .*astral-sh/uv" "${DOCKER_LOG}"; then
+  echo "FAIL: cached local uv image unexpectedly contacted GHCR" >&2
+  echo "Observed: $(cat "${DOCKER_LOG}")" >&2
+  exit 1
+fi
+
+if ! grep -q -- "build --target dependencies --build-arg UV_IMAGE=astral-uv:0.12.1 " "${DOCKER_LOG}"; then
+  echo "FAIL: cached local uv image was not passed to the BlockSci build" >&2
   echo "Observed: $(cat "${DOCKER_LOG}")" >&2
   exit 1
 fi
