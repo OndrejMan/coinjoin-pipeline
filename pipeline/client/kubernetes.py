@@ -381,15 +381,11 @@ def render_s3_emulation_resources(
     """Render a kubectl-compatible JSON resource list for in-cluster emulation."""
     name = s3_emulation_job_name(run_id)
     labels = {"app.kubernetes.io/name": "coinjoin-s3", "coinjoin.run-id": run_id}
-    joinmarket_fallback = (
-        " --joinmarket-descriptor-regtest-fallback" if engine == "joinmarket" else ""
-    )
     btc_node_image_arg = ' --btc-node-image "$BTC_NODE_IMAGE"' if btc_node_image else ""
     controller = (
         'python manager.py --driver kubernetes --engine "$ENGINE" run '
         '--scenario /config/scenario.json --namespace "$NAMESPACE" --reuse-namespace '
-        '--disable-port-forward --image-prefix "$IMAGE_PREFIX" --run-id "$RUN_ID"'
-        f"{joinmarket_fallback} "
+        '--disable-port-forward --image-prefix "$IMAGE_PREFIX" --run-id "$RUN_ID" '
         '--btc-node-arg=-blocksxor=0 --download-btc-data "/app/logs/$RUN_ID/bitcoin_data" '
         "--controller-done-marker /app/logs/.controller.done "
         "--controller-failed-marker /app/logs/.controller.failed"

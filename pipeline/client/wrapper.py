@@ -1162,8 +1162,6 @@ def kubernetes_emulator_command(
     pinned_run_id = pipeline_run_id_env()
     if pinned_run_id:
         command.extend(["--run-id", pinned_run_id])
-    if engine == "joinmarket":
-        command.append("--joinmarket-descriptor-regtest-fallback")
     btc_node_image = os.environ.get("COINJOIN_BTC_NODE_IMAGE", "").strip()
     if btc_node_image:
         command.extend(["--btc-node-image", btc_node_image])

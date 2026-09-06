@@ -116,7 +116,7 @@ def render_kubernetes_manifest(*, reuse_namespace: bool = False, engine: str = "
     )
 
 
-def test_s3_joinmarket_controller_enables_descriptor_regtest_fallback() -> None:
+def test_s3_controllers_omit_obsolete_descriptor_regtest_fallback() -> None:
     joinmarket_manifest = render_kubernetes_manifest(engine="joinmarket")
     joinmarket_job = next(
         item for item in joinmarket_manifest["items"] if item["kind"] == "Job"
@@ -126,7 +126,7 @@ def test_s3_joinmarket_controller_enables_descriptor_regtest_fallback() -> None:
         for container in joinmarket_job["spec"]["template"]["spec"]["containers"]
         if container["name"] == "controller"
     )
-    assert "--joinmarket-descriptor-regtest-fallback" in joinmarket_controller["command"][-1]
+    assert "--joinmarket-descriptor-regtest-fallback" not in joinmarket_controller["command"][-1]
 
     wasabi_manifest = render_kubernetes_manifest(engine="wasabi")
     wasabi_job = next(item for item in wasabi_manifest["items"] if item["kind"] == "Job")

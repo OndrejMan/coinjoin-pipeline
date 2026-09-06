@@ -48,14 +48,15 @@ else:
 PY
 }
 
-_local_images_build_one() {  # <tag> <context>
+_local_images_build_one() {  # <tag> <context> [extra docker build args...]
   local tag="$1" context="$2"
+  shift 2
   if [[ ! -f "${context}/Dockerfile" ]]; then
     echo "FAIL: no Dockerfile in ${context} for ${tag}" >&2
     return 1
   fi
   echo "Building ${tag} from ${context}"
-  if docker build -t "${tag}" "${context}" >/dev/null; then
+  if docker build "$@" -t "${tag}" "${context}" >/dev/null; then
     LOCAL_IMAGES_BUILT+=("${tag}")
   else
     echo "FAIL: build of ${tag} failed" >&2
@@ -82,8 +83,27 @@ local_images_build() {  # <engine> [scenario-file]
   fi
 
   if [[ "${engine}" == "joinmarket" ]]; then
+    # The client Dockerfile starts FROM ghcr.io/ondrejman/joinmarket-base, which
+    # is not published from this source and whose registry copy lags the
+    # checkout: its verification steps live in vendor/ and are missing there, so
+    # the build died with "test_wallet_displayall.py: No such file". Build the
+    # base from the vendored source and hand it to the client build.
+    local base_image="joinmarket-base:local"
+    local base_context="${emulator_dir}/vendor/joinmarket-clientserver"
+    local base_args=()
+    if [[ -f "${base_context}/Dockerfile" ]]; then
+      echo "Building ${base_image} from ${base_context}"
+      if docker build -t "${base_image}" "${base_context}" >/dev/null; then
+        base_args=(--build-arg "JOINMARKET_BASE_IMAGE=${base_image}")
+      else
+        echo "FAIL: build of ${base_image} failed" >&2
+        return 1
+      fi
+    else
+      echo "WARN: vendored JoinMarket source missing at ${base_context}; using the published base" >&2
+    fi
     _local_images_build_one "${prefix}joinmarket-client-server:latest" \
-      "${emulator_dir}/containers/joinmarket-client-server" || return 1
+      "${emulator_dir}/containers/joinmarket-client-server" "${base_args[@]}" || return 1
     _local_images_build_one "${prefix}irc-server:latest" \
       "${emulator_dir}/containers/irc-server" || return 1
     return 0

@@ -1509,9 +1509,9 @@ class WrapperExportTest(unittest.TestCase):
         self.assertEqual(command[command.index("--run-timezone") + 1], "Europe/Prague")
         self.assertIn("--control-ip", command)
         self.assertEqual(command[command.index("--control-ip") + 1], "172.17.0.1")
-        self.assertIn("--joinmarket-descriptor-regtest-fallback", command)
+        self.assertNotIn("--joinmarket-descriptor-regtest-fallback", command)
 
-    def test_kubernetes_emulator_command_keeps_wasabi_descriptor_fallback_disabled(self):
+    def test_kubernetes_emulator_command_omits_obsolete_fallback_for_wasabi(self):
         command = kubernetes_emulator_command(
             scenario="/app/scenarios/overactive-local.json",
             engine="wasabi",
@@ -1647,7 +1647,7 @@ class WrapperExportTest(unittest.TestCase):
         self.assertIn(
             "python manager.py --engine ${COINJOIN_ENGINE:-wasabi} --run-timezone \\\"$${RUN_TIMEZONE}\\\" run "
             "$${PIPELINE_RUN_ID:+--run-id \\\"$${PIPELINE_RUN_ID}\\\"} "
-            "--joinmarket-descriptor-regtest-fallback",
+            "${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:+--coinjoin-infrastructure-local-build}",
             compose_yaml,
         )
         self.assertIn("RUN_TIMEZONE=${RUN_TIMEZONE:-Europe/Prague}", compose_yaml)

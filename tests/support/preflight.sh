@@ -20,8 +20,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 MODE="${1:-local}"
 STORAGE_BASE="${PBS_TEST_STORAGE_ROOT:-/storage/github-runner}"
-MIN_STORAGE_GB="${PREFLIGHT_MIN_STORAGE_GB:-40}"
-MIN_DOCKER_GB="${PREFLIGHT_MIN_DOCKER_GB:-40}"
+# A full local-build suite consumes roughly 60 GB of Docker storage per run
+# (a 4 GB Wasabi client image, a DinD cache per emulation, k3d imports), so a
+# 40 GB floor let a run start and then die mid-way: on 2026-09-05 the k3d nodes
+# picked up a disk-pressure taint and btc-node never scheduled.
+MIN_STORAGE_GB="${PREFLIGHT_MIN_STORAGE_GB:-60}"
+MIN_DOCKER_GB="${PREFLIGHT_MIN_DOCKER_GB:-120}"
 REGISTRY_TIMEOUT="${PREFLIGHT_REGISTRY_TIMEOUT:-30}"
 
 if [[ "${MODE}" != "local" && "${MODE}" != "github" ]]; then
@@ -146,6 +150,38 @@ if [[ "${MODE}" == "github" ]]; then
   image_freshness coinjoin-emulator "${EMULATOR_REPO}" manager
 fi
 
+# --- upstream base images -----------------------------------------------------
+# The local builds start FROM public bases on Docker Hub and MCR. A transient
+# Docker Hub timeout killed the image build one minute into a run on 2026-09-06
+# ("failed to resolve source metadata for docker.io/library/python:3.11"), so
+# check reachability here rather than after the build step has already failed.
+base_images=(
+  "python:3.11"
+  "debian:bookworm"
+  "debian:bookworm-slim"
+  "docker:29-dind"
+  "docker:29-cli"
+  "alpine:latest"
+  "mcr.microsoft.com/dotnet/sdk:8.0"
+)
+# Sequential and best-effort: a burst of anonymous manifest requests trips Docker
+# Hub's rate limiter, and a rate-limited probe says "unreachable" about an image
+# that builds fine. An image already in the local store needs no registry at all,
+# so it is not probed. These are warnings, never blockers — a real outage still
+# fails the build with a precise message, and blocking the suite on a throttled
+# probe would be worse than the problem.
+for image in "${base_images[@]}"; do
+  if docker image inspect "${image}" >/dev/null 2>&1; then
+    ok "base image ${image} (local)"
+    continue
+  fi
+  if timeout "${REGISTRY_TIMEOUT}" docker manifest inspect "${image}" >/dev/null 2>&1; then
+    ok "base image ${image}"
+  else
+    warn "base image ${image} is neither local nor reachable right now (Docker Hub throttling looks like this too); the build may have to wait for it"
+  fi
+done
+
 # --- local image tags ---------------------------------------------------------
 if [[ "${MODE}" == "local" ]]; then
   for image in \
@@ -182,7 +218,10 @@ docker_root="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null)"
 if [[ -n "${docker_root}" && -d "${docker_root}" ]]; then
   docker_free="$(free_gb "${docker_root}")"
   if [[ -n "${docker_free}" ]] && (( docker_free < MIN_DOCKER_GB )); then
+    reclaimable="$(docker system df --format '{{.Type}} {{.Reclaimable}}' 2>/dev/null | tr '\n' '; ')"
     fail "docker root ${docker_root} has ${docker_free}GB free, below ${MIN_DOCKER_GB}GB"
+    printf '        reclaimable: %s\n' "${reclaimable:-unknown}"
+    printf '        free it with: docker volume prune -f && docker image prune -f\n'
   else
     ok "docker root free: ${docker_free:-?}GB"
   fi
