@@ -1673,9 +1673,10 @@ class WrapperExportTest(unittest.TestCase):
         )
         self.assertIn("Skipping btc-node pull; local build requested", compose_yaml)
         self.assertIn(
-            "pull_image ghcr.io/ondrejman/joinmarket-base:latest",
+            "Skipping JoinMarket base pull; the manager builds it from the vendored source",
             compose_yaml,
         )
+        self.assertNotIn("pull_image ghcr.io/ondrejman/joinmarket-base", compose_yaml)
         self.assertIn("Skipping irc-server pull; local build requested", compose_yaml)
         self.assertIn("--download-btc-data /home/bitcoin/data", compose_yaml)
 

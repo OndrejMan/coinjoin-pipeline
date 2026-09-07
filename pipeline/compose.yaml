@@ -77,8 +77,7 @@ services:
                       if [ -z \"${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-}\" ]; then
                         pull_image \"$${PREFIX}joinmarket-client-server\";
                       else
-                        echo 'Prefetching JoinMarket base for the manager container build' &&
-                        pull_image ghcr.io/ondrejman/joinmarket-base:latest;
+                        echo 'Skipping JoinMarket base pull; the manager builds it from the vendored source';
                       fi &&
                       if [ -z \"${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-}\" ]; then
                         pull_image \"$${PREFIX}irc-server:latest\";

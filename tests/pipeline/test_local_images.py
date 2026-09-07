@@ -149,7 +149,7 @@ def test_wasabi_images_follow_all_scenario_versions(tmp_path, scenario, expected
 
 @pytest.mark.parametrize("local", [False, True])
 @pytest.mark.parametrize("engine", ["joinmarket", "wasabi"])
-def test_compose_prefetch_selects_base_only_for_local_joinmarket(tmp_path, local, engine):
+def test_compose_prefetch_skips_images_for_local_builds(tmp_path, local, engine):
     compose = yaml.safe_load((PROJECT_ROOT / "pipeline/compose.yaml").read_text())
     prefetch = compose["services"]["dind_image_prefetch"]
     values = {
@@ -175,10 +175,11 @@ docker() { echo "PULL $*"; }
     assert result.returncode == 0, result.stderr
     pulls = [line for line in result.stdout.splitlines() if line.startswith("PULL ")]
     if local:
-        assert pulls == (
-            ["PULL pull ghcr.io/ondrejman/joinmarket-base:latest"]
-            if engine == "joinmarket" else []
-        )
+        # A local build pulls nothing at all: the manager builds joinmarket-base
+        # from the vendored checkout and hands that tag to the client build as
+        # JOINMARKET_BASE_IMAGE. Prefetching the published base here made local
+        # mode depend on a private ghcr.io package it never ends up using.
+        assert pulls == []
     else:
         assert "PULL pull test/btc-node" in pulls
         if engine == "joinmarket":
