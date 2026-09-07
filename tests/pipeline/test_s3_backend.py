@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -1558,6 +1559,20 @@ def test_rendered_pbs_script_calls_fake_s5cmd_only_on_compute_path() -> None:
         assert "sync s3://bucket/runs/run-1/*" in logged
         assert "sync " in logged and "coinjoin-analysis_data" in logged
         assert "cp " in logged and "coinjoin-analysis.done" in logged
+
+
+@pytest.mark.parametrize("engine", ["wasabi", "joinmarket"])
+def test_s3_controller_explicitly_runs_in_cluster(engine):
+    manifest = render_kubernetes_manifest(engine=engine)
+    job = next(item for item in manifest["items"] if item["kind"] == "Job")
+    controller = next(
+        container for container in job["spec"]["template"]["spec"]["containers"]
+        if container["name"] == "controller"
+    )
+    command = shlex.split(controller["command"][-1])
+    assert command.count("--in-cluster") == 1
+    assert command.index("--in-cluster") < command.index("run")
+    assert "--disable-port-forward" in command
 
 
 def test_kubernetes_manifest_has_controller_uploader_secret_and_rbac() -> None:

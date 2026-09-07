@@ -1484,6 +1484,14 @@ class WrapperExportTest(unittest.TestCase):
             ],
         )
 
+    def test_local_kubernetes_manager_does_not_request_in_cluster_mode(self):
+        for engine in ("wasabi", "joinmarket"):
+            with self.subTest(engine=engine), mock.patch.dict(
+                os.environ, {"KUBERNETES_SERVICE_HOST": "10.43.0.1"}
+            ):
+                command = kubernetes_emulator_command(scenario="/scenario.json", engine=engine)
+            self.assertNotIn("--in-cluster", command)
+
     def test_kubernetes_emulator_command_can_copy_btc_data_to_host(self):
         command = kubernetes_emulator_command(
             scenario="/app/scenarios/overactive-local.json",

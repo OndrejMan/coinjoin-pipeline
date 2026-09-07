@@ -1138,7 +1138,7 @@ def kubernetes_emulator_command(
     coinjoin_infrastructure_local_build: bool = False,
     run_timezone_name: str = DEFAULT_RUN_TIMEZONE,
 ) -> list[str]:
-    """Build the coinjoin-emulator command for Kubernetes mode."""
+    """Build the command for a local manager accessing Kubernetes via kubeconfig."""
     command = [
         "python",
         "manager.py",

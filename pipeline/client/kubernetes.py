@@ -383,7 +383,7 @@ def render_s3_emulation_resources(
     labels = {"app.kubernetes.io/name": "coinjoin-s3", "coinjoin.run-id": run_id}
     btc_node_image_arg = ' --btc-node-image "$BTC_NODE_IMAGE"' if btc_node_image else ""
     controller = (
-        'python manager.py --driver kubernetes --engine "$ENGINE" run '
+        'python manager.py --driver kubernetes --in-cluster --engine "$ENGINE" run '
         '--scenario /config/scenario.json --namespace "$NAMESPACE" --reuse-namespace '
         '--disable-port-forward --image-prefix "$IMAGE_PREFIX" --run-id "$RUN_ID" '
         '--btc-node-arg=-blocksxor=0 --download-btc-data "/app/logs/$RUN_ID/bitcoin_data" '
