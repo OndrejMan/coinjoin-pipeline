@@ -244,6 +244,27 @@ else
   ok "no leftover test containers"
 fi
 
+# Every emulation leaves its Compose project network behind (the teardown removes
+# containers, not the network) and each one holds a subnet from Docker's default
+# address pools. Once those are exhausted, k3d cluster creation dies with "all
+# predefined address pools have been fully subnetted" — which failed a suite two
+# hours in on 2026-09-07 after 29 of them had piled up. The suite needs roughly a
+# dozen networks of headroom, so complain well before the wall.
+orphan_networks=0
+for network in $(docker network ls --format '{{.Name}}' 2>/dev/null); do
+  [[ "${network}" =~ ^(cjp-|blocksci-emulator|k3d-cj-) ]] || continue
+  [[ "$(docker network inspect -f '{{len .Containers}}' "${network}" 2>/dev/null)" == "0" ]] \
+    && orphan_networks=$(( orphan_networks + 1 ))
+done
+total_networks="$(docker network ls -q 2>/dev/null | wc -l)"
+if (( orphan_networks >= 12 )); then
+  fail "${orphan_networks} orphaned emulation network(s) of ${total_networks} total — Docker will run out of subnets mid-suite; run scripts/cleanup-stale-clusters.sh or 'docker network prune'"
+elif (( orphan_networks > 0 )); then
+  warn "${orphan_networks} orphaned emulation network(s) of ${total_networks} total — reclaim them before they exhaust the address pools"
+else
+  ok "no orphaned emulation networks (${total_networks} networks total)"
+fi
+
 # run-all.sh calls this before its first test, so our own suite is an ancestor,
 # not a competitor. Only a suite outside this process tree is a problem.
 ancestors=" "
