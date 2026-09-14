@@ -133,6 +133,24 @@ jobs:
           EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-docker-emulation-logs
         run: ./tests/test-runIt-overactive-local-docker.sh
 
+  podman-overactive-local:
+    runs-on: [self-hosted, x64]
+    needs: podman-wrapper
+    if: needs.gate.outputs.should-run == 'true'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR for Podman
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Run complete overactive-local pipeline through real Podman
+        env:
+          CONTAINER_RUNTIME: podman
+          EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-podman-emulation-logs
+        run: ./tests/test-runIt-overactive-local-podman.sh
+
   docker-joinmarket:
     runs-on: [self-hosted, x64]
     needs: podman-wrapper

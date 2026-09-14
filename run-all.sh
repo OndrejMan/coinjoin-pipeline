@@ -470,6 +470,14 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
     "tests/test-bitcoin-block-archive-s3-minio.sh"
   )
 
+  # Docker-built local images normally live in a different image store from
+  # rootless Podman. The dedicated Podman E2E can build its own local images
+  # when invoked directly, but the shared local suite must not silently pull
+  # published images instead of testing its selected local inputs.
+  if [[ "${IMAGE_MODE}" != "local" ]]; then
+    tests+=("tests/test-runIt-overactive-local-podman.sh")
+  fi
+
   for test_script in "${tests[@]}"; do
     if [[ ! -x "${SCRIPT_DIR}/${test_script}" ]]; then
       echo "ERROR: test script is not executable: ${SCRIPT_DIR}/${test_script}" >&2
