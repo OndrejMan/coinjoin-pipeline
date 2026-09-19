@@ -536,6 +536,11 @@ def load_joinmarket_round_labels(path: Path) -> list[JsonObject]:
     # confirmed event; flatten that txid for the existing label consumer.
     labels: list[JsonObject] = []
     for item in data:
+        if item.get("status") in ("multiple_matches", "duplicate_destination"):
+            raise ValueError(
+                f"JoinMarket round {item.get('export_round_id', '?')} "
+                f"has destination conflict status: {item['status']}"
+            )
         label = dict(item)
         matches = label.get("destination_matches")
         label.pop("txid", None)

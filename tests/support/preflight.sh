@@ -117,7 +117,7 @@ image_freshness() {  # <package> <repo dir> [path within repo]
   [[ -d "${repo}/.git" ]] || return 0
 
   local image_ts
-  image_ts="$(gh api "users/ondrejman/packages/container/${package}/versions" \
+  image_ts="$(timeout 20 gh api "users/ondrejman/packages/container/${package}/versions" \
     --jq 'map(select(.metadata.container.tags | index("latest"))) | .[0].created_at' 2>/dev/null)"
   [[ -n "${image_ts}" && "${image_ts}" != "null" ]] || return 0
 

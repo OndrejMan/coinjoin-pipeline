@@ -1276,6 +1276,58 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertTrue(emulator_data["transactions"]["txA"]["is_coinjoin"])
         self.assertEqual(emulator_data["summary"]["producer_positive_labels"], 1)
 
+    def test_joinmarket_destination_conflicts_disable_all_labels(self):
+        cases = [
+            ("multiple_matches", ["txA", "txB"]),
+            ("duplicate_destination", []),
+            ("duplicate_destination", ["txA"]),
+            ("duplicate_destination", ["txA", "txB"]),
+        ]
+        for status, txids in cases:
+            with self.subTest(status=status, txids=txids), tempfile.TemporaryDirectory() as tmpdir:
+                run_dir = Path(tmpdir)
+                data_dir = run_dir / "coinjoin_emulator_data" / "data"
+                block_dir = data_dir / "btc-node"
+                block_dir.mkdir(parents=True)
+                save_json(data_dir / "joinmarket_round_events.json", [
+                    {
+                        "export_round_id": 1,
+                        "status": status,
+                        "destination_matches": [
+                            {"txid": txid, "block_height": 7} for txid in txids
+                        ],
+                    },
+                    {
+                        "export_round_id": 2,
+                        "status": "confirmed",
+                        "destination_matches": [{"txid": "txC", "block_height": 7}],
+                    },
+                ])
+                # Even a hash-valid manifest with a matching positive count cannot
+                # declare a capture complete when a round has conflicting evidence.
+                write_producer_label_manifest(
+                    run_dir / "coinjoin_emulator_data",
+                    "joinmarket",
+                    ["joinmarket_round_events.json"],
+                    positive_count=1,
+                )
+                save_json(block_dir / "block_7.json", {
+                    "height": 7,
+                    "tx": [
+                        {"txid": txid, "vin": [{"txid": "funding", "vout": 0}], "vout": []}
+                        for txid in ("txA", "txB", "txC")
+                    ],
+                })
+
+                emulator_data = build_emulator_data(run_dir, coinjoin_analysis_fixture(), "joinmarket")
+
+                self.assertFalse(emulator_data["label_provenance"]["independent"])
+                self.assertIn(status, emulator_data["label_provenance"]["unavailable_reason"])
+                self.assertEqual(len(emulator_data["transactions"]), 3)
+                self.assertTrue(all(
+                    tx["is_coinjoin"] is None for tx in emulator_data["transactions"].values()
+                ))
+
     def test_build_emulator_data_rejects_malformed_joinmarket_label_source(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)
