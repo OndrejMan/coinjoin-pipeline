@@ -105,12 +105,28 @@ def _iter_attr(obj: object, name: str) -> Iterable[object]:
     return value if isinstance(value, Iterable) else []
 
 
+def _address_text(address: object) -> str | None:
+    """Plain address string of a BlockSci address object.
+
+    ``str()`` is only the bare address for the pubkey family; script-hash and
+    witness-unknown (Taproot) scripts render as ``WitnessUnknownAddress(bcrt1p…)``,
+    which made every P2TR input and output a shared_tx_mismatch against the
+    baseline. ``address_string`` is the bare form wherever BlockSci defines one.
+    """
+    if address is None:
+        return None
+    plain = safe_attr(address, "address_string")
+    if isinstance(plain, str) and plain:
+        return plain
+    return to_json_text(address)
+
+
 def _base_io_record(item: object, fallback_index: int) -> JsonObject:
     """Build the fields shared by every input and output record."""
     return {
         "index": str(safe_attr(item, "index", fallback_index)),
         "value": coerce_sats(safe_attr(item, "value")),
-        "address": to_json_text(safe_attr(item, "address")),
+        "address": _address_text(safe_attr(item, "address")),
     }
 
 

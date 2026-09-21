@@ -245,3 +245,33 @@ def test_assert_real_blocksci_rejects_a_shadowing_directory() -> None:
     assert "/mnt/exporters/blocksci" in message
     assert "Blockchain" in message
     assert "heuristics" in message
+
+
+class _PrettyPrintedAddress:
+    """A BlockSci address whose str() wraps the bare address in its type name."""
+
+    def __init__(self, address_string: str, type_name: str) -> None:
+        self.address_string = address_string
+        self._type_name = type_name
+
+    def __str__(self) -> str:
+        return f"{self._type_name}({self.address_string})"
+
+
+class _AddressWithoutString:
+    def __str__(self) -> str:
+        return "OpReturn()"
+
+
+def test_io_records_carry_the_bare_address_for_every_script_type() -> None:
+    from exporters.blocksci_export.detector import _base_io_record
+
+    taproot = types.SimpleNamespace(
+        index=2, value=2097152, address=_PrettyPrintedAddress("bcrt1pguuun", "WitnessUnknownAddress")
+    )
+    opreturn = types.SimpleNamespace(index=0, value=0, address=_AddressWithoutString())
+    missing = types.SimpleNamespace(index=1, value=5, address=None)
+
+    assert _base_io_record(taproot, 9)["address"] == "bcrt1pguuun"
+    assert _base_io_record(opreturn, 9)["address"] == "OpReturn()"
+    assert _base_io_record(missing, 9)["address"] is None
