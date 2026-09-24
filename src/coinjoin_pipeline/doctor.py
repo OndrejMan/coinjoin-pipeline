@@ -194,10 +194,9 @@ def check(
                 continue
             if local.returncode == 0:
                 continue
-            reference = f"docker://{image}" if runtime == "podman" else image
             try:
                 remote = subprocess.run(
-                    [executable, "manifest", "inspect", reference], stdout=subprocess.DEVNULL,
+                    [executable, "manifest", "inspect", image], stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL, check=False, timeout=20,
                 )
             except subprocess.TimeoutExpired:
