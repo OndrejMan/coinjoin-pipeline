@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
+import yaml
+
 
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 
@@ -42,6 +44,28 @@ class PublishWorkflowTests(unittest.TestCase):
         self.assertNotIn("publish-pipeline-image", workflow)
         self.assertNotIn("WRAPPER_IMAGE", workflow)
         self.assertFalse((WORKFLOWS / "publish-pipeline-image.yaml").exists())
+
+    def test_kubernetes_jobs_checkout_the_sources_they_build(self) -> None:
+        jobs = yaml.safe_load((WORKFLOWS / "tests.yaml").read_text())["jobs"]
+        for name in (
+            "kubernetes-k3d", "kubernetes-pbs-wasabi", "kubernetes-pbs-joinmarket",
+            "kubernetes-pbs-parallel", "kubernetes-s3-minio",
+        ):
+            with self.subTest(job=name):
+                job = jobs[name]
+                checkouts = [step for step in job["steps"] if
+                             step.get("with", {}).get("repository") ==
+                             "OndrejMan/coinjoin-emulator"]
+                self.assertEqual(len(checkouts), 1)
+                checkout = checkouts[0]
+                self.assertEqual(checkout["with"]["submodules"], "recursive")
+                source_dir = "${{ github.workspace }}/" + checkout["with"]["path"]
+                variable = ("COINJOIN_EMULATOR_ROOT" if name == "kubernetes-s3-minio"
+                            else "COINJOIN_EMULATOR_SOURCE_DIR")
+                self.assertEqual(job["env"][variable], source_dir)
+                build_steps = [i for i, step in enumerate(job["steps"])
+                               if "./tests/test-" in step.get("run", "")]
+                self.assertLess(job["steps"].index(checkout), min(build_steps))
 
 
 if __name__ == "__main__":

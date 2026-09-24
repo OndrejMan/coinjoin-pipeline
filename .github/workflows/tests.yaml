@@ -202,10 +202,18 @@ jobs:
     env:
       KUBECTL_VERSION: v1.35.6
       K3D_VERSION: v5.9.0
+      COINJOIN_EMULATOR_SOURCE_DIR: ${{ github.workspace }}/coinjoin-emulator
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Checkout emulator build sources
+        uses: actions/checkout@v4
+        with:
+          repository: OndrejMan/coinjoin-emulator
+          path: coinjoin-emulator
+          submodules: recursive
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -294,11 +302,19 @@ jobs:
     runs-on: [self-hosted, x64]
     needs: pbs-fixture-analysis
     timeout-minutes: 90
+    env:
+      COINJOIN_EMULATOR_SOURCE_DIR: ${{ github.workspace }}/coinjoin-emulator
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Checkout emulator build sources
+        uses: actions/checkout@v4
+        with:
+          repository: OndrejMan/coinjoin-emulator
+          path: coinjoin-emulator
+          submodules: recursive
 
       - name: Run Kubernetes+PBS analysis (wasabi)
         env:
@@ -317,11 +333,19 @@ jobs:
     runs-on: [self-hosted, x64]
     needs: kubernetes-pbs-wasabi
     timeout-minutes: 90
+    env:
+      COINJOIN_EMULATOR_SOURCE_DIR: ${{ github.workspace }}/coinjoin-emulator
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Checkout emulator build sources
+        uses: actions/checkout@v4
+        with:
+          repository: OndrejMan/coinjoin-emulator
+          path: coinjoin-emulator
+          submodules: recursive
 
       - name: Run Kubernetes+PBS analysis (joinmarket)
         env:
@@ -339,10 +363,19 @@ jobs:
   kubernetes-pbs-parallel:
     runs-on: [self-hosted, x64]
     needs: kubernetes-pbs-joinmarket
+    env:
+      COINJOIN_EMULATOR_SOURCE_DIR: ${{ github.workspace }}/coinjoin-emulator
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Checkout emulator build sources
+        uses: actions/checkout@v4
+        with:
+          repository: OndrejMan/coinjoin-emulator
+          path: coinjoin-emulator
+          submodules: recursive
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -389,10 +422,18 @@ jobs:
     env:
       KUBECTL_VERSION: v1.35.6
       K3D_VERSION: v5.9.0
+      COINJOIN_EMULATOR_ROOT: ${{ github.workspace }}/coinjoin-emulator
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Checkout emulator build sources
+        uses: actions/checkout@v4
+        with:
+          repository: OndrejMan/coinjoin-emulator
+          path: coinjoin-emulator
+          submodules: recursive
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
