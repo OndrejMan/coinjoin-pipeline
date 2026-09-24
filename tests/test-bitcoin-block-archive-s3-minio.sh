@@ -88,6 +88,11 @@ dump_diagnostics() {
     echo "===== S3 objects ====="; s5 ls "s3://${BUCKET}/*" || true
     echo "===== PBS history ====="; qstat -x 2>/dev/null || true
     echo "===== PBS logs ====="
+    if [[ -n "${S3_ENDPOINT_URL}" ]]; then
+      s5 cp "${ARTIFACT_URI}/${RUN_ID}/logs/blocksci-parse.pbs.log" \
+        "${WORK_ROOT}/blocksci-parse.pbs.log" >/dev/null 2>&1 || true
+    fi
+    [[ ! -s "${WORK_ROOT}/blocksci-parse.pbs.log" ]] || tail -n 200 "${WORK_ROOT}/blocksci-parse.pbs.log"
     find "${LOGS_ROOT}" -type f -name '*.pbs.log' -print -exec tail -n 200 {} \; 2>/dev/null || true
   } >"${DIAGNOSTICS_FILE}" 2>&1
   cat "${DIAGNOSTICS_FILE}" >&2
@@ -98,7 +103,7 @@ cleanup() {
   trap - EXIT
   (( status == 0 )) || dump_diagnostics || true
   mkdir -p "${RESULT_DIR}"
-  for artifact in archive-manifest.json blocksci-parse-manifest.json pipeline-output.log diagnostics.txt; do
+  for artifact in archive-manifest.json blocksci-parse-manifest.json blocksci-parse.pbs.log pipeline-output.log diagnostics.txt; do
     [[ -s "${WORK_ROOT}/${artifact}" ]] && cp "${WORK_ROOT}/${artifact}" "${RESULT_DIR}/${artifact}"
   done
   docker rm -f "${PBS_CONTAINER_NAME}" "${MINIO_CONTAINER_NAME}" >/dev/null 2>&1 || true

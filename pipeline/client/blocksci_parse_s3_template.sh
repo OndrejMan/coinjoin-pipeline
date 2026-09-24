@@ -16,12 +16,16 @@ RUNS_ROOT="$SCRATCHDIR/coinjoin-run"
 RUN_WORK="$RUNS_ROOT/$RUN_ID"
 CACHE_DIR="$RUN_WORK/blocksci-parse_data"
 mkdir -p "$RUN_WORK/.pbs" "$RUN_WORK/logs" "$RUN_WORK/coinjoin_emulator_data/data/btc-node" "$CACHE_DIR"
+JOB_LOG="$RUN_WORK/logs/blocksci-parse.pbs.log"
 FAILED_MARKER="$RUN_WORK/.pbs/blocksci-parse.failed"
 DONE_MARKER="$RUN_WORK/.pbs/blocksci-parse.done"
 on_exit() {{
   status=$?
   trap - EXIT TERM
   set +e
+  exec 1>&3 2>&4
+  exec 3>&- 4>&-
+  {upload_log}
   if [ "$status" -eq 0 ]; then
     printf 'done\n' > "$DONE_MARKER"
     {upload_done}
@@ -33,6 +37,8 @@ on_exit() {{
 }}
 trap on_exit EXIT
 trap 'exit 143' TERM
+exec 3>&1 4>&2
+exec >"$JOB_LOG" 2>&1
 test -r "$S3_CREDENTIALS_FILE" || {{ echo "S3 credentials file is not readable: $S3_CREDENTIALS_FILE" >&2; exit 1; }}
 {s5cmd_check}
 export TMPDIR="$SCRATCHDIR" SINGULARITY_CACHEDIR="$SCRATCHDIR" SINGULARITY_TMPDIR="$SCRATCHDIR" SINGULARITY_LOCALCACHEDIR="$SCRATCHDIR"

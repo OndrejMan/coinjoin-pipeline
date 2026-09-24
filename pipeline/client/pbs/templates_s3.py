@@ -458,6 +458,9 @@ PY'''
         network=network,
         prepare_source=prepare_source,
         produce_index=produce_index,
+        upload_log=render_s5cmd_cp(
+            '"$JOB_LOG"', '"$ARTIFACT_URI/$RUN_ID/logs/blocksci-parse.pbs.log"'
+        ),
         upload_cache=render_s5cmd_sync(
             '"$CACHE_DIR/"', '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/"'
         ),

@@ -406,6 +406,54 @@ def test_s3_bitcoin_archive_parse_verifies_manifest_checksums_and_height() -> No
     assert '"bitcoin-blocks-s3" "bitcoin" "$EXPORTED_MAX_BLOCK"' in script
 
 
+def test_s3_bitcoin_archive_parse_uploads_failure_log_before_marker(tmp_path: Path) -> None:
+    captured_log = tmp_path / "uploaded.log"
+    upload_order = tmp_path / "upload-order"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_s5cmd = fake_bin / "s5cmd"
+    fake_s5cmd.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib, shutil, sys\n"
+        "source, destination = sys.argv[-2:]\n"
+        "if destination.endswith('blocksci-parse.pbs.log'):\n"
+        "    shutil.copyfile(source, os.environ['CAPTURED_LOG'])\n"
+        "    kind = 'log'\n"
+        "elif destination.endswith('blocksci-parse.failed'):\n"
+        "    kind = 'marker'\n"
+        "else:\n"
+        "    raise SystemExit(f'unexpected upload: {destination}')\n"
+        "with pathlib.Path(os.environ['UPLOAD_ORDER']).open('a') as stream:\n"
+        "    stream.write(kind + '\\n')\n",
+        encoding="utf-8",
+    )
+    fake_s5cmd.chmod(0o755)
+    target = S3Target(
+        artifact_uri="s3://bucket/runs",
+        run_id="run-1",
+        endpoint_url="https://example.com",
+        credentials_file=str(tmp_path / "missing-credentials"),
+        profile="coinjoin",
+    )
+    script = render_blocksci_parse_s3_pbs(
+        target,
+        image="docker://blocksci",
+        command="true",
+        bitcoin_blocks_uri="s3://bucket/bitcoin-blocks",
+        external_network="bitcoin",
+        external_max_block=1,
+    )
+    result = subprocess.run(
+        ["bash"], input=script, text=True, capture_output=True,
+        env={**os.environ, "SCRATCHDIR": str(tmp_path), "PATH": f"{fake_bin}:{os.environ['PATH']}",
+             "CAPTURED_LOG": str(captured_log), "UPLOAD_ORDER": str(upload_order)},
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "S3 credentials file is not readable" in captured_log.read_text(encoding="utf-8")
+    assert upload_order.read_text(encoding="utf-8").splitlines() == ["log", "marker"]
+
+
 def test_cached_external_task_downloads_dumplings_baseline_and_uploads_report() -> None:
     command = blocksci_external_report_pbs_command(
         "run-1", "joinmarket", None, "definite", 5000, 0.00004, 200000
