@@ -30,10 +30,10 @@ def resolve_pbs_image(args: argparse.Namespace, default_image: str, stage_option
     """Resolve a stage override before the shared PBS image override."""
     stage_image = getattr(args, stage_option, None)
     if stage_image:
-        return str(stage_image)
+        return with_singularity_scheme(str(stage_image))
     if getattr(args, "pbs_image", None):
-        return str(args.pbs_image)
-    return default_image
+        return with_singularity_scheme(str(args.pbs_image))
+    return with_singularity_scheme(default_image)
 
 
 CONTAINER_LOCK_DIR = Path(__file__).resolve().parents[2] / "container"
@@ -64,8 +64,11 @@ IMAGE_URI_SCHEMES = (
 
 
 def with_singularity_scheme(image: str) -> str:
-    """Prefix a bare registry reference with ``docker://``, leave URIs alone."""
-    return image if image.startswith(IMAGE_URI_SCHEMES) else f"docker://{image}"
+    """Prefix registry references while preserving transports and local images."""
+    if (image.startswith(IMAGE_URI_SCHEMES + ("/", "./", "../"))
+            or image.endswith((".sif", ".simg"))):
+        return image
+    return f"docker://{image}"
 
 
 def unified_report_image_reference(args: argparse.Namespace | None = None) -> str:
