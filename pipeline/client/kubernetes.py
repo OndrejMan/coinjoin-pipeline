@@ -26,7 +26,11 @@ S3_JOB_OWNED_RESOURCE_TYPES = (
     "rolebinding.rbac.authorization.k8s.io",
 )
 CONTROLLER_LOG_TAIL_LINES = 100
-CONTROLLER_FATAL_SUMMARY_MARKERS = ("Kubernetes CPU quota exhausted",)
+CONTROLLER_FATAL_SUMMARY_MARKERS = (
+    "Kubernetes CPU quota exhausted",
+    "Terminating exception:",
+    "is unreachable at",
+)
 
 
 def kubeconfig_path(value: str | None) -> Path:

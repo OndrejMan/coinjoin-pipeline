@@ -38,3 +38,26 @@ def test_quota_failure_is_summarized_even_before_controller_log_tail() -> None:
     assert "diagnostic line 50" in controller_tail
     assert "diagnostic line 49" not in controller_tail
     assert run.call_args_list[1].args[0][-1] == "--tail=-1"
+
+
+def test_client_gone_failure_is_summarized_before_cleanup_tail() -> None:
+    client_gone = (
+        "Terminating exception: client wasabi-client-004 is unreachable at "
+        "wasabi-client-004:37128 (container state: Completed). Underlying error: "
+        "Connection refused"
+    )
+    controller_output = "\n".join(
+        [client_gone, *(f"Deleted pod wasabi-client-{index:03d}" for index in range(150))]
+    )
+    completed = [
+        subprocess.CompletedProcess([], 0, stdout="job description", stderr=""),
+        subprocess.CompletedProcess([], 0, stdout=controller_output, stderr=""),
+        subprocess.CompletedProcess([], 0, stdout="uploader logs", stderr=""),
+    ]
+
+    with mock.patch("client.kubernetes.subprocess.run", side_effect=completed):
+        diagnostics = collect_s3_emulation_diagnostics(
+            Path("/kube/config"), "man5-ns", "job-1"
+        )
+
+    assert "--- controller failure summary ---\n" + client_gone in diagnostics
