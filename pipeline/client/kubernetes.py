@@ -26,7 +26,11 @@ S3_JOB_OWNED_RESOURCE_TYPES = (
     "rolebinding.rbac.authorization.k8s.io",
 )
 CONTROLLER_LOG_TAIL_LINES = 100
-CONTROLLER_FATAL_SUMMARY_MARKERS = ("Kubernetes CPU quota exhausted",)
+CONTROLLER_FATAL_SUMMARY_MARKERS = (
+    "Kubernetes CPU quota exhausted",
+    "Terminating exception:",
+    "is unreachable at",
+)
 
 
 def kubeconfig_path(value: str | None) -> Path:
@@ -495,6 +499,21 @@ rm -f /credentials/credentials"""
         {"name": "RUN_ID", "value": run_id},
         {"name": "ENGINE", "value": engine},
         {"name": "IMAGE_PREFIX", "value": image_prefix},
+        # The emulator makes this pod the owner of every pod and service it
+        # creates, so Kubernetes removes them even when the controller is
+        # killed before its own cleanup finishes.
+        {
+            "name": "COINJOIN_OWNER_POD_NAME",
+            "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}},
+        },
+        {
+            "name": "COINJOIN_OWNER_POD_UID",
+            "valueFrom": {"fieldRef": {"fieldPath": "metadata.uid"}},
+        },
+        {
+            "name": "COINJOIN_OWNER_POD_NAMESPACE",
+            "valueFrom": {"fieldRef": {"fieldPath": "metadata.namespace"}},
+        },
     ]
     # The controller runs in a separate Kubernetes container, so an override
     # set on the frontend must be included explicitly in its environment.

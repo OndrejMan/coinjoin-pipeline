@@ -162,7 +162,7 @@ def test_s3_controller_receives_distributor_startup_timeout() -> None:
         if container["name"] == "controller"
     )
 
-    environment = {item["name"]: item["value"] for item in controller["env"]}
+    environment = {item["name"]: item.get("value") for item in controller["env"]}
     assert environment["COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT"] == "1800"
 
 
@@ -191,7 +191,7 @@ def test_s3_controller_can_use_an_imported_btc_node_image() -> None:
         if container["name"] == "controller"
     )
 
-    environment = {item["name"]: item["value"] for item in controller["env"]}
+    environment = {item["name"]: item.get("value") for item in controller["env"]}
     assert environment["BTC_NODE_IMAGE"] == "btc-node:test"
     assert environment["KUBERNETES_IMAGE_PULL_POLICY"] == "IfNotPresent"
     assert environment["COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT"] == "201"
@@ -1573,6 +1573,23 @@ def test_s3_controller_explicitly_runs_in_cluster(engine):
     assert command.count("--in-cluster") == 1
     assert command.index("--in-cluster") < command.index("run")
     assert "--disable-port-forward" in command
+
+
+def test_s3_controller_knows_its_own_pod_to_own_the_emulation_pods() -> None:
+    manifest = render_kubernetes_manifest()
+    job = next(item for item in manifest["items"] if item["kind"] == "Job")
+    controller = next(
+        container for container in job["spec"]["template"]["spec"]["containers"]
+        if container["name"] == "controller"
+    )
+    field_paths = {
+        item["name"]: item["valueFrom"]["fieldRef"]["fieldPath"]
+        for item in controller["env"]
+        if "valueFrom" in item
+    }
+    assert field_paths["COINJOIN_OWNER_POD_NAME"] == "metadata.name"
+    assert field_paths["COINJOIN_OWNER_POD_UID"] == "metadata.uid"
+    assert field_paths["COINJOIN_OWNER_POD_NAMESPACE"] == "metadata.namespace"
 
 
 def test_kubernetes_manifest_has_controller_uploader_secret_and_rbac() -> None:
