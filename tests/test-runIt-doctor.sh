@@ -45,7 +45,7 @@ run_it() {
   cd "${PROJECT_DIR}"
     EMULATION_LOGS_DIR="${FAKE_LOGS}" \
     BLOCKSCI_IMAGE="ghcr.io/ondrejman/blocksci-complete:latest" \
-    COINJOIN_EMULATOR_IMAGE="ghcr.io/ondrejman/coinjoin-emulator:latest" \
+    COINJOIN_EMULATOR_IMAGE="ghcr.io/ondrejman/emulator-manager:latest" \
     COINJOIN_ANALYSIS_IMAGE="ghcr.io/ondrejman/coinjoin-analysis:latest" \
     PATH="${FAKE_BIN}:${PATH}" \
     "$@"

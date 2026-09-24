@@ -1858,7 +1858,7 @@ class WrapperExportTest(unittest.TestCase):
     def test_container_run_pull_args_default_to_always_for_registry_images(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(
-                container_run_pull_args("ghcr.io/ondrejman/coinjoin-emulator:latest", "COINJOIN_EMULATOR_PULL_POLICY"),
+                container_run_pull_args("ghcr.io/ondrejman/emulator-manager:latest", "COINJOIN_EMULATOR_PULL_POLICY"),
                 ["--pull=always"],
             )
 
@@ -1872,7 +1872,7 @@ class WrapperExportTest(unittest.TestCase):
     def test_container_run_pull_args_honor_env_override(self):
         with mock.patch.dict(os.environ, {"COINJOIN_EMULATOR_PULL_POLICY": "never"}, clear=True):
             self.assertEqual(
-                container_run_pull_args("ghcr.io/ondrejman/coinjoin-emulator:latest", "COINJOIN_EMULATOR_PULL_POLICY"),
+                container_run_pull_args("ghcr.io/ondrejman/emulator-manager:latest", "COINJOIN_EMULATOR_PULL_POLICY"),
                 ["--pull=never"],
             )
 

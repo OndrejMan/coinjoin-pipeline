@@ -42,7 +42,7 @@ After the restart the containerd-store images are no longer visible to the
 classic store, so re-pull the bases (tests also do this automatically):
 
 ```bash
-docker pull ghcr.io/ondrejman/coinjoin-emulator:latest
+docker pull ghcr.io/ondrejman/emulator-manager:latest
 docker pull ghcr.io/ondrejman/blocksci-complete:latest
 ```
 
@@ -61,7 +61,7 @@ Then, as after any store switch, the images built/tagged under the classic store
 won't be visible; re-pull as needed:
 
 ```bash
-docker pull ghcr.io/ondrejman/coinjoin-emulator:latest
+docker pull ghcr.io/ondrejman/emulator-manager:latest
 docker pull ghcr.io/ondrejman/blocksci-complete:latest
 ```
 

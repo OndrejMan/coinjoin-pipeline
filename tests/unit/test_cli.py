@@ -269,11 +269,12 @@ class CliTests(unittest.TestCase):
         ):
             code = main(["full-run", "--engine", "joinmarket", "--dry-run"])
         self.assertEqual(code, 0)
-        self.assertIn("coinjoin-emulator:latest", output.getvalue())
+        self.assertIn("emulator-manager:latest", output.getvalue())
 
     def test_latest_defaults_match_published_runtime_images(self) -> None:
         images = resolve_images(None, {})
         self.assertEqual(images.blocksci, "ghcr.io/ondrejman/blocksci-complete:latest")
+        self.assertEqual(images.emulator, "ghcr.io/ondrejman/emulator-manager:latest")
         self.assertTrue(
             all(image.endswith(":latest") for image in images.as_dict().values())
         )

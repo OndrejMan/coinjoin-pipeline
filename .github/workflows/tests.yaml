@@ -367,7 +367,7 @@ jobs:
       - name: Run parallel PBS analysis integration test (wasabi + joinmarket)
         env:
           CONTAINER_RUNTIME: docker
-          COINJOIN_EMULATOR_IMAGE: ghcr.io/ondrejman/coinjoin-emulator:latest
+          COINJOIN_EMULATOR_IMAGE: ghcr.io/ondrejman/emulator-manager:latest
           IMAGE_PREFIX: ghcr.io/ondrejman/
           EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-parallel-pbs-logs
           PBS_TEST_STORAGE_ROOT: /storage/github-runner
@@ -417,7 +417,7 @@ jobs:
 
       - name: Run S3-compatible full-run e2e (MinIO)
         env:
-          COINJOIN_EMULATOR_IMAGE: ghcr.io/ondrejman/coinjoin-emulator:latest
+          COINJOIN_EMULATOR_IMAGE: ghcr.io/ondrejman/emulator-manager:latest
           IMAGE_PREFIX: ghcr.io/ondrejman/
           PBS_TEST_STORAGE_ROOT: /storage/github-runner
           KUBERNETES_S3_TIMEOUT: 85m

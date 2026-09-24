@@ -32,7 +32,7 @@ if [[ "${IMAGE_MODE}" == "local" ]]; then
   BUILD_LOCAL_IMAGES=1
 fi
 UPSTREAM_BLOCKSCI_IMAGE="${UPSTREAM_BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-complete:latest}"
-UPSTREAM_EMULATOR_IMAGE="${UPSTREAM_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
+UPSTREAM_EMULATOR_IMAGE="${UPSTREAM_EMULATOR_IMAGE:-ghcr.io/ondrejman/emulator-manager:latest}"
 UPSTREAM_COINJOIN_ANALYSIS_IMAGE="${UPSTREAM_COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}"
 LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE:-blocksci-cj:joinmarket-local}"
 LOCAL_BLOCKSCI_IMAGE="${LOCAL_BLOCKSCI_IMAGE:-blocksci-complete:joinmarket-local}"

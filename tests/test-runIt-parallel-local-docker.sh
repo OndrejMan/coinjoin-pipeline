@@ -91,7 +91,7 @@ if [[ "${IMAGE_MODE}" == "local" ]]; then
   COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD=1
 else
   BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-complete:latest}"
-  COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
+  COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/emulator-manager:latest}"
   COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}"
   BLOCKSCI_PULL_POLICY="${BLOCKSCI_PULL_POLICY:-always}"
   COINJOIN_EMULATOR_PULL_POLICY="${COINJOIN_EMULATOR_PULL_POLICY:-always}"

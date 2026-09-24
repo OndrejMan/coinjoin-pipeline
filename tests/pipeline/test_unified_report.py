@@ -295,7 +295,7 @@ def complete_image_digests():
     return {
         "blocksci": "ghcr.io/ondrejman/blocksci-complete@sha256:blocksci",
         "coinjoin_analysis": "ghcr.io/ondrejman/coinjoin-analysis@sha256:analysis",
-        "coinjoin_emulator": "ghcr.io/ondrejman/coinjoin-emulator@sha256:emulator",
+        "coinjoin_emulator": "ghcr.io/ondrejman/emulator-manager@sha256:emulator",
         "uploader": "ghcr.io/ondrejman/coinjoin-pipeline-uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     }
 

@@ -98,7 +98,7 @@ services:
 
   manager:
     profiles: ["emulate"]
-    image: ${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}
+    image: ${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/emulator-manager:latest}
     pull_policy: ${COINJOIN_EMULATOR_PULL_POLICY:-always}
     volumes:
      - btc_data:/home/bitcoin/data:rw # Named container volume
@@ -150,7 +150,7 @@ services:
         - COINJOIN_ANALYSIS_IMAGE=${COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}
         - COINJOIN_ANALYSIS_IMAGE_ID=${COINJOIN_ANALYSIS_IMAGE_ID:-}
         - COINJOIN_ANALYSIS_IMAGE_DIGEST=${COINJOIN_ANALYSIS_IMAGE_DIGEST:-}
-        - COINJOIN_EMULATOR_IMAGE=${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}
+        - COINJOIN_EMULATOR_IMAGE=${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/emulator-manager:latest}
         - COINJOIN_EMULATOR_IMAGE_ID=${COINJOIN_EMULATOR_IMAGE_ID:-}
         - COINJOIN_EMULATOR_IMAGE_DIGEST=${COINJOIN_EMULATOR_IMAGE_DIGEST:-}
         - COINJOIN_UPLOADER_IMAGE=${COINJOIN_UPLOADER_IMAGE:-}

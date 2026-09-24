@@ -9,7 +9,7 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 LAUNCHER="${PROJECT_DIR}/runIt.sh"
 RUNTIME_DIR="${PROJECT_DIR}/pipeline"
 TMP_DIR="$(mktemp -d)"
-EXPECTED_COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
+EXPECTED_COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/emulator-manager:latest}"
 
 cleanup() {
   rm -rf "${TMP_DIR}"
@@ -32,7 +32,7 @@ cp "${FAKE_BIN}/docker" "${FAKE_BIN}/kubectl"
 
 export BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-complete:latest}"
 export COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}"
-export COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
+export COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/emulator-manager:latest}"
 
 fail_with() {
   echo "FAIL: $1" >&2

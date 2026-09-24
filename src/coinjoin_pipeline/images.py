@@ -7,7 +7,7 @@ import re
 
 
 IMAGE_NAMES = {
-    "emulator": "ghcr.io/ondrejman/coinjoin-emulator",
+    "emulator": "ghcr.io/ondrejman/emulator-manager",
     "coinjoin_analysis": "ghcr.io/ondrejman/coinjoin-analysis",
     "blocksci": "ghcr.io/ondrejman/blocksci-complete",
     "mappings": "ghcr.io/ondrejman/coinjoin-mappings-enumerator",

@@ -19,7 +19,7 @@ EMULATION_TIMEOUT="${EMULATION_TIMEOUT:-90m}"
 SCENARIO="${SCENARIO:-overactive-local.json}"
 ACTION="${ACTION:-emulate}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
-EMULATOR_IMAGE="${EMULATOR_IMAGE:-ghcr.io/ondrejman/coinjoin-emulator:latest}"
+EMULATOR_IMAGE="${EMULATOR_IMAGE:-ghcr.io/ondrejman/emulator-manager:latest}"
 # The wrapper reads COINJOIN_EMULATOR_IMAGE. Keep it aligned with the image
 # selected for this test so local-image validation does not fall back to GHCR.
 COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-${EMULATOR_IMAGE}}"
