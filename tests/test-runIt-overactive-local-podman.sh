@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Happy-path E2E: run the complete Wasabi pipeline with Podman only.
+# Happy-path E2E: run the complete Wasabi pipeline through host Podman.
 #
 # Unlike test-podman-no-host-docker.sh, this starts real containers.  The
-# emulator itself receives --driver podman, while the wrapper uses Podman
-# Compose for both analyzers.  A fake docker binary makes any accidental
-# fallback to the host Docker daemon fail immediately.
+# wrapper uses Podman Compose; the emulator's Docker-in-Docker daemon remains
+# inside that stack. A fake docker binary rejects host Docker fallback.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -133,7 +132,6 @@ echo "Running complete Podman workflow with logs in ${LOGS_DIR}..."
     bash runIt.sh container podman full-run \
       --engine wasabi \
       --scenario scenarios/overactive-local.json \
-      --driver podman \
       --min-input-count 15
   ) 2>&1 | tee "${RUN_LOG}"
 ) &
