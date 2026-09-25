@@ -45,6 +45,8 @@ for test_script in \
   test-command-builder-contract.sh \
   pipeline/test_emulate_exit_status.sh \
   pipeline/test_emulate_interrupt_cleanup.sh \
+  pipeline/test_emulate_log_follower_cleanup.sh \
+  pipeline/test_delete_profiles.sh \
   test-run-all-local-failure-report.sh \
   test-podman-no-host-docker.sh \
   test-runIt-overactive-local-docker.sh \
