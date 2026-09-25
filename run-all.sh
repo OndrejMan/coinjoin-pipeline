@@ -455,6 +455,7 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
     "tests/test-command-builder-contract.sh"
     "tests/pipeline/test_emulate_exit_status.sh"
     "tests/pipeline/test_emulate_interrupt_cleanup.sh"
+    "tests/pipeline/test_emulate_log_follower_cleanup.sh"
     "tests/pipeline/test_delete_profiles.sh"
     "tests/test-run-all-local-failure-report.sh"
     "tests/test-runIt-overactive-local.sh"

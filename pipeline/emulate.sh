@@ -35,6 +35,7 @@ else
 fi
 
 LOG_PID=""
+LOG_PID_IS_GROUP=false
 WAIT_PID=""
 WAIT_RESULT_FILE="$(mktemp)"
 STACK_STARTED=false
@@ -45,8 +46,12 @@ cleanup_emulate_stack() {
     wait "${WAIT_PID}" >/dev/null 2>&1 || true
   fi
 
-  if [[ -n "${LOG_PID}" ]] && kill -0 "${LOG_PID}" >/dev/null 2>&1; then
-    kill "${LOG_PID}" >/dev/null 2>&1 || true
+  if [[ -n "${LOG_PID}" ]]; then
+    if [[ "${LOG_PID_IS_GROUP}" == "true" ]]; then
+      kill -- "-${LOG_PID}" >/dev/null 2>&1 || true
+    else
+      kill "${LOG_PID}" >/dev/null 2>&1 || true
+    fi
     wait "${LOG_PID}" >/dev/null 2>&1 || true
   fi
 
@@ -97,7 +102,16 @@ SCENARIO_PATH="${SCENARIO_PATH}" COINJOIN_ENGINE="${COINJOIN_ENGINE}" "${COMPOSE
 # 2. Start streaming logs in the background 
 # The `-f` flag "follows" the logs in real-time.
 # The `&` at the end runs this command in the background so the script can move on.
-"${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile emulate logs -f &
+# ``podman compose`` runs an external provider (docker-compose) as a child and
+# does not forward SIGTERM to it; killing only the wrapper orphaned a follower
+# that kept this script's stdout pipe open and hung the caller after the stage
+# finished.  Run the follower in its own process group and signal the group.
+if command -v setsid >/dev/null 2>&1; then
+  setsid "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile emulate logs -f &
+  LOG_PID_IS_GROUP=true
+else
+  "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile emulate logs -f &
+fi
 
 # Capture the Process ID (PID) of that background log stream
 LOG_PID=$!
