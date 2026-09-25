@@ -50,7 +50,10 @@ HOST_KUBECONFIG="${WORK_ROOT}/kubeconfig-host.yaml"
 IMAGE_PREFIX="${IMAGE_PREFIX:-ghcr.io/ondrejman/}"
 UPLOADER_IMAGE="${UPLOADER_IMAGE:-}"
 COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/emulator-manager:latest}"
-COINJOIN_EMULATOR_ROOT="${COINJOIN_EMULATOR_ROOT:-${PROJECT_DIR}/../coinjoin-emulator}"
+# support/local-images.sh reads COINJOIN_EMULATOR_SOURCE_DIR; COINJOIN_EMULATOR_ROOT
+# is the older name for the same checkout and is still honoured.
+COINJOIN_EMULATOR_SOURCE_DIR="${COINJOIN_EMULATOR_SOURCE_DIR:-${COINJOIN_EMULATOR_ROOT:-${PROJECT_DIR}/../coinjoin-emulator}}"
+export COINJOIN_EMULATOR_SOURCE_DIR
 BTC_NODE_SOURCE_IMAGE="${BTC_NODE_IMAGE:-}"
 MINIO_IMAGE="${MINIO_IMAGE:-minio/minio:latest}"
 RESULT_DIR="${TEST_RESULT_DIR:-${PROJECT_DIR}/emulation_logs/_test-results/kubernetes-s3-minio-${RUN_TOKEN}}"
@@ -215,8 +218,8 @@ ensure_source_image "${COINJOIN_EMULATOR_SOURCE_IMAGE}"
 if ! docker run --rm --entrypoint sh "${COINJOIN_EMULATOR_SOURCE_IMAGE}" -c \
   'grep -q COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT /app/manager/engine/engine_base.py && grep -q "ports.get(container_port, container_port)" /app/manager/engine/engine_base.py && grep -q KUBERNETES_IMAGE_PULL_POLICY /app/manager/driver/kubernetes.py'; then
   echo "FAIL: emulator image ${COINJOIN_EMULATOR_SOURCE_IMAGE} is stale for this S3 test." >&2
-  echo "      Rebuild it from ${COINJOIN_EMULATOR_ROOT}:" >&2
-  echo "      docker build -t ${COINJOIN_EMULATOR_SOURCE_IMAGE} ${COINJOIN_EMULATOR_ROOT}" >&2
+  echo "      Rebuild it from ${COINJOIN_EMULATOR_SOURCE_DIR}:" >&2
+  echo "      docker build -t ${COINJOIN_EMULATOR_SOURCE_IMAGE} ${COINJOIN_EMULATOR_SOURCE_DIR}" >&2
   exit 2
 fi
 
@@ -234,12 +237,12 @@ if [[ -n "${BTC_NODE_SOURCE_IMAGE}" ]]; then
   ensure_source_image "${BTC_NODE_SOURCE_IMAGE}"
   docker tag "${BTC_NODE_SOURCE_IMAGE}" "${K3D_BTC_NODE_IMAGE}"
 else
-  [[ -f "${COINJOIN_EMULATOR_ROOT}/containers/btc-node/Dockerfile" ]] || {
-    echo "FAIL: btc-node Dockerfile not found under ${COINJOIN_EMULATOR_ROOT}" >&2
+  [[ -f "${COINJOIN_EMULATOR_SOURCE_DIR}/containers/btc-node/Dockerfile" ]] || {
+    echo "FAIL: btc-node Dockerfile not found under ${COINJOIN_EMULATOR_SOURCE_DIR}" >&2
     exit 2
   }
   echo "Building the current local btc-node image ${K3D_BTC_NODE_IMAGE}..."
-  docker build -t "${K3D_BTC_NODE_IMAGE}" "${COINJOIN_EMULATOR_ROOT}/containers/btc-node"
+  docker build -t "${K3D_BTC_NODE_IMAGE}" "${COINJOIN_EMULATOR_SOURCE_DIR}/containers/btc-node"
 fi
 if ! docker run --rm --entrypoint sh "${K3D_BTC_NODE_IMAGE}" -c \
   'grep -q COINJOIN_INITIAL_BLOCK_COUNT /home/bitcoin/mine.sh'; then

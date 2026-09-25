@@ -60,9 +60,9 @@ class PublishWorkflowTests(unittest.TestCase):
                 checkout = checkouts[0]
                 self.assertEqual(checkout["with"]["submodules"], "recursive")
                 source_dir = "${{ github.workspace }}/" + checkout["with"]["path"]
-                variable = ("COINJOIN_EMULATOR_ROOT" if name == "kubernetes-s3-minio"
-                            else "COINJOIN_EMULATOR_SOURCE_DIR")
-                self.assertEqual(job["env"][variable], source_dir)
+                # tests/support/local-images.sh resolves the emulator checkout
+                # from this variable, whatever name the test script uses.
+                self.assertEqual(job["env"]["COINJOIN_EMULATOR_SOURCE_DIR"], source_dir)
                 build_steps = [i for i, step in enumerate(job["steps"])
                                if "./tests/test-" in step.get("run", "")]
                 self.assertLess(job["steps"].index(checkout), min(build_steps))

@@ -422,7 +422,7 @@ jobs:
     env:
       KUBECTL_VERSION: v1.35.6
       K3D_VERSION: v5.9.0
-      COINJOIN_EMULATOR_ROOT: ${{ github.workspace }}/coinjoin-emulator
+      COINJOIN_EMULATOR_SOURCE_DIR: ${{ github.workspace }}/coinjoin-emulator
 
     steps:
       - name: Checkout repository
