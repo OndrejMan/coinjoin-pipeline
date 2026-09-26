@@ -55,7 +55,9 @@ COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/emulator-m
 COINJOIN_EMULATOR_SOURCE_DIR="${COINJOIN_EMULATOR_SOURCE_DIR:-${COINJOIN_EMULATOR_ROOT:-${PROJECT_DIR}/../coinjoin-emulator}}"
 export COINJOIN_EMULATOR_SOURCE_DIR
 BTC_NODE_SOURCE_IMAGE="${BTC_NODE_IMAGE:-}"
-MINIO_IMAGE="${MINIO_IMAGE:-minio/minio:latest}"
+# minio/minio is gone from Docker Hub and quay.io/minio/minio needs a login;
+# pgsty/minio is the community rebuild with the same entrypoint and CLI.
+MINIO_IMAGE="${MINIO_IMAGE:-pgsty/minio:RELEASE.2026-08-04T00-00-00Z}"
 RESULT_DIR="${TEST_RESULT_DIR:-${PROJECT_DIR}/emulation_logs/_test-results/kubernetes-s3-minio-${RUN_TOKEN}}"
 KEEP_WORK="${KEEP_TEST_WORK:-0}"
 KUBERNETES_S3_TIMEOUT="${KUBERNETES_S3_TIMEOUT:-85m}"

@@ -128,7 +128,7 @@ GATEWAY="${CONTAINER_KUBE_HOST:-$(docker network inspect bridge --format '{{(ind
 docker rm -f "${PBS_CONTAINER_NAME}" "${MINIO_CONTAINER_NAME}" >/dev/null 2>&1 || true
 docker run -d --name "${MINIO_CONTAINER_NAME}" \
   -e MINIO_ROOT_USER="${MINIO_ROOT_USER}" -e MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD}" \
-  -p 9000 "${MINIO_IMAGE:-minio/minio:latest}" server /data >/dev/null
+  -p 9000 "${MINIO_IMAGE:-pgsty/minio:RELEASE.2026-08-04T00-00-00Z}" server /data >/dev/null
 MINIO_PORT="$(docker port "${MINIO_CONTAINER_NAME}" 9000/tcp | head -n 1 | awk -F: '{print $NF}')"
 S3_ENDPOINT_URL="http://${GATEWAY}:${MINIO_PORT}"
 printf '[%s]\naws_access_key_id = %s\naws_secret_access_key = %s\n' \
