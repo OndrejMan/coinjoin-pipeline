@@ -126,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         passthrough, host = parse_host_options(raw)
-        runtime = str(host["runtime"])
+        runtime = host["runtime"]
         runs_root = Path(str(
             host.get("runs_root")
             or os.environ.get("EMULATION_LOGS_DIR")

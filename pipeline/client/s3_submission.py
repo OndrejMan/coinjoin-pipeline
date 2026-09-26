@@ -30,6 +30,7 @@ from client.pbs import (
     persist_pbs_job_id,
 )
 from client.pbs_settings import (
+    PBSResources,
     resolve_pbs_image,
     resolve_unified_report_pbs_image,
     resolve_unified_report_pbs_resource,
@@ -256,7 +257,7 @@ class S3StageRunner:
             ),
         )
 
-    def _blocksci_resources(self) -> tuple[str, dict[str, object]]:
+    def _blocksci_resources(self) -> tuple[str, PBSResources]:
         return (
             resolve_pbs_image(
                 self.args, DEFAULT_BLOCKSCI_IMAGE, "pbs_blocksci_image"

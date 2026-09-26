@@ -14,7 +14,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, ContextManager
+from typing import Callable, ContextManager, NoReturn
 
 from client.artifacts import ArtifactTransportError, S3Access
 from client.pbs import PBSError
@@ -70,7 +70,7 @@ class WrapperOperations:
     run_serial_analysis: Callable[[argparse.Namespace, Path, Path], None]
 
 
-def _error_and_exit(error: Exception) -> None:
+def _error_and_exit(error: Exception) -> NoReturn:
     print(f"[ERROR] {error}", file=sys.stderr)
     raise SystemExit(2)
 

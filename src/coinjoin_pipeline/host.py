@@ -3,12 +3,35 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
+from typing import Literal, TypedDict
 
 from .commands import DOCKERLESS_RESEARCH_ACTIONS, has_option
 from .images import IMAGE_NAMES, Images
 
 
-HOST_VALUE_OPTIONS = {
+HostValueKey = Literal[
+    "version", "runtime", "runs_root", "emulator", "coinjoin_analysis",
+    "blocksci", "mappings", "sake",
+]
+
+
+class _RequiredHostOptions(TypedDict):
+    runtime: str
+    local_build: bool
+
+
+class HostOptions(_RequiredHostOptions, total=False):
+    version: str
+    runs_root: str
+    emulator: str
+    coinjoin_analysis: str
+    blocksci: str
+    mappings: str
+    sake: str
+
+
+HOST_VALUE_OPTIONS: dict[str, HostValueKey] = {
     "--version": "version",
     "--runtime": "runtime",
     "--runs-root": "runs_root",
@@ -20,9 +43,9 @@ HOST_VALUE_OPTIONS = {
 }
 
 
-def parse_host_options(argv: list[str]) -> tuple[list[str], dict[str, object]]:
+def parse_host_options(argv: list[str]) -> tuple[list[str], HostOptions]:
     passthrough: list[str] = []
-    host: dict[str, object] = {"runtime": "docker", "local_build": False}
+    host: HostOptions = {"runtime": "docker", "local_build": False}
     index = 0
     while index < len(argv):
         item = argv[index]
@@ -50,7 +73,7 @@ def parse_host_options(argv: list[str]) -> tuple[list[str], dict[str, object]]:
     return passthrough, host
 
 
-def image_overrides(host: dict[str, object]) -> dict[str, str | None]:
+def image_overrides(host: Mapping[str, object]) -> dict[str, str | None]:
     environment_names = {
         "emulator": "COINJOIN_EMULATOR_IMAGE",
         "coinjoin_analysis": "COINJOIN_ANALYSIS_IMAGE",
