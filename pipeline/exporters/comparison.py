@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from exporters.common import JsonObject
+from exporters.report_types import IORecord, RecordSummary, TransactionRecord
 
 
 def compare_io(
     label: str,
-    coinjoin_analysis_values: list[JsonObject],
-    blocksci_values: list[JsonObject],
+    coinjoin_analysis_values: list[IORecord],
+    blocksci_values: list[IORecord],
 ) -> list[str]:
     mismatches = []
     coinjoin_analysis_by_index = {item["index"]: item for item in coinjoin_analysis_values}
@@ -32,7 +35,9 @@ def compare_io(
     return mismatches
 
 
-def compare_records(coinjoin_analysis_record: JsonObject, blocksci_record: JsonObject) -> list[str]:
+def compare_records(
+    coinjoin_analysis_record: TransactionRecord, blocksci_record: TransactionRecord
+) -> list[str]:
     mismatches = []
     for field in (
         "input_count",
@@ -55,20 +60,20 @@ def compare_records(coinjoin_analysis_record: JsonObject, blocksci_record: JsonO
     return mismatches
 
 
-def record_wallets(record: JsonObject | None) -> list[str]:
+def record_wallets(record: TransactionRecord | None) -> list[str]:
     if record is None:
         return []
 
     wallets = set()
-    for side in ("inputs", "outputs"):
-        for item in record.get(side, []):
+    for side in (record.get("inputs", []), record.get("outputs", [])):
+        for item in side:
             wallet = item.get("wallet_name")
             if wallet:
                 wallets.add(wallet)
     return sorted(wallets)
 
 
-def record_summary(record: JsonObject | None) -> JsonObject | None:
+def record_summary(record: TransactionRecord | None) -> RecordSummary | None:
     if record is None:
         return None
 
@@ -146,7 +151,7 @@ def compute_optional_rate(numerator: int, denominator: int) -> float | None:
 
 def build_detection_confusion_matrix(
     emulator_data: JsonObject | None,
-    detected_records: dict[str, JsonObject],
+    detected_records: Mapping[str, object],
 ) -> JsonObject | None:
     if not emulator_data or not (emulator_data.get("label_provenance") or {}).get("independent"):
         return None

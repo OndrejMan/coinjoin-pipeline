@@ -568,14 +568,13 @@ def load_wasabi_round_labels(run_dir: Path, log_paths: list[Path]) -> list[JsonO
                 if match is None:
                     continue
                 round_match = WASABI_ROUND_ID_RE.search(text)
-                label = {
+                txid = match.group("txid").lower()
+                labels_by_txid[txid] = {
                     "timestamp": text[:round_match.start()].strip() if round_match else None,
                     "round_id": round_match.group("round_id") if round_match else None,
-                    "txid": match.group("txid"),
+                    "txid": txid,
+                    "source_file": str(path.relative_to(run_dir)),
                 }
-                label["txid"] = label["txid"].lower()
-                label["source_file"] = str(path.relative_to(run_dir))
-                labels_by_txid[label["txid"]] = label
     return [labels_by_txid[txid] for txid in sorted(labels_by_txid)]
 
 

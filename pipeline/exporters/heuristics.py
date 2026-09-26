@@ -16,9 +16,10 @@ from exporters.common import (
     coerce_int,
     rule_result,
 )
+from exporters.report_types import IORecord, TransactionRecord
 
 
-def values_descending(records: list[JsonObject]) -> bool:
+def values_descending(records: list[IORecord]) -> bool:
     values: list[int] = []
     for record in records:
         value = record.get("value")
@@ -28,11 +29,11 @@ def values_descending(records: list[JsonObject]) -> bool:
     return all(values[index] >= values[index + 1] for index in range(len(values) - 1))
 
 
-def unique_addresses(records: list[JsonObject]) -> set[str]:
+def unique_addresses(records: list[IORecord]) -> set[str]:
     return {str(record["address"]) for record in records if record.get("address")}
 
 
-def address_type_rule(name: str, records: list[JsonObject]) -> JsonObject:
+def address_type_rule(name: str, records: list[IORecord]) -> JsonObject:
     address_types = [str(record["address_type"]) for record in records if record.get("address_type")]
     expected = "WITNESS_PUBKEYHASH or WITNESS_UNKNOWN"
     if not address_types:
@@ -94,7 +95,7 @@ def wasabi2_blocksci_denominations() -> set[int]:
 WASABI2_BLOCKSCI_DENOMINATIONS = wasabi2_blocksci_denominations()
 
 
-def wasabi2_known_denomination_count(outputs: list[JsonObject]) -> int:
+def wasabi2_known_denomination_count(outputs: list[IORecord]) -> int:
     return sum(1 for output in outputs if output.get("value") in WASABI2_BLOCKSCI_DENOMINATIONS)
 
 
@@ -105,7 +106,7 @@ def wasabi2_denomination_ratio(block_height: int | None) -> float:
 
 
 def explain_wasabi2_heuristic(
-    record: JsonObject,
+    record: TransactionRecord,
     min_input_count: int | None = None,
     first_wasabi2_block: int = DEFAULT_FIRST_WASABI2_BLOCK,
 ) -> JsonObject:
@@ -169,7 +170,7 @@ def explain_wasabi2_heuristic(
     }
 
 
-def grouped_input_values_by_address(inputs: list[JsonObject]) -> dict[str, int]:
+def grouped_input_values_by_address(inputs: list[IORecord]) -> dict[str, int]:
     grouped: dict[str, int] = {}
     for input_record in inputs:
         address = input_record.get("address")
@@ -180,7 +181,7 @@ def grouped_input_values_by_address(inputs: list[JsonObject]) -> dict[str, int]:
     return grouped
 
 
-def output_addresses_by_value(outputs: list[JsonObject]) -> dict[int, set[str]]:
+def output_addresses_by_value(outputs: list[IORecord]) -> dict[int, set[str]]:
     grouped: dict[int, set[str]] = {}
     for output_record in outputs:
         value = output_record.get("value")
@@ -191,7 +192,7 @@ def output_addresses_by_value(outputs: list[JsonObject]) -> dict[int, set[str]]:
     return grouped
 
 
-def output_value_counts(outputs: list[JsonObject]) -> dict[int, int]:
+def output_value_counts(outputs: list[IORecord]) -> dict[int, int]:
     counts: dict[int, int] = {}
     for output_record in outputs:
         value = output_record.get("value")
@@ -264,7 +265,7 @@ def joinmarket_subset_result(
 
 
 def explain_joinmarket_definite_heuristic(
-    record: JsonObject,
+    record: TransactionRecord,
     min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE,
     percentage_fee: float = DEFAULT_JOINMARKET_PERCENTAGE_FEE,
     max_depth: int = DEFAULT_JOINMARKET_MAX_DEPTH,
@@ -381,7 +382,7 @@ def explain_joinmarket_definite_heuristic(
 
 
 def explain_joinmarket_possible_heuristic(
-    record: JsonObject,
+    record: TransactionRecord,
     min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE,
     percentage_fee: float = DEFAULT_JOINMARKET_PERCENTAGE_FEE,
     max_depth: int = DEFAULT_JOINMARKET_MAX_DEPTH,
@@ -492,7 +493,7 @@ def explain_joinmarket_possible_heuristic(
 
 
 def add_blocksci_heuristic_explanations(
-    records: dict[str, JsonObject],
+    records: dict[str, TransactionRecord],
     coinjoin_type: str,
     min_input_count: int | None = None,
     first_wasabi2_block: int = DEFAULT_FIRST_WASABI2_BLOCK,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
 from exporters.common import (
@@ -15,6 +16,7 @@ from exporters.common import (
     nested_get,
     tree_sha256,
 )
+from exporters.report_types import DetectorManifest, ImageFields, RunManifest
 
 MANIFEST_COMPARE_FIELDS = (
     ("scenario.sha256", ("scenario", "sha256")),
@@ -49,8 +51,8 @@ def build_detector_manifest(
     joinmarket_min_base_fee: int,
     joinmarket_percentage_fee: float,
     joinmarket_max_depth: int,
-) -> JsonObject:
-    detector: JsonObject = {
+) -> DetectorManifest:
+    detector: DetectorManifest = {
         "coinjoin_type": coinjoin_type,
         "blocksci_min_input_count": min_input_count,
     }
@@ -90,13 +92,13 @@ def build_run_manifest(
     uploader_image_digest: str | None = None,
     unified_report_image_digest: str | None = None,
     emulator_git_commit: str | None = None,
-) -> JsonObject:
+) -> RunManifest:
     exporters_root = Path(__file__).resolve().parent
     inferred_engine = engine or os.environ.get("COINJOIN_ENGINE")
     if not inferred_engine:
         inferred_engine = "joinmarket" if coinjoin_type == "joinmarket" else "wasabi"
 
-    images = {
+    images: ImageFields = {
         "blocksci": first_present(blocksci_image, os.environ.get("BLOCKSCI_IMAGE")),
         "coinjoin_analysis": first_present(
             coinjoin_analysis_image,
@@ -184,8 +186,8 @@ def build_run_manifest(
 
 
 def compare_run_manifests(
-    previous_manifest: JsonObject | None,
-    current_manifest: JsonObject,
+    previous_manifest: Mapping[str, object] | None,
+    current_manifest: RunManifest,
 ) -> JsonObject:
     if not previous_manifest:
         return {

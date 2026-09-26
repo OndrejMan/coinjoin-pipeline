@@ -6,10 +6,18 @@ import hashlib
 import json
 import subprocess
 from collections import Counter
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from exporters.report_types import IORecord, TransactionMetrics
 
 JsonValue = object
+# Free-form JSON whose schema this code does not model: scenario files,
+# emulator evidence, the rendered report. The records the report computes on
+# are typed in exporters.report_types instead.
 JsonObject = dict
 
 SCHEMA_VERSION = "1.8"
@@ -167,10 +175,10 @@ def docker_image_digest(image: str | None) -> str | None:
     return image_id.strip() or None
 
 
-def nested_get(data: JsonObject | None, path: tuple[str, ...]) -> JsonValue:
+def nested_get(data: Mapping[str, object] | None, path: tuple[str, ...]) -> JsonValue:
     current: JsonValue = data
     for key in path:
-        if not isinstance(current, dict):
+        if not isinstance(current, Mapping):
             return None
         current = current.get(key)
     return current
@@ -234,20 +242,19 @@ def sorted_items(mapping: JsonObject) -> list[tuple[str, JsonObject]]:
     return sorted(mapping.items(), key=key)
 
 
-def repeated_denominations(outputs: list[JsonObject]) -> dict[str, int]:
+def repeated_denominations(outputs: list[IORecord]) -> dict[str, int]:
     counts = Counter(output["value"] for output in outputs if output.get("value") is not None)
     return {str(value): count for value, count in sorted(counts.items()) if count > 1}
 
 
-def add_common_metrics(record: JsonObject) -> JsonObject:
-    inputs = record.get("inputs", [])
-    outputs = record.get("outputs", [])
-    record["input_count"] = len(inputs)
-    record["output_count"] = len(outputs)
-    record["total_input_sats"] = sum(item["value"] or 0 for item in inputs)
-    record["total_output_sats"] = sum(item["value"] or 0 for item in outputs)
-    record["repeated_output_denominations"] = repeated_denominations(outputs)
-    return record
+def transaction_metrics(inputs: list[IORecord], outputs: list[IORecord]) -> TransactionMetrics:
+    return {
+        "input_count": len(inputs),
+        "output_count": len(outputs),
+        "total_input_sats": sum(item["value"] or 0 for item in inputs),
+        "total_output_sats": sum(item["value"] or 0 for item in outputs),
+        "repeated_output_denominations": repeated_denominations(outputs),
+    }
 
 
 def rule_result(name: str, passed: bool | None, observed: JsonValue, expected: JsonValue) -> JsonObject:

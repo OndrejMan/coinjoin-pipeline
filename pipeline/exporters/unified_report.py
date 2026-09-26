@@ -38,6 +38,7 @@ from exporters.heuristics import *  # noqa: F403
 from exporters.manifest import *  # noqa: F403
 from exporters.normalization import *  # noqa: F403
 from exporters.report_builder import *  # noqa: F403
+from exporters.report_types import TransactionRecord
 from exporters.scenario import *  # noqa: F403
 from exporters.script_metadata import *  # noqa: F403
 
@@ -73,7 +74,7 @@ def export_blocksci_records(  # type: ignore[no-redef]
     joinmarket_min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE,
     joinmarket_percentage_fee: float = DEFAULT_JOINMARKET_PERCENTAGE_FEE,
     joinmarket_max_depth: int = DEFAULT_JOINMARKET_MAX_DEPTH,
-) -> tuple[dict[str, JsonObject], list[str]]:
+) -> tuple[dict[str, TransactionRecord], list[str]]:
     _sync_blocksci()
     return _blocksci_export.export_blocksci_records(
         config_path,

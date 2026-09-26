@@ -8,6 +8,7 @@ import builtins
 import os
 import sys
 from pathlib import Path
+from typing import cast
 
 if not hasattr(builtins, "xrange"):
     setattr(builtins, "xrange", range)
@@ -27,13 +28,13 @@ from exporters.common import (
     DEFAULT_JOINMARKET_MAX_DEPTH,
     DEFAULT_JOINMARKET_MIN_BASE_FEE,
     DEFAULT_JOINMARKET_PERCENTAGE_FEE,
-    JsonObject,
     load_json,
     save_json,
 )
 from exporters.emulator_data import output_address
 from exporters.integration_diagnostics import build_integration_diagnostics
 from exporters.normalization import load_first_wasabi2_block
+from exporters.report_types import BlockSciAnalysisArtifact, DetectorParameters
 
 SCHEMA_VERSION = "1.0"
 ARTIFACT_NAME = "blocksci_analysis.json"
@@ -63,7 +64,7 @@ def exported_addresses(run_dir: Path) -> set[str]:
     return addresses
 
 
-def detector_parameters(args: argparse.Namespace) -> JsonObject:
+def detector_parameters(args: argparse.Namespace) -> DetectorParameters:
     return {
         "coinjoin_type": args.coinjoin_type,
         "min_input_count": args.min_input_count,
@@ -78,8 +79,9 @@ def load_analysis(
     path: Path,
     *,
     run_id: str,
-    expected_parameters: JsonObject,
-) -> JsonObject:
+    expected_parameters: DetectorParameters,
+) -> BlockSciAnalysisArtifact:
+    """Load an artifact and check every field report assembly relies on."""
     artifact = load_json(path)
     if artifact.get("schema_version") != SCHEMA_VERSION:
         raise ValueError(
@@ -104,7 +106,7 @@ def load_analysis(
     clusters = artifact.get("predicted_address_clusters")
     if clusters is not None and not isinstance(clusters, dict):
         raise ValueError("BlockSci analysis artifact has invalid predicted_address_clusters")
-    return artifact
+    return cast(BlockSciAnalysisArtifact, artifact)
 
 
 def write_analysis(args: argparse.Namespace) -> Path:
@@ -155,7 +157,7 @@ def write_analysis(args: argparse.Namespace) -> Path:
         cluster_dir,
         min_input_count=args.min_input_count,
     )
-    artifact: JsonObject = {
+    artifact: BlockSciAnalysisArtifact = {
         "schema_version": SCHEMA_VERSION,
         "run_id": run_dir.name,
         "parameters": detector_parameters(args),

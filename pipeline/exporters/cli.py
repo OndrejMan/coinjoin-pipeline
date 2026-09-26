@@ -225,10 +225,10 @@ def main(argv: list[str] | None = None) -> int:
             run_id=run_dir.name,
             expected_parameters=blocksci_detector_parameters(analysis_args),
         )
-        first_wasabi2_block = analysis.get("first_wasabi2_block")
+        first_wasabi2_block = analysis["first_wasabi2_block"]
         blocksci_records = analysis["records"]
         blocksci_skipped_txids = analysis["skipped_txids"]
-        integration_diagnostics = analysis.get("integration_diagnostics")
+        integration_diagnostics = analysis["integration_diagnostics"]
         predicted_address_clusters = analysis.get("predicted_address_clusters")
         cluster_export_error = analysis.get("cluster_export_error")
         if args.skip_clustering:

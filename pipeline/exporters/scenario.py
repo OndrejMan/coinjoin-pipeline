@@ -6,6 +6,7 @@ from pathlib import Path
 
 from exporters.artifact_paths import emulator_dir
 from exporters.common import JsonObject, coerce_sats, load_json, sha256_json
+from exporters.report_types import TransactionRecord
 
 
 def wallet_name(index: int) -> str:
@@ -58,18 +59,18 @@ def load_scenario(run_dir: Path, fallback_path: Path | None) -> JsonObject | Non
     return None
 
 
-def coinjoin_analysis_wallet_names(coinjoin_analysis: dict[str, JsonObject]) -> set[str]:
+def coinjoin_analysis_wallet_names(coinjoin_analysis: dict[str, TransactionRecord]) -> set[str]:
     names = set()
     for tx in coinjoin_analysis.values():
-        for side in ("inputs", "outputs"):
-            for item in tx.get(side, []):
+        for side in (tx.get("inputs", []), tx.get("outputs", [])):
+            for item in side:
                 wallet = item.get("wallet_name")
                 if wallet and wallet.startswith("wallet-"):
                     names.add(wallet)
     return names
 
 
-def per_wallet_observed_counts(coinjoin_analysis: dict[str, JsonObject]) -> dict[str, dict[str, int]]:
+def per_wallet_observed_counts(coinjoin_analysis: dict[str, TransactionRecord]) -> dict[str, dict[str, int]]:
     counts: dict[str, dict[str, int]] = {}
     for tx in coinjoin_analysis.values():
         for item in tx.get("inputs", []):
@@ -90,7 +91,7 @@ def per_wallet_observed_counts(coinjoin_analysis: dict[str, JsonObject]) -> dict
 
 def build_scenario_checks(
     scenario: JsonObject | None,
-    coinjoin_analysis: dict[str, JsonObject],
+    coinjoin_analysis: dict[str, TransactionRecord],
     coinjoin_type: str | None = None,
 ) -> JsonObject:
     wallet_names = coinjoin_analysis_wallet_names(coinjoin_analysis)

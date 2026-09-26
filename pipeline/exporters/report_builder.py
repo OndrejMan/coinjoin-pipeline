@@ -24,14 +24,15 @@ from exporters.comparison import (
 )
 from exporters.heuristics import add_blocksci_heuristic_explanations
 from exporters.manifest import build_run_manifest, compare_run_manifests
+from exporters.report_types import TransactionRecord
 from exporters.scenario import build_scenario_checks
 from exporters.script_metadata import enrich_records_with_script_metadata
 
 
 def build_report(
     run_dir: Path,
-    coinjoin_analysis: dict[str, JsonObject],
-    blocksci_records: dict[str, JsonObject],
+    coinjoin_analysis: dict[str, TransactionRecord],
+    blocksci_records: dict[str, TransactionRecord],
     coinjoin_type: str,
     scenario: JsonObject | None = None,
     min_input_count: int | None = None,

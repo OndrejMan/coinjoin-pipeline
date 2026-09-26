@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Callable, Protocol, cast
 
@@ -358,7 +359,7 @@ def build_integration_diagnostics(
     run_dir: Path,
     config_path: Path,
     blocksci_module: BlocksciModule,
-    blocksci_records: dict[str, JsonObject],
+    blocksci_records: Mapping[str, object],
     coinjoin_type: str,
     images: dict[str, str | None],
     image_ids: dict[str, str | None] | None = None,

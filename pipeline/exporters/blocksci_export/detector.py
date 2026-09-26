@@ -8,6 +8,7 @@ import os
 import sys
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Protocol, cast
 
 from exporters.common import (
     DEFAULT_CLUSTER_MAX_DISTANCE,
@@ -16,14 +17,76 @@ from exporters.common import (
     DEFAULT_JOINMARKET_MIN_BASE_FEE,
     DEFAULT_JOINMARKET_PERCENTAGE_FEE,
     JsonObject,
-    add_common_metrics,
     coerce_sats,
     safe_attr,
     to_json_text,
+    transaction_metrics,
 )
 from exporters.emulator_data import wallet_address_labels
+from exporters.integration_diagnostics import Blockchain
+from exporters.report_types import IORecord, TransactionRecord
 
 BLOCKSCI_REQUIRED_ATTRIBUTES = ("Blockchain", "heuristics")
+
+
+class BlocksciChain(Blockchain, Protocol):
+    """``blocksci.Blockchain`` methods the detector and clustering call.
+
+    The two scan bindings exist only in the fork's builds; ``_require_binding``
+    checks for them before use, so an older image fails with a rebuild hint.
+    """
+
+    def scan_coinjoins_by_subset_matching(
+        self,
+        start: int,
+        stop: int,
+        detector: str,
+        min_base_fee: int,
+        percentage_fee: float,
+        max_depth: int,
+    ) -> tuple[Iterable[object], Iterable[object]]: ...
+
+    def filter_coinjoin_txes_raw(self, start: int, stop: int, *args: object) -> Iterable[object]: ...
+
+    def address_from_string(self, address: str) -> object: ...
+
+
+class ClusteringHeuristic(Protocol):
+    """A BlockSci change heuristic; ``&`` composes two into one."""
+
+    def __and__(self, other: ClusteringHeuristic) -> ClusteringHeuristic: ...
+
+
+class CoinjoinHeuristics(Protocol):
+    one_output_consolidation_2hops: ClusteringHeuristic
+    two_equal_output_consolidation_1hop: ClusteringHeuristic
+
+
+class HeuristicsNamespace(Protocol):
+    coinjoin: CoinjoinHeuristics
+
+
+class CoinjoinClusterer(Protocol):
+    """The ``CoinjoinClusterManager`` lookup used to read cluster assignments."""
+
+    def cluster_with_address(self, address: object) -> object: ...
+
+
+class CoinjoinClusterManagerType(Protocol):
+    def create_clustering(self, **options: object) -> CoinjoinClusterer: ...
+
+
+class ClusterNamespace(Protocol):
+    CoinjoinClusterManager: CoinjoinClusterManagerType
+
+
+class BlocksciBindings(Protocol):
+    """The compiled ``blocksci`` module surface this package uses."""
+
+    heuristics: HeuristicsNamespace
+    cluster: ClusterNamespace
+
+    def Blockchain(self, config_path: str) -> BlocksciChain: ...
 
 
 def prepare_blocksci_import() -> None:
@@ -32,7 +95,7 @@ def prepare_blocksci_import() -> None:
         setattr(builtins, "xrange", range)
 
 
-def import_blocksci_bindings() -> object:
+def import_blocksci_bindings() -> BlocksciBindings:
     """Import the editable BlockSci binding without source-root shadowing.
 
     The complete image keeps the BlockSci checkout at ``/mnt/blocksci`` and
@@ -59,7 +122,7 @@ def import_blocksci_bindings() -> object:
         entry for entry in original_path if not is_blocksci_source_parent(entry)
     ]
     try:
-        return importlib.import_module("blocksci")
+        return cast(BlocksciBindings, importlib.import_module("blocksci"))
     finally:
         sys.path[:] = original_path
 
@@ -89,6 +152,7 @@ def assert_real_blocksci(module: object) -> None:
 
 
 BLOCKSCI_IMPORT_ERROR: ImportError | None = None
+blocksci: BlocksciBindings | None
 
 try:
     blocksci = import_blocksci_bindings()
@@ -121,7 +185,7 @@ def _address_text(address: object) -> str | None:
     return to_json_text(address)
 
 
-def _base_io_record(item: object, fallback_index: int) -> JsonObject:
+def _base_io_record(item: object, fallback_index: int) -> IORecord:
     """Build the fields shared by every input and output record."""
     return {
         "index": str(safe_attr(item, "index", fallback_index)),
@@ -138,7 +202,7 @@ def _referenced_txid(item: object, tx_attr: str) -> str | None:
     return to_json_text(safe_attr(referenced_tx, "hash"))
 
 
-def _normalize_input(input_value: object, fallback_index: int) -> JsonObject:
+def _normalize_input(input_value: object, fallback_index: int) -> IORecord:
     record = _base_io_record(input_value, fallback_index)
     spent_txid = _referenced_txid(input_value, "spent_tx")
     spent_index = safe_attr(input_value, "spent_tx_index")
@@ -147,7 +211,7 @@ def _normalize_input(input_value: object, fallback_index: int) -> JsonObject:
     return record
 
 
-def _normalize_output(output_value: object, fallback_index: int) -> JsonObject:
+def _normalize_output(output_value: object, fallback_index: int) -> IORecord:
     record = _base_io_record(output_value, fallback_index)
     spending_txid = _referenced_txid(output_value, "spending_tx")
     spending_index = safe_attr(output_value, "spending_tx_index")
@@ -156,28 +220,33 @@ def _normalize_output(output_value: object, fallback_index: int) -> JsonObject:
     return record
 
 
-def _sorted_by_index(records: list[JsonObject]) -> list[JsonObject]:
+def _sorted_by_index(records: list[IORecord]) -> list[IORecord]:
     return sorted(records, key=lambda item: int(str(item["index"])))
 
 
-def normalize_blocksci_tx(tx: object) -> JsonObject:
-    inputs = [
+def normalize_blocksci_tx(tx: object) -> TransactionRecord:
+    inputs = _sorted_by_index([
         _normalize_input(input_value, index)
         for index, input_value in enumerate(_iter_attr(tx, "inputs"))
-    ]
-    outputs = [
+    ])
+    outputs = _sorted_by_index([
         _normalize_output(output_value, index)
         for index, output_value in enumerate(_iter_attr(tx, "outputs"))
-    ]
-
-    record = {
+    ])
+    return {
         "txid": to_json_text(safe_attr(tx, "hash")),
         "broadcast_time": to_json_text(safe_attr(tx, "block_time")),
-        "block_height": safe_attr(tx, "block_height"),
-        "inputs": _sorted_by_index(inputs),
-        "outputs": _sorted_by_index(outputs),
+        "block_height": cast("int | None", safe_attr(tx, "block_height")),
+        "inputs": inputs,
+        "outputs": outputs,
+        **transaction_metrics(inputs, outputs),
     }
-    return add_common_metrics(record)
+
+
+def _require_blocksci() -> BlocksciBindings:
+    if blocksci is None:
+        raise RuntimeError("BlockSci Python module is required.")
+    return blocksci
 
 
 def _require_binding(chain: object, method: str, hint: str) -> None:
@@ -189,7 +258,7 @@ def _require_binding(chain: object, method: str, hint: str) -> None:
 
 
 def _scan_coinjoins_by_subset_matching(
-    chain: object,
+    chain: BlocksciChain,
     joinmarket_detector: str,
     joinmarket_min_base_fee: int,
     joinmarket_percentage_fee: float,
@@ -213,7 +282,7 @@ def _scan_coinjoins_by_subset_matching(
 
 
 def _filter_raw_coinjoin_txes(
-    chain: object,
+    chain: BlocksciChain,
     coinjoin_type: str,
     min_input_count: int | None,
 ) -> Iterable[object]:
@@ -223,12 +292,12 @@ def _filter_raw_coinjoin_txes(
     return chain.filter_coinjoin_txes_raw(0, len(chain), coinjoin_type, min_input_count)
 
 
-def _records_by_txid(txes: Iterable[object]) -> dict[str, JsonObject]:
+def _records_by_txid(txes: Iterable[object]) -> dict[str, TransactionRecord]:
     records = [normalize_blocksci_tx(tx) for tx in txes]
     return {
-        record["txid"]: record
+        txid: record
         for record in sorted(records, key=lambda item: item["txid"] or "")
-        if record["txid"]
+        if (txid := record["txid"])
     }
 
 
@@ -240,7 +309,7 @@ def export_blocksci_records(
     joinmarket_min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE,
     joinmarket_percentage_fee: float = DEFAULT_JOINMARKET_PERCENTAGE_FEE,
     joinmarket_max_depth: int = DEFAULT_JOINMARKET_MAX_DEPTH,
-) -> tuple[dict[str, JsonObject], list[str]]:
+) -> tuple[dict[str, TransactionRecord], list[str]]:
     if blocksci is None:
         raise RuntimeError("BlockSci Python module is required to export BlockSci records.")
     chain = blocksci.Blockchain(str(config_path))
@@ -260,8 +329,8 @@ def export_blocksci_records(
     return _records_by_txid(txes), skipped_txids
 
 
-def build_default_coinjoin_clustering_heuristic() -> object:
-    coinjoin_heuristics = blocksci.heuristics.coinjoin
+def build_default_coinjoin_clustering_heuristic() -> ClusteringHeuristic:
+    coinjoin_heuristics = _require_blocksci().heuristics.coinjoin
     return (
         coinjoin_heuristics.one_output_consolidation_2hops
         & coinjoin_heuristics.two_equal_output_consolidation_1hop
@@ -293,12 +362,12 @@ def export_blocksci_cluster_assignments(
 
 
 def _run_coinjoin_clustering(
-    chain: object,
+    chain: BlocksciChain,
     output_dir: Path,
     coinjoin_type: str,
     max_distance: int,
     min_input_count: int | None,
-) -> object:
+) -> CoinjoinClusterer:
     """Build the CoinJoin cluster manager for the whole chain."""
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     options = {
@@ -313,12 +382,14 @@ def _run_coinjoin_clustering(
     }
     if min_input_count is not None:
         options["min_input_count"] = min_input_count
-    return blocksci.cluster.CoinjoinClusterManager.create_clustering(
+    return _require_blocksci().cluster.CoinjoinClusterManager.create_clustering(
         **options,
     )
 
 
-def _cluster_index_for_address(chain: object, clusterer: object, address_text: str) -> str | None:
+def _cluster_index_for_address(
+    chain: BlocksciChain, clusterer: CoinjoinClusterer, address_text: str
+) -> str | None:
     """Return the cluster index for ``address_text``, or None if it is not comparable."""
     try:
         address = chain.address_from_string(address_text)
@@ -350,7 +421,7 @@ def export_blocksci_cluster_assignments_for_addresses(
         return None, "No addresses were supplied for BlockSci clustering."
 
     try:
-        chain = blocksci.Blockchain(str(config_path))
+        chain = _require_blocksci().Blockchain(str(config_path))
         clusterer = _run_coinjoin_clustering(
             chain, output_dir, coinjoin_type, max_distance, min_input_count
         )

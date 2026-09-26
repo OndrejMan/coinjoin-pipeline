@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from exporters.artifact_paths import emulator_dir
 from exporters.common import JsonObject, load_json, to_json_text
 from exporters.normalization import block_height_from_path
+from exporters.report_types import IORecord, TransactionRecord
 
 
 def blocksci_address_type_from_script_type(script_type: str | None) -> str | None:
@@ -66,15 +68,18 @@ def load_exported_block_script_metadata(
     return outputs, input_prevouts
 
 
-def apply_script_metadata(record: JsonObject, metadata: JsonObject | None) -> None:
+def apply_script_metadata(record: IORecord, metadata: JsonObject | None) -> None:
     if not metadata:
         return
-    for key in ("script_type", "script_asm", "script_hex", "address_type"):
+    keys: tuple[Literal["script_type", "script_asm", "script_hex", "address_type"], ...] = (
+        "script_type", "script_asm", "script_hex", "address_type"
+    )
+    for key in keys:
         if key in metadata and not record.get(key):
             record[key] = metadata[key]
 
 
-def enrich_records_with_script_metadata(records: dict[str, JsonObject], run_dir: Path) -> None:
+def enrich_records_with_script_metadata(records: dict[str, TransactionRecord], run_dir: Path) -> None:
     outputs, input_prevouts = load_exported_block_script_metadata(run_dir)
     if not outputs and not input_prevouts:
         return

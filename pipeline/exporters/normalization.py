@@ -9,12 +9,13 @@ from exporters.artifact_paths import emulator_dir
 from exporters.common import (
     DEFAULT_FIRST_WASABI2_BLOCK,
     JsonObject,
-    add_common_metrics,
     coerce_sats,
     load_json,
     sorted_items,
     to_json_text,
+    transaction_metrics,
 )
+from exporters.report_types import IORecord, TransactionRecord
 
 FALSE_CJTXS_GLOB = "false_cjtxs.json*"
 
@@ -53,10 +54,10 @@ def filter_coinjoin_analysis_false_positives(
     return filtered, removed
 
 
-def normalize_io_map(values: JsonObject) -> list[JsonObject]:
+def normalize_io_map(values: JsonObject) -> list[IORecord]:
     records = []
     for index, record in sorted_items(values):
-        normalized = {
+        normalized: IORecord = {
             "index": str(index),
             "value": coerce_sats(record.get("value")),
             "address": to_json_text(record.get("address")),
@@ -77,19 +78,21 @@ def normalize_io_map(values: JsonObject) -> list[JsonObject]:
     return records
 
 
-def normalize_coinjoin_analysis_record(txid: str, tx: JsonObject) -> JsonObject:
-    record = {
+def normalize_coinjoin_analysis_record(txid: str, tx: JsonObject) -> TransactionRecord:
+    inputs = normalize_io_map(tx.get("inputs", {}))
+    outputs = normalize_io_map(tx.get("outputs", {}))
+    return {
         "txid": to_json_text(tx.get("txid") or txid),
         "broadcast_time": to_json_text(tx.get("broadcast_time")),
         "block_height": tx.get("block_height") or tx.get("block_index"),
         "round_id": to_json_text(tx.get("round_id")),
-        "inputs": normalize_io_map(tx.get("inputs", {})),
-        "outputs": normalize_io_map(tx.get("outputs", {})),
+        "inputs": inputs,
+        "outputs": outputs,
+        **transaction_metrics(inputs, outputs),
     }
-    return add_common_metrics(record)
 
 
-def normalize_coinjoin_analysis(data: JsonObject) -> dict[str, JsonObject]:
+def normalize_coinjoin_analysis(data: JsonObject) -> dict[str, TransactionRecord]:
     coinjoins = data.get("coinjoins", {})
     return {
         txid: normalize_coinjoin_analysis_record(txid, tx)
@@ -143,7 +146,7 @@ def output_address(output: JsonObject) -> str | None:
 
 
 def fill_missing_block_heights(
-    records: dict[str, JsonObject],
+    records: dict[str, TransactionRecord],
     tx_block_heights: dict[str, int],
 ) -> None:
     for txid, record in records.items():
