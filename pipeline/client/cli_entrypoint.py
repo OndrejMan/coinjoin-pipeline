@@ -87,7 +87,13 @@ def _validate_request(
     args: argparse.Namespace,
     normalized_argv: list[str],
 ) -> None:
-    """Apply public CLI, artifact, and cross-stage validation."""
+    """Apply public CLI, artifact, and cross-stage validation.
+
+    ``validate_passthrough`` applies the rules shared with the host CLI and the
+    command builder (``coinjoin_pipeline.option_rules``) to the explicit argv.
+    What follows checks only the effective values argparse resolved, which can
+    come from the environment (``PBS_BITCOIN_DATADIR``) or need normalizing.
+    """
     from coinjoin_pipeline.commands import action_from, validate_passthrough
 
     public_errors = validate_passthrough(normalized_argv, action_from(normalized_argv))
@@ -99,8 +105,6 @@ def _validate_request(
         if not script_path.is_file():
             parser.error(f"BlockSci script does not exist or is not a file: {script_path}")
         args.blocksci_script = str(script_path)
-    if args.action == "clean" and not args.dry_run and not args.yes:
-        parser.error("clean is destructive; pass --yes or use --dry-run")
     direct_kubernetes_pbs = (
         args.action == "full-run"
         and getattr(args, "driver", operations.default_driver) == "kubernetes"
@@ -123,16 +127,6 @@ def _validate_request(
     if getattr(args, "engine", None) == "joinmarket" and hasattr(args, "coinjoin_type"):
         if args.coinjoin_type == operations.default_coinjoin_type:
             args.coinjoin_type = "joinmarket"
-    if getattr(args, "mappingsPbs", False) and getattr(args, "engine", None) != "wasabi":
-        parser.error("--mappingsPbs is supported only with --engine wasabi")
-    if getattr(args, "mappingsPbs", False) and args.action not in {
-        "full-run", "mappings", "pbs-from-s3"
-    }:
-        parser.error("--mappingsPbs is supported only by full-run, mappings, and pbs-from-s3")
-    if getattr(args, "mappingsPbs", False) and getattr(args, "coinjoin_type", None) != "wasabi2":
-        parser.error("--mappingsPbs requires --coinjoin-type wasabi2")
-    if args.action == "mappings" and not getattr(args, "mappingsPbs", False):
-        parser.error("mappings requires --mappingsPbs")
 
 
 def _print_dry_run(operations: WrapperOperations, args: argparse.Namespace) -> bool:

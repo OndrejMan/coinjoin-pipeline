@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
+from coinjoin_pipeline.commands import validate_passthrough
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "pipeline"))
@@ -646,9 +647,11 @@ def test_standalone_s3_emulation_can_supply_frontend_credentials() -> None:
     assert args.s3_credentials_file == "/storage/user/.aws/credentials"
     assert args.s3_profile == "coinjoin"
 
-    with pytest.raises(SystemExit):
-        # And they are mandatory, not silently defaulted.
-        validate_artifact_arguments(parser, parser.parse_args(arguments))
+    # And they are mandatory, not silently defaulted: the wrapper applies the
+    # shared option rules to its argv before it acts on the parsed values.
+    errors = validate_passthrough(arguments, "emulate")
+    assert "Kubernetes S3-compatible mode requires --s3-credentials-file" in errors
+    assert "Kubernetes S3-compatible mode requires --s3-profile" in errors
 
 
 def test_s3_emulation_forwards_timeout_to_uploader_manifest(

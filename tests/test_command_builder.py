@@ -289,7 +289,7 @@ class CommandBuilderTests(unittest.TestCase):
         errors = MODULE.validate_command(analyze_analysis_pbs).errors
         self.assertTrue(any("does not support: --analysisPbs" in error for error in errors))
         self.assertTrue(
-            any("--analysisPbs is supported only by full-run and coinjoin-analysis" in error for error in errors)
+            any("--analysisPbs is supported only by full-run, coinjoin-analysis, pbs-from-s3" in error for error in errors)
         )
 
         analyze_blocksci_pbs = MODULE.Command(
@@ -318,7 +318,7 @@ class CommandBuilderTests(unittest.TestCase):
         # Both flags are reported together in a single "does not support" message.
         self.assertTrue(any("--blocksciPbs" in error for error in unsupported))
         self.assertTrue(any("--pbs-blocksci-image" in error for error in unsupported))
-        self.assertTrue(any("--blocksciPbs is supported only by full-run and analyze" in error for error in errors))
+        self.assertTrue(any("--blocksciPbs is supported only by full-run, analyze, pbs-from-s3" in error for error in errors))
 
     def test_coinjoin_analysis_all_runs_rejects_analysis_pbs(self) -> None:
         command = MODULE.Command(
@@ -400,7 +400,7 @@ class CommandBuilderTests(unittest.TestCase):
             action="full-run",
             options=[("--engine", "joinmarket"), ("--mappingsPbs", None)],
         )
-        self.assertTrue(any("requires --engine wasabi" in error
+        self.assertTrue(any("--mappingsPbs is supported only with --engine wasabi" in error
                             for error in MODULE.validate_command(wrong_engine).errors))
 
         wrong_type = MODULE.Command(
@@ -472,7 +472,7 @@ class CommandBuilderTests(unittest.TestCase):
             ],
         )
         errors = MODULE.validate_command(missing).errors
-        self.assertTrue(any("--blocksci-script not found or not a file" in error for error in errors))
+        self.assertTrue(any("BlockSci script not found: /no/such/script.py" in error for error in errors))
 
     def test_reusable_blocksci_parse_from_s3_is_valid(self) -> None:
         command = MODULE.Command(
