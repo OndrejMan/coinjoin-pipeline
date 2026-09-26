@@ -1567,11 +1567,6 @@ def s3_access_from_args(args: argparse.Namespace) -> S3Access:
     )
 
 
-def s3_access_from_target(target: S3Target) -> S3Access:
-    """Resolve frontend access from the immutable S3 run target."""
-    return target.access
-
-
 def run_kubernetes_s3_emulation(args: argparse.Namespace) -> None:
     """Compatibility façade for the Kubernetes S3 emulation submission."""
     return run_s3_kubernetes_emulation(
