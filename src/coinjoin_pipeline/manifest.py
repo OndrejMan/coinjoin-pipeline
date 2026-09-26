@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -36,7 +36,7 @@ def initial_manifest(**values: Any) -> dict[str, Any]:
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "cli_version": __version__,
-        "created_at": datetime.now(UTC).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "status": "prepared",
         **values,
     }
@@ -44,7 +44,7 @@ def initial_manifest(**values: Any) -> dict[str, Any]:
 
 def mark_finished(manifest: dict[str, Any], exit_code: int) -> None:
     manifest.update({
-        "finished_at": datetime.now(UTC).isoformat(),
+        "finished_at": datetime.now(timezone.utc).isoformat(),
         "exit_code": exit_code,
         "status": "completed" if exit_code == 0 else "failed",
     })

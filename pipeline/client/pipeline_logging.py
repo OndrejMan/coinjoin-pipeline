@@ -6,7 +6,7 @@ import contextlib
 import os
 import shutil
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, TextIO
 
@@ -72,7 +72,7 @@ def stage_log_slug(stage_name: str) -> str:
 
 def new_stage_log_path(directory: Path, stage_name: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
-    stem = f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%S.%fZ')}-{stage_log_slug(stage_name)}"
+    stem = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')}-{stage_log_slug(stage_name)}"
     candidate = directory / f"{stem}.log"
     suffix = 1
     while candidate.exists():
