@@ -16,7 +16,7 @@ from client.stage_executor import (
     execute_parallel_analysis,
     execute_serial_analysis,
 )
-from client.stages import StagePlan, analysis_plan
+from client.stages import StageGraph, StageKind, StagePlan, analysis_plan
 
 # A gate that a healthy test releases quickly; the timeout only stops a broken
 # executor from hanging the suite.
@@ -38,6 +38,7 @@ class RecordingRunner:
     cancelled: list[str] = field(default_factory=list)
     failing_stage: str | None = None
     failing_submit: str | None = None
+    failing_cancel: str | None = None
     gates: dict[str, threading.Event] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -72,6 +73,8 @@ class RecordingRunner:
             gate = self.gates.get(stage.name)
             if gate is not None:
                 gate.set()
+            if stage.name == self.failing_cancel:
+                raise OSError("cancel refused")
 
         return StageSubmission(stage, wait, cancel)
 
@@ -185,3 +188,49 @@ def test_parallel_executor_does_not_cancel_work_that_already_finished() -> None:
         execute_parallel_analysis(plan, runner)
 
     assert runner.cancelled == ["blocksci"]
+
+
+def test_parallel_executor_does_not_submit_more_work_after_wait_failure() -> None:
+    runner = RecordingRunner(failing_stage="blocksci")
+    runner.hold("coinjoin-analysis")
+
+    with pytest.raises(StageExecutionError, match="blocksci"):
+        execute_parallel_analysis(_parallel_plan(), runner)
+
+    assert "coinjoin-mappings" not in runner.submitted
+
+
+def test_parallel_executor_keeps_original_error_when_cancellation_fails(monkeypatch) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "GATE_TIMEOUT_SECONDS", 0.1)
+    runner = RecordingRunner(failing_stage="blocksci", failing_cancel="coinjoin-analysis")
+    runner.hold("coinjoin-analysis")
+    runner.hold("coinjoin-mappings")
+    plan = StageGraph((
+        StagePlan("coinjoin-analysis", StageKind.BASELINE, "pbs"),
+        StagePlan("blocksci", StageKind.BLOCKSCI_WORK, "pbs"),
+        StagePlan("coinjoin-mappings", StageKind.MAPPINGS, "pbs"),
+    ))
+
+    with pytest.raises(StageExecutionError, match="blocksci: expected failure") as error:
+        execute_parallel_analysis(plan, runner)
+
+    assert "cancel refused" in str(error.value)
+    assert runner.cancelled == ["coinjoin-analysis", "coinjoin-mappings"]
+
+
+def test_parallel_executor_cancels_submitted_work_on_interrupt(monkeypatch) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "GATE_TIMEOUT_SECONDS", 0.1)
+    runner = RecordingRunner()
+    runner.hold("coinjoin-analysis")
+    submit = runner.submit
+
+    def interrupted_submit(stage: StagePlan) -> StageSubmission:
+        if stage.name == "blocksci":
+            raise KeyboardInterrupt
+        return submit(stage)
+
+    monkeypatch.setattr(runner, "submit", interrupted_submit)
+    with pytest.raises(KeyboardInterrupt):
+        execute_parallel_analysis(_parallel_plan(), runner)
+
+    assert runner.cancelled == ["coinjoin-analysis"]

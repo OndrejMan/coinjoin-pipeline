@@ -14,6 +14,7 @@ stay with the caller.
 from __future__ import annotations
 
 import concurrent.futures
+import sys
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
@@ -30,7 +31,7 @@ class StageSubmission:
 
     stage: StagePlan
     wait: Callable[[], None]
-    cancel: Callable[[], object] | None = None
+    cancel: Callable[[], bool | None] | None = None
 
 
 class StageRunner(Protocol):
@@ -38,6 +39,25 @@ class StageRunner(Protocol):
 
     def submit(self, stage: StagePlan) -> StageSubmission:
         """Submit or prepare ``stage`` and return its lifecycle handle."""
+
+
+def _cancel_running(
+    running: dict[concurrent.futures.Future[None], StageSubmission],
+    failures: dict[str, Exception],
+    cancelled: set[str],
+) -> None:
+    """Attempt every cancellation without masking the stage failure."""
+    for future, submission in running.items():
+        name = submission.stage.name
+        if future.done() or submission.cancel is None or name in cancelled:
+            continue
+        cancelled.add(name)
+        try:
+            if submission.cancel() is False:
+                raise RuntimeError("cancellation was not confirmed")
+        except Exception as error:
+            failures[f"{name} cancellation"] = error
+            print(f"[pipeline] Could not cancel {name}: {error}", file=sys.stderr)
 
 
 def _executable_stages(graph: StageGraph) -> tuple[StagePlan, ...]:
@@ -73,34 +93,41 @@ def execute_parallel_analysis(graph: StageGraph, runner: StageRunner) -> None:
     completed: set[str] = set()
     failures: dict[str, Exception] = {}
     running: dict[concurrent.futures.Future[None], StageSubmission] = {}
+    cancelled: set[str] = set()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(stages))) as executor:
-        while True:
-            ready = [
-                stage for stage in pending if set(stage.dependencies) <= completed
-            ]
-            for stage in ready:
-                pending.remove(stage)
-                try:
-                    submission = runner.submit(stage)
-                except Exception as error:
-                    failures[stage.name] = error
-                    continue
-                running[executor.submit(submission.wait)] = submission
-            if not running:
-                break
+        try:
+            while True:
+                ready = [
+                    stage for stage in pending if set(stage.dependencies) <= completed
+                ]
+                for stage in ready:
+                    pending.remove(stage)
+                    try:
+                        submission = runner.submit(stage)
+                    except Exception as error:
+                        failures[stage.name] = error
+                        continue
+                    running[executor.submit(submission.wait)] = submission
+                if not running:
+                    break
 
-            finished = next(concurrent.futures.as_completed(list(running)))
-            submission = running.pop(finished)
-            try:
-                finished.result()
-            except Exception as error:
-                failures[submission.stage.name] = error
-                for other_future, other in running.items():
-                    if not other_future.done() and other.cancel:
-                        other.cancel()
-            else:
-                completed.add(submission.stage.name)
+                finished = next(concurrent.futures.as_completed(list(running)))
+                submission = running.pop(finished)
+                try:
+                    finished.result()
+                except Exception as error:
+                    failures[submission.stage.name] = error
+                    # No new work after a running stage fails, even when a
+                    # sibling finishes successfully while being cancelled.
+                    pending.clear()
+                    _cancel_running(running, failures, cancelled)
+                else:
+                    completed.add(submission.stage.name)
+        except BaseException:
+            # Cancel before ThreadPoolExecutor.__exit__ joins its waiters.
+            _cancel_running(running, failures, cancelled)
+            raise
 
     if failures:
         details = "; ".join(f"{stage}: {error}" for stage, error in failures.items())
