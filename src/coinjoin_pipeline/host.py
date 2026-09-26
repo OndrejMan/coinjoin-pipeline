@@ -6,7 +6,7 @@ import os
 from collections.abc import Mapping
 from typing import Literal, TypedDict
 
-from .commands import DOCKERLESS_RESEARCH_ACTIONS, has_option
+from .commands import DOCKERLESS_RESEARCH_ACTIONS, has_option, option_value
 from .images import IMAGE_NAMES, Images
 
 
@@ -100,15 +100,6 @@ def local_images() -> Images:
     )
 
 
-def _artifact_backend(arguments: list[str]) -> str:
-    for index, item in enumerate(arguments):
-        if item == "--artifact-backend" and index + 1 < len(arguments):
-            return arguments[index + 1]
-        if item.startswith("--artifact-backend="):
-            return item.split("=", 1)[1]
-    return "shared-storage"
-
-
 # The frontend submits Singularity references to PBS, so a stage delegated by
 # one of these flags never touches the local Docker/Podman daemon. Only the
 # delegated stage disappears, though: a shared-storage `full-run --analysisPbs`
@@ -133,7 +124,7 @@ def required_image_components(action: str, arguments: list[str]) -> set[str]:
         return set()
     if action == "pbs-from-s3":
         return set()
-    if action == "full-run" and _artifact_backend(arguments) == "s3":
+    if action == "full-run" and option_value(arguments, "--artifact-backend") == "s3":
         # Emulation runs in-cluster and analysis in PBS; nothing touches the
         # local Docker/Podman daemon.
         return set()

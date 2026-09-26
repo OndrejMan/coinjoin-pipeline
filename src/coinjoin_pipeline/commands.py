@@ -91,11 +91,14 @@ def has_option(argv: list[str], flag: str) -> bool:
     return flag in argv or any(item.startswith(f"{flag}=") for item in argv)
 
 
-def option_value(argv: list[str], flag: str) -> str | None:
-    for index, item in enumerate(argv):
-        if item == flag:
+def option_value(argv: list[str], flag: str, *aliases: str) -> str | None:
+    """Read the last occurrence, matching argparse's store action."""
+    flags = (flag, *aliases)
+    for index in range(len(argv) - 1, -1, -1):
+        item = argv[index]
+        if item in flags:
             return argv[index + 1] if index + 1 < len(argv) else None
-        if item.startswith(f"{flag}="):
+        if item.split("=", 1)[0] in flags and "=" in item:
             return item.split("=", 1)[1]
     return None
 
@@ -119,7 +122,7 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
             errors.append(f"{action} requires {option['flag']}")
         if present_alias is None:
             continue
-        value = option_value(argv, present_alias)
+        value = option_value(argv, *option_aliases)
         if option["takes_value"] and (value is None or value.startswith("--")):
             errors.append(f"{present_alias} requires a value")
             continue
@@ -361,7 +364,7 @@ def validate_passthrough(argv: list[str], action: str) -> list[str]:
     engine = option_value(argv, "--engine")
     if engine is not None and engine not in {"wasabi", "joinmarket"}:
         errors.append("--engine must be wasabi or joinmarket")
-    script = option_value(argv, "--blocksci-script") or option_value(argv, "--blocksciScript")
+    script = option_value(argv, "--blocksci-script", "--blocksciScript")
     if script and not Path(script).expanduser().is_file():
         errors.append(f"BlockSci script not found: {script}")
     return list(dict.fromkeys(errors))

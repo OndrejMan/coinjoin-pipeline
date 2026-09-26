@@ -2,6 +2,8 @@ import argparse
 import unittest
 from typing import cast
 
+from coinjoin_pipeline.commands import option_value
+from coinjoin_pipeline.runs import run_id_for
 from client.cli_options import COINJOIN_TYPES, DEFAULT_COINJOIN_TYPE
 from client.research import parser as research_parser
 from client.wrapper import (
@@ -30,6 +32,26 @@ def option(parser: argparse.ArgumentParser, name: str) -> argparse.Action:
 
 
 class SharedCliContractTests(unittest.TestCase):
+    def test_repeated_options_have_the_same_effect_on_host_and_wrapper(self):
+        arguments = [
+            "emulate", "--engine", "wasabi", "--engine=joinmarket",
+            "--run-id=old-run", "--run-id", "new-run",
+            "--driver", "docker", "--driver=kubernetes",
+        ]
+        parsed = build_parser().parse_args(arguments)
+        self.assertEqual(run_id_for(arguments), parsed.run_id)
+        self.assertEqual(option_value(arguments, "--engine"), parsed.engine)
+        self.assertEqual(option_value(arguments, "--driver"), parsed.driver)
+
+    def test_option_aliases_follow_argv_order(self):
+        for flags in (
+            ("--blocksci-script", "--blocksciScript"),
+            ("--blocksciScript", "--blocksci-script"),
+        ):
+            arguments = ["analyze", "--engine", "wasabi", flags[0], "old.py", flags[1], "new.py"]
+            parsed = build_parser().parse_args(arguments)
+            self.assertEqual(option_value(arguments, *flags), parsed.blocksci_script)
+
     def test_all_analysis_commands_share_coinjoin_contract(self):
         wrapper = build_parser()
         external = subparser(subparser(research_parser(), "external"), "analyze")
