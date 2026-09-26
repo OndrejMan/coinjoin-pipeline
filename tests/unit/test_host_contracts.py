@@ -1,9 +1,11 @@
 """Regression checks at the host CLI / wrapper boundary, without backends."""
 
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
+from coinjoin_pipeline.cli import main
 from coinjoin_pipeline.commands import option_value
 from coinjoin_pipeline.runs import manifest_target, run_id_for
 
@@ -22,3 +24,24 @@ def test_host_run_id_matches_argparse_last_value(arguments: list[str]) -> None:
     assert manifest_target("emulate", arguments, Path("/runs")) == (
         Path("/runs/new-run/research_manifest.json")
     )
+
+
+def test_local_build_preserves_explicit_and_environment_image_overrides(tmp_path: Path) -> None:
+    with mock.patch.dict("os.environ", {"BLOCKSCI_IMAGE": "blocksci:env"}, clear=True), mock.patch(
+        "coinjoin_pipeline.cli.doctor_check", return_value=[]
+    ), mock.patch("coinjoin_pipeline.cli.run", return_value=0) as run:
+        assert main([
+            "--runs-root", str(tmp_path), "emulate", "--engine", "wasabi", "--run-id", "custom-images",
+            "--local-build", "--emulator-image", "emulator:custom",
+        ]) == 0
+        env = run.call_args.kwargs["environment"]
+    assert env["COINJOIN_EMULATOR_IMAGE"] == "emulator:custom"
+    assert env["BLOCKSCI_IMAGE"] == "blocksci:env"
+    assert env["COINJOIN_ANALYSIS_IMAGE"] == "coinjoin-analysis:local"
+
+
+def test_local_build_rejects_invalid_image_overrides() -> None:
+    with mock.patch("coinjoin_pipeline.cli.doctor_check", return_value=[]):
+        assert main([
+            "emulate", "--engine", "wasabi", "--local-build", "--emulator-image", "not an image", "--dry-run",
+        ]) == 2

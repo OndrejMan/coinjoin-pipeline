@@ -78,7 +78,9 @@ default to the explicit `latest` tag. Use `--version TAG` to apply one coordinat
 tag to every default image, or `--local-build` for local development tags.
 Individual overrides (`--emulator-image`, `--coinjoin-analysis-image`,
 `--blocksci-image`, `--mappings-image`, and `--sake-image`) take precedence
-over the coordinated tag. The in-cluster uploader and the pinned Python image
+over the coordinated tag and over `--local-build` defaults. The corresponding
+environment overrides also apply in local mode; explicit CLI images win over
+the environment. The in-cluster uploader and the pinned Python image
 for the PBS report step are not part of that coordinated set: they carry their
 own immutable references in `container/uploader.image` and
 `container/unified-report.image`, overridable per run with `--uploader-image`

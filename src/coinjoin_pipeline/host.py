@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Literal, TypedDict
 
 from .commands import DOCKERLESS_RESEARCH_ACTIONS, has_option, option_value
-from .images import IMAGE_NAMES, Images
+from .images import IMAGE_NAMES, Images, validate_image
 
 
 HostValueKey = Literal[
@@ -90,14 +90,20 @@ def image_overrides(host: Mapping[str, object]) -> dict[str, str | None]:
     }
 
 
-def local_images() -> Images:
-    return Images(
+def local_images(overrides: Mapping[str, str | None] | None = None) -> Images:
+    defaults = Images(
         emulator="coinjoin-emulator:local",
         coinjoin_analysis="coinjoin-analysis:local",
         blocksci="blocksci-complete:local",
         mappings="coinjoin-mappings-enumerator:local",
         sake="coinjoin-mappings-sake:local",
-    )
+    ).as_dict()
+    for component in defaults:
+        override = (overrides or {}).get(component)
+        if override:
+            validate_image(override)
+            defaults[component] = override
+    return Images(**defaults)
 
 
 # The frontend submits Singularity references to PBS, so a stage delegated by

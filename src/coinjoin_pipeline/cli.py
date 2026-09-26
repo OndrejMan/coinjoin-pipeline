@@ -133,7 +133,11 @@ def main(argv: list[str] | None = None) -> int:
             or Path.cwd() / "coinjoin-runs"
         )).expanduser().resolve()
         overrides = image_overrides(host)
-        images = local_images() if host["local_build"] else resolve_images(host.get("version"), overrides)  # type: ignore[arg-type]
+        images = (
+            local_images(overrides)
+            if host["local_build"]
+            else resolve_images(host.get("version"), overrides)
+        )
     except ValueError as exc:
         return fail(str(exc))
 
