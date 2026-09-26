@@ -261,6 +261,34 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Generated runtime command:", output.getvalue())
 
+    def test_pbs_dry_run_leaves_the_run_directory_untouched(self) -> None:
+        # The wrapper still runs to render the PBS script, but a dry run must
+        # neither overwrite the real run's manifest nor create runtime dirs.
+        with tempfile.TemporaryDirectory() as directory:
+            runs_root = Path(directory) / "runs"
+            manifest = runs_root / "run-1" / "research_manifest.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text('{"host_launcher": {"status": "finished"}}\n', encoding="utf-8")
+            bitcoin_datadir = Path(directory) / "btc"
+            (bitcoin_datadir / "regtest" / "blocks").mkdir(parents=True)
+            with (
+                redirect_stdout(io.StringIO()),
+                mock.patch("coinjoin_pipeline.cli.doctor_check", return_value=[]),
+                mock.patch("coinjoin_pipeline.cli.run", return_value=0) as run,
+            ):
+                code = main([
+                    "--runs-root", str(runs_root), "analyze", "--engine", "wasabi",
+                    "--run-dir", "run-1", "--blocksciPbs",
+                    "--pbs-bitcoin-datadir", str(bitcoin_datadir), "--dry-run",
+                ])
+            self.assertEqual(code, 0)
+            run.assert_called_once()
+            self.assertEqual(
+                manifest.read_text(encoding="utf-8"),
+                '{"host_launcher": {"status": "finished"}}\n',
+            )
+            self.assertEqual(sorted(path.name for path in runs_root.iterdir()), ["run-1"])
+
     def test_mutating_command_uses_explicit_latest_by_default(self) -> None:
         output = io.StringIO()
         with (

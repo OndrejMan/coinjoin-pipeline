@@ -217,11 +217,17 @@ def main(argv: list[str] | None = None) -> int:
         or action == "pbs-from-s3"
         or (action in {"emulate", "full-run"} and option_value(passthrough, "--artifact-backend") == "s3")
     )
-    if "--dry-run" in passthrough and not stage_pbs_dry_run:
+    dry_run = "--dry-run" in passthrough
+    if dry_run and not stage_pbs_dry_run:
         print("[dry-run] validation passed; command was not executed")
         return 0
-    prepare_runtime_directories(command.environment)
-    target = manifest_target(action, passthrough, runs_root, pipeline_run_id)
+    # A PBS or S3 dry run still starts the wrapper so it can render the job
+    # scripts and Kubernetes resources, but nothing runs: creating runtime
+    # directories or a manifest would claim a run, or overwrite a real one's.
+    target: Path | None = None
+    if not dry_run:
+        prepare_runtime_directories(command.environment)
+        target = manifest_target(action, passthrough, runs_root, pipeline_run_id)
     manifest = initial_manifest(
         action=action,
         requested_version=("local" if host["local_build"] else host.get("version") or DEFAULT_VERSION),
