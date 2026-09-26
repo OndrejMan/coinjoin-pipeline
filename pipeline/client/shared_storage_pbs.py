@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from client.operation_types import (
+    ComposeEnvironment,
+    ComposeEnvironmentFromArgs,
+    SubmitBlockSciPBS,
+    SubmitCoinjoinAnalysisPBS,
+    SubmitMappingsPBS,
+    WaitForPBSMarker,
+)
 from client.pbs import (
     DEFAULT_BLOCKSCI_IMAGE,
     DEFAULT_BLOCKSCI_MEM,
@@ -31,14 +39,14 @@ from client.pbs_settings import (
 class SharedStoragePBSOperations:
     """Wrapper-resolved I/O operations for shared-storage PBS stages."""
 
-    compose_environment_from_args: Callable[..., Mapping[str, str]]
-    compose_environment: Callable[..., Mapping[str, str]]
+    compose_environment_from_args: ComposeEnvironmentFromArgs
+    compose_environment: ComposeEnvironment
     stage_blocksci_script: Callable[[str | None, Path], str | None]
     stage_exporters: Callable[[Path, Path], Path]
-    submit_blocksci: Callable[..., str | None]
-    submit_analysis: Callable[..., str | None]
-    submit_mappings: Callable[..., str | None]
-    wait_for_marker: Callable[..., None]
+    submit_blocksci: SubmitBlockSciPBS
+    submit_analysis: SubmitCoinjoinAnalysisPBS
+    submit_mappings: SubmitMappingsPBS
+    wait_for_marker: WaitForPBSMarker
 
 
 def _wait_for_stage(

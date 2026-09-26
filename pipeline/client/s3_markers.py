@@ -12,6 +12,7 @@ import sys
 from collections.abc import Callable
 
 from client.artifacts import S3Access
+from client.operation_types import WaitForS3Marker
 from client.pbs import PBSError
 
 
@@ -22,7 +23,7 @@ def wait_for_s3_pbs_marker(
     run_prefix: str,
     access: S3Access,
     walltime: str,
-    wait_for_marker: Callable[..., None],
+    wait_for_marker: WaitForS3Marker,
     pbs_probe: Callable[[str], Callable[[], str]],
     wait_timeout: Callable[[str], int],
 ) -> None:

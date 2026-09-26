@@ -12,6 +12,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from client.operation_types import (
+    RunBlockSciDockerStage,
+    RunBlockSciPBSStage,
+    RunCoinjoinAnalysis,
+    RunPBSStage,
+    RunScript,
+    WaitForPBSMarker,
+)
 from client.stage_executor import StageSubmission
 from client.stages import (
     StageGraph,
@@ -26,17 +34,17 @@ from client.stages import (
 class SharedStorageOperations:
     """Concrete Compose/PBS operations used by one shared-storage run."""
 
-    run_coinjoin_analysis: Callable[..., None]
+    run_coinjoin_analysis: RunCoinjoinAnalysis
     run_coinjoin_analysis_docker: Callable[[str], None]
-    run_coinjoin_analysis_pbs: Callable[..., None]
-    run_mappings_pbs: Callable[..., None]
-    run_blocksci_docker: Callable[..., None]
-    run_blocksci_pbs: Callable[..., None]
-    wait_for_pbs_marker: Callable[..., None]
+    run_coinjoin_analysis_pbs: RunPBSStage
+    run_mappings_pbs: RunPBSStage
+    run_blocksci_docker: RunBlockSciDockerStage
+    run_blocksci_pbs: RunBlockSciPBSStage
+    wait_for_pbs_marker: WaitForPBSMarker
     qdel_pbs_stage: Callable[[Path, str], bool]
     stage_wait_timeout: Callable[[argparse.Namespace, str], int]
     stage_blocksci_script: Callable[[str | None, Path], str | None]
-    run_script: Callable[..., None]
+    run_script: RunScript
     analysis_script: Path
 
 

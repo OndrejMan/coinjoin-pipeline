@@ -6,8 +6,18 @@ import argparse
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TypedDict
 
 from client.artifacts import ArtifactTransportError, S3Access, S3Target
+from client.operation_types import (
+    SubmitBlockSciAnalyzeS3PBS,
+    SubmitBlockSciParseS3PBS,
+    SubmitBlockSciS3PBS,
+    SubmitBlockSciUpdateS3PBS,
+    SubmitCoinjoinAnalysisS3PBS,
+    SubmitMappingsS3PBS,
+    SubmitUnifiedReportS3PBS,
+)
 from client.pbs import (
     DEFAULT_BLOCKSCI_IMAGE,
     DEFAULT_COINJOIN_ANALYSIS_IMAGE,
@@ -131,17 +141,24 @@ class S3StageSubmissionOperations:
     """
 
     tracker_operations: S3SubmissionOperations
-    s3_preflight: Callable[..., None]
-    object_exists: Callable[..., bool]
-    ensure_empty_prefix: Callable[..., None]
-    ensure_exporters: Callable[..., None]
-    submit_analysis: Callable[..., str | None]
-    submit_mappings: Callable[..., str | None]
-    submit_update: Callable[..., str | None]
-    submit_blocksci: Callable[..., str | None]
-    submit_parse: Callable[..., str | None]
-    submit_blocksci_work: Callable[..., str | None]
-    submit_report: Callable[..., str | None]
+    s3_preflight: Callable[[S3Access, str], None]
+    object_exists: Callable[[S3Access, str], bool]
+    ensure_empty_prefix: Callable[[S3Access, str, str], None]
+    ensure_exporters: Callable[[argparse.Namespace], None]
+    submit_analysis: SubmitCoinjoinAnalysisS3PBS
+    submit_mappings: SubmitMappingsS3PBS
+    submit_update: SubmitBlockSciUpdateS3PBS
+    submit_blocksci: SubmitBlockSciS3PBS
+    submit_parse: SubmitBlockSciParseS3PBS
+    submit_blocksci_work: SubmitBlockSciAnalyzeS3PBS
+    submit_report: SubmitUnifiedReportS3PBS
+
+
+class _CommonSubmission(TypedDict):
+    """Keyword arguments every S3 PBS submission receives."""
+
+    target: S3Target
+    dry_run: bool
 
 
 @dataclass
@@ -170,7 +187,7 @@ class S3StageRunner:
     )
 
     @property
-    def common(self) -> dict[str, object]:
+    def common(self) -> _CommonSubmission:
         return {"target": self.target, "dry_run": self.args.dry_run}
 
     @property

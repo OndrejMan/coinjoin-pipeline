@@ -14,11 +14,17 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, ContextManager, NoReturn
+from typing import Callable, NoReturn
 
 from client.artifacts import ArtifactTransportError, S3Access
+from client.operation_types import (
+    CapturedPipelineStage,
+    ComposeEnvironment,
+    ComposeEnvironmentFromArgs,
+    RunKubernetesEmulation,
+    RunScript,
+)
 from client.pbs import PBSError
-from client.pipeline_logging import StageLog
 
 
 @dataclass(frozen=True)
@@ -39,23 +45,23 @@ class WrapperOperations:
     default_driver: str
     default_coinjoin_type: str
     container_runtime_env: str
-    compose_env: Callable[..., dict[str, str]]
-    compose_env_from_args: Callable[..., dict[str, str]]
+    compose_env: ComposeEnvironment
+    compose_env_from_args: ComposeEnvironmentFromArgs
     command_lock_path: Callable[[argparse.Namespace, Path], Path]
     acquire_lock: Callable[[Path], object]
     truthy_env: Callable[[str], bool]
     run_dirs: Callable[[Path], set[Path]]
     detect_active_run: Callable[[Path, set[Path]], Path | None]
     pipeline_run_id_env: Callable[[], str]
-    captured_pipeline_stage: Callable[..., ContextManager[StageLog]]
-    run_script: Callable[..., None]
+    captured_pipeline_stage: CapturedPipelineStage
+    run_script: RunScript
     emulate_script: Path
     analysis_script: Path
     delete_script: Path
     s3_access_from_args: Callable[[argparse.Namespace], S3Access]
     stage_kubernetes_s3_run: Callable[[argparse.Namespace, S3Access], None]
     run_kubernetes_s3_emulation: Callable[[argparse.Namespace], None]
-    run_kubernetes_emulation: Callable[..., None]
+    run_kubernetes_emulation: RunKubernetesEmulation
     run_pbs_from_s3: Callable[[argparse.Namespace], object]
     run_mappings_pbs_stage: Callable[[argparse.Namespace, Path], None]
     run_blocksci_pbs_stage: Callable[[argparse.Namespace, Path], None]

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from client.artifacts import ArtifactTransportError, S3Access
+from client.operation_types import WaitForS3Marker, WaitForS3PBSStage
 from client.pbs import PBSError
 from client.pbs_settings import stage_pbs_walltime
 from client.stages import (
@@ -80,13 +81,13 @@ class S3FullRunOperations:
     require_qsub: Callable[[], None]
     stage_kubernetes_run: Callable[[argparse.Namespace, S3Access], None]
     run_kubernetes_emulation: Callable[[argparse.Namespace], None]
-    wait_for_marker: Callable[..., None]
+    wait_for_marker: WaitForS3Marker
     kubernetes_probe: Callable[[Path, str, str], Callable[[], str]]
     collect_kubernetes_diagnostics: Callable[[Path, str, str], str]
     delete_kubernetes_job: Callable[[Path, str, str], None]
     kubernetes_job_name: Callable[[str], str]
     submit_pbs: Callable[[argparse.Namespace], S3PBSJobs]
-    wait_for_pbs_stage: Callable[..., None]
+    wait_for_pbs_stage: WaitForS3PBSStage
     cancel_dependent_pbs_job: Callable[[str, str], bool]
     emulation_start_timeout: int
 

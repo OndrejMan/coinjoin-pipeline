@@ -4,21 +4,23 @@ from __future__ import annotations
 
 import argparse
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+from client.operation_types import ComposeEnvironment, RenderS3EmulationResources
 
 
 @dataclass(frozen=True)
 class S3EmulationOperations:
     """Wrapper-resolved dependencies for the Kubernetes S3 emulation job."""
 
-    compose_environment: Callable[..., Mapping[str, str]]
-    container_scenario_path: Callable[..., str]
+    compose_environment: ComposeEnvironment
+    container_scenario_path: Callable[[str | None, Path, str], str]
     default_container_scenario: Callable[[str], str]
     host_scenario_path: Callable[[str, Path], Path]
     resolve_uploader_image: Callable[[argparse.Namespace], str]
-    render_resources: Callable[..., str]
+    render_resources: RenderS3EmulationResources
     apply_resources: Callable[[str, Path], None]
     default_emulator_image: str
 
