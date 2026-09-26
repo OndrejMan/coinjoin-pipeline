@@ -1248,11 +1248,15 @@ def exists_or_unreadable(path: Path) -> bool:
     turns the resulting EACCES into a plain ``False`` and a finished BlockSci
     run reads as one that never happened. Everything that consumes these paths
     runs as root in a container, so "cannot look" must not mean "not there".
+
+    ``os.path`` rather than ``Path``: before Python 3.14, ``Path.is_file()`` and
+    ``Path.exists()`` raise ``PermissionError`` behind such a directory instead
+    of returning ``False``.
     """
-    if path.is_file():
+    if os.path.isfile(path):
         return True
     for parent in path.parents:
-        if not parent.exists():
+        if not os.path.exists(parent):
             continue
         return not os.access(parent, os.R_OK | os.X_OK)
     return False
