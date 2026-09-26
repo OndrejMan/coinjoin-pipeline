@@ -69,9 +69,15 @@ fi
 
 # --- registry reachability ----------------------------------------------------
 mapfile -t registry_images < <(
-  grep -ohE 'ghcr\.io/[a-zA-Z0-9._/-]+(:[A-Za-z0-9._-]+)?' \
-    "${PROJECT_DIR}/pipeline/compose.yaml" "${PROJECT_DIR}"/tests/*.sh \
-    "${PROJECT_DIR}/container/uploader.image" 2>/dev/null \
+  {
+    grep -ohE 'ghcr\.io/[a-zA-Z0-9._/-]+(:[A-Za-z0-9._-]+)?' \
+      "${PROJECT_DIR}/pipeline/compose.yaml" "${PROJECT_DIR}"/tests/*.sh \
+      "${PROJECT_DIR}/container/uploader.image" 2>/dev/null
+    # The S3 tests pull MinIO from Docker Hub; a local copy used to hide that
+    # minio/minio had disappeared from the registry.
+    grep -ohE '\$\{MINIO_IMAGE:-[^}]+\}' "${PROJECT_DIR}"/tests/*.sh 2>/dev/null \
+      | sed -E 's/^\$\{MINIO_IMAGE:-(.*)\}$/\1/'
+  } \
   | grep -v '\${' \
   | grep -vE '/$' \
   | grep -v '^ghcr\.io/test/' \
@@ -100,7 +106,7 @@ for image in "${registry_images[@]}"; do
   if [[ "$(cat "${result_file}" 2>/dev/null)" == "ok" ]]; then
     ok "registry ${image}"
   else
-    fail "cannot reach ${image} — check 'docker login ghcr.io' (an expired credential also blocks public images)"
+    fail "cannot reach ${image} — check 'docker login' for its registry (an expired credential also blocks public images) or whether the image was withdrawn"
   fi
 done
 rm -rf "${registry_results}"
