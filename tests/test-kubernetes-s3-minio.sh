@@ -407,6 +407,7 @@ s5 cp "${ARTIFACT_URI}/${RUN_ID}/coinjoin-analysis_data/coinjoin_tx_info.json" \
 
 python3 - "${WORK_ROOT}/results" "${EXPECTED_SCENARIO}" "${EXPECTED_COINJOIN_TYPE}" <<'PY'
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -420,6 +421,25 @@ if run.get("scenario_name") != expected_scenario:
     raise SystemExit(f"FAIL: scenario {run.get('scenario_name')!r} != {expected_scenario!r}")
 if run.get("coinjoin_type") != expected_type:
     raise SystemExit(f"FAIL: coinjoin type {run.get('coinjoin_type')!r} != {expected_type!r}")
+if report.get("evaluation_scope") != "emulator_ground_truth":
+    raise SystemExit(f"FAIL: independent emulator labels unavailable: {report.get('evaluation_scope')!r}")
+label_provenance = (report.get("emulator_data") or {}).get("label_provenance") or {}
+manifest = label_provenance.get("manifest")
+if label_provenance.get("independent") is not True or not isinstance(manifest, str) or not manifest:
+    raise SystemExit(f"FAIL: producer-label manifest was not verified: {label_provenance!r}")
+chain = (report.get("integration_diagnostics") or {}).get("chain") or {}
+if chain.get("status") != "ok":
+    raise SystemExit(f"FAIL: BlockSci chain diagnostics are not ok: {chain!r}")
+evaluations = report.get("detector_evaluations") or {}
+for detector in ("blocksci", "coinjoin_analysis"):
+    evaluation = evaluations.get(detector)
+    if not isinstance(evaluation, dict):
+        raise SystemExit(f"FAIL: {detector} has no ground-truth evaluation")
+    for metric in ("precision", "recall", "f1"):
+        value = evaluation.get(metric)
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or not 0 <= value <= 1):
+            raise SystemExit(f"FAIL: {detector} has no valid {metric}: {value!r}")
 baseline_coinjoins = baseline.get("coinjoins") or {}
 if not baseline_coinjoins:
     raise SystemExit("FAIL: coinjoin-analysis produced no CoinJoin transactions")
