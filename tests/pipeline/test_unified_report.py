@@ -1564,7 +1564,7 @@ class UnifiedReportTest(unittest.TestCase):
             arguments = None
 
             @staticmethod
-            def create_clustering(**kwargs):
+            def create_clustering_from_txes(**kwargs):
                 FakeCoinjoinClusterManager.arguments = kwargs
                 return FakeClusterer()
 
@@ -1574,6 +1574,9 @@ class UnifiedReportTest(unittest.TestCase):
 
             def address_from_string(self, address):
                 return address
+
+            def tx_with_hash(self, txid):
+                return f"tx:{txid}"
 
         previous_blocksci = unified_report.blocksci
         unified_report.blocksci = types.SimpleNamespace(
@@ -1592,16 +1595,15 @@ class UnifiedReportTest(unittest.TestCase):
                         }
                     }
                 },
-                "wasabi2",
+                ["cj-b", "cj-a", "cj-b"],
                 Path("/tmp/clusters"),
-                min_input_count=10,
             )
         finally:
             unified_report.blocksci = previous_blocksci
 
         self.assertIsNone(error)
         self.assertEqual(predicted, {"known-a": "7"})
-        self.assertEqual(FakeCoinjoinClusterManager.arguments["min_input_count"], 10)
+        self.assertEqual(FakeCoinjoinClusterManager.arguments["coinjoin_txes"], ["tx:cj-a", "tx:cj-b"])
 
     def test_export_blocksci_cluster_assignments_creates_output_parent(self):
         class FakeHeuristic:
@@ -1624,7 +1626,7 @@ class UnifiedReportTest(unittest.TestCase):
 
         class FakeCoinjoinClusterManager:
             @staticmethod
-            def create_clustering(**kwargs):
+            def create_clustering_from_txes(**kwargs):
                 output_path = Path(kwargs["output_path"])
                 if not output_path.parent.is_dir():
                     raise RuntimeError("missing clustering parent")
@@ -1636,6 +1638,9 @@ class UnifiedReportTest(unittest.TestCase):
 
             def address_from_string(self, address):
                 return address
+
+            def tx_with_hash(self, txid):
+                return f"tx:{txid}"
 
         previous_blocksci = unified_report.blocksci
         unified_report.blocksci = types.SimpleNamespace(
@@ -1656,7 +1661,7 @@ class UnifiedReportTest(unittest.TestCase):
                             }
                         }
                     },
-                    "joinmarket",
+                    ["cj"],
                     output_dir,
                 )
         finally:
@@ -1664,6 +1669,45 @@ class UnifiedReportTest(unittest.TestCase):
 
         self.assertIsNone(error)
         self.assertEqual(predicted, {"known-a": "3"})
+
+    def test_export_blocksci_cluster_assignments_needs_detected_coinjoins(self):
+        previous_blocksci = unified_report.blocksci
+        unified_report.blocksci = types.SimpleNamespace()
+        try:
+            predicted, error = export_blocksci_cluster_assignments(
+                Path("/tmp/config.json"),
+                {"transactions": {"tx": {"inputs": [{"address": "a", "wallet_name": "w"}], "outputs": []}}},
+                [],
+                Path("/tmp/clusters"),
+            )
+        finally:
+            unified_report.blocksci = previous_blocksci
+
+        self.assertIsNone(predicted)
+        self.assertEqual(error, "BlockSci detected no CoinJoins to cluster around.")
+
+    def test_export_blocksci_cluster_assignments_asks_for_rebuild_without_binding(self):
+        class FakeClusterBlockchain:
+            def __init__(self, _config):
+                pass
+
+        previous_blocksci = unified_report.blocksci
+        unified_report.blocksci = types.SimpleNamespace(
+            Blockchain=FakeClusterBlockchain,
+            cluster=types.SimpleNamespace(CoinjoinClusterManager=types.SimpleNamespace()),
+        )
+        try:
+            predicted, error = export_blocksci_cluster_assignments(
+                Path("/tmp/config.json"),
+                {"transactions": {"tx": {"inputs": [{"address": "a", "wallet_name": "w"}], "outputs": []}}},
+                ["cj"],
+                Path("/tmp/clusters"),
+            )
+        finally:
+            unified_report.blocksci = previous_blocksci
+
+        self.assertIsNone(predicted)
+        self.assertIn("create_clustering_from_txes", error)
 
     def test_evaluate_cluster_assignments_detects_overmerge_and_undermerge(self):
         emulator_data = {

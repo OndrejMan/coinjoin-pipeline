@@ -153,9 +153,8 @@ def write_analysis(args: argparse.Namespace) -> Path:
     clusters, cluster_error = export_blocksci_cluster_assignments_for_addresses(
         config_path,
         exported_addresses(run_dir),
-        args.coinjoin_type,
+        records,
         cluster_dir,
-        min_input_count=args.min_input_count,
     )
     artifact: BlockSciAnalysisArtifact = {
         "schema_version": SCHEMA_VERSION,

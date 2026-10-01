@@ -296,9 +296,8 @@ def main(argv: list[str] | None = None) -> int:
             predicted_address_clusters, cluster_export_error = export_blocksci_cluster_assignments(
                 config_path,
                 emulator_data,
-                args.coinjoin_type,
+                blocksci_records,
                 cluster_output_dir,
-                min_input_count=args.min_input_count,
             )
     output_path = output_dir / args.output_name
     previous_run_manifest = None

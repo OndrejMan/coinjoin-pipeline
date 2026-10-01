@@ -73,7 +73,7 @@ class CoinjoinClusterer(Protocol):
 
 
 class CoinjoinClusterManagerType(Protocol):
-    def create_clustering(self, **options: object) -> CoinjoinClusterer: ...
+    def create_clustering_from_txes(self, **options: object) -> CoinjoinClusterer: ...
 
 
 class ClusterNamespace(Protocol):
@@ -340,10 +340,9 @@ def build_default_coinjoin_clustering_heuristic() -> ClusteringHeuristic:
 def export_blocksci_cluster_assignments(
     config_path: Path,
     emulator_data: JsonObject | None,
-    coinjoin_type: str,
+    coinjoin_txids: Iterable[str],
     output_dir: Path,
     max_distance: int = DEFAULT_CLUSTER_MAX_DISTANCE,
-    min_input_count: int | None = None,
 ) -> tuple[dict[str, str] | None, str | None]:
     if blocksci is None:
         return None, "BlockSci Python module is required for clustering evaluation."
@@ -354,36 +353,40 @@ def export_blocksci_cluster_assignments(
     return export_blocksci_cluster_assignments_for_addresses(
         config_path,
         labels_by_address,
-        coinjoin_type,
+        coinjoin_txids,
         output_dir,
         max_distance,
-        min_input_count,
     )
 
 
 def _run_coinjoin_clustering(
     chain: BlocksciChain,
     output_dir: Path,
-    coinjoin_type: str,
+    coinjoin_txids: Iterable[str],
     max_distance: int,
-    min_input_count: int | None,
 ) -> CoinjoinClusterer:
-    """Build the CoinJoin cluster manager for the whole chain."""
+    """Cluster around the CoinJoins the detection step found.
+
+    Seeding the clustering with the detection result keeps both on one CoinJoin
+    set; ``create_clustering`` would run its own protocol detector, which for
+    JoinMarket is not the subset-matching scan the report evaluates.
+    """
+    manager = _require_blocksci().cluster.CoinjoinClusterManager
+    if not hasattr(manager, "create_clustering_from_txes"):
+        raise RuntimeError(
+            "This BlockSci build does not expose CoinjoinClusterManager.create_clustering_from_txes; "
+            "rebuild BlockSci with the detection-seeded clustering binding."
+        )
     output_dir.parent.mkdir(parents=True, exist_ok=True)
-    options = {
-        "chain": chain,
-        "start": 0,
-        "stop": -1,
-        "heuristic_func": build_default_coinjoin_clustering_heuristic(),
-        "output_path": str(output_dir),
-        "overwrite": True,
-        "coinjoin_type": coinjoin_type,
-        "max_distance": max_distance,
-    }
-    if min_input_count is not None:
-        options["min_input_count"] = min_input_count
-    return _require_blocksci().cluster.CoinjoinClusterManager.create_clustering(
-        **options,
+    return manager.create_clustering_from_txes(
+        chain=chain,
+        start=0,
+        stop=-1,
+        coinjoin_txes=[chain.tx_with_hash(txid) for txid in sorted(set(coinjoin_txids))],
+        heuristic_func=build_default_coinjoin_clustering_heuristic(),
+        output_path=str(output_dir),
+        overwrite=True,
+        max_distance=max_distance,
     )
 
 
@@ -410,21 +413,21 @@ def _cluster_index_for_address(
 def export_blocksci_cluster_assignments_for_addresses(
     config_path: Path,
     addresses: Iterable[str],
-    coinjoin_type: str,
+    coinjoin_txids: Iterable[str],
     output_dir: Path,
     max_distance: int = DEFAULT_CLUSTER_MAX_DISTANCE,
-    min_input_count: int | None = None,
 ) -> tuple[dict[str, str] | None, str | None]:
     """Cluster the chain and return assignments for the requested addresses."""
     requested_addresses = sorted({str(address) for address in addresses if address})
     if not requested_addresses:
         return None, "No addresses were supplied for BlockSci clustering."
+    coinjoin_txids = list(coinjoin_txids)
+    if not coinjoin_txids:
+        return None, "BlockSci detected no CoinJoins to cluster around."
 
     try:
         chain = _require_blocksci().Blockchain(str(config_path))
-        clusterer = _run_coinjoin_clustering(
-            chain, output_dir, coinjoin_type, max_distance, min_input_count
-        )
+        clusterer = _run_coinjoin_clustering(chain, output_dir, coinjoin_txids, max_distance)
     except Exception as exc:
         return None, f"BlockSci cluster assignment export failed: {exc}"
 

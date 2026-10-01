@@ -139,7 +139,7 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
     assert artifact["records"] == {"tx": {"txid": "tx"}}
     assert artifact["predicted_address_clusters"] == {"bcrt1-address": "7"}
     assert artifact["integration_diagnostics"] == {"status": "ok"}
-    assert export_cluster_assignments.call_args.kwargs["min_input_count"] == 10
+    assert list(export_cluster_assignments.call_args.args[2]) == ["tx"]
 
 
 def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:

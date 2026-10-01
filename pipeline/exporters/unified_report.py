@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import builtins
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 if not hasattr(builtins, "xrange"):
@@ -90,19 +91,17 @@ def export_blocksci_records(  # type: ignore[no-redef]
 def export_blocksci_cluster_assignments(  # type: ignore[no-redef]
     config_path: Path,
     emulator_data: JsonObject,
-    coinjoin_type: str,
+    coinjoin_txids: Iterable[str],
     output_dir: Path,
     max_distance: int = DEFAULT_CLUSTER_MAX_DISTANCE,
-    min_input_count: int | None = None,
 ) -> tuple[dict[str, str] | None, str | None]:
     _sync_blocksci()
     return _blocksci_export.export_blocksci_cluster_assignments(
         config_path,
         emulator_data,
-        coinjoin_type,
+        coinjoin_txids,
         output_dir,
         max_distance,
-        min_input_count,
     )
 
 
