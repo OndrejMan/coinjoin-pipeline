@@ -1,49 +1,33 @@
-"""Installed thin CLI for the CoinJoin pipeline."""
+"""Load one experiment configuration and execute it in this process."""
 
 from __future__ import annotations
 
+import importlib
 import os
-from pathlib import Path
 import shlex
+import subprocess
 import sys
+from dataclasses import asdict
+from pathlib import Path
+
+from exporters.artifact_paths import RUN_MANIFEST
 
 from . import MANIFEST_SCHEMA_VERSION, __version__
-from .commands import (
-    action_from,
-    option_value,
-    research_command,
-    runtime_command,
-    validate_passthrough,
-)
-from .configuration import ConfigurationError, expand_configuration
-from .doctor import check as doctor_check, required_capabilities, validate_arguments
-from .host import (
-    add_effective_image_arguments,
-    image_overrides,
-    local_images,
-    parse_host_options,
-    required_image_components,
-)
-from .images import DEFAULT_VERSION, IMAGE_NAMES, Images, resolve_images
-from .manifest import initial_manifest, mark_finished
+from .arguments import CONFIGURATION_FLAGS, action_word, build_parser, load_configuration
+from .configuration import PipelineConfiguration
+from .context import RunContext
+from .doctor import check as doctor_check
+from .doctor import required_capabilities, required_image_components, validate_arguments
+from .images import DEFAULT_VERSION, IMAGE_NAMES, Images
+from .manifest import environment_snapshot, initial_manifest, mark_finished
+from .paths import PIPELINE_ROOT
 from .process import run
-from .runs import manifest_target, run_id_for, store_host_manifest, valid_run_id
-
-
-RESEARCH_ACTIONS = {"runs", "external", "scenarios"}
+from .runs import store_host_manifest
 
 
 def fail(message: str, code: int = 2) -> int:
     print(f"ERROR: {message}", file=sys.stderr)
     return code
-
-
-def prepare_runtime_directories(environment: dict[str, str]) -> None:
-    """Create the host directories the launcher used to mkdir before running."""
-    for key in ("EMULATION_LOGS_DIR", "NOTEBOOKS_DIR", "KUBERNETES_COPY_TO_HOST_DIR"):
-        value = environment.get(key)
-        if value:
-            Path(value).mkdir(parents=True, exist_ok=True)
 
 
 def print_version() -> None:
@@ -56,196 +40,184 @@ def print_version() -> None:
 
 def pull(runtime: str, images: Images) -> int:
     for image in images.as_dict().values():
-        print(f"Pulling {image}")
         if run([runtime, "pull", image]):
             return 5
     return 0
 
 
 def runtime_root() -> Path:
-    """Locate the wrapper runtime inside the source checkout.
-
-    The checkout is the only supported source of truth, so a missing tree is a
-    hard error with an actionable message rather than a silent fallback.
-    """
-    source_root = Path(__file__).resolve().parents[2] / "pipeline"
-    if (source_root / "client" / "wrapper.py").is_file():
-        return source_root
-    raise RuntimeError(
-        "coinjoin-pipeline requires an editable installation from a source "
-        f"checkout; no wrapper runtime at {source_root / 'client' / 'wrapper.py'}. "
-        "Install with `pip install -e .` (or `pipx install --editable .`) "
-        "from the checkout."
-    )
-
-
-def usage() -> None:
-    print("""usage: coinjoin-pipeline [HOST OPTIONS] ACTION [PIPELINE OPTIONS]
-
-Host actions: doctor, pull, version, builder, watch, download-report, clean-s3
-Pipeline actions: full-run, emulate, clean, analyze, export,
-  coinjoin-analysis, pbs-from-s3, mappings, initialize, runs ..., scenarios ..., external ...
-
-Host options:
-  --version TAG                 coordinated image tag (default: latest)
-  --runtime docker|podman       host container runtime
-  --runs-root PATH              output root (default: ./coinjoin-runs)
-  --local-build                 use local development image tags
-  --emulator-image IMAGE        override an individual image
-  --coinjoin-analysis-image IMAGE
-  --blocksci-image IMAGE
-  --mappings-image IMAGE
-  --sake-image IMAGE
-  --from-configuration FILE     load pipeline options from YAML
-  --fromConfiguration FILE      compatibility alias
-""")
+    if not (PIPELINE_ROOT / "compose.yaml").is_file():
+        raise RuntimeError("Install coinjoin-pipeline with pip install -e . from its source checkout")
+    return PIPELINE_ROOT
 
 
 def use_line_buffered_output() -> None:
-    """Emit progress while a stage runs, not when the process exits.
-
-    Python block-buffers stdout whenever it is a pipe or a file, so a long
-    Kubernetes/PBS stage looked frozen in `tee`d suite logs for tens of minutes
-    and only flushed at the end.
-    """
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
             reconfigure(line_buffering=True)
 
 
-def main(argv: list[str] | None = None) -> int:
-    use_line_buffered_output()
-    original_raw = list(sys.argv[1:] if argv is None else argv)
-    try:
-        raw, configuration_path = expand_configuration(original_raw)
-    except ConfigurationError as exc:
-        return fail(str(exc))
-    if not raw or raw[0] in {"-h", "--help"}:
-        usage()
-        return 0
-    try:
-        passthrough, host = parse_host_options(raw)
-        runtime = host["runtime"]
-        runs_root = Path(str(
-            host.get("runs_root")
-            or os.environ.get("EMULATION_LOGS_DIR")
-            or Path.cwd() / "coinjoin-runs"
-        )).expanduser().resolve()
-        overrides = image_overrides(host)
-        images = (
-            local_images(overrides)
-            if host["local_build"]
-            else resolve_images(host.get("version"), overrides)
-        )
-    except ValueError as exc:
-        return fail(str(exc))
-
-    top_action = passthrough[0] if passthrough else "full-run"
-    if top_action == "version":
+def _utility(argv: list[str]) -> int | None:
+    if argv[:1] == ["container"]:
+        return None
+    utility_actions = {
+        "version",
+        "doctor",
+        "pull",
+        "watch",
+        "download-report",
+        "clean-s3",
+        "runs",
+        "scenarios",
+    }
+    parser = build_parser(
+        {
+            "runtime",
+            "runs_root",
+            *{
+                "images." + name
+                for name in (
+                    "version",
+                    "local_build",
+                    "emulator",
+                    "coinjoin_analysis",
+                    "blocksci",
+                    "mappings",
+                    "sake",
+                    "uploader",
+                    "unified_report",
+                )
+            },
+        },
+        add_help=False,
+    )
+    values, remaining = parser.parse_known_args(argv)
+    supplied = vars(values)
+    action = supplied.pop("action", None)
+    supplied.pop("from_configuration", None)
+    if action not in utility_actions:
+        return None
+    if action == "version":
         print_version()
         return 0
-    if top_action == "builder":
-        from .builder import main as builder_main
-        builder_main()
-        return 0
-    if top_action == "watch":
-        from .watch import main as watch_main
-        return watch_main(passthrough[1:], runs_root=runs_root)
-    if top_action == "download-report":
-        from .download_report import main as download_report_main
-        return download_report_main(passthrough[1:], runs_root=runs_root)
-    if top_action == "clean-s3":
-        from .clean_s3 import main as clean_s3_main
-        return clean_s3_main(passthrough[1:], runs_root=runs_root)
-    if top_action in {"doctor", "pull"}:
-        if top_action == "doctor":
-            doctor_arguments = passthrough[1:]
-            errors = validate_arguments(doctor_arguments, runs_root)
-            errors.extend(doctor_check(runtime, runs_root, images))
-            if errors:
-                for error in errors:
-                    print(f"ERROR: {error}", file=sys.stderr)
-                return 2
-            print(f"doctor OK: runtime={runtime} output={runs_root}")
-            return 0
-        return pull(runtime, images)
+    context = RunContext.prepare(PipelineConfiguration.from_flat(supplied), shlex.join(["cjp", *argv]))
+    root = context.config.runs_path
+    if action in {"watch", "download-report", "clean-s3"}:
+        module = importlib.import_module(f"coinjoin_pipeline.{action.replace('-', '_')}")
+        return module.main(remaining, runs_root=root)
+    if action in {"runs", "scenarios"}:
+        from .execution.research import main as research_main
 
-    action = action_from(passthrough)
-    if (
-        configuration_path is not None
-        and action == "full-run"
-        and option_value(passthrough, "--artifact-backend") == "s3"
-        and not option_value(passthrough, "--run-id")
-    ):
-        passthrough.extend(("--run-id", run_id_for(passthrough)))
-    passthrough = add_effective_image_arguments(action, passthrough, images)
-    required_images = required_image_components(action, passthrough)
-    errors = validate_passthrough(passthrough, action)
-    errors.extend(validate_arguments(passthrough, runs_root))
+        if action == "runs" and remaining[:1] == ["validate"] and "blocksci_image" in supplied:
+            remaining.extend(["--blocksci-image", context.images.blocksci])
+        return research_main(
+            [
+                "--runs-root",
+                str(root),
+                "--runtime",
+                context.config.runtime,
+                action,
+                *remaining,
+            ]
+        )
+    if remaining:
+        return fail(f"unexpected arguments for {action}: {' '.join(remaining)}")
+    if action == "pull":
+        return pull(context.config.runtime, context.images)
+    errors = doctor_check(context.config.runtime, root, context.images)
     if errors:
-        for error in errors:
-            print(f"ERROR: {error}", file=sys.stderr)
-        return 2
-    reproduction = shlex.join(["coinjoin-pipeline", *original_raw])
-    try:
-        wrapper_root = runtime_root()
-    except RuntimeError as exc:
-        return fail(str(exc))
-    build = research_command if action.split(" ")[0] in RESEARCH_ACTIONS else runtime_command
-    command = build(wrapper_root, runtime, passthrough, images, runs_root, reproduction)
-    pipeline_run_id: str | None = None
-    if action in {"full-run", "emulate"} and not option_value(passthrough, "--run-dir"):
-        candidate_run_id = run_id_for(passthrough)
-        if valid_run_id(candidate_run_id):
-            pipeline_run_id = candidate_run_id
-            command.environment["PIPELINE_RUN_ID"] = candidate_run_id
-    print(f"Generated runtime command:\n{command.rendered()}")
-    preflight = doctor_check(
-        runtime, runs_root, images,
-        image_components=required_images,
-        capabilities=required_capabilities(action, passthrough),
-    )
-    if preflight:
-        for error in preflight:
-            print(f"ERROR: {error}", file=sys.stderr)
-        return 2
-    stage_pbs_dry_run = (
-        (action == "analyze" and "--blocksciPbs" in passthrough)
-        or (action == "coinjoin-analysis" and "--analysisPbs" in passthrough)
-        or (action == "mappings" and "--mappingsPbs" in passthrough)
-        or action == "pbs-from-s3"
-        or (action in {"emulate", "full-run"} and option_value(passthrough, "--artifact-backend") == "s3")
-    )
-    dry_run = "--dry-run" in passthrough
-    if dry_run and not stage_pbs_dry_run:
-        print("[dry-run] validation passed; command was not executed")
+        return fail("; ".join(errors))
+    print(f"doctor OK: runtime={context.config.runtime} output={root}")
+    return 0
+
+
+def execute(context: RunContext) -> None:
+    from .execution import containers, orchestrator
+
+    containers.install_termination_handlers()
+    if context.config.action == "external analyze":
+        from .execution.research import run_external_configuration
+
+        run_external_configuration(context.config)
+    else:
+        orchestrator.run_configuration(context.config)
+
+
+def main(argv: list[str] | None = None) -> int:
+    use_line_buffered_output()
+    original = list(sys.argv[1:] if argv is None else argv)
+    if not original or original[0] in {"-h", "--help"}:
+        print(
+            "usage: cjp run CONFIG.yaml [--dry-run]\n       cjp ACTION [OPTIONS]\n       cjp doctor | watch | download-report | clean-s3 | runs | scenarios"
+        )
         return 0
-    # A PBS or S3 dry run still starts the wrapper so it can render the job
-    # scripts and Kubernetes resources, but nothing runs: creating runtime
-    # directories or a manifest would claim a run, or overwrite a real one's.
-    target: Path | None = None
-    if not dry_run:
-        prepare_runtime_directories(command.environment)
-        target = manifest_target(action, passthrough, runs_root, pipeline_run_id)
-    manifest = initial_manifest(
-        action=action,
-        requested_version=("local" if host["local_build"] else host.get("version") or DEFAULT_VERSION),
-        effective_images=images.as_dict(),
-        runtime=runtime,
-        user_arguments=original_raw,
-        pipeline_arguments=passthrough,
-        user_command=reproduction,
-        generated_runtime_command=command.rendered(),
-        working_directory=str(Path.cwd()),
-    )
-    if target:
-        store_host_manifest(target, manifest)
-    exit_code = run(command.argv(), environment=command.environment)
-    if target:
-        mark_finished(manifest, exit_code)
-        store_host_manifest(target, manifest)
-    return exit_code if exit_code in {0, 2, 3, 4, 5, 130} else 5
+    target = None
+    manifest = None
+    code = 5
+    try:
+        if (
+            not any(value.split("=", 1)[0] in CONFIGURATION_FLAGS for value in original)
+            and action_word(original) != "run"
+        ):
+            result = _utility(original)
+            if result is not None:
+                return result
+        reproduction = shlex.join(["coinjoin-pipeline", *original])
+        context = RunContext.prepare(load_configuration(original), reproduction)
+        config = context.config
+        root = config.runs_path
+        runtime_root()
+        errors = validate_arguments(config, root)
+        if not config.dry_run:
+            errors.extend(
+                doctor_check(
+                    config.runtime,
+                    root,
+                    context.images,
+                    image_components=required_image_components(config),
+                    capabilities=required_capabilities(config),
+                )
+            )
+        if errors:
+            return fail("; ".join(errors))
+        print(f"Run configuration: {config.action} ({config.driver}, {config.artifacts.backend})")
+        if not config.dry_run:
+            for path in (root, root / ".notebooks"):
+                path.mkdir(parents=True, exist_ok=True)
+            if context.run_dir is not None and (config.run_dir or config.action in {"emulate", "full-run"}):
+                target = context.run_dir / RUN_MANIFEST
+            effective = asdict(config)
+            effective.pop("_provided", None)
+            manifest = initial_manifest(
+                action=config.action,
+                requested_version=config.images.version or DEFAULT_VERSION,
+                effective_images=context.images.as_dict(),
+                runtime=config.runtime,
+                user_arguments=original,
+                configuration=effective,
+                environment=environment_snapshot({**os.environ, **context.environment}),
+                user_command=reproduction,
+                working_directory=str(Path.cwd()),
+            )
+            if target:
+                store_host_manifest(target, manifest)
+        with context.activate():
+            execute(context)
+        code = 0
+    except (ValueError, OSError) as error:
+        code = fail(str(error))
+    except (RuntimeError, subprocess.CalledProcessError) as error:
+        code = fail(str(error), 5)
+    except KeyboardInterrupt:
+        code = 130
+    except SystemExit as error:
+        code = error.code if isinstance(error.code, int) else 2
+    finally:
+        if target and manifest is not None:
+            mark_finished(manifest, code)
+            store_host_manifest(target, manifest)
+    return code
 
 
 if __name__ == "__main__":

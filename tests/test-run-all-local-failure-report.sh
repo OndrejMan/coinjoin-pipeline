@@ -28,17 +28,17 @@ exit 0
 EOF
 chmod +x "${FAKE_BIN}/docker"
 
-cat >"${ISOLATED_PROJECT}/tests/test-command-builder-contract.sh" <<'EOF'
+cat >"${ISOLATED_PROJECT}/tests/pipeline/test_emulate_exit_status.sh" <<'EOF'
 #!/usr/bin/env bash
 exit 23
 EOF
-chmod +x "${ISOLATED_PROJECT}/tests/test-command-builder-contract.sh"
+chmod +x "${ISOLATED_PROJECT}/tests/pipeline/test_emulate_exit_status.sh"
 
 set +e
 (
   cd "${ISOLATED_PROJECT}"
   EMULATION_LOGS_DIR="${ISOLATED_PROJECT}/emulation_logs" \
-  PATH="${FAKE_BIN}:${PATH}" bash run-all-local.sh --skip-build --tests-only
+  PREFLIGHT_SKIP=1 RUN_SUITE_DISABLE=1 PATH="${FAKE_BIN}:${PATH}" bash run-all-local.sh --skip-build --tests-only
 ) >"${RUN_LOG}" 2>&1
 RUN_EXIT_CODE=$?
 set -e
@@ -49,7 +49,7 @@ if [[ "${RUN_EXIT_CODE}" -ne 23 ]]; then
   exit 1
 fi
 
-if ! grep -Fq "FAILED: test tests/test-command-builder-contract.sh (exit code 23). Logs: ${ISOLATED_PROJECT}/emulation_logs" "${RUN_LOG}"; then
+if ! grep -Fq "FAILED: test tests/pipeline/test_emulate_exit_status.sh (exit code 23). Logs: ${ISOLATED_PROJECT}/emulation_logs" "${RUN_LOG}"; then
   echo "FAIL: expected a named failure summary with the log directory" >&2
   cat "${RUN_LOG}" >&2
   exit 1

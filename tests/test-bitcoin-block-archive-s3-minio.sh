@@ -103,7 +103,7 @@ cleanup() {
   trap - EXIT
   (( status == 0 )) || dump_diagnostics || true
   mkdir -p "${RESULT_DIR}"
-  for artifact in archive-manifest.json blocksci-parse-manifest.json blocksci-parse.pbs.log pipeline-output.log diagnostics.txt; do
+  for artifact in blk00000.dat.json blocksci-parse-manifest.json blocksci-parse.pbs.log pipeline-output.log diagnostics.txt; do
     [[ -s "${WORK_ROOT}/${artifact}" ]] && cp "${WORK_ROOT}/${artifact}" "${RESULT_DIR}/${artifact}"
   done
   docker rm -f "${PBS_CONTAINER_NAME}" "${MINIO_CONTAINER_NAME}" >/dev/null 2>&1 || true
@@ -204,7 +204,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
   --block-dir /blocks --state-dir /state \
   --bitcoin-cli /fixture/fake-bitcoin-cli --bitcoin-datadir /fixture/bitcoin \
   --keep-latest-files 0 --no-stop-on-error
-s5 cp "${BLOCKS_URI}/archive-manifest.json" "${WORK_ROOT}/archive-manifest.json" >/dev/null
+s5 cp "${BLOCKS_URI}/blk00000.dat.json" "${WORK_ROOT}/blk00000.dat.json" >/dev/null
 
 export PBS_CONTAINER_NAME PBS_WORKDIR_HOST="${WORK_ROOT}" PBS_WORKDIR_CONTAINER="${WORK_ROOT}"
 "${PBS_HELPER}" start
@@ -225,7 +225,7 @@ export PBS_CLIENT_WORKDIR="${WORK_ROOT}" EMULATION_LOGS_DIR="${LOGS_ROOT}"
 echo "Submitting BlockSci S3 parse for ${RUN_ID}..."
 (
   cd "${PROJECT_DIR}"
-  PYTHONPATH="${PROJECT_DIR}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+  PYTHONPATH="${PROJECT_DIR}/src:${PROJECT_DIR}/pipeline${PYTHONPATH:+:${PYTHONPATH}}" \
     timeout --foreground "${E2E_TIMEOUT}" python3 -m coinjoin_pipeline.cli pbs-from-s3 \
     --engine joinmarket --artifact-uri "${ARTIFACT_URI}" --run-id "${RUN_ID}" \
     --s3-endpoint-url "${S3_ENDPOINT_URL}" --s3-credentials-file "${CREDENTIALS_FILE}" --s3-profile "${S3_PROFILE}" \
@@ -241,13 +241,13 @@ until s5 ls "${ARTIFACT_URI}/${RUN_ID}/.pbs/blocksci-parse.done" >/dev/null 2>&1
   sleep 5
 done
 s5 cp "${ARTIFACT_URI}/${RUN_ID}/blocksci-parse_data/manifest.json" "${WORK_ROOT}/blocksci-parse-manifest.json" >/dev/null
-python3 - "${WORK_ROOT}/archive-manifest.json" "${WORK_ROOT}/blocksci-parse-manifest.json" <<'PY'
+python3 - "${WORK_ROOT}/blk00000.dat.json" "${WORK_ROOT}/blocksci-parse-manifest.json" <<'PY'
 import json, sys
 archive, cache = (json.load(open(path, encoding="utf-8")) for path in sys.argv[1:])
-if archive.get("schema_version") != 1 or archive.get("archived_max_height") != 1:
-    raise SystemExit("FAIL: archive manifest has wrong coverage")
-if [entry.get("file") for entry in archive.get("block_files", [])] != ["blk00000.dat"]:
-    raise SystemExit("FAIL: archive manifest has wrong block inventory")
+if archive.get("schema_version") != 1 or archive.get("height_ranges") != [[0, 1]]:
+    raise SystemExit("FAIL: archive sidecar has wrong coverage")
+if archive.get("file") != "blk00000.dat":
+    raise SystemExit("FAIL: archive sidecar has wrong block inventory")
 if cache.get("source_kind") != "bitcoin-blocks-s3" or cache.get("network") != "bitcoin" or cache.get("exported_max_block") != 1:
     raise SystemExit("FAIL: parsed cache does not preserve the S3 fixture provenance")
 print("PASS: public Bitcoin fixture -> bitcoin-block-archive -> MinIO -> PBS BlockSci parse")

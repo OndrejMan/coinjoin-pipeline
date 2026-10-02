@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import re
-
+from dataclasses import asdict, dataclass
 
 IMAGE_NAMES = {
     "emulator": "ghcr.io/ondrejman/emulator-manager",
@@ -55,9 +54,3 @@ def resolve_images(version: str | None, overrides: dict[str, str | None]) -> Ima
         else:
             resolved[component] = f"{name}:{effective_version}"
     return Images(**resolved)
-
-
-def all_images_overridden(
-    overrides: dict[str, str | None], components: set[str] | None = None,
-) -> bool:
-    return all(overrides.get(name) for name in (components or set(IMAGE_NAMES)))

@@ -36,8 +36,7 @@ class PublishWorkflowTests(unittest.TestCase):
     def test_test_workflow_no_longer_publishes_a_wrapper_image(self) -> None:
         workflow = (WORKFLOWS / "tests.yaml").read_text(encoding="utf-8")
         self.assertIn(
-            "group: coinjoin-pipeline-${{ github.workflow }}-"
-            "${{ github.event.pull_request.number || github.ref }}",
+            "group: coinjoin-pipeline-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}",
             workflow,
         )
         self.assertIn("cancel-in-progress: true", workflow)
@@ -48,14 +47,19 @@ class PublishWorkflowTests(unittest.TestCase):
     def test_kubernetes_jobs_checkout_the_sources_they_build(self) -> None:
         jobs = yaml.safe_load((WORKFLOWS / "tests.yaml").read_text())["jobs"]
         for name in (
-            "kubernetes-k3d", "kubernetes-pbs-wasabi", "kubernetes-pbs-joinmarket",
-            "kubernetes-pbs-parallel", "kubernetes-s3-minio",
+            "kubernetes-k3d",
+            "kubernetes-pbs-wasabi",
+            "kubernetes-pbs-joinmarket",
+            "kubernetes-pbs-parallel",
+            "kubernetes-s3-minio",
         ):
             with self.subTest(job=name):
                 job = jobs[name]
-                checkouts = [step for step in job["steps"] if
-                             step.get("with", {}).get("repository") ==
-                             "OndrejMan/coinjoin-emulator"]
+                checkouts = [
+                    step
+                    for step in job["steps"]
+                    if step.get("with", {}).get("repository") == "OndrejMan/coinjoin-emulator"
+                ]
                 self.assertEqual(len(checkouts), 1)
                 checkout = checkouts[0]
                 self.assertEqual(checkout["with"]["submodules"], "recursive")
@@ -63,8 +67,7 @@ class PublishWorkflowTests(unittest.TestCase):
                 # tests/support/local-images.sh resolves the emulator checkout
                 # from this variable, whatever name the test script uses.
                 self.assertEqual(job["env"]["COINJOIN_EMULATOR_SOURCE_DIR"], source_dir)
-                build_steps = [i for i, step in enumerate(job["steps"])
-                               if "./tests/test-" in step.get("run", "")]
+                build_steps = [i for i, step in enumerate(job["steps"]) if "./tests/test-" in step.get("run", "")]
                 self.assertLess(job["steps"].index(checkout), min(build_steps))
 
 

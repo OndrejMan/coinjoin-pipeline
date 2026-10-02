@@ -72,7 +72,10 @@ def apply_script_metadata(record: IORecord, metadata: JsonObject | None) -> None
     if not metadata:
         return
     keys: tuple[Literal["script_type", "script_asm", "script_hex", "address_type"], ...] = (
-        "script_type", "script_asm", "script_hex", "address_type"
+        "script_type",
+        "script_asm",
+        "script_hex",
+        "address_type",
     )
     for key in keys:
         if key in metadata and not record.get(key):

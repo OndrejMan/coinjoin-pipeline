@@ -316,9 +316,7 @@ def build_emulator_data(
                 )
         except (OSError, ValueError, json.JSONDecodeError) as error:
             label_provenance["independent"] = False
-            label_provenance["unavailable_reason"] = (
-                f"producer label source cannot be parsed: {error}"
-            )
+            label_provenance["unavailable_reason"] = f"producer label source cannot be parsed: {error}"
             independent_labels_available = False
             joinmarket_round_labels = []
             wasabi_round_labels = []
@@ -327,11 +325,7 @@ def build_emulator_data(
         for label in joinmarket_round_labels
         if label.get("txid") and label.get("status") == "confirmed"
     }
-    wasabi_labels_by_txid = {
-        str(label["txid"]): label
-        for label in wasabi_round_labels
-        if label.get("txid")
-    }
+    wasabi_labels_by_txid = {str(label["txid"]): label for label in wasabi_round_labels if label.get("txid")}
     producer_positive_txids = set(joinmarket_labels_by_txid) | set(wasabi_labels_by_txid)
     producer_positive_count = label_provenance.get("producer_positive_count")
     if (
@@ -374,10 +368,7 @@ def build_emulator_data(
                 if is_coinbase_tx(tx):
                     continue
 
-                if (
-                    coinjoin_type == "wasabi2"
-                    and len(tx.get("vin", [])) >= WASABI_PARSEABILITY_MIN_INPUTS
-                ):
+                if coinjoin_type == "wasabi2" and len(tx.get("vin", [])) >= WASABI_PARSEABILITY_MIN_INPUTS:
                     wasabi_parseability_candidate_txids.add(txid)
 
                 inputs = []
@@ -494,12 +485,7 @@ def build_emulator_data(
         for item in tx.get(side, [])
         if item.get("wallet_name")
     )
-    total_io = sum(
-        1
-        for tx in transactions.values()
-        for side in ("inputs", "outputs")
-        for item in tx.get(side, [])
-    )
+    total_io = sum(1 for tx in transactions.values() for side in ("inputs", "outputs") for item in tx.get(side, []))
 
     return {
         "schema_version": EMULATOR_DATA_SCHEMA_VERSION,
@@ -518,10 +504,7 @@ def build_emulator_data(
             "unmatched_positive_txids": unmatched_positive_txids,
             "wasabi_parseability_candidate_txids": sorted(wasabi_parseability_candidate_txids),
         },
-        "transactions": {
-            txid: transactions[txid]
-            for txid in sorted(transactions)
-        },
+        "transactions": {txid: transactions[txid] for txid in sorted(transactions)},
     }
 
 
@@ -538,8 +521,7 @@ def load_joinmarket_round_labels(path: Path) -> list[JsonObject]:
     for item in data:
         if item.get("status") in ("multiple_matches", "duplicate_destination"):
             raise ValueError(
-                f"JoinMarket round {item.get('export_round_id', '?')} "
-                f"has destination conflict status: {item['status']}"
+                f"JoinMarket round {item.get('export_round_id', '?')} has destination conflict status: {item['status']}"
             )
         label = dict(item)
         matches = label.get("destination_matches")
@@ -570,7 +552,7 @@ def load_wasabi_round_labels(run_dir: Path, log_paths: list[Path]) -> list[JsonO
                 round_match = WASABI_ROUND_ID_RE.search(text)
                 txid = match.group("txid").lower()
                 labels_by_txid[txid] = {
-                    "timestamp": text[:round_match.start()].strip() if round_match else None,
+                    "timestamp": text[: round_match.start()].strip() if round_match else None,
                     "round_id": round_match.group("round_id") if round_match else None,
                     "txid": txid,
                     "source_file": str(path.relative_to(run_dir)),

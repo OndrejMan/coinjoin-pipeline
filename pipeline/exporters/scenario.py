@@ -115,9 +115,7 @@ def build_scenario_checks(
     elif coinjoin_type == "joinmarket":
         wallet_count_rule = "subset"
         wallet_count_matches = (
-            0 < observed_wallet_count <= scenario_wallet_count
-            if scenario_wallet_count is not None
-            else None
+            0 < observed_wallet_count <= scenario_wallet_count if scenario_wallet_count is not None else None
         )
     else:
         wallet_count_rule = "exact"
@@ -142,9 +140,7 @@ def build_scenario_checks(
             max_coinjoin_input_sats <= scenario_initial_funds if scenario_initial_funds is not None else None
         ),
         "coinjoin_input_sats_to_funds_ratio": (
-            round(coinjoin_analysis_input_sats / scenario_initial_funds, 3)
-            if scenario_initial_funds
-            else None
+            round(coinjoin_analysis_input_sats / scenario_initial_funds, 3) if scenario_initial_funds else None
         ),
         "per_wallet_observed_counts": per_wallet_observed_counts(coinjoin_analysis),
     }

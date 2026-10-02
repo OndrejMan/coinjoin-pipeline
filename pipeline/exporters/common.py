@@ -6,6 +6,7 @@ import hashlib
 import json
 import subprocess
 from collections import Counter
+from functools import partial
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
@@ -106,6 +107,14 @@ def git_tree_is_dirty(path: Path) -> bool | None:
 # make the frontend and node hashes disagree over noise.
 TREE_HASH_SKIPPED_DIRECTORIES = {"__pycache__", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache"}
 TREE_HASH_SKIPPED_SUFFIXES = {".pyc", ".pyo"}
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(partial(stream.read, 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def tree_sha256(root: Path) -> str | None:

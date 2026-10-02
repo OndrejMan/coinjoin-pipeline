@@ -113,11 +113,7 @@ def explain_wasabi2_heuristic(
     inputs = record.get("inputs", [])
     outputs = record.get("outputs", [])
     block_height = coerce_int(record.get("block_height"))
-    input_threshold = (
-        min_input_count
-        if min_input_count is not None
-        else wasabi2_default_input_threshold(block_height)
-    )
+    input_threshold = min_input_count if min_input_count is not None else wasabi2_default_input_threshold(block_height)
     input_threshold_source = "--min-input-count" if min_input_count is not None else "BlockSci default"
     input_addresses = unique_addresses(inputs)
     output_addresses = unique_addresses(outputs)
@@ -202,10 +198,6 @@ def output_value_counts(outputs: list[IORecord]) -> dict[int, int]:
     return counts
 
 
-def format_int_list(values: list[int]) -> str:
-    return ", ".join(str(value) for value in values) if values else "-"
-
-
 def joinmarket_subset_result(
     values: list[int],
     bucket_goals: list[int],
@@ -264,6 +256,31 @@ def joinmarket_subset_result(
     return result, reason, depth
 
 
+def _subset_observation(input_values: list[int], bucket_goals: list[int], depth: int, reason: str) -> JsonObject:
+    return {
+        "input_values": sorted(input_values, reverse=True),
+        "bucket_goals_after_fee": bucket_goals,
+        "search_depth": depth,
+        "reason": reason,
+    }
+
+
+def _joinmarket_explanation(
+    heuristic: str,
+    rules: list[JsonObject],
+    subset_passed: bool | None,
+    parameters: JsonObject,
+) -> JsonObject:
+    failed_rules = [rule["name"] for rule in rules if rule["passed"] is False]
+    return {
+        "heuristic": heuristic,
+        "would_pass_python_rules": not failed_rules and subset_passed is True,
+        "failed_rules": failed_rules,
+        "rules": rules,
+        "parameters": parameters,
+    }
+
+
 def explain_joinmarket_definite_heuristic(
     record: TransactionRecord,
     min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE,
@@ -300,10 +317,7 @@ def explain_joinmarket_definite_heuristic(
             if bucket_index < len(bucket_goals):
                 bucket_goals[bucket_index] += int(value)
             bucket_index += 1
-        fee_adjusted_bucket_goals = [
-            0 if max_possible_fee > goal else goal - max_possible_fee
-            for goal in bucket_goals
-        ]
+        fee_adjusted_bucket_goals = [0 if max_possible_fee > goal else goal - max_possible_fee for goal in bucket_goals]
         subset_passed, subset_reason, subset_depth = joinmarket_subset_result(
             list(input_values_by_address.values()),
             fee_adjusted_bucket_goals,
@@ -311,16 +325,11 @@ def explain_joinmarket_definite_heuristic(
         )
 
     repeated_other_values = {
-        value: count
-        for value, count in sorted(value_counts.items())
-        if count > 1 and value != dominant_value
+        value: count for value, count in sorted(value_counts.items()) if count > 1 and value != dominant_value
     }
-    subset_observed = {
-        "input_values": sorted(input_values_by_address.values(), reverse=True),
-        "bucket_goals_after_fee": fee_adjusted_bucket_goals,
-        "search_depth": subset_depth,
-        "reason": subset_reason,
-    }
+    subset_observed = _subset_observation(
+        list(input_values_by_address.values()), fee_adjusted_bucket_goals, subset_depth, subset_reason
+    )
 
     rules = [
         rule_result(
@@ -363,13 +372,11 @@ def explain_joinmarket_definite_heuristic(
             ),
         ),
     ]
-    failed_rules = [rule["name"] for rule in rules if rule["passed"] is False]
-    return {
-        "heuristic": "joinmarket_definite",
-        "would_pass_python_rules": not failed_rules and subset_passed is True,
-        "failed_rules": failed_rules,
-        "rules": rules,
-        "parameters": {
+    return _joinmarket_explanation(
+        "joinmarket_definite",
+        rules,
+        subset_passed,
+        {
             "min_base_fee": min_base_fee,
             "percentage_fee": percentage_fee,
             "max_depth": max_depth,
@@ -378,7 +385,7 @@ def explain_joinmarket_definite_heuristic(
             "dominant_output_value": dominant_value,
             "repeated_non_mix_output_values": repeated_other_values,
         },
-    }
+    )
 
 
 def explain_joinmarket_possible_heuristic(
@@ -462,25 +469,18 @@ def explain_joinmarket_possible_heuristic(
         rule_result(
             "two_bucket_subset_after_fee",
             subset_passed,
-            {
-                "input_values": sorted(input_values_by_address.values(), reverse=True),
-                "bucket_goals_after_fee": bucket_goals,
-                "search_depth": subset_depth,
-                "reason": subset_reason,
-            },
+            _subset_observation(list(input_values_by_address.values()), bucket_goals, subset_depth, subset_reason),
             (
                 "grouped input address values can fill two buckets after "
                 f"max({min_base_fee}, dominant_unknown_value * {percentage_fee}) fee"
             ),
         ),
     ]
-    failed_rules = [rule["name"] for rule in rules if rule["passed"] is False]
-    return {
-        "heuristic": "joinmarket_possible",
-        "would_pass_python_rules": not failed_rules and subset_passed is True,
-        "failed_rules": failed_rules,
-        "rules": rules,
-        "parameters": {
+    return _joinmarket_explanation(
+        "joinmarket_possible",
+        rules,
+        subset_passed,
+        {
             "min_base_fee": min_base_fee,
             "percentage_fee": percentage_fee,
             "max_depth": max_depth,
@@ -489,7 +489,7 @@ def explain_joinmarket_possible_heuristic(
             "dominant_unknown_output_value": unknown_dominant_value,
             "goal_value": goal_value,
         },
-    }
+    )
 
 
 def add_blocksci_heuristic_explanations(

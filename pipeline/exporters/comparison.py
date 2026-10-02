@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from exporters.common import JsonObject
+from exporters.common import JsonObject, compute_optional_rate
+from exporters.emulator_data import wallet_address_labels
 from exporters.report_types import IORecord, RecordSummary, TransactionRecord
 
 
@@ -35,9 +36,7 @@ def compare_io(
     return mismatches
 
 
-def compare_records(
-    coinjoin_analysis_record: TransactionRecord, blocksci_record: TransactionRecord
-) -> list[str]:
+def compare_records(coinjoin_analysis_record: TransactionRecord, blocksci_record: TransactionRecord) -> list[str]:
     mismatches = []
     for field in (
         "input_count",
@@ -137,18 +136,6 @@ def build_divergences(transactions: JsonObject) -> dict[str, list[JsonObject]]:
     return divergences
 
 
-def compute_rate(numerator: int, denominator: int, empty_default: float) -> float:
-    if denominator == 0:
-        return empty_default
-    return round(numerator / denominator, 6)
-
-
-def compute_optional_rate(numerator: int, denominator: int) -> float | None:
-    if denominator == 0:
-        return None
-    return round(numerator / denominator, 6)
-
-
 def build_detection_confusion_matrix(
     emulator_data: JsonObject | None,
     detected_records: Mapping[str, object],
@@ -210,20 +197,6 @@ def build_detection_confusion_matrix(
     }
 
 
-def wallet_address_labels(emulator_data: JsonObject | None) -> dict[str, str]:
-    if not emulator_data:
-        return {}
-    labels = {}
-    for tx in (emulator_data.get("transactions") or {}).values():
-        for side in ("inputs", "outputs"):
-            for item in tx.get(side, []):
-                address = item.get("address")
-                item_wallet_name = item.get("wallet_name")
-                if address and item_wallet_name:
-                    labels[str(address)] = str(item_wallet_name)
-    return labels
-
-
 def pairs_by_partition(labels_by_item: dict[str, str]) -> set[tuple[str, str]]:
     grouped: dict[str, list[str]] = {}
     for item, label in labels_by_item.items():
@@ -233,7 +206,7 @@ def pairs_by_partition(labels_by_item: dict[str, str]) -> set[tuple[str, str]]:
     for items in grouped.values():
         sorted_group_items = sorted(items)
         for left_index, left in enumerate(sorted_group_items):
-            for right in sorted_group_items[left_index + 1:]:
+            for right in sorted_group_items[left_index + 1 :]:
                 pairs.add((left, right))
     return pairs
 
@@ -275,16 +248,8 @@ def evaluate_cluster_assignments(
         wallets_by_cluster.setdefault(cluster, set()).add(wallet)
         clusters_by_wallet.setdefault(wallet, set()).add(cluster)
 
-    overmerged = {
-        cluster: sorted(wallets)
-        for cluster, wallets in wallets_by_cluster.items()
-        if len(wallets) > 1
-    }
-    undermerged = {
-        wallet: sorted(clusters)
-        for wallet, clusters in clusters_by_wallet.items()
-        if len(clusters) > 1
-    }
+    overmerged = {cluster: sorted(wallets) for cluster, wallets in wallets_by_cluster.items() if len(wallets) > 1}
+    undermerged = {wallet: sorted(clusters) for wallet, clusters in clusters_by_wallet.items() if len(clusters) > 1}
 
     return {
         "available": True,

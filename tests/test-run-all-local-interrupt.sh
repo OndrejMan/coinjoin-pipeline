@@ -30,7 +30,7 @@ exit 0
 EOF
 chmod +x "${FAKE_BIN}/docker"
 
-cat >"${ISOLATED_PROJECT}/tests/test-runIt-overactive-local.sh" <<'EOF'
+cat >"${ISOLATED_PROJECT}/tests/pipeline/test_emulate_exit_status.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 trap 'touch "${CHILD_INTERRUPTED:?}"; exit 130' INT TERM
@@ -39,11 +39,10 @@ while true; do
   sleep 1
 done
 EOF
-chmod +x "${ISOLATED_PROJECT}/tests/test-runIt-overactive-local.sh"
+chmod +x "${ISOLATED_PROJECT}/tests/pipeline/test_emulate_exit_status.sh"
 
 for test_script in \
-  test-command-builder-contract.sh \
-  pipeline/test_emulate_exit_status.sh \
+  test-runIt-overactive-local.sh \
   pipeline/test_emulate_interrupt_cleanup.sh \
   pipeline/test_emulate_log_follower_cleanup.sh \
   pipeline/test_delete_profiles.sh \
@@ -66,7 +65,7 @@ done
 
 (
   cd "${ISOLATED_PROJECT}"
-  PATH="${FAKE_BIN}:${PATH}" \
+  PREFLIGHT_SKIP=1 RUN_SUITE_DISABLE=1 PATH="${FAKE_BIN}:${PATH}" \
   CHILD_STARTED="${CHILD_STARTED}" \
   CHILD_INTERRUPTED="${CHILD_INTERRUPTED}" \
   bash run-all-local.sh --skip-build --tests-only

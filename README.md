@@ -11,9 +11,11 @@ This is a local prototype and is not published to PyPI.
 Run these from the repository checkout:
 
 ```bash
-pipx install .
-# development install with the optional interactive builder and tests
-python3 -m pip install -e '.[builder,test]'
+pipx install --editable .
+# development install with tests
+python3 -m pip install -e '.[test]'
+# static checks: Ruff (with fixes), mypy and pylint (fail-under 10)
+uv run lint
 
 coinjoin-pipeline version
 cjp doctor
@@ -40,7 +42,7 @@ coinjoin-pipeline watch --run-id "$RUN_ID" --pbs-only \
   --pbs-job blocksci=12346.server
 ```
 
-By default the wrapper leaves `--min-input-count` unset, so BlockSci applies
+By default the pipeline leaves `--min-input-count` unset, so BlockSci applies
 its height-aware production threshold. Pass `--min-input-count N` for an
 intentional positive override. Values below 1 are rejected. Small Wasabi
 regtest scenarios normally need a scenario-appropriate explicit value;
@@ -49,8 +51,8 @@ warning.
 Independent emulator labels, raw detector metrics,
 and provenance rules are defined in
 [Analysis semantics](docs/analysis-semantics.md).
-When verified emulator labels are available, unified report schema 1.7
-evaluates both BlockSci and the filtered, normalized `coinjoin-analysis`
+When verified emulator labels are available, unified report schema 1.7 and
+later evaluate both BlockSci and the filtered, normalized `coinjoin-analysis`
 baseline against the same exported transaction universe while preserving the
 legacy BlockSci confusion-matrix field.
 
@@ -107,13 +109,17 @@ Developer compatibility entrypoints use the same CLI:
 ./run-all.sh local --build-only
 ```
 
-The wrapper runs directly from the checkout under the interpreter that runs
-`cjp` itself (`sys.executable`), not inside a published wrapper image. Install
-it as an editable checkout — `pip install -e .` or `pipx install --editable .`
-— because `coinjoin-pipeline` resolves `pipeline/client/wrapper.py`,
-`pipeline/exporters/`, and `scenarios/` relative to that checkout. There is no
-standalone, relocatable wheel: a non-editable `pip install .` gives a working
-`cjp version` but fails with a clear error on the first pipeline action.
+The host CLI and orchestration run in one Python process from an editable
+checkout (`pip install -e .` or `pipx install --editable .`). Container workloads
+remain separate processes. `pipeline/compose.yaml`, the standalone exporters
+and scenarios are resolved relative to the checkout; a relocated wheel alone
+is not a complete execution installation.
+
+The recommended entry point is `cjp run experiment.yaml`. Both YAML and the
+existing command flags load the same typed configuration directly. Defaults,
+image selection and run identity are resolved before execution; YAML is never
+translated to a second command line. The interactive builder and generated
+command metadata have been removed. See [Current architecture](docs/architecture.md).
 
 ## Commands and contracts
 
@@ -123,7 +129,7 @@ between raw and linked detector results are documented in
 and scheduler contract is documented in
 [PBS stage contract](docs/pbs-stage-contract.md).
 
-Host commands are `doctor`, `pull`, `version`, `builder`, `watch`, and
+Host commands are `doctor`, `pull`, `version`, `watch`, `clean-s3`, and
 `download-report`. `watch` discovers the outer Kubernetes pod from `--run-id`
 and streams prefixed controller output without starting a container. Pass
 `--all` to multiplex the controller, S3 uploader, and the selected engine
@@ -136,26 +142,21 @@ unified output. `--pbs` adds PBS stdout/stderr to the Kubernetes stream, while
 `--pbs-only` needs no kubeconfig. PBS job IDs are discovered from
 `.pbs/*.jobid`, from `$HOME/<run-id>-full-run.log`, or supplied explicitly with
 repeatable `--pbs-job STAGE=JOB_ID`; job state changes are included in the
-prefixed stream. All merged parser
-commands remain represented by `command_metadata.json`: `full-run`, `emulate`,
-`clean`, `analyze`, `export`, `coinjoin-analysis`, `pbs-from-s3`, `mappings`, `initialize`, and
+prefixed stream. Pipeline actions are `full-run`, `emulate`, `clean`, `analyze`,
+`export`, `coinjoin-analysis`, `pbs-from-s3`, `mappings`, and `initialize`, plus
 the `runs`, `scenarios`, and `external` command groups.
-
-Install the `builder` extra and run `coinjoin-pipeline builder` for the existing
-interactive paste/edit, completion, contextual-help, validation, and preflight
-workflow. Verify metadata/parser parity with:
-
-```bash
-./tests/test-command-builder-contract.sh
-```
 
 Before a new full run, the CLI atomically creates `research_manifest.json` in
 the expected run directory. Stage-only commands update the explicitly selected
 run. Host data is namespaced as `host_launcher`, preserving established
-wrapper/report fields. It records structured arguments, the exact rendered
-runtime command, requested version, effective images, runtime, timestamps,
+report fields. It records the resolved configuration, original user command,
+requested version, effective images, runtime, timestamps,
 working directory, status, and exit code. Sensitive-looking keys are redacted.
-The wrapper report separately records resolved image IDs and repository digests.
+`host_launcher.environment` records effective `BLOCKSCI_`, `COINJOIN_`,
+`KUBERNETES_`, `MAPPINGS_`, `SAKE_`, and `PBS_` environment options, with resolved
+launcher values taking precedence over inherited values. Secret-bearing keys
+are omitted from this environment snapshot.
+The analytical report separately records resolved image IDs and repository digests.
 
 ## Artifact backends
 
@@ -282,10 +283,10 @@ thresholds, and leaves the larger global/mainnet PBS defaults unchanged.
 
 When the Bitcoin Core node is pruned after archival by
 `bitcoin-block-archive`, use the S3 archive variant instead. The parser job
-downloads the complete archive to PBS scratch, requires a schema-1
-`archive-manifest.json` with contiguous `blk00000.dat…` entries, verifies each
-object and its `.sha256` sidecar, and refuses a requested height not covered by
-the manifest. The second job compares the cached BlockSci index with a
+downloads the complete archive to PBS scratch, requires contiguous
+`blk00000.dat…` files, checks each one's size and SHA-256 against its schema-1
+`blkNNNNN.dat.json` sidecar, and refuses a requested height that the sidecars'
+`height_ranges` do not cover from height 0. The second job compares the cached BlockSci index with a
 `coinjoin_tx_info.json` produced from Dumplings; it reports baseline agreement,
 not ground-truth precision/recall.
 
@@ -638,20 +639,20 @@ walltime. Use `--pbs-unified-report-ncpus`,
 
 ## Security
 
-The wrapper container receives the Docker or Podman API socket so it can manage
-component containers. Socket access is effectively host-level container
-control; only run trusted pipeline images. Rootless Podman is selected with
-`--runtime podman`; set `CONTAINER_SOCKET` if automatic discovery is insufficient.
-Kubernetes and PBS options retain their current wrapper semantics.
+The host process invokes the selected Docker or Podman CLI to manage component
+containers. Run trusted component images. Rootless Podman is selected with
+`--runtime podman`; Kubernetes and PBS work uses `kubectl`, `qsub`, `qstat`,
+`qdel` and the shared S3 client on the frontend.
 
 ## Layout
 
-- `src/coinjoin_pipeline/`: installed CLI, metadata, builder, and runtime logic.
-- `pipeline/client/`: wrapper, PBS, research, and run-catalog implementation.
-- `pipeline/exporters/`: unified JSON/Markdown report implementation.
+- `src/coinjoin_pipeline/`: CLI, typed configuration, run context and host commands.
+- `src/coinjoin_pipeline/execution/`: stage graph, container/Kubernetes/PBS adapters, templates and run catalog.
+- `src/coinjoin_pipeline/storage/`: shared S3 transport.
+- `pipeline/exporters/`: shared container worker, analytical artifact and JSON/Markdown report.
 - `container/`: uploader image build plus the committed image references
   (`uploader.image`, `unified-report.image`).
 - `scenarios/`: canonical scenarios.
-- `tests/`: host, wrapper/report, PBS, Podman, and Kubernetes coverage.
+- `tests/`: configuration, worker/report, scheduler, Podman and Kubernetes coverage.
 
 Historical emulation logs were deliberately not copied. See `MIGRATION.md`.

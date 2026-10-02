@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from unittest import mock
 
+from coinjoin_pipeline.execution.pbs.status import parse_qstat as _parse_qstat
 from coinjoin_pipeline.watch import (
     PbsJob,
     _job_ids_from_frontend_log,
     _kubernetes_log_command,
     _newest_pod,
-    _parse_qstat,
     build_parser,
     main,
 )
@@ -79,9 +79,7 @@ def test_main_builds_unified_all_component_sources() -> None:
                 "coinjoin_pipeline.watch._discover_pod",
                 side_effect=["outer-pod", "coordinator-pod"],
             ) as discover,
-            mock.patch(
-                "coinjoin_pipeline.watch.stream_sources", return_value=0
-            ) as stream,
+            mock.patch("coinjoin_pipeline.watch.stream_sources", return_value=0) as stream,
         ):
             code = main(
                 [
@@ -101,12 +99,8 @@ def test_main_builds_unified_all_component_sources() -> None:
     assert set(sources) == {"controller", "uploader", "engine"}
     assert sources["controller"][-1] == "--timestamps=true"
     assert "--follow=true" not in sources["controller"]
-    assert discover.call_args_list[0].args[1] == (
-        "app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1"
-    )
-    assert discover.call_args_list[1].args[1] == (
-        "app=wasabi-coordinator,coinjoin.run-id=run-1"
-    )
+    assert discover.call_args_list[0].args[1] == ("app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1")
+    assert discover.call_args_list[1].args[1] == ("app=wasabi-coordinator,coinjoin.run-id=run-1")
 
 
 def test_main_all_discovers_joinmarket_engine_service() -> None:
@@ -120,9 +114,7 @@ def test_main_all_discovers_joinmarket_engine_service() -> None:
                 "coinjoin_pipeline.watch._discover_pod",
                 side_effect=["outer-pod", "joinmarket-pod"],
             ) as discover,
-            mock.patch(
-                "coinjoin_pipeline.watch.stream_sources", return_value=0
-            ) as stream,
+            mock.patch("coinjoin_pipeline.watch.stream_sources", return_value=0) as stream,
         ):
             code = main(
                 [
@@ -139,12 +131,8 @@ def test_main_all_discovers_joinmarket_engine_service() -> None:
 
     assert code == 0
     assert set(stream.call_args.args[0]) == {"controller", "uploader", "engine"}
-    assert discover.call_args_list[0].args[1] == (
-        "app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1"
-    )
-    assert discover.call_args_list[1].args[1] == (
-        "app=joinmarket-distributor,coinjoin.run-id=run-1"
-    )
+    assert discover.call_args_list[0].args[1] == ("app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1")
+    assert discover.call_args_list[1].args[1] == ("app=joinmarket-distributor,coinjoin.run-id=run-1")
 
 
 def test_parse_qstat_extracts_state_and_wrapped_output_path() -> None:
@@ -158,9 +146,7 @@ def test_parse_qstat_extracts_state_and_wrapped_output_path() -> None:
     )
 
     assert fields["job_state"] == "R"
-    assert fields["Output_Path"] == (
-        "frontend:/storage/brno2/home/user/blocksci_analysis_s3.o123"
-    )
+    assert fields["Output_Path"] == ("frontend:/storage/brno2/home/user/blocksci_analysis_s3.o123")
 
 
 def test_frontend_log_discovers_all_s3_pbs_jobs() -> None:
@@ -227,9 +213,7 @@ def test_main_uses_host_runs_root_for_pbs_job_discovery(tmp_path: Path) -> None:
     assert stream.call_args.kwargs["pbs_jobs"] == {"pbs:blocksci": job}
 
 
-def test_main_skips_stale_pbs_jobs_and_still_watches_live_ones(
-    tmp_path: Path, capsys
-) -> None:
+def test_main_skips_stale_pbs_jobs_and_still_watches_live_ones(tmp_path: Path, capsys) -> None:
     """One unresolvable .jobid must not hide every other stage.
 
     .jobid files are never pruned, so an old job that qstat can no longer

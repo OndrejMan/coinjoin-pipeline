@@ -111,15 +111,19 @@ The Wasabi 2 heuristic chooses an internal minimum input count when its
 optional `inputCount` argument is absent. For pre-height-850237 transactions,
 that internal minimum is 50; newer transactions use 20.
 
-The wrapper and exporter leave the option unset by default, so BlockSci uses
+The pipeline and exporter leave the option unset by default, so BlockSci uses
 the height-aware production threshold. An explicit `--min-input-count N`
 overrides that threshold, and the run manifest records that override as `N`;
 no override is recorded as `null`. Overrides must be positive integers; zero,
 negative, and non-numeric values are command-line errors.
 
-When supplied, the override is passed both to the raw BlockSci detector and to
-`CoinjoinClusterManager`, so report detection and clustering use the same
-Wasabi 2 input threshold.
+When supplied, the override is passed to the raw BlockSci detector. Clustering
+receives that detector's transaction set through
+`CoinjoinClusterManager.create_clustering_from_txes`, so it uses the same Wasabi 2
+input threshold without running detection again. For JoinMarket, clustering uses
+the subset-matching result, excluding skipped transactions, instead of the protocol
+detector's potentially different set. This requires a BlockSci build with the new
+binding; older builds report clustering as unavailable with a rebuild hint.
 
 Small regtest Wasabi rounds generally need an explicit
 `--min-input-count`. When production thresholds are used on pre-850237
@@ -144,10 +148,11 @@ reports carry a `wasabi_production_threshold_zero_detections` warning.
 The exporter fails with a rebuild instruction when the installed BlockSci
 module lacks the raw binding; it never silently substitutes the linked subset.
 
-In the parallel S3 PBS graph, these detector results and the associated
-integration diagnostics and clustering assignments are persisted as
-`blocksci-analysis_data/blocksci_analysis.json` (schema 1.0). Report assembly
-requires the artifact's run ID and detector parameters to exactly match the
+On every path (Docker and PBS, serial and parallel), these detector results and
+the associated integration diagnostics and clustering assignments are persisted
+by `exporters/worker.py` as `blocksci-analysis_data/blocksci_analysis.json`
+(schema 1.1; readers also accept 1.0). Report assembly reads only this artifact
+and never scans BlockSci itself. It requires the artifact's run ID and detector parameters to exactly match the
 requested report; a mismatched or stale artifact fails rather than being
 silently combined with a different baseline.
 
@@ -175,19 +180,26 @@ positive CPU counts, memory/scratch size grammar, walltime components, job and
 stage tokens, and container-image characters. Invalid values raise `PBSError`
 and are not interpolated into PBS directives or shell assignments.
 
-Stage command bodies are generated internally by the wrapper and remain the
+Stage command bodies are generated internally by the pipeline
+(`execution/pbs/commands.py`) and remain the
 only deliberate shell fragments in the templates.
 
 ## Run catalog report statuses
 
-`runs list` (`pipeline/client/run_catalog.py::report_status`) classifies each
+`runs list` (`src/coinjoin_pipeline/execution/run_catalog.py::report_status`) classifies each
 run's `coinjoinPipeline_data/unified_report.json` into one of:
 
 - `missing` — no report file exists; the export stage has not run.
 - `invalid` — the report file exists but cannot be parsed as JSON.
-- `stale` — the report exists but an upstream artifact (emulator data,
-  baseline, BlockSci config, or mappings) is newer, so it describes a previous
-  analyzer run; re-export to refresh it.
+- `stale` — the report exists but one of its inputs changed after it was
+  written, so it describes a previous analyzer run; re-export to refresh it.
+  Reports record the SHA-256 of every input they read in
+  `run_manifest.inputs` (scenario, producer-label manifest, JoinMarket round
+  events, baseline and its false-positive sidecars, BlockSci analysis artifact,
+  mappings). An input that is rewritten or appears later marks the report
+  stale; an input missing locally (an S3 run with only the report downloaded)
+  does not. Reports written before 2026-10 carry no hashes and fall back to
+  comparing modification times.
 - `baseline_agreement_only` — external mode; the report compares BlockSci with
   `coinjoin-analysis` only and intentionally has no ground-truth metrics.
 - `emulator_labels_unavailable` — emulator mode, but independent producer
@@ -201,6 +213,10 @@ run's `coinjoinPipeline_data/unified_report.json` into one of:
 - `diagnostics_not_ok` — integration diagnostics ran and found a problem, or
   reported a status other than the explicit `ok` (the check fails closed).
 - `complete` — emulator ground truth was available and diagnostics passed.
+
+`runs list` and `runs inspect` show each stage as `present`, `missing` or,
+for the report and its Markdown, `stale`. Every run-relative path comes from
+`pipeline/exporters/artifact_paths.py`.
 
 Runs made with an emulator image that predates the producer-label manifest
 always classify as `emulator_labels_unavailable` after re-export; regenerate

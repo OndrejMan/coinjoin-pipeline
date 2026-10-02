@@ -22,6 +22,10 @@ Path mapping:
 - `blocksciEmulatorAnalysis/exporters` → `pipeline/exporters`.
 - Wrapper compose and lifecycle scripts → `pipeline/`.
 
+Later change (2026-10-02): `pipeline/client` moved to the importable package
+`src/coinjoin_pipeline/execution/`, and the interactive builder and generated
+command metadata were removed in favour of the typed configuration schema.
+
 `coinjoin-emulator`, `coinjoin-analysis`, and `blocksci` remain independent
 image dependencies. Until cutover acceptance, the original runner remains the
 rollback path for thesis evidence.

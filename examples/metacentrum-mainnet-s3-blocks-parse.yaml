@@ -25,7 +25,7 @@ blocksci:
   # Prefix created by bitcoin-core-s3-archive, not the per-run artifact URI.
   bitcoin_blocks_uri: s3://xman-coinjoin/bitcoin-mainnet/blocks
   network: bitcoin
-  # Inclusive and rejected unless archive-manifest.json proves coverage.
+  # Inclusive and rejected unless the blk*.dat.json sidecars cover heights 0..max_block.
   max_block: 900000
 
 pbs:

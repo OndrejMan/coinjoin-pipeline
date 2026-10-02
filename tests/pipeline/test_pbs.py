@@ -4,48 +4,55 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+from coinjoin_pipeline.configuration import PipelineConfiguration
 from unittest import mock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2] / "pipeline"
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from client.artifacts import (  # noqa: E402
+from coinjoin_pipeline.execution.pbs.commands import (
+    blocksci_export_pbs_command,
+    blocksci_pbs_command,
+    blocksci_script_pbs_command,
+    coinjoin_analysis_pbs_command,
+)
+from coinjoin_pipeline.execution.pbs.defaults import PBS_ACTIVE_STATES, PBS_QUEUED_STATES, PBS_TERMINAL_STATES
+from coinjoin_pipeline.execution.pbs.submission import (
+    pbs_job_probe,
+    persist_pbs_job_id,
+    qdel_pbs_job,
+    qstat_job_state,
+    submit_pbs,
+    submit_pbs_text,
+)
+from coinjoin_pipeline.execution.pbs.submission_local import (
+    report_stage_log,
+    stage_log_path,
+    submit_blocksci_pbs,
+    submit_coinjoin_analysis_pbs,
+    wait_for_pbs_marker,
+)
+from coinjoin_pipeline.execution.pbs.templates_local import (
+    render_blocksci_pbs,
+    render_coinjoin_analysis_pbs,
+    render_mappings_pbs,
+)
+from coinjoin_pipeline.execution.pbs.validation import PBSError, require_qsub, require_storage_path
+from coinjoin_pipeline.storage.s3 import (  # noqa: E402
     PROBE_QUEUED,
     PROBE_RUNNING,
     PROBE_TERMINAL,
     PROBE_UNKNOWN,
 )
-from client.pbs import (  # noqa: E402
-    PBS_ACTIVE_STATES,
-    PBS_QUEUED_STATES,
-    PBS_TERMINAL_STATES,
-    PBSError,
-    _qstat_job_state,
-    persist_pbs_job_id,
-    qdel_pbs_job,
-    blocksci_export_pbs_command,
-    blocksci_pbs_command,
-    blocksci_script_pbs_command,
-    coinjoin_analysis_pbs_command,
-    pbs_job_probe,
-    render_blocksci_pbs,
-    render_coinjoin_analysis_pbs,
-    render_mappings_pbs,
-    require_qsub,
-    require_storage_path,
-    submit_pbs,
-    submit_pbs_text,
-    submit_blocksci_pbs,
-    report_stage_log,
-    stage_log_path,
-    submit_coinjoin_analysis_pbs,
-    wait_for_pbs_marker,
-)
 
 
 class PBSJobProbeTest(unittest.TestCase):
     def _probe_state(self, qstat_state):
-        with mock.patch("client.pbs.submission._qstat_job_state", return_value=qstat_state):
+        with mock.patch(
+            "coinjoin_pipeline.execution.pbs.submission.qstat_job_state",
+            return_value=qstat_state,
+        ):
             return pbs_job_probe("7.server")()
 
     def test_terminal_states_map_to_terminal(self):
@@ -95,68 +102,65 @@ class PBSJobProbeTest(unittest.TestCase):
             stderr="qstat: Unknown Job Id 7.server",
         )
         with (
-            mock.patch("client.pbs.submission.shutil.which", return_value="/usr/bin/qstat"),
-            mock.patch("client.pbs.submission.subprocess.run", side_effect=[history_disabled, missing]) as run,
+            mock.patch(
+                "coinjoin_pipeline.execution.pbs.submission.shutil.which",
+                return_value="/usr/bin/qstat",
+            ),
+            mock.patch(
+                "coinjoin_pipeline.execution.pbs.submission.subprocess.run",
+                side_effect=[history_disabled, missing],
+            ) as run,
         ):
-            self.assertEqual(_qstat_job_state("7.server"), "MISSING")
+            self.assertEqual(qstat_job_state("7.server"), "MISSING")
         self.assertEqual(run.call_args_list[1].args[0], ["qstat", "-f", "7.server"])
 
 
 class PBSStateSetParityTest(unittest.TestCase):
-    """client.pbs owns the state sets; the watcher copies them.
+    """The watcher and the submitter must classify PBS job states from one set."""
 
-    src/coinjoin_pipeline/watch.py cannot import client.pbs (pipeline/ is a
-    subprocess runtime root, not a packaged module), so the duplicate is
-    asserted here instead of being allowed to drift.
-    """
+    def test_watch_uses_the_submitter_terminal_states(self):
+        from coinjoin_pipeline.watch import PBS_TERMINAL_STATES as watched
 
-    def test_watch_terminal_states_match_client_pbs(self):
-        watch_path = (
-            Path(__file__).resolve().parents[2]
-            / "src"
-            / "coinjoin_pipeline"
-            / "watch.py"
-        )
-        namespace: dict[str, object] = {}
-        for line in watch_path.read_text(encoding="utf-8").splitlines():
-            if line.startswith("PBS_TERMINAL_STATES"):
-                exec(line, namespace)  # noqa: S102 - constant literal only
-                break
-        self.assertEqual(namespace["PBS_TERMINAL_STATES"], PBS_TERMINAL_STATES)
+        self.assertIs(watched, PBS_TERMINAL_STATES)
 
 
 class PBSQdelTest(unittest.TestCase):
     def test_qdel_reports_success(self):
         with (
-            mock.patch("client.pbs.submission.shutil.which", return_value="/usr/bin/qdel"),
-            mock.patch("client.pbs.submission.subprocess.run") as run,
+            mock.patch(
+                "coinjoin_pipeline.execution.pbs.submission.shutil.which",
+                return_value="/usr/bin/qdel",
+            ),
+            mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run,
         ):
             run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
             self.assertTrue(qdel_pbs_job("7.server"))
 
     def test_qdel_reports_failure_when_unavailable(self):
         """Rollback must not claim success when qdel is not installed."""
-        with mock.patch("client.pbs.validation.shutil.which", return_value=None):
+        with mock.patch("coinjoin_pipeline.execution.pbs.validation.shutil.which", return_value=None):
             self.assertFalse(qdel_pbs_job("7.server"))
 
     def test_qdel_reports_failure_when_scheduler_rejects(self):
         with (
-            mock.patch("client.pbs.submission.shutil.which", return_value="/usr/bin/qdel"),
-            mock.patch("client.pbs.submission.subprocess.run") as run,
+            mock.patch(
+                "coinjoin_pipeline.execution.pbs.submission.shutil.which",
+                return_value="/usr/bin/qdel",
+            ),
+            mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run,
         ):
-            run.return_value = mock.Mock(
-                returncode=1, stdout="", stderr="qdel: Permission denied"
-            )
+            run.return_value = mock.Mock(returncode=1, stdout="", stderr="qdel: Permission denied")
             self.assertFalse(qdel_pbs_job("7.server"))
 
     def test_qdel_treats_already_finished_job_as_cancelled(self):
         with (
-            mock.patch("client.pbs.submission.shutil.which", return_value="/usr/bin/qdel"),
-            mock.patch("client.pbs.submission.subprocess.run") as run,
+            mock.patch(
+                "coinjoin_pipeline.execution.pbs.submission.shutil.which",
+                return_value="/usr/bin/qdel",
+            ),
+            mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run,
         ):
-            run.return_value = mock.Mock(
-                returncode=1, stdout="", stderr="qdel: Unknown Job Id 7.server"
-            )
+            run.return_value = mock.Mock(returncode=1, stdout="", stderr="qdel: Unknown Job Id 7.server")
             self.assertTrue(qdel_pbs_job("7.server"))
 
 
@@ -182,7 +186,10 @@ class PBSJobIdPersistenceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             run_dir = Path(raw)
             persist_pbs_job_id(run_dir, "blocksci", "7.server")
-            with mock.patch("client.pbs.submission.os.replace", side_effect=OSError("boom")):
+            with mock.patch(
+                "coinjoin_pipeline.execution.pbs.submission.os.replace",
+                side_effect=OSError("boom"),
+            ):
                 with self.assertRaises(OSError):
                     persist_pbs_job_id(run_dir, "blocksci", "8.server")
             marker_dir = run_dir / ".pbs"
@@ -191,14 +198,12 @@ class PBSJobIdPersistenceTest(unittest.TestCase):
                 (marker_dir / "blocksci.jobid").read_text(encoding="utf-8"),
                 "7.server\n",
             )
-            self.assertEqual(
-                sorted(p.name for p in marker_dir.iterdir()), ["blocksci.jobid"]
-            )
+            self.assertEqual(sorted(p.name for p in marker_dir.iterdir()), ["blocksci.jobid"])
 
 
 class PBSStdinSubmissionTest(unittest.TestCase):
     def test_submit_pbs_text_pipes_script_and_dependency(self):
-        with mock.patch("client.pbs.submission.subprocess.run") as run:
+        with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(returncode=0, stdout="9.server\n", stderr="")
             job_id = submit_pbs_text("#PBS -N stage\ntrue\n", "8.server")
         self.assertEqual(job_id, "9.server")
@@ -206,7 +211,7 @@ class PBSStdinSubmissionTest(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["input"], "#PBS -N stage\ntrue\n")
 
     def test_submit_pbs_text_supports_multiple_dependencies(self):
-        with mock.patch("client.pbs.submission.subprocess.run") as run:
+        with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(returncode=0, stdout="10.server\n", stderr="")
             job_id = submit_pbs_text(
                 "#PBS -N report\ntrue\n",
@@ -219,7 +224,7 @@ class PBSStdinSubmissionTest(unittest.TestCase):
         )
 
     def test_submit_pbs_text_raises_on_qsub_failure(self):
-        with mock.patch("client.pbs.submission.subprocess.run") as run:
+        with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(returncode=1, stdout="", stderr="bad queue")
             with self.assertRaises(PBSError):
                 submit_pbs_text("#PBS -N stage\ntrue\n")
@@ -233,13 +238,13 @@ class PBSStdinSubmissionTest(unittest.TestCase):
         """
         for stdout in ("", "   \n"):
             with self.subTest(stdout=stdout):
-                with mock.patch("client.pbs.submission.subprocess.run") as run:
+                with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run:
                     run.return_value = mock.Mock(returncode=0, stdout=stdout, stderr="")
                     with self.assertRaisesRegex(PBSError, "invalid job ID"):
                         submit_pbs_text("#PBS -N stage\ntrue\n")
 
     def test_submit_pbs_text_rejects_multiline_job_id(self):
-        with mock.patch("client.pbs.submission.subprocess.run") as run:
+        with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(
                 returncode=0,
                 stdout="warning: queue is full\n11.server\n",
@@ -249,15 +254,13 @@ class PBSStdinSubmissionTest(unittest.TestCase):
                 submit_pbs_text("#PBS -N stage\ntrue\n")
 
     def test_submit_pbs_text_rejects_unsafe_job_id(self):
-        with mock.patch("client.pbs.submission.subprocess.run") as run:
-            run.return_value = mock.Mock(
-                returncode=0, stdout="11.server; rm -rf /\n", stderr=""
-            )
+        with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout="11.server; rm -rf /\n", stderr="")
             with self.assertRaises(PBSError):
                 submit_pbs_text("#PBS -N stage\ntrue\n")
 
     def test_submit_pbs_text_accepts_metacentrum_job_id(self):
-        with mock.patch("client.pbs.submission.subprocess.run") as run:
+        with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(
                 returncode=0,
                 stdout="12345678.meta-pbs.metacentrum.cz\n",
@@ -269,7 +272,7 @@ class PBSStdinSubmissionTest(unittest.TestCase):
             )
 
     def test_submit_pbs_rejects_empty_job_id_on_zero_exit(self):
-        with mock.patch("client.pbs.submission.subprocess.run") as run:
+        with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(returncode=0, stdout="\n", stderr="")
             with self.assertRaisesRegex(PBSError, "invalid job ID"):
                 submit_pbs(Path("/storage/run-a/job.pbs"))
@@ -287,9 +290,7 @@ class PBSTemplateTest(unittest.TestCase):
         )
         self.assertIn('case "docker://enumerator" in', script)
         self.assertIn('case "docker://sake" in', script)
-        self.assertIn(
-            'singularity pull --force "$ENUMERATOR_SIF" "docker://enumerator"', script
-        )
+        self.assertIn('singularity pull --force "$ENUMERATOR_SIF" "docker://enumerator"', script)
         self.assertIn('cp "docker://enumerator" "$ENUMERATOR_SIF"', script)
         self.assertIn('"$ENUMERATOR_SIF" python3 /app/run.py', script)
         self.assertIn('"$SAKE_SIF" dotnet /app/Sake.dll', script)
@@ -348,9 +349,7 @@ class PBSTemplateTest(unittest.TestCase):
         self.assertIn("#PBS -l select=1:ncpus=4:mem=16gb:scratch_local=50gb", script)
         self.assertIn("analyze-emul", script)
         self.assertIn('OUTPUT_DIR="/storage/run-a/coinjoin-analysis_data"', script)
-        self.assertIn(
-            'INPUT_DATA_DIR="/storage/run-a/coinjoin_emulator_data/data"', script
-        )
+        self.assertIn('INPUT_DATA_DIR="/storage/run-a/coinjoin_emulator_data/data"', script)
         self.assertIn(
             '--bind "$OUTPUT_DIR:/runs/emulation/selected/$(basename "$RUN_DIR"):rw"',
             script,
@@ -367,81 +366,84 @@ class PBSTemplateTest(unittest.TestCase):
     def test_blocksci_pbs_command_contains_parser_and_report(self):
         run_dir = Path("/storage/run-a")
         command = blocksci_pbs_command(
-            run_id=run_dir.name,
-            coinjoin_type="joinmarket",
-            min_input_count=1,
-            joinmarket_detector="definite",
-            joinmarket_min_base_fee=5000,
-            joinmarket_percentage_fee=0.00004,
-            joinmarket_max_depth=200000,
+            run_dir.name,
+            PipelineConfiguration.from_flat(
+                {
+                    "coinjoin_type": "joinmarket",
+                    "min_input_count": 1,
+                    "joinmarket_detector": "definite",
+                    "joinmarket_min_base_fee": 5000,
+                    "joinmarket_percentage_fee": 4e-05,
+                    "joinmarket_max_depth": 200000,
+                }
+            ),
         )
-        self.assertIn("blocksci_parser", command)
-        self.assertIn("unified_report.py", command)
+        self.assertIn("worker.py run", command)
+        self.assertIn("--report" if "worker.py run" in command else "worker.py report", command)
         self.assertIn(
-            "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:"
-            "/mnt/blocksci/blockscipy /usr/bin/python3",
+            "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3",
             command,
         )
-        self.assertIn("--disk /mnt/data/regtest", command)
+        self.assertIn("--run-dir /runs/emulation/logs/run-a", command)
         self.assertIn("--coinjoin-type joinmarket", command)
 
     def test_blocksci_pbs_command_runs_custom_script_before_report(self):
         command = blocksci_pbs_command(
-            run_id="run-a",
-            coinjoin_type="joinmarket",
-            min_input_count=1,
-            joinmarket_detector="definite",
-            joinmarket_min_base_fee=5000,
-            joinmarket_percentage_fee=0.00004,
-            joinmarket_max_depth=200000,
+            "run-a",
+            PipelineConfiguration.from_flat(
+                {
+                    "coinjoin_type": "joinmarket",
+                    "min_input_count": 1,
+                    "joinmarket_detector": "definite",
+                    "joinmarket_min_base_fee": 5000,
+                    "joinmarket_percentage_fee": 4e-05,
+                    "joinmarket_max_depth": 200000,
+                }
+            ),
             blocksci_script="/runs/emulation/logs/run-a/.pipeline/blocksci-script.py",
         )
 
-        script_index = command.index(
-            "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:"
-            "/mnt/blocksci/blockscipy /usr/bin/python3 "
-            "/runs/emulation/logs/run-a/.pipeline/blocksci-script.py"
-        )
-        report_index = command.index(
-            "/usr/bin/python3 /mnt/exporters/unified_report.py"
-        )
-        self.assertLess(script_index, report_index)
-        self.assertIn(
-            "BLOCKSCI_CONFIG=/runs/emulation/logs/run-a/blocksci_data/config.json",
-            command,
-        )
+        self.assertIn("--script /runs/emulation/logs/run-a/.pipeline/blocksci-script.py", command)
+        self.assertIn("--report", command)
 
     def test_blocksci_pbs_command_can_defer_report(self):
         command = blocksci_pbs_command(
-            run_id="run-a",
-            coinjoin_type="joinmarket",
-            min_input_count=1,
-            joinmarket_detector="definite",
-            joinmarket_min_base_fee=5000,
-            joinmarket_percentage_fee=0.00004,
-            joinmarket_max_depth=200000,
+            "run-a",
+            PipelineConfiguration.from_flat(
+                {
+                    "coinjoin_type": "joinmarket",
+                    "min_input_count": 1,
+                    "joinmarket_detector": "definite",
+                    "joinmarket_min_base_fee": 5000,
+                    "joinmarket_percentage_fee": 4e-05,
+                    "joinmarket_max_depth": 200000,
+                }
+            ),
             include_report=False,
         )
 
-        self.assertIn("blocksci_parser", command)
+        self.assertIn("worker.py run", command)
         self.assertNotIn("unified_report.py", command)
 
     def test_blocksci_pbs_command_can_persist_analysis_for_lightweight_report(self):
         command = blocksci_pbs_command(
-            run_id="run-a",
-            coinjoin_type="wasabi2",
-            min_input_count=None,
-            joinmarket_detector="definite",
-            joinmarket_min_base_fee=5000,
-            joinmarket_percentage_fee=0.00004,
-            joinmarket_max_depth=200000,
+            "run-a",
+            PipelineConfiguration.from_flat(
+                {
+                    "coinjoin_type": "wasabi2",
+                    "min_input_count": None,
+                    "joinmarket_detector": "definite",
+                    "joinmarket_min_base_fee": 5000,
+                    "joinmarket_percentage_fee": 4e-05,
+                    "joinmarket_max_depth": 200000,
+                }
+            ),
             include_report=False,
-            export_analysis=True,
         )
 
-        self.assertIn("blocksci_parser", command)
+        self.assertIn("worker.py run", command)
         self.assertIn(
-            "/usr/bin/python3 /mnt/exporters/blocksci_export/analysis.py",
+            "/usr/bin/python3 /mnt/exporters/worker.py run",
             command,
         )
         self.assertIn("--min-input-count default", command)
@@ -449,28 +451,36 @@ class PBSTemplateTest(unittest.TestCase):
 
     def test_blocksci_export_pbs_command_is_report_only(self):
         command = blocksci_export_pbs_command(
-            run_id="run-a",
-            coinjoin_type="joinmarket",
-            min_input_count=1,
-            joinmarket_detector="definite",
-            joinmarket_min_base_fee=5000,
-            joinmarket_percentage_fee=0.00004,
-            joinmarket_max_depth=200000,
+            "run-a",
+            PipelineConfiguration.from_flat(
+                {
+                    "coinjoin_type": "joinmarket",
+                    "min_input_count": 1,
+                    "joinmarket_detector": "definite",
+                    "joinmarket_min_base_fee": 5000,
+                    "joinmarket_percentage_fee": 4e-05,
+                    "joinmarket_max_depth": 200000,
+                }
+            ),
         )
 
-        self.assertIn("unified_report.py", command)
-        self.assertIn("--blocksci-analysis", command)
+        self.assertIn("--report" if "worker.py run" in command else "worker.py report", command)
+        self.assertIn("--run-dir /runs/emulation/logs/run-a", command)
         self.assertNotIn("blocksci_parser", command)
 
     def test_blocksci_script_command_exports_typed_detector_settings(self):
         command = blocksci_script_pbs_command(
-            run_id="mainnet-850000",
-            coinjoin_type="joinmarket",
-            min_input_count=None,
-            joinmarket_detector="possible",
-            joinmarket_min_base_fee=4000,
-            joinmarket_percentage_fee=0.00005,
-            joinmarket_max_depth=150000,
+            "mainnet-850000",
+            PipelineConfiguration.from_flat(
+                {
+                    "coinjoin_type": "joinmarket",
+                    "min_input_count": None,
+                    "joinmarket_detector": "possible",
+                    "joinmarket_min_base_fee": 4000,
+                    "joinmarket_percentage_fee": 5e-05,
+                    "joinmarket_max_depth": 150000,
+                }
+            ),
         )
 
         self.assertIn("BLOCKSCI_CONFIG=", command)
@@ -481,9 +491,7 @@ class PBSTemplateTest(unittest.TestCase):
         self.assertIn("JOINMARKET_PERCENTAGE_FEE=5e-05", command)
         self.assertIn("JOINMARKET_MAX_DEPTH=150000", command)
         self.assertNotIn("MIN_INPUT_COUNT=", command)
-        self.assertTrue(
-            command.endswith("/usr/bin/python3 /mnt/user-analysis.py")
-        )
+        self.assertTrue(command.endswith("/usr/bin/python3 /mnt/user-analysis.py"))
 
     def test_coinjoin_analysis_pbs_command_supports_analyze_only(self):
         command = coinjoin_analysis_pbs_command("analyze_only")
@@ -524,12 +532,15 @@ class PBSValidationTest(unittest.TestCase):
             )
 
     def test_require_qsub_raises_when_missing(self):
-        with mock.patch("client.pbs.validation.shutil.which", return_value=None):
+        with mock.patch("coinjoin_pipeline.execution.pbs.validation.shutil.which", return_value=None):
             with self.assertRaises(PBSError):
                 require_qsub()
 
     def test_require_qsub_passes_when_available(self):
-        with mock.patch("client.pbs.validation.shutil.which", return_value="/usr/bin/qsub"):
+        with mock.patch(
+            "coinjoin_pipeline.execution.pbs.validation.shutil.which",
+            return_value="/usr/bin/qsub",
+        ):
             require_qsub()
 
     def test_require_storage_path_rejects_non_storage_path(self):
@@ -542,10 +553,8 @@ class PBSValidationTest(unittest.TestCase):
 
 class PBSSubmissionTest(unittest.TestCase):
     def test_submit_pbs_supports_afterok_dependency(self):
-        with mock.patch("client.pbs.submission.subprocess.run") as run_mock:
-            run_mock.return_value = subprocess.CompletedProcess(
-                [], 0, stdout="block-job.meta\n", stderr=""
-            )
+        with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run_mock:
+            run_mock.return_value = subprocess.CompletedProcess([], 0, stdout="block-job.meta\n", stderr="")
             job_id = submit_pbs(Path("/tmp/blocksci.pbs"), "analysis-job.meta")
         self.assertEqual(job_id, "block-job.meta")
         self.assertEqual(
@@ -559,10 +568,8 @@ class PBSSubmissionTest(unittest.TestCase):
         )
 
     def test_submit_pbs_supports_multiple_afterok_dependencies(self):
-        with mock.patch("client.pbs.submission.subprocess.run") as run_mock:
-            run_mock.return_value = subprocess.CompletedProcess(
-                [], 0, stdout="report-job.meta\n", stderr=""
-            )
+        with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run_mock:
+            run_mock.return_value = subprocess.CompletedProcess([], 0, stdout="report-job.meta\n", stderr="")
             job_id = submit_pbs(
                 Path("/tmp/report.pbs"),
                 ("analysis-job.meta", "blocksci-job.meta"),
@@ -583,11 +590,14 @@ class PBSSubmissionTest(unittest.TestCase):
             run_dir = Path(tmpdir) / "run-a"
             run_dir.mkdir()
             with (
-                mock.patch("client.pbs.validation.shutil.which", return_value="/usr/bin/qsub"),
-                mock.patch("client.pbs.submission.require_storage_path"),
-                mock.patch("client.pbs.submission.require_existing_path"),
-                mock.patch("client.pbs.submission.require_bitcoin_datadir"),
-                mock.patch("client.pbs.submission.subprocess.run") as run_mock,
+                mock.patch(
+                    "coinjoin_pipeline.execution.pbs.validation.shutil.which",
+                    return_value="/usr/bin/qsub",
+                ),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission_local.require_storage_path"),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission_local.require_existing_path"),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission_local.require_bitcoin_datadir"),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run_mock,
             ):
                 run_mock.return_value = subprocess.CompletedProcess(
                     [],
@@ -619,15 +629,16 @@ class PBSSubmissionTest(unittest.TestCase):
             run_dir = Path(tmpdir) / "run-a"
             run_dir.mkdir()
             with (
-                mock.patch("client.pbs.validation.shutil.which", return_value="/usr/bin/qsub"),
-                mock.patch("client.pbs.submission.require_storage_path"),
-                mock.patch("client.pbs.submission.require_existing_path"),
-                mock.patch("client.pbs.submission.require_bitcoin_datadir"),
-                mock.patch("client.pbs.submission.subprocess.run") as run_mock,
+                mock.patch(
+                    "coinjoin_pipeline.execution.pbs.validation.shutil.which",
+                    return_value="/usr/bin/qsub",
+                ),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission_local.require_storage_path"),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission_local.require_existing_path"),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission_local.require_bitcoin_datadir"),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run_mock,
             ):
-                run_mock.return_value = subprocess.CompletedProcess(
-                    [], 0, stdout="42\n", stderr=""
-                )
+                run_mock.return_value = subprocess.CompletedProcess([], 0, stdout="42\n", stderr="")
                 submit_blocksci_pbs(
                     run_dir=run_dir,
                     logs_root=run_dir.parent,
@@ -650,9 +661,12 @@ class PBSSubmissionTest(unittest.TestCase):
             run_dir = Path(tmpdir) / "run-a"
             run_dir.mkdir()
             with (
-                mock.patch("client.pbs.validation.shutil.which", return_value="/usr/bin/qsub"),
-                mock.patch("client.pbs.submission.require_storage_path"),
-                mock.patch("client.pbs.submission.subprocess.run") as run_mock,
+                mock.patch(
+                    "coinjoin_pipeline.execution.pbs.validation.shutil.which",
+                    return_value="/usr/bin/qsub",
+                ),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission_local.require_storage_path"),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run_mock,
             ):
                 input_data_dir = run_dir / "coinjoin_emulator_data" / "data"
                 input_data_dir.mkdir(parents=True)
@@ -676,10 +690,13 @@ class PBSSubmissionTest(unittest.TestCase):
             run_dir = Path(tmpdir) / "run-a"
             run_dir.mkdir()
             with (
-                mock.patch("client.pbs.validation.shutil.which", return_value="/usr/bin/qsub"),
-                mock.patch("client.pbs.submission.require_storage_path"),
-                mock.patch("client.pbs.submission.require_existing_path"),
-                mock.patch("client.pbs.submission.require_bitcoin_datadir"),
+                mock.patch(
+                    "coinjoin_pipeline.execution.pbs.validation.shutil.which",
+                    return_value="/usr/bin/qsub",
+                ),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission_local.require_storage_path"),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission_local.require_existing_path"),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission_local.require_bitcoin_datadir"),
             ):
                 job_id = submit_blocksci_pbs(
                     run_dir=run_dir,
@@ -696,18 +713,21 @@ class PBSSubmissionTest(unittest.TestCase):
                 )
             self.assertIsNone(job_id)
             pbs_script = run_dir / ".pbs" / "blocksci.pbs"
-            self.assertTrue(pbs_script.exists())
+            self.assertFalse(pbs_script.exists())
 
     def test_submit_blocksci_pbs_raises_on_qsub_failure(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir) / "run-a"
             run_dir.mkdir()
             with (
-                mock.patch("client.pbs.validation.shutil.which", return_value="/usr/bin/qsub"),
-                mock.patch("client.pbs.submission.require_storage_path"),
-                mock.patch("client.pbs.submission.require_existing_path"),
-                mock.patch("client.pbs.submission.require_bitcoin_datadir"),
-                mock.patch("client.pbs.submission.subprocess.run") as run_mock,
+                mock.patch(
+                    "coinjoin_pipeline.execution.pbs.validation.shutil.which",
+                    return_value="/usr/bin/qsub",
+                ),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission_local.require_storage_path"),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission_local.require_existing_path"),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission_local.require_bitcoin_datadir"),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run_mock,
             ):
                 run_mock.return_value = subprocess.CompletedProcess(
                     [],
@@ -734,7 +754,10 @@ class PBSSubmissionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir) / "run-a"
             run_dir.mkdir()
-            with mock.patch("client.pbs.validation.shutil.which", return_value="/usr/bin/qsub"):
+            with mock.patch(
+                "coinjoin_pipeline.execution.pbs.validation.shutil.which",
+                return_value="/usr/bin/qsub",
+            ):
                 with self.assertRaises(PBSError):
                     submit_blocksci_pbs(
                         run_dir=run_dir,
@@ -784,7 +807,10 @@ class PBSMarkerWaitTest(unittest.TestCase):
                 if call_count[0] == 2:
                     done.write_text("", encoding="utf-8")
 
-            with mock.patch("client.pbs.submission.time.sleep", side_effect=fake_sleep):
+            with mock.patch(
+                "coinjoin_pipeline.execution.pbs.submission_local.time.sleep",
+                side_effect=fake_sleep,
+            ):
                 wait_for_pbs_marker(run_dir, "blocksci", poll_interval=0)
             self.assertGreaterEqual(call_count[0], 2)
 
@@ -804,12 +830,21 @@ class PBSMarkerWaitTest(unittest.TestCase):
                     done.write_text("", encoding="utf-8")
 
             with (
-                mock.patch("client.pbs.submission._qstat_job_state", return_value="Q"),
-                mock.patch("client.pbs.submission.time.sleep", side_effect=fake_sleep),
+                mock.patch(
+                    "coinjoin_pipeline.execution.pbs.submission.qstat_job_state",
+                    return_value="Q",
+                ),
+                mock.patch(
+                    "coinjoin_pipeline.execution.pbs.submission_local.time.sleep",
+                    side_effect=fake_sleep,
+                ),
             ):
                 wait_for_pbs_marker(
-                    run_dir, "blocksci", poll_interval=0,
-                    job_id="7.server", timeout_seconds=0,
+                    run_dir,
+                    "blocksci",
+                    poll_interval=0,
+                    job_id="7.server",
+                    timeout_seconds=0,
                 )
             self.assertGreaterEqual(call_count[0], 3)
 
@@ -840,7 +875,7 @@ class PBSStageLogReportTest(unittest.TestCase):
             run_dir = Path(tmpdir) / "run-a"
             run_dir.mkdir()
             with (
-                mock.patch("client.pbs.submission.time.sleep") as sleep,
+                mock.patch("coinjoin_pipeline.execution.pbs.submission_local.time.sleep") as sleep,
                 mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
             ):
                 reported = report_stage_log(run_dir, "blocksci")
@@ -859,7 +894,10 @@ class PBSStageLogReportTest(unittest.TestCase):
                 log_path.write_text("late arrival\n", encoding="utf-8")
 
             with (
-                mock.patch("client.pbs.submission.time.sleep", side_effect=fake_sleep),
+                mock.patch(
+                    "coinjoin_pipeline.execution.pbs.submission_local.time.sleep",
+                    side_effect=fake_sleep,
+                ),
                 mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
             ):
                 reported = report_stage_log(run_dir, "blocksci")
@@ -888,14 +926,15 @@ class PBSStageLogReportTest(unittest.TestCase):
             log_path.parent.mkdir(parents=True)
             log_path.write_text("killed by the scheduler\n", encoding="utf-8")
             with (
-                mock.patch("client.pbs.submission._qstat_job_state", return_value="F"),
-                mock.patch("client.pbs.submission.time.sleep"),
+                mock.patch(
+                    "coinjoin_pipeline.execution.pbs.submission.qstat_job_state",
+                    return_value="F",
+                ),
+                mock.patch("coinjoin_pipeline.execution.pbs.submission_local.time.sleep"),
                 mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
             ):
                 with self.assertRaises(PBSError) as raised:
-                    wait_for_pbs_marker(
-                        run_dir, "blocksci", poll_interval=0, job_id="7.server"
-                    )
+                    wait_for_pbs_marker(run_dir, "blocksci", poll_interval=0, job_id="7.server")
             self.assertIn("killed by the scheduler", stderr.getvalue())
             self.assertIn("ended without marker", str(raised.exception))
 

@@ -1,829 +1,268 @@
-from __future__ import annotations
-
-from contextlib import redirect_stdout
-import io
 import json
+import os
 from pathlib import Path
-import tempfile
-import unittest
 from unittest import mock
 
-from coinjoin_pipeline.cli import (
-    add_effective_image_arguments,
-    main,
-    parse_host_options,
+import pytest
+
+from coinjoin_pipeline import cli
+from coinjoin_pipeline.arguments import load_configuration
+from coinjoin_pipeline.context import RunContext
+from coinjoin_pipeline.doctor import (
+    Capability,
+    required_capabilities,
+    required_image_components,
 )
-from coinjoin_pipeline.commands import (
-    action_from,
-    runtime_command,
-    runtime_environment,
-    validate_passthrough,
-)
-from coinjoin_pipeline.doctor import Capability, required_capabilities
 from coinjoin_pipeline.images import resolve_images
-from coinjoin_pipeline.manifest import atomic_write
-from coinjoin_pipeline.builder import Command, parse_command, render_command
-from coinjoin_pipeline.host import required_image_components
-from coinjoin_pipeline.runs import manifest_target, run_id_for, valid_run_id
+from coinjoin_pipeline.manifest import redact
+from coinjoin_pipeline.runs import run_id_for
+from coinjoin_pipeline.storage.s3 import validate_run_id
 
 
-class CliTests(unittest.TestCase):
-    def test_download_report_routes_without_container_runtime(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            runs_root = Path(directory)
-            with mock.patch(
-                "coinjoin_pipeline.download_report.main", return_value=0
-            ) as download_main:
-                code = main(
-                    [
-                        "--runs-root",
-                        str(runs_root),
-                        "download-report",
-                        "--run-id",
-                        "run-1",
-                    ]
-                )
+def test_executes_typed_configuration_in_process_and_restores_environment(tmp_path):
+    observed = []
 
-        self.assertEqual(code, 0)
-        download_main.assert_called_once_with(
-            ["--run-id", "run-1"], runs_root=runs_root.resolve()
-        )
+    def execute(context):
+        observed.append(context)
+        assert os.environ["PIPELINE_RUN_ID"] == "run-a"
+        assert context.config.engine == "joinmarket"
+        assert context.config.coinjoin_type == "joinmarket"
 
-    def test_watch_routes_to_host_watcher_without_container_runtime(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            runs_root = Path(directory)
-            with mock.patch("coinjoin_pipeline.watch.main", return_value=0) as watch_main:
-                code = main(
-                    [
-                        "--runs-root",
-                        str(runs_root),
-                        "watch",
-                        "--run-id",
-                        "run-1",
-                    ]
-                )
-
-        self.assertEqual(code, 0)
-        watch_main.assert_called_once_with(
-            ["--run-id", "run-1"], runs_root=runs_root.resolve()
-        )
-
-    def test_image_version_and_override_precedence(self) -> None:
-        images = resolve_images("thesis-2026-07", {"blocksci": "local/blocksci:test"})
-        self.assertTrue(images.emulator.endswith(":thesis-2026-07"))
-        self.assertEqual(images.blocksci, "local/blocksci:test")
-
-    def test_invalid_image_and_version_are_rejected(self) -> None:
-        with self.assertRaises(ValueError):
-            resolve_images("bad tag", {})
-        with self.assertRaises(ValueError):
-            resolve_images("ok", {"blocksci": "not valid image"})
-
-    def test_host_options_are_removed_from_pipeline_arguments(self) -> None:
-        args, host = parse_host_options(
-            [
-                "full-run",
-                "--engine",
-                "joinmarket",
-                "--version",
-                "v1",
-                "--runtime=podman",
-            ]
-        )
-        self.assertEqual(args, ["full-run", "--engine", "joinmarket"])
-        self.assertEqual(host["version"], "v1")
-        self.assertEqual(host["runtime"], "podman")
-
-    def test_full_run_manifest_uses_precomputed_run_id(self) -> None:
-        target = manifest_target(
-            "full-run",
-            ["full-run", "--engine", "joinmarket"],
-            Path("/runs"),
-            "2026-07-12_12-00_default-joinmarket",
-        )
-        self.assertEqual(
-            target,
-            Path("/runs/2026-07-12_12-00_default-joinmarket/research_manifest.json"),
-        )
-
-    def test_explicit_run_id_is_used_for_host_provenance(self) -> None:
-        arguments = [
-            "full-run",
-            "--engine",
-            "joinmarket",
-            "--run-id",
-            "explicit-s3-run",
-        ]
-        self.assertEqual(run_id_for(arguments), "explicit-s3-run")
-        self.assertEqual(
-            manifest_target("full-run", arguments, Path("/runs")),
-            Path("/runs/explicit-s3-run/research_manifest.json"),
-        )
-
-    def test_run_id_validation_matches_emulator_rules(self) -> None:
-        self.assertTrue(valid_run_id(run_id_for(["full-run", "--engine", "joinmarket"])))
-        self.assertTrue(valid_run_id("2026-07-12_22-37_default-joinmarket"))
-        self.assertFalse(valid_run_id("-leading-dash"))
-        self.assertFalse(valid_run_id("trailing-"))
-        self.assertFalse(valid_run_id("trailing_"))
-        self.assertFalse(valid_run_id("trailing."))
-        self.assertFalse(valid_run_id("a/../b"))
-        self.assertFalse(valid_run_id("x" * 64))
-
-    def test_generated_run_id_slugifies_and_bounds_scenario_name(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            scenario = Path(directory) / "scenario.json"
-            scenario.write_text(
-                json.dumps({"name": "Žltý Wasabi experiment #1 " + "x" * 100}),
-                encoding="utf-8",
-            )
-            run_id = run_id_for(
-                ["full-run", "--engine", "wasabi", "--scenario", str(scenario)]
-            )
-
-        self.assertTrue(valid_run_id(run_id))
-        self.assertLessEqual(len(run_id), 63)
-        self.assertIn("_zlty-wasabi-experiment-1-", run_id)
-
-    def test_stage_actions_require_explicit_run(self) -> None:
-        self.assertEqual(action_from(["analyze", "--engine", "joinmarket"]), "analyze")
-        errors = validate_passthrough(["analyze", "--engine", "joinmarket"], "analyze")
-        self.assertTrue(any("requires --run-dir" in error for error in errors))
-        self.assertEqual(
-            action_from(["coinjoin", "--run-dir", "run-1"]), "coinjoin-analysis"
-        )
-
-    def test_pbs_images_are_pinned_from_effective_version(self) -> None:
-        args = add_effective_image_arguments(
-            "full-run",
-            ["full-run", "--engine", "wasabi", "--mappingsPbs"],
-            resolve_images("v1", {}),
-        )
-        self.assertIn(
-            "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:v1", args
-        )
-        self.assertIn("docker://ghcr.io/ondrejman/coinjoin-mappings-sake:v1", args)
-
-    def test_explicit_equals_form_image_is_not_overridden_by_default(self) -> None:
-        args = add_effective_image_arguments(
-            "analyze",
-            ["analyze", "--run-dir", "X", "--blocksciPbs",
-             "--pbs-blocksci-image=docker://my-custom-blocksci:tag"],
-            resolve_images("v1", {}),
-        )
-        self.assertEqual(args.count("--pbs-blocksci-image"), 0)
-        self.assertNotIn("docker://ghcr.io/ondrejman/blocksci-complete:v1", args)
-
-    def test_action_from_ignores_option_values(self) -> None:
-        self.assertEqual(action_from(["--run-dir", "myrun", "analyze"]), "analyze")
-        # A value that happens to equal a research prefix must not pair up.
-        self.assertEqual(action_from(["--scenario", "runs", "full-run"]), "full-run")
-
-    def test_pbs_flag_error_lists_pbs_from_s3(self) -> None:
-        errors = validate_passthrough(
-            ["export", "--run-dir", "X", "--analysisPbs"], "export"
-        )
-        message = next(error for error in errors if "--analysisPbs is supported" in error)
-        self.assertIn("pbs-from-s3", message)
-        self.assertNotIn("coinjoin,", message)
-
-    def test_test_values_option_is_rejected(self) -> None:
-        errors = validate_passthrough(["full-run", "--test-values"], "full-run")
-        self.assertTrue(any("--test-values" in error for error in errors))
-
-    def test_cleanup_requires_confirmation(self) -> None:
-        self.assertIn(
-            "clean is destructive; pass --yes or --dry-run",
-            validate_passthrough(["clean"], "clean"),
-        )
-
-    def test_runtime_rendering_quotes_paths(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            command = runtime_command(
-                root / "pipeline with spaces",
-                "docker",
-                ["full-run", "--engine", "joinmarket"],
-                resolve_images("v1", {}),
-                root / "runs with spaces",
-                "coinjoin-pipeline full-run",
-            )
-            self.assertIn("'", command.rendered())
-            self.assertIn("pipeline with spaces", command.rendered())
-
-    def _runtime_environment(self, directory: str, **kwargs: object) -> dict[str, str]:
-        root = Path(directory)
-        return runtime_environment(
-            root / "pipeline",
-            "docker",
-            resolve_images("v1", {}),
-            root / "runs",
-            "coinjoin-pipeline full-run",
-            **kwargs,  # type: ignore[arg-type]
-        )
-
-    def test_launcher_derived_defaults_survive_wrapper_removal(self) -> None:
-        # These two used to come from the in-image launcher: without them a run
-        # hangs in Jupyter and the bare wrapper litters pipeline/ with bytecode
-        # that later ships to S3. Only a shell test covered them before.
-        with tempfile.TemporaryDirectory() as directory:
-            with mock.patch.dict("os.environ", {}, clear=True):
-                environment = self._runtime_environment(directory)
-        self.assertEqual(environment["BLOCKSCI_LAUNCH_JUPYTER"], "0")
-        self.assertEqual(environment["PYTHONDONTWRITEBYTECODE"], "1")
-
-    def test_explicit_jupyter_opt_in_beats_launcher_default(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            with mock.patch.dict(
-                "os.environ", {"BLOCKSCI_LAUNCH_JUPYTER": "1"}, clear=True
-            ):
-                environment = self._runtime_environment(directory)
-        self.assertEqual(environment["BLOCKSCI_LAUNCH_JUPYTER"], "1")
-
-    def test_manifest_redacts_sensitive_fields(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory) / "research_manifest.json"
-            atomic_write(target, {"token": "secret", "nested": {"password": "hidden"}})
-            self.assertEqual(
-                json.loads(target.read_text()),
-                {"nested": {"password": "<redacted>"}, "token": "<redacted>"},
-            )
-
-    def test_dry_run_renders_without_runtime_access(self) -> None:
-        output = io.StringIO()
-        with (
-            redirect_stdout(output),
-            mock.patch("coinjoin_pipeline.cli.doctor_check", return_value=[]),
-        ):
-            code = main(
-                ["full-run", "--engine", "joinmarket", "--version", "v1", "--dry-run"]
-            )
-        self.assertEqual(code, 0)
-        self.assertIn("Generated runtime command:", output.getvalue())
-
-    def test_pbs_dry_run_leaves_the_run_directory_untouched(self) -> None:
-        # The wrapper still runs to render the PBS script, but a dry run must
-        # neither overwrite the real run's manifest nor create runtime dirs.
-        with tempfile.TemporaryDirectory() as directory:
-            runs_root = Path(directory) / "runs"
-            manifest = runs_root / "run-1" / "research_manifest.json"
-            manifest.parent.mkdir(parents=True)
-            manifest.write_text('{"host_launcher": {"status": "finished"}}\n', encoding="utf-8")
-            bitcoin_datadir = Path(directory) / "btc"
-            (bitcoin_datadir / "regtest" / "blocks").mkdir(parents=True)
-            with (
-                redirect_stdout(io.StringIO()),
-                mock.patch("coinjoin_pipeline.cli.doctor_check", return_value=[]),
-                mock.patch("coinjoin_pipeline.cli.run", return_value=0) as run,
-            ):
-                code = main([
-                    "--runs-root", str(runs_root), "analyze", "--engine", "wasabi",
-                    "--run-dir", "run-1", "--blocksciPbs",
-                    "--pbs-bitcoin-datadir", str(bitcoin_datadir), "--dry-run",
-                ])
-            self.assertEqual(code, 0)
-            run.assert_called_once()
-            self.assertEqual(
-                manifest.read_text(encoding="utf-8"),
-                '{"host_launcher": {"status": "finished"}}\n',
-            )
-            self.assertEqual(sorted(path.name for path in runs_root.iterdir()), ["run-1"])
-
-    def test_mutating_command_uses_explicit_latest_by_default(self) -> None:
-        output = io.StringIO()
-        with (
-            redirect_stdout(output),
-            mock.patch("coinjoin_pipeline.cli.doctor_check", return_value=[]),
-        ):
-            code = main(["full-run", "--engine", "joinmarket", "--dry-run"])
-        self.assertEqual(code, 0)
-        self.assertIn("emulator-manager:latest", output.getvalue())
-
-    def test_latest_defaults_match_published_runtime_images(self) -> None:
-        images = resolve_images(None, {})
-        self.assertEqual(images.blocksci, "ghcr.io/ondrejman/blocksci-complete:latest")
-        self.assertEqual(images.emulator, "ghcr.io/ondrejman/emulator-manager:latest")
-        self.assertTrue(
-            all(image.endswith(":latest") for image in images.as_dict().values())
-        )
-
-    def test_emulate_checks_only_images_used_by_that_stage(self) -> None:
-        self.assertEqual(
-            required_image_components(
-                "emulate", ["emulate", "--driver", "kubernetes"]
-            ),
-            {"emulator"},
-        )
-
-    def test_pbs_stages_do_not_require_local_images(self) -> None:
-        self.assertEqual(
-            required_image_components(
-                "coinjoin-analysis", ["coinjoin-analysis", "--analysisPbs"]
-            ),
-            set(),
-        )
-
-    def test_pbs_flags_only_drop_the_stage_they_delegate(self) -> None:
-        # A shared-storage full-run keeps emulating locally, so --analysisPbs
-        # must not turn the whole image preflight off.
-        self.assertEqual(
-            required_image_components(
-                "full-run", ["full-run", "--engine", "wasabi", "--analysisPbs"]
-            ),
-            {"emulator", "blocksci"},
-        )
-        self.assertEqual(
-            required_image_components(
-                "full-run",
-                ["full-run", "--engine", "wasabi", "--analysisPbs", "--blocksciPbs"],
-            ),
-            {"emulator"},
-        )
-        # A stage action delegates its whole body, unlike full-run/emulate.
-        self.assertEqual(
-            required_image_components(
-                "analyze", ["analyze", "--run-dir", "run", "--blocksciPbs"]
-            ),
-            set(),
-        )
-        self.assertEqual(
-            required_image_components("mappings", ["mappings", "--mappingsPbs"]),
-            set(),
-        )
-        self.assertEqual(
-            required_image_components(
-                "full-run",
-                ["full-run", "--engine", "wasabi", "--mappingsPbs"],
-            ),
-            {"emulator", "coinjoin_analysis", "blocksci"},
-        )
-
-    def test_pbs_stage_skips_frontend_container_preflight(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            with (
-                mock.patch(
-                    "coinjoin_pipeline.doctor.shutil.which",
-                    return_value="/usr/bin/qsub",
-                ),
-                mock.patch("coinjoin_pipeline.cli.doctor_check", return_value=[]) as check,
-                mock.patch("coinjoin_pipeline.cli.run", return_value=0),
-                redirect_stdout(io.StringIO()),
-            ):
-                code = main(
-                    ["coinjoin-analysis", "--run-dir", directory, "--analysisPbs"]
-                )
-        self.assertEqual(code, 0)
-        capabilities = check.call_args.kwargs["capabilities"]
-        self.assertNotIn(Capability.CONTAINER_RUNTIME, capabilities)
-        self.assertIn(Capability.QSUB, capabilities)
-
-    def test_yaml_s3_full_run_generates_run_id_before_validation(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            configuration = root / "experiment.yaml"
-            configuration.write_text(
-                """\
-engine: wasabi
-driver: kubernetes
-dry_run: true
-kubernetes:
-  reuse_namespace: true
-artifacts:
-  backend: s3
-  uri: s3://bucket/runs
-  endpoint_url: https://s3.example.invalid
-  secret_name: coinjoin-s3
-  credentials_file: /storage/user/.aws/credentials
-  profile: coinjoin
-pbs:
-  analysis:
-    mem: 32gb
-  blocksci:
-    mem: 2tb
-""",
-                encoding="utf-8",
-            )
-            with (
-                mock.patch("coinjoin_pipeline.cli.run", return_value=0) as run_mock,
-                redirect_stdout(io.StringIO()),
-            ):
-                code = main(
-                    [
-                        "--runs-root",
-                        str(root / "runs"),
-                        "--fromConfiguration",
-                        str(configuration),
-                    ]
-                )
-
-        self.assertEqual(code, 0)
-        command = run_mock.call_args.args[0]
-        self.assertIn("--run-id", command)
-        generated_run_id = command[command.index("--run-id") + 1]
-        self.assertTrue(valid_run_id(generated_run_id))
-        self.assertIn("--pbs-analysis-mem", command)
-        self.assertIn("--pbs-blocksci-mem", command)
-
-    def test_default_yaml_run_configuration_passes_host_validation(self) -> None:
-        configuration = Path(__file__).resolve().parents[2] / "examples/metacentrum-s3.yaml"
-        with tempfile.TemporaryDirectory() as directory:
-            with (
-                mock.patch("coinjoin_pipeline.cli.run", return_value=0) as run_mock,
-                redirect_stdout(io.StringIO()),
-            ):
-                code = main(
-                    [
-                        "--runs-root",
-                        directory,
-                        "--fromConfiguration",
-                        str(configuration),
-                        "--dry-run",
-                    ]
-                )
-
-        self.assertEqual(code, 0)
-        command = run_mock.call_args.args[0]
-        self.assertIn("--blocksci-workflow", command)
-        self.assertEqual(command[command.index("--blocksci-workflow") + 1], "reusable")
-        self.assertIn("--pbs-unified-report-mem", command)
-
-    def test_metadata_required_fields_and_choices_are_enforced(self) -> None:
-        self.assertTrue(
-            any(
-                "requires --engine" in error
-                for error in validate_passthrough(["full-run", "--dry-run"], "full-run")
-            )
-        )
-        self.assertTrue(
-            any(
-                "must be one of" in error
-                for error in validate_passthrough(
-                    [
-                        "full-run",
-                        "--engine",
-                        "joinmarket",
-                        "--driver",
-                        "invalid",
-                        "--dry-run",
-                    ],
+    with (
+        mock.patch.dict(os.environ, {"PIPELINE_RUN_ID": "outside"}),
+        mock.patch.object(cli, "doctor_check", return_value=[]),
+        mock.patch.object(cli, "execute", side_effect=execute),
+    ):
+        assert (
+            cli.main(
+                [
                     "full-run",
-                )
+                    "--engine",
+                    "joinmarket",
+                    "--runs-root",
+                    str(tmp_path),
+                    "--run-id",
+                    "run-a",
+                ]
             )
+            == 0
         )
+        assert os.environ["PIPELINE_RUN_ID"] == "outside"
+    data = json.loads((tmp_path / "run-a/research_manifest.json").read_text())
+    assert data["mode"] == "emulator"
+    assert data["run_id"] == "run-a"
+    assert data["host_launcher"]["status"] == "completed"
+    assert data["host_launcher"]["configuration"]["engine"] == "joinmarket"
+    assert len(observed) == 1
 
-    def test_unified_report_resource_overrides_require_a_separate_report_job(self) -> None:
-        arguments = [
-            "pbs-from-s3",
-            "--run-id",
-            "run-1",
-            "--artifact-uri",
-            "s3://bucket/runs",
-            "--s3-endpoint-url",
-            "https://s3.example.invalid",
-            "--s3-credentials-file",
-            "/storage/user/.aws/credentials",
-            "--s3-profile",
-            "coinjoin",
-            "--engine",
-            "wasabi",
-            "--analysisPbs",
-            "--pbs-unified-report-ncpus",
-            "1",
-        ]
-        self.assertTrue(
-            any(
-                "require a separate unified-report job" in error
-                for error in validate_passthrough(arguments, "pbs-from-s3")
+
+def test_failed_execution_finishes_manifest(tmp_path):
+    with (
+        mock.patch.object(cli, "doctor_check", return_value=[]),
+        mock.patch.object(cli, "execute", side_effect=RuntimeError("failed stage")),
+    ):
+        assert cli.main(["emulate", "--runs-root", str(tmp_path), "--run-id", "failed-run"]) == 5
+    manifest = json.loads((tmp_path / "failed-run/research_manifest.json").read_text())
+    assert manifest["host_launcher"]["status"] == "failed"
+    assert manifest["host_launcher"]["exit_code"] == 5
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_manifest_records_effective_environment_without_secrets(tmp_path, fails):
+    inherited = {
+        "COINJOIN_BTC_NODE_IMAGE": "btc-node:review",
+        "COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT": "173",
+        "KUBERNETES_IMAGE_PULL_POLICY": "IfNotPresent",
+        "BLOCKSCI_IMAGE": "blocksci:inherited",
+        "COINJOIN_API_TOKEN": "private-token",
+        "PBS_PASSWORD": "private-password",
+        "KUBERNETES_CLIENT_SECRET": "private-secret",
+        "MAPPINGS_ACCESS_KEY_ID": "private-access-key",
+        "SAKE_PRIVATE_KEY": "private-key",
+        "COINJOIN_REGISTRY_CREDENTIALS": "private-credentials",
+        "UNRELATED_REVIEW_SETTING": "unrelated-value",
+    }
+    target = tmp_path / "run-a/research_manifest.json"
+    observed = []
+
+    def execute(_context):
+        prepared = json.loads(target.read_text())["host_launcher"]
+        assert prepared["status"] == "prepared"
+        environment = prepared["environment"]
+        assert environment["COINJOIN_BTC_NODE_IMAGE"] == os.environ["COINJOIN_BTC_NODE_IMAGE"]
+        assert environment["COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT"] == "173"
+        assert environment["KUBERNETES_IMAGE_PULL_POLICY"] == "IfNotPresent"
+        assert environment["BLOCKSCI_IMAGE"] == os.environ["BLOCKSCI_IMAGE"] == "blocksci:explicit"
+        observed.append(environment)
+        if fails:
+            raise RuntimeError("failed stage")
+
+    with (
+        mock.patch.dict(os.environ, inherited, clear=True),
+        mock.patch.object(cli, "doctor_check", return_value=[]),
+        mock.patch.object(cli, "execute", side_effect=execute),
+    ):
+        code = cli.main(
+            ["emulate", "--runs-root", str(tmp_path), "--run-id", "run-a", "--blocksci-image", "blocksci:explicit"]
+        )
+        assert code == (5 if fails else 0)
+        assert dict(os.environ) == inherited
+    text = target.read_text()
+    finished = json.loads(text)["host_launcher"]
+    assert finished["environment"] == observed[0]
+    assert finished["status"] == ("failed" if fails else "completed")
+    for key, value in inherited.items():
+        if value.startswith("private-") or key == "UNRELATED_REVIEW_SETTING":
+            assert key not in finished["environment"]
+            assert value not in text
+
+
+def test_dry_run_does_not_overwrite_manifest_or_preflight_runtime(tmp_path):
+    run = tmp_path / "run-a"
+    run.mkdir()
+    manifest = run / "research_manifest.json"
+    manifest.write_text('{"evidence": true}')
+    with (
+        mock.patch.object(cli, "doctor_check") as doctor,
+        mock.patch.object(cli, "execute") as execute,
+    ):
+        assert (
+            cli.main(
+                [
+                    "full-run",
+                    "--runs-root",
+                    str(tmp_path),
+                    "--run-id",
+                    "run-a",
+                    "--dry-run",
+                ]
             )
+            == 0
         )
-        arguments.append("--blocksciPbs")
-        self.assertEqual(validate_passthrough(arguments, "pbs-from-s3"), [])
+    doctor.assert_not_called()
+    assert execute.call_args.args[0].config.dry_run
+    assert manifest.read_text() == '{"evidence": true}'
+    assert not (tmp_path / ".notebooks").exists()
 
-        cached_blocksci_only = [
-            item for item in arguments if item != "--analysisPbs"
-        ]
-        cached_blocksci_only.extend(["--blocksci-workflow", "cached"])
-        self.assertEqual(
-            validate_passthrough(cached_blocksci_only, "pbs-from-s3"), []
-        )
 
-    def test_stage_specific_resources_require_the_matching_stage(self) -> None:
-        arguments = [
+@pytest.mark.parametrize(
+    "action,module",
+    [
+        ("watch", "watch"),
+        ("download-report", "download_report"),
+        ("clean-s3", "clean_s3"),
+    ],
+)
+def test_utility_routes_without_container_preflight(action, module, tmp_path):
+    with (
+        mock.patch(f"coinjoin_pipeline.{module}.main", return_value=0) as handler,
+        mock.patch.object(cli, "doctor_check") as doctor,
+    ):
+        assert cli.main(["--runs-root", str(tmp_path), action, "--run-id", "run-a"]) == 0
+    doctor.assert_not_called()
+    assert handler.call_args.args[0] == ["--run-id", "run-a"]
+    assert handler.call_args.kwargs["runs_root"] == tmp_path
+
+
+@pytest.mark.parametrize("action", ["analyze", "export", "coinjoin-analysis", "mappings"])
+def test_stage_requires_selected_run(action):
+    with mock.patch.object(cli, "execute") as execute:
+        assert cli.main([action, "--dry-run"]) == 2
+    execute.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["clean"],
+        ["full-run", "--test-values"],
+        ["full-run", "--min-input-count", "0"],
+        ["builder"],
+    ],
+)
+def test_invalid_input_never_executes(args):
+    with mock.patch.object(cli, "execute") as execute:
+        assert cli.main([*args, "--dry-run"] if args[0] != "clean" else args) == 2
+    execute.assert_not_called()
+
+
+def test_images_resolve_once_before_pbs_rendering():
+    config = load_configuration(
+        [
             "full-run",
-            "--engine",
-            "wasabi",
             "--analysisPbs",
-            "--pbs-analysis-mem",
-            "32gb",
-            "--pbs-blocksci-mem",
-            "2tb",
-        ]
-        errors = validate_passthrough(arguments, "full-run")
-        self.assertTrue(
-            any("blocksci-specific PBS resources require --blocksciPbs" in error for error in errors)
-        )
-        arguments.append("--blocksciPbs")
-        self.assertEqual(validate_passthrough(arguments, "full-run"), [])
-
-    def test_s3_full_run_passthrough_validation(self) -> None:
-        complete = [
-            "full-run", "--engine", "wasabi", "--driver", "kubernetes",
-            "--artifact-backend", "s3",
-            "--artifact-uri", "s3://bucket/runs",
-            "--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz",
-            "--s3-secret-name", "coinjoin-s3",
-            "--s3-credentials-file", "/storage/user/.aws/credentials",
-            "--s3-profile", "coinjoin",
-            "--run-id", "run-1",
-            "--reuse-namespace",
-            "--analysisPbs", "--blocksciPbs",
-            "--pbs-unified-report-ncpus", "1",
-        ]
-        self.assertEqual(validate_passthrough(complete, "full-run"), [])
-
-        missing = validate_passthrough(
-            ["full-run", "--engine", "wasabi", "--driver", "kubernetes", "--artifact-backend", "s3"],
-            "full-run",
-        )
-        self.assertTrue(any("--s3-credentials-file" in error for error in missing))
-        self.assertTrue(any("both --analysisPbs and --blocksciPbs" in error for error in missing))
-        self.assertTrue(any("--reuse-namespace" in error for error in missing))
-
-        one_stage = validate_passthrough(
-            [item for item in complete if item != "--blocksciPbs"], "full-run"
-        )
-        self.assertTrue(
-            any("requires both --analysisPbs and --blocksciPbs" in error for error in one_stage)
-        )
-
-        rejected = validate_passthrough([*complete, "--parallel", "--copy-to-host"], "full-run")
-        self.assertTrue(any("--parallel" in error for error in rejected))
-        self.assertTrue(any("--copy-to-host" in error for error in rejected))
-
-    def test_s3_emulate_requires_frontend_credentials_in_shared_validator(self) -> None:
-        arguments = [
-            "emulate",
-            "--engine",
-            "wasabi",
-            "--driver",
-            "kubernetes",
-            "--artifact-backend",
-            "s3",
-            "--artifact-uri",
-            "s3://bucket/runs",
-            "--s3-endpoint-url",
-            "https://s3.example.invalid",
-            "--s3-secret-name",
-            "coinjoin-s3",
-            "--run-id",
-            "run-1",
-            "--reuse-namespace",
-        ]
-        errors = validate_passthrough(arguments, "emulate")
-        self.assertTrue(any("--s3-credentials-file" in error for error in errors))
-        self.assertTrue(any("--s3-profile" in error for error in errors))
-
-        arguments.extend(
-            [
-                "--s3-credentials-file",
-                "/storage/user/.aws/credentials",
-                "--s3-profile",
-                "coinjoin",
-            ]
-        )
-        self.assertEqual(validate_passthrough(arguments, "emulate"), [])
-
-    def test_reusable_blocksci_task_validation(self) -> None:
-        base = [
-            "pbs-from-s3",
-            "--run-id", "run-1",
-            "--artifact-uri", "s3://bucket/runs",
-            "--s3-endpoint-url", "https://s3.example.invalid",
-            "--s3-credentials-file", "/storage/user/.aws/credentials",
-            "--s3-profile", "coinjoin",
-            "--engine", "wasabi",
             "--blocksciPbs",
+            "--version",
+            "stable",
+            "--blocksci-image",
+            "registry/blocksci:chosen",
         ]
-        self.assertEqual(
-            validate_passthrough(
-                [*base, "--blocksci-workflow", "reusable", "--blocksci-task", "parse"],
-                "pbs-from-s3",
-            ),
-            [],
-        )
-        notebook_errors = validate_passthrough(
-            [*base, "--blocksci-task", "notebook"], "pbs-from-s3"
-        )
-        self.assertTrue(any("require --blocksci-workflow" in error for error in notebook_errors))
+    )
+    context = RunContext.prepare(config, "cjp")
+    assert context.config.pbs.blocksci_image == "registry/blocksci:chosen"
+    assert context.config.pbs.coinjoin_analysis_image.endswith(":stable")
+    assert context.environment["BLOCKSCI_IMAGE"] == context.config.images.blocksci
 
-        external = [
-            *base,
-            "--blocksci-workflow", "reusable",
-            "--blocksci-task", "parse",
-            "--blocksci-external-bitcoin-datadir", "/storage/external/bitcoin",
-            "--blocksci-network", "bitcoin",
-            "--blocksci-max-block", "850000",
-        ]
-        self.assertEqual(validate_passthrough(external, "pbs-from-s3"), [])
-        missing_height = external[:-2]
-        self.assertTrue(
-            any("requires --blocksci-network and --blocksci-max-block" in error
-                for error in validate_passthrough(missing_height, "pbs-from-s3"))
-        )
 
-        update = [
-            *base[:2], "run-2", *base[3:],
-            "--blocksci-workflow", "cached",
-            "--blocksci-task", "update",
-            "--blocksci-cache-source-run-id", "run-1",
-            "--blocksci-external-bitcoin-datadir", "/storage/external/bitcoin",
-            "--blocksci-network", "bitcoin",
-            "--blocksci-max-block", "850100",
-        ]
-        self.assertEqual(validate_passthrough(update, "pbs-from-s3"), [])
-        same_run = [
-            item if item != "run-2" else "run-1"
-            for item in update
-        ]
-        self.assertTrue(
-            any("must differ" in error for error in validate_passthrough(same_run, "pbs-from-s3"))
-        )
-        source_flag_index = update.index("--blocksci-cache-source-run-id")
-        missing_source = update[:source_flag_index] + update[source_flag_index + 2:]
-        self.assertTrue(
-            any("requires --blocksci-cache-source-run-id" in error
-                for error in validate_passthrough(missing_source, "pbs-from-s3"))
-        )
-
-    def test_s3_full_run_needs_no_environment_switch(self) -> None:
-        arguments = [
-            "full-run", "--engine", "wasabi", "--driver", "kubernetes",
-            "--artifact-backend", "s3",
-            "--artifact-uri", "s3://bucket/runs",
-            "--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz",
-            "--s3-secret-name", "coinjoin-s3",
-            "--s3-credentials-file", "/storage/user/.aws/credentials",
-            "--s3-profile", "coinjoin",
-            "--run-id", "run-1",
-            "--reuse-namespace",
-            "--analysisPbs", "--blocksciPbs",
-        ]
-        capabilities = required_capabilities("full-run", arguments)
-        # A pure S3 full-run on a PBS frontend must not demand a local daemon.
-        self.assertNotIn(Capability.CONTAINER_RUNTIME, capabilities)
-        self.assertEqual(
-            {
-                Capability.KUBECTL,
-                Capability.QSUB,
-                Capability.QSTAT,
-                Capability.QDEL,
-                Capability.S5CMD_FRONTEND,
-            },
-            capabilities,
-        )
-
-    def test_pbs_actions_require_qstat_and_qdel_alongside_qsub(self) -> None:
-        """qsub alone is not enough to run a PBS graph safely.
-
-        Duplicate-submission prevention and every marker wait poll qstat, and
-        rolling back a partially submitted graph shells out to qdel; missing
-        either turns a clear preflight error into a mid-run failure or a
-        rollback that silently leaves jobs running.
-        """
-        for action, arguments in (
-            ("pbs-from-s3", ["pbs-from-s3", "--run-id", "run-1"]),
-            (
+def test_explicit_pbs_image_override_wins():
+    context = RunContext.prepare(
+        load_configuration(
+            [
                 "full-run",
-                ["full-run", "--artifact-backend", "s3", "--run-id", "run-1"],
-            ),
-            ("analyze", ["analyze", "--run-dir", "run-1", "--blocksciPbs"]),
-        ):
-            capabilities = required_capabilities(action, arguments)
-            self.assertIn(Capability.QSTAT, capabilities, action)
-            self.assertIn(Capability.QDEL, capabilities, action)
+                "--blocksciPbs",
+                "--pbs-blocksci-image",
+                "docker://registry/blocksci:pbs",
+            ]
+        ),
+        "cjp",
+    )
+    assert context.config.pbs.blocksci_image == "docker://registry/blocksci:pbs"
 
-    def test_dry_runs_do_not_require_pbs_tooling(self) -> None:
-        capabilities = required_capabilities(
-            "pbs-from-s3", ["pbs-from-s3", "--run-id", "run-1", "--dry-run"]
-        )
-        for capability in (Capability.QSUB, Capability.QSTAT, Capability.QDEL):
-            self.assertNotIn(capability, capabilities)
 
-    def test_research_actions_do_not_need_a_container_runtime(self) -> None:
-        # `runs`/`scenarios` only read the runs tree in-process. Requiring Docker
-        # would make them unusable on the Docker-less PBS frontend, which is
-        # exactly where S3 runs are launched from.
-        for action, arguments in (
-            ("runs list", ["runs", "list"]),
-            ("runs inspect", ["runs", "inspect", "--run-dir", "run-1"]),
-            ("scenarios list", ["scenarios", "list"]),
-        ):
-            self.assertEqual(set(), required_capabilities(action, arguments), action)
+def test_capabilities_follow_actual_delegation():
+    config = load_configuration(["full-run", "--analysisPbs"])
+    assert "emulator" in required_image_components(config)
+    assert "coinjoin_analysis" not in required_image_components(config)
+    assert {
+        Capability.QSUB,
+        Capability.QSTAT,
+        Capability.QDEL,
+        Capability.CONTAINER_RUNTIME,
+    } <= required_capabilities(config)
 
-    def test_runs_validate_is_not_exempt_from_the_container_preflight(self) -> None:
-        # It reopens the parsed chain by running the BlockSci image, so the
-        # Docker-less exemption its `runs ` siblings get would turn a clear
-        # preflight error into a failure inside `docker run`.
-        arguments = ["runs", "validate", "--run-dir", "run-1"]
-        self.assertEqual(
-            {Capability.CONTAINER_RUNTIME},
-            required_capabilities("runs validate", arguments),
-        )
-        self.assertEqual(
-            {"blocksci"},
-            required_image_components("runs validate", arguments),
-        )
 
-    def test_environment_variables_that_steer_a_run_are_rendered(self) -> None:
-        # The bare wrapper inherits the whole shell; anything the pipeline reads
-        # from it must show up in the printed command and the manifest, or a run
-        # is not reproducible from what was recorded.
-        with tempfile.TemporaryDirectory() as directory:
-            with mock.patch.dict(
-                "os.environ",
-                {
-                    "KUBERNETES_CONTROL_IP": "172.17.0.1",
-                    "PBS_BITCOIN_DATADIR": "/storage/user/bitcoin",
-                    "AWS_SECRET_ACCESS_KEY": "must-not-leak",
-                    "COINJOIN_S3_SECRET_NAME": "must-not-leak-either",
-                    "UNRELATED_VARIABLE": "ignored",
-                },
-                clear=True,
-            ):
-                environment = self._runtime_environment(directory)
-        self.assertEqual(environment["KUBERNETES_CONTROL_IP"], "172.17.0.1")
-        self.assertEqual(environment["PBS_BITCOIN_DATADIR"], "/storage/user/bitcoin")
-        self.assertNotIn("AWS_SECRET_ACCESS_KEY", environment)
-        self.assertNotIn("COINJOIN_S3_SECRET_NAME", environment)
-        self.assertNotIn("UNRELATED_VARIABLE", environment)
+def test_s3_capabilities_need_no_local_container():
+    config = load_configuration(["run", str(Path(__file__).parents[2] / "examples/wasabi-s3-no-mappings.yaml")])
+    assert required_image_components(config) == set()
+    assert Capability.CONTAINER_RUNTIME not in required_capabilities(config)
+    assert {
+        Capability.QSUB,
+        Capability.QSTAT,
+        Capability.QDEL,
+        Capability.KUBECTL,
+        Capability.S5CMD_FRONTEND,
+    } <= required_capabilities(config)
 
-    def test_computed_images_beat_inherited_values(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            with mock.patch.dict(
-                "os.environ", {"COINJOIN_EMULATOR_IMAGE": "stale:from-shell"}, clear=True
-            ):
-                environment = self._runtime_environment(directory)
-        self.assertEqual(
-            environment["COINJOIN_EMULATOR_IMAGE"],
-            resolve_images("v1", {}).emulator,
-        )
 
-    def test_s3_full_run_needs_qsub_without_pbs_flags(self) -> None:
-        # run_full_run_s3 calls require_qsub() unconditionally, so the preflight
-        # must ask for it even when no --*Pbs flag is present.
-        capabilities = required_capabilities(
-            "full-run",
-            ["full-run", "--engine", "wasabi", "--artifact-backend", "s3"],
-        )
-        self.assertIn(Capability.QSUB, capabilities)
-        self.assertNotIn(Capability.CONTAINER_RUNTIME, capabilities)
+def test_images_reject_invalid_overrides():
+    with pytest.raises(ValueError):
+        resolve_images("bad tag", {})
+    with pytest.raises(ValueError):
+        resolve_images(None, {"blocksci": "bad image"})
 
-    def test_s3_full_run_requires_no_local_images(self) -> None:
-        from coinjoin_pipeline.host import required_image_components
 
-        self.assertEqual(
-            required_image_components(
-                "full-run", ["full-run", "--artifact-backend", "s3", "--analysisPbs"]
-            ),
-            set(),
-        )
-        self.assertEqual(
-            required_image_components("full-run", ["full-run", "--artifact-backend=s3"]),
-            set(),
-        )
+def test_manifest_redacts_secrets():
+    assert (
+        redact({"configuration": {"artifacts": {"credentials_file": "/private/credentials"}}})["configuration"][
+            "artifacts"
+        ]["credentials_file"]
+        == "<redacted>"
+    )
 
-    def test_environment_image_overrides_preserve_legacy_workflows(self) -> None:
-        environment = {
-            "BLOCKSCI_IMAGE": "blocksci:test",
-            "COINJOIN_EMULATOR_IMAGE": "emulator:test",
-            "COINJOIN_ANALYSIS_IMAGE": "analysis:test",
-        }
-        with mock.patch.dict("os.environ", environment, clear=False):
-            _, host = parse_host_options(["full-run", "--engine", "joinmarket"])
-            from coinjoin_pipeline.host import (
-                image_overrides,
-                required_image_components,
-            )
-            from coinjoin_pipeline.images import all_images_overridden
 
-            overrides = image_overrides(host)
-            self.assertTrue(
-                all_images_overridden(
-                    overrides, required_image_components("full-run", ["full-run"])
-                )
-            )
-
-    def test_builder_round_trips_generated_host_options(self) -> None:
-        command = Command(
-            "full-run",
-            runtime="podman",
-            version="v1",
-            options=[("--engine", "joinmarket")],
-        )
-        parsed = parse_command(render_command(command))
-        self.assertEqual(parsed.runtime, "podman")
-        self.assertEqual(parsed.version, "v1")
-        self.assertEqual(parsed.action, "full-run")
-
-if __name__ == "__main__":
-    unittest.main()
+def test_run_id_is_safe_and_bounded(tmp_path):
+    scenario = tmp_path / "scenario.json"
+    scenario.write_text(json.dumps({"name": "Příliš žluťoučký " * 20}))
+    value = run_id_for(load_configuration(["emulate", "--scenario", str(scenario)]))
+    assert validate_run_id(value) == value
+    assert len(value) <= 63

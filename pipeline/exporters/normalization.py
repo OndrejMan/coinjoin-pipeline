@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from exporters.artifact_paths import emulator_dir
+from exporters.artifact_paths import FALSE_CJTXS_GLOB, emulator_dir
 from exporters.common import (
     DEFAULT_FIRST_WASABI2_BLOCK,
     JsonObject,
@@ -16,8 +16,6 @@ from exporters.common import (
     transaction_metrics,
 )
 from exporters.report_types import IORecord, TransactionRecord
-
-FALSE_CJTXS_GLOB = "false_cjtxs.json*"
 
 
 def load_false_positive_txids(analysis_dir: Path) -> tuple[set[str], list[JsonObject]]:
@@ -94,10 +92,7 @@ def normalize_coinjoin_analysis_record(txid: str, tx: JsonObject) -> Transaction
 
 def normalize_coinjoin_analysis(data: JsonObject) -> dict[str, TransactionRecord]:
     coinjoins = data.get("coinjoins", {})
-    return {
-        txid: normalize_coinjoin_analysis_record(txid, tx)
-        for txid, tx in sorted_items(coinjoins)
-    }
+    return {txid: normalize_coinjoin_analysis_record(txid, tx) for txid, tx in sorted_items(coinjoins)}
 
 
 def block_height_from_path(path: Path) -> int | None:

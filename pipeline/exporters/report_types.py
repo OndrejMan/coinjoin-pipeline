@@ -149,6 +149,9 @@ class RunManifest(_RunManifestFields, total=False):
     network: str | None
     mapping_parameters: JsonObject | None
     sake_seed: int | None
+    # SHA-256 of each report input by run-relative path; absent in reports
+    # written before 2026-10. `runs list` compares it to mark a report stale.
+    inputs: dict[str, str]
 
 
 class DetectorParameters(TypedDict):
@@ -171,6 +174,8 @@ class BlockSciAnalysisArtifact(TypedDict):
     first_wasabi2_block: int
     records: dict[str, TransactionRecord]
     skipped_txids: list[str]
-    integration_diagnostics: JsonObject
+    integration_diagnostics: JsonObject | None
+    mode: str
+    image_provenance: JsonObject
     predicted_address_clusters: dict[str, str] | None
     cluster_export_error: str | None

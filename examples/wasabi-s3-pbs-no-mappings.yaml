@@ -4,7 +4,6 @@ coinjoin_type: wasabi2
 driver: kubernetes
 scenario: scenarios/overactive-k8s-small.json
 run_id: 2026-08-10-wasabi-k8s-s3-06
-test_values: true
 emulation_timeout: 43200
 
 kubernetes:

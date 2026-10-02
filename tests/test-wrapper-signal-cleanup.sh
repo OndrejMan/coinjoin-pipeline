@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Hard gate from the wrapper-removal plan: the bare wrapper owns the peer
-# container cleanup that the deleted launcher's INT/TERM trap used to do.
+# The in-process pipeline owns the peer container cleanup that the removed
+# launcher's INT/TERM trap used to do.
 #
-# Runs the real runtime command built by cli.py -- not `cjp` with a stubbed
-# launcher -- so it exercises exactly the invocation production uses. Both
+# Runs the real `python -m coinjoin_pipeline.cli` invocation with only the
+# container runtime stubbed, so it exercises what production runs. Both
 # signals are covered: SIGTERM never unwinds through atexit, so it used to
 # leave the lock file behind as well.
 set -euo pipefail
@@ -56,26 +56,16 @@ run_signal_case() {
 
   # Build the invocation from the same function the production path uses.
   local command_file="${TMP_DIR}/command-${signal}.sh"
-  PYTHONPATH="${PROJECT_DIR}/src" python3 - "${command_file}" "${LOGS_ROOT}" <<'PY'
+  python3 - "${command_file}" "${LOGS_ROOT}" <<'PY'
 import sys
 from pathlib import Path
 
-from coinjoin_pipeline.cli import runtime_root
-from coinjoin_pipeline.commands import runtime_command
-from coinjoin_pipeline.images import resolve_images
+import shlex
 
 destination, runs_root = Path(sys.argv[1]), Path(sys.argv[2])
-command = runtime_command(
-    runtime_root(),
-    "docker",
-    ["emulate", "--engine", "wasabi", "--scenario", "overactive-local.json"],
-    resolve_images(None, {}),
-    runs_root,
-    "coinjoin-pipeline emulate --engine wasabi",
-)
-# `exec` cannot take bare VAR=value prefixes; env applies them and keeps
-# the wrapper as the signalled process rather than a bash child.
-destination.write_text(f"exec env {command.rendered()}\n", encoding="utf-8")
+command = [sys.executable, "-m", "coinjoin_pipeline.cli", "emulate", "--engine", "wasabi",
+           "--scenario", "overactive-local.json", "--runs-root", str(runs_root)]
+destination.write_text("exec " + shlex.join(command) + "\n", encoding="utf-8")
 PY
 
   (
@@ -84,6 +74,8 @@ PY
     export STAGE_STARTED="${stage_started}"
     export STAGE_PID_FILE="${stage_pid_file}"
     export PATH="${FAKE_BIN}:${PATH}"
+    # Same import path as the runIt.sh fallback: the package and its exporters.
+    export PYTHONPATH="${PROJECT_DIR}/src:${PROJECT_DIR}/pipeline${PYTHONPATH:+:${PYTHONPATH}}"
     # Replace this asynchronous subshell with the wrapper. Otherwise `$!`
     # identifies the signal-ignoring background shell rather than the
     # wrapper process that owns the cleanup handlers.

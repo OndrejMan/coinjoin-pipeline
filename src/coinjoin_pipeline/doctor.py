@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from enum import Enum, auto
 import os
-from importlib.resources import files
-from pathlib import Path
 import shutil
 import subprocess
+from enum import Enum, auto
+from importlib.resources import files
+from pathlib import Path
 
+from .configuration import PipelineConfiguration
+from .execution.kubernetes import resolve_kubeconfig
 from .images import Images
-from .commands import DOCKERLESS_RESEARCH_ACTIONS, has_option, option_value
 
 
 class Capability(Enum):
@@ -24,91 +25,76 @@ class Capability(Enum):
     S5CMD_FRONTEND = auto()
 
 
-PBS_FLAGS = ("--analysisPbs", "--blocksciPbs", "--mappingsPbs")
-
-
-def required_capabilities(action: str, arguments: list[str]) -> set[Capability]:
-    """Map an action to the host tools it needs.
-
-    Replaces the previous frontend env-var switch: a pure S3
-    full-run on a PBS frontend needs qsub, kubectl and s5cmd but never Docker,
-    while a local run needs the container runtime and nothing else.
-    """
+def required_capabilities(config: PipelineConfiguration) -> set[Capability]:
     capabilities: set[Capability] = set()
-    driver = option_value(arguments, "--driver")
-    backend = option_value(arguments, "--artifact-backend")
-    uses_s3 = backend == "s3"
-    uses_pbs = any(has_option(arguments, flag) for flag in PBS_FLAGS) or action == "pbs-from-s3"
-    # Dry runs never reach the cluster or the queue, matching the previous
-    # `not dry_run` guards on the kubernetes and qsub checks.
-    live = not has_option(arguments, "--dry-run")
-
-    if driver == "kubernetes" and live:
-        capabilities.add(Capability.KUBECTL)
-    # `run_full_run_s3` calls `require_qsub()` unconditionally after the dry-run
-    # branch, so an S3 full-run needs the queue even without a --*Pbs flag;
-    # without this the preflight would pass and the wrapper would fail later.
-    if (uses_pbs or (uses_s3 and action == "full-run")) and live:
-        capabilities.add(Capability.QSUB)
-        # qsub alone is not enough: duplicate-submission prevention and every
-        # marker wait poll qstat, and failed-graph rollback shells out to qdel.
-        capabilities.add(Capability.QSTAT)
-        capabilities.add(Capability.QDEL)
-    if (uses_s3 or action == "pbs-from-s3") and live:
-        capabilities.add(Capability.S5CMD_FRONTEND)
-    # The frontend needs a local daemon only when it still runs containers
-    # itself: S3 hands emulation to a Kubernetes Job, and a PBS-only stage runs
-    # under Singularity on the compute node. full-run/emulate keep emulating
-    # locally even with PBS analysis flags, so they stay on the runtime.
-    # The read-only `runs`/`scenarios` actions only inspect the runs tree
-    # in-process, so demanding Docker would make them unusable on a Docker-less
-    # PBS frontend — which is exactly where the S3 workflow lives. `runs
-    # validate` is not one of them; it runs the BlockSci image.
-    delegated = (
-        uses_s3
-        or (uses_pbs and action not in {"full-run", "emulate"})
-        or action in DOCKERLESS_RESEARCH_ACTIONS
+    uses_s3 = config.artifacts.backend == "s3"
+    uses_pbs = (
+        any((config.stages.analysis, config.stages.blocksci, config.stages.mappings)) or config.action == "pbs-from-s3"
     )
-    if not delegated:
+    if not config.dry_run:
+        if config.driver == "kubernetes":
+            capabilities.add(Capability.KUBECTL)
+        if uses_pbs or (uses_s3 and config.action == "full-run"):
+            capabilities.update((Capability.QSUB, Capability.QSTAT, Capability.QDEL))
+        if uses_s3:
+            capabilities.add(Capability.S5CMD_FRONTEND)
+    delegated = uses_s3 or (uses_pbs and config.action not in {"full-run", "emulate"})
+    if not delegated and not config.dry_run:
         capabilities.add(Capability.CONTAINER_RUNTIME)
     return capabilities
 
 
-def validate_arguments(arguments: list[str], runs_root: Path) -> list[str]:
-    """Validate host-visible files and tools selected by pipeline arguments."""
+def required_image_components(config: PipelineConfiguration) -> set[str]:
+    if config.dry_run or config.artifacts.backend == "s3" or config.action == "clean":
+        return set()
+    delegated = set()
+    for enabled, names in (
+        (config.stages.analysis, {"coinjoin_analysis"}),
+        (config.stages.blocksci, {"blocksci"}),
+        (config.stages.mappings, {"mappings", "sake"}),
+    ):
+        if enabled:
+            delegated.update(names)
+    if delegated and config.action not in {"full-run", "emulate"}:
+        return set()
+    selected = {
+        "external analyze": {"blocksci"},
+        "emulate": {"emulator"},
+        "coinjoin-analysis": {"coinjoin_analysis"},
+        "analyze": {"blocksci", "coinjoin_analysis"},
+        "export": set(),
+        "mappings": {"mappings", "sake"},
+    }.get(config.action, {"emulator", "coinjoin_analysis", "blocksci"})
+    return selected - delegated
+
+
+def validate_arguments(config: PipelineConfiguration, runs_root: Path) -> list[str]:
+    """Check host-visible inputs after effective configuration is resolved."""
     errors: list[str] = []
-    scenario = option_value(arguments, "--scenario")
-    if scenario:
-        candidate = Path(scenario).expanduser()
+    if config.scenario:
+        candidate = Path(config.scenario).expanduser()
         packaged = files("coinjoin_pipeline").joinpath(f"resources/scenarios/{candidate.name}")
-        if not candidate.is_file() and not (Path.cwd() / candidate).is_file() and not packaged.is_file():
-            errors.append(f"scenario not found: {scenario}")
-    dry_run = has_option(arguments, "--dry-run")
-    if option_value(arguments, "--driver") == "kubernetes" and not dry_run:
-        kubeconfig = Path(option_value(arguments, "--kubeconfig") or Path.home() / ".kube/config").expanduser()
+        if not candidate.is_file() and not packaged.is_file():
+            errors.append(f"scenario not found: {config.scenario}")
+    if config.driver == "kubernetes" and not config.dry_run:
+        kubeconfig = resolve_kubeconfig(config.kubernetes.kubeconfig)
         if not kubeconfig.is_file():
             errors.append(f"kubeconfig not found: {kubeconfig}")
-    pbs_datadir = option_value(arguments, "--pbs-bitcoin-datadir") or os.environ.get(
-        "PBS_BITCOIN_DATADIR"
-    )
-    if has_option(arguments, "--blocksciPbs") and pbs_datadir:
-        # Kubernetes emulation without --copy-to-host fills this directory
-        # itself; every other path must already hold a parsed chain.
-        action_words = [item for item in arguments if not item.startswith("-")]
+    pbs_datadir = config.pbs.bitcoin_datadir
+    if config.stages.blocksci and pbs_datadir:
         kubernetes_fills_it = (
-            option_value(arguments, "--driver") == "kubernetes"
-            and any(word in {"full-run", "emulate"} for word in action_words)
-            and not has_option(arguments, "--copy-to-host")
+            config.driver == "kubernetes"
+            and config.action in {"full-run", "emulate"}
+            and not config.kubernetes.copy_to_host
         )
         if not kubernetes_fills_it and not (Path(pbs_datadir).expanduser() / "regtest/blocks").is_dir():
-            errors.append(
-                f"PBS Bitcoin datadir must contain regtest/blocks: {pbs_datadir}"
-            )
-    run_dir = option_value(arguments, "--run-dir")
-    if run_dir:
-        selected = Path(run_dir).expanduser()
+            errors.append(f"PBS Bitcoin datadir must contain regtest/blocks: {pbs_datadir}")
+    if config.run_dir:
+        selected = Path(config.run_dir).expanduser()
         if not selected.is_absolute():
             selected = runs_root / selected
+        if selected.resolve().parent != runs_root.resolve():
+            errors.append(f"run directory must be directly inside {runs_root}: {selected}")
         if not selected.is_dir():
             errors.append(f"run directory not found: {selected}")
     return errors
@@ -157,8 +143,11 @@ def check(
         else:
             try:
                 result = subprocess.run(
-                    [executable, "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    check=False, timeout=10,
+                    [executable, "info"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=10,
                 )
             except subprocess.TimeoutExpired:
                 errors.append(f"{runtime} daemon/API check timed out")
@@ -186,8 +175,11 @@ def check(
                 continue
             try:
                 local = subprocess.run(
-                    [executable, "image", "inspect", image], stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL, check=False, timeout=10,
+                    [executable, "image", "inspect", image],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=10,
                 )
             except subprocess.TimeoutExpired:
                 errors.append(f"image inspection timed out: {image}")
@@ -196,8 +188,11 @@ def check(
                 continue
             try:
                 remote = subprocess.run(
-                    [executable, "manifest", "inspect", image], stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL, check=False, timeout=20,
+                    [executable, "manifest", "inspect", image],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=20,
                 )
             except subprocess.TimeoutExpired:
                 errors.append(f"registry image check timed out: {image}")

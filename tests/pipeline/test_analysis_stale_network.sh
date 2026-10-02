@@ -34,7 +34,6 @@ export DOCKER_LOG
   cd "${PROJECT_DIR}"
   PATH="${FAKE_BIN}:${PATH}" \
   ACTIVE_RUN_ID="analysis-stale-network-test" \
-  HOST_CLIENT_DIR="${PROJECT_DIR}/client" \
   COMPOSE_FILE="${PROJECT_DIR}/compose.yaml" \
   bash analysis.sh
 )

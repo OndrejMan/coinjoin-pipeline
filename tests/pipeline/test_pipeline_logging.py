@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pipeline"))
 
-from client.pipeline_logging import StageLog  # noqa: E402
+from coinjoin_pipeline.execution.pipeline_logging import StageLog  # noqa: E402
 
 
 def read_only(directory: Path) -> None:

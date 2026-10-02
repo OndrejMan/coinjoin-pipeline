@@ -1,79 +1,78 @@
 import io
 import os
-import re
 import subprocess
 import sys
 import tempfile
 import unittest
-from argparse import ArgumentTypeError, Namespace
 from pathlib import Path
 from unittest import mock
 
 import pytest
+from config_support import configuration as Namespace
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2] / "pipeline"
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from client.wrapper import (
+from config_support import build_parser
+
+from coinjoin_pipeline.execution.run_context import run_dir_under_root
+from coinjoin_pipeline.execution.scenarios import container_scenario_path, host_scenario_path
+from coinjoin_pipeline.execution.containers import (
+    compose_env,
+    container_run_pull_args,
+    exists_or_unreadable,
+    export_command,
+    export_preflight_error,
+    run_blocksci_docker_stage,
+    run_coinjoin_analysis,
+    run_command,
+    run_dirs,
+    stage_blocksci_script,
+    stage_pbs_exporters,
+)
+from coinjoin_pipeline.execution.kubernetes import kubernetes_auth_preflight
+from coinjoin_pipeline.execution.kubernetes_launch import (
+    kubernetes_emulator_command,
+    run_kubernetes_emulation,
+)
+from coinjoin_pipeline.execution.locks import command_lock_path, ensure_no_active_s3_pbs_submission
+from coinjoin_pipeline.execution.pbs.validation import PBSError
+from coinjoin_pipeline.execution.pipeline_logging import (
+    captured_pipeline_stage,
+    pipeline_stage,
+    stage_separator,
+    terminal_supports_color,
+)
+from coinjoin_pipeline.execution.runtime import (
+    compose_command,
+    container_runtime,
+)
+from coinjoin_pipeline.execution.s3_submission import S3PBSJobs
+from coinjoin_pipeline.execution.s3_workflow import run_s3_full_run as run_full_run_s3
+from coinjoin_pipeline.execution.settings import (
     COINJOIN_ANALYSIS_INPUT_DATA_PATH_ENV,
     COINJOIN_ANALYSIS_MOUNT_PATH_ENV,
     COINJOIN_ANALYSIS_SELECTED_ROOT_CONTAINER,
     COINJOIN_ANALYSIS_SOURCE_PATH_ENV,
     COINJOIN_ANALYSIS_TARGET_PATH_ENV,
-    DEFAULT_RUN_TIMEZONE,
     RUNS_ROOT_CONTAINER,
-    S3PBSJobs,
-    blocksci_output_exists,
-    build_parser,
-    captured_pipeline_stage,
-    compose_command,
-    compose_env,
-    command_lock_path,
-    container_command,
-    container_run_pull_args,
-    container_runtime,
-    container_scenario_path,
-    export_command,
-    host_scenario_path,
-    export_preflight_error,
-    ensure_no_active_s3_pbs_submission,
-    kubernetes_auth_preflight,
-    kubernetes_emulator_command,
-    normalize_argv,
-    pipeline_stage,
-    run_blocksci_docker_stage,
-    run_blocksci_export_pbs_stage,
-    run_blocksci_pbs_stage,
-    run_coinjoin_analysis,
-    run_command,
-    run_dir_under_root,
-    run_dirs,
-    run_full_run_s3,
-    run_kubernetes_emulation,
-    run_parallel_analysis,
-    run_pbs_from_s3,
-    run_serial_analysis,
-    run_timezone,
-    stage_blocksci_script,
-    stage_pbs_exporters,
-    stage_separator,
-    terminal_supports_color,
-    wrapper_operations,
 )
-
-
-from client.artifacts import ArtifactTransportError
-from client.pbs import PBSError
-from exporters.artifact_paths import BLOCKSCI_ANALYSIS_DIR
-from exporters.blocksci_export.analysis import ARTIFACT_NAME
+from coinjoin_pipeline.execution.shared_storage_pbs import (
+    run_blocksci_stage as run_blocksci_pbs_stage,
+)
+from coinjoin_pipeline.storage.s3 import ArtifactTransportError
 
 
 def _write_required_exporters(root: Path) -> None:
-    (root / "blocksci_export").mkdir(parents=True)
+    from coinjoin_pipeline.storage.s3 import REQUIRED_EXPORTERS
+
+    for relative in REQUIRED_EXPORTERS:
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("fixture\n")
+    (root / "blocksci_export").mkdir(parents=True, exist_ok=True)
     (root / "unified_report.py").write_text("report\n", encoding="utf-8")
-    (root / "blocksci_export" / "analysis.py").write_text(
-        "analysis\n", encoding="utf-8"
-    )
+    (root / "blocksci_export" / "analysis.py").write_text("analysis\n", encoding="utf-8")
 
 
 def test_stage_pbs_exporters_snapshots_checkout_under_shared_run(
@@ -97,14 +96,6 @@ def test_stage_pbs_exporters_snapshots_checkout_under_shared_run(
     assert not (staged / "newer.py").exists()
 
 
-def test_wrapper_operations_bind_the_compatibility_facade_at_invocation() -> None:
-    """The thin entrypoint must still observe wrapper-level test patch points."""
-    with mock.patch("client.wrapper.run_script") as run_script:
-        operations = wrapper_operations()
-
-    assert operations.run_script is run_script
-
-
 def test_stage_pbs_exporters_rejects_partial_existing_snapshot(
     tmp_path: Path,
 ) -> None:
@@ -117,36 +108,6 @@ def test_stage_pbs_exporters_rejects_partial_existing_snapshot(
 
     with pytest.raises(PBSError, match="Failed to stage PBS exporters"):
         stage_pbs_exporters(run_dir, source)
-
-
-def test_serial_analysis_preserves_legacy_analysis_script_dispatch() -> None:
-    """The serial refactor must retain the established Compose execution path."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        logs_root = Path(tmpdir)
-        run_dir = logs_root / "run-a"
-        run_dir.mkdir()
-        args = Namespace(
-            analysisPbs=False,
-            blocksciPbs=False,
-            mappingsPbs=False,
-            blocksci_script=None,
-            engine="wasabi",
-            coinjoin_type="wasabi2",
-            min_input_count=None,
-            scenario=None,
-            joinmarket_detector="definite",
-            joinmarket_min_base_fee=5000,
-            joinmarket_percentage_fee=0.00004,
-            joinmarket_max_depth=200000,
-        )
-        with mock.patch("client.wrapper.run_coinjoin_analysis") as baseline, mock.patch(
-            "client.wrapper.run_script"
-        ) as analysis_script:
-            run_serial_analysis(args, run_dir, logs_root)
-
-    baseline.assert_called_once_with("run-a")
-    assert analysis_script.call_args.args[0].name == "analysis.sh"
-    assert analysis_script.call_args.kwargs["active_run_id"] == "run-a"
 
 
 def test_blocksci_pbs_stage_submits_shared_staged_exporters(
@@ -171,18 +132,18 @@ def test_blocksci_pbs_stage_submits_shared_staged_exporters(
 
     with (
         mock.patch(
-            "client.wrapper.compose_env",
+            "coinjoin_pipeline.execution.containers.compose_env",
             return_value={
                 "EMULATION_LOGS_DIR": str(run_dir.parent),
                 "EXPORTERS_DIR": str(tmp_path / "checkout-exporters"),
             },
         ),
         mock.patch(
-            "client.wrapper.stage_pbs_exporters",
+            "coinjoin_pipeline.execution.containers.stage_pbs_exporters",
             return_value=staged,
         ) as stage_mock,
-        mock.patch("client.wrapper.submit_blocksci_pbs") as submit_mock,
-        mock.patch("client.wrapper.wait_for_pbs_marker"),
+        mock.patch("coinjoin_pipeline.execution.shared_storage_pbs.submit_blocksci_pbs") as submit_mock,
+        mock.patch("coinjoin_pipeline.execution.shared_storage_pbs.wait_for_pbs_marker"),
     ):
         run_blocksci_pbs_stage(args, run_dir)
 
@@ -193,96 +154,6 @@ def test_blocksci_pbs_stage_submits_shared_staged_exporters(
     assert submit_mock.call_args.kwargs["exporters_dir"] == staged
 
 
-def _blocksci_pbs_commands(
-    args: Namespace, run_dir: Path, tmp_path: Path, *, include_report: bool
-) -> tuple[str, str]:
-    """Return the (BlockSci, unified-report) commands the parallel pair submits."""
-    with (
-        mock.patch(
-            "client.wrapper.compose_env",
-            return_value={
-                "EMULATION_LOGS_DIR": str(run_dir.parent),
-                "EXPORTERS_DIR": str(tmp_path / "checkout-exporters"),
-            },
-        ),
-        mock.patch(
-            "client.wrapper.stage_pbs_exporters",
-            return_value=run_dir / ".pipeline" / "exporters",
-        ),
-        mock.patch("client.wrapper.submit_blocksci_pbs") as submit_mock,
-        mock.patch("client.wrapper.wait_for_pbs_marker"),
-    ):
-        run_blocksci_pbs_stage(
-            args, run_dir, wait=False, include_report=include_report
-        )
-        blocksci_command = submit_mock.call_args.kwargs["command"]
-        submit_mock.reset_mock()
-        run_blocksci_export_pbs_stage(args, run_dir)
-        report_command = submit_mock.call_args.kwargs["command"]
-    return blocksci_command, report_command
-
-
-def _parallel_pbs_args(run_dir: Path, tmp_path: Path) -> Namespace:
-    return build_parser().parse_args(
-        [
-            "analyze",
-            "--engine",
-            "wasabi",
-            "--run-dir",
-            run_dir.name,
-            "--blocksciPbs",
-            "--pbs-bitcoin-datadir",
-            str(tmp_path / "bitcoin"),
-        ]
-    )
-
-
-def test_deferred_report_pbs_pair_agrees_on_the_analysis_artifact(
-    tmp_path: Path,
-) -> None:
-    """The BlockSci job must write the artifact the unified-report job reads.
-
-    With --parallel --blocksciPbs the report is deferred to its own PBS job,
-    which consumes blocksci_analysis.json instead of querying BlockSci. Nothing
-    else produces that file, so a BlockSci job that only parses leaves the
-    report job to die on a missing path.
-    """
-    run_dir = tmp_path / "runs" / "run-a"
-    run_dir.mkdir(parents=True)
-    args = _parallel_pbs_args(run_dir, tmp_path)
-
-    blocksci_command, report_command = _blocksci_pbs_commands(
-        args, run_dir, tmp_path, include_report=False
-    )
-
-    consumed = re.search(r"--blocksci-analysis (\S+)", report_command)
-    assert consumed is not None, report_command
-    produced_run_dir = re.search(
-        r"blocksci_export/analysis\.py --config \S+ --run-dir (\S+)", blocksci_command
-    )
-    assert produced_run_dir is not None, blocksci_command
-    assert consumed.group(1) == (
-        f"{produced_run_dir.group(1)}/{BLOCKSCI_ANALYSIS_DIR}/{ARTIFACT_NAME}"
-    )
-    assert "unified_report.py" not in blocksci_command
-
-
-def test_self_contained_blocksci_pbs_stage_skips_the_analysis_artifact(
-    tmp_path: Path,
-) -> None:
-    """Serial mode reports from the same job, so it must not export the artifact."""
-    run_dir = tmp_path / "runs" / "run-a"
-    run_dir.mkdir(parents=True)
-    args = _parallel_pbs_args(run_dir, tmp_path)
-
-    blocksci_command, _ = _blocksci_pbs_commands(
-        args, run_dir, tmp_path, include_report=True
-    )
-
-    assert "blocksci_export/analysis.py" not in blocksci_command
-    assert "unified_report.py" in blocksci_command
-
-
 def _kubectl_cmd(*parts: str) -> list[str]:
     return ["kubectl", "--kubeconfig", "/kube/config", *parts]
 
@@ -290,21 +161,17 @@ def _kubectl_cmd(*parts: str) -> list[str]:
 def test_pbs_from_s3_uses_a_run_specific_submission_lock(tmp_path: Path) -> None:
     args = Namespace(action="pbs-from-s3", run_id="run-1")
 
-    assert command_lock_path(args, tmp_path) == (
-        tmp_path / "run-1" / ".pbs-submit.lock"
-    )
+    assert command_lock_path(args, tmp_path) == (tmp_path / "run-1" / ".pbs-submit.lock")
 
 
 def test_pbs_from_s3_refuses_a_recorded_active_graph(tmp_path: Path) -> None:
     marker_dir = tmp_path / ".pbs"
     marker_dir.mkdir()
-    (marker_dir / "blocksci.jobid").write_text(
-        "blocksci.server\n", encoding="utf-8"
-    )
+    (marker_dir / "blocksci.jobid").write_text("blocksci.server\n", encoding="utf-8")
 
     with (
         mock.patch(
-            "client.wrapper.pbs_job_probe",
+            "coinjoin_pipeline.execution.locks.pbs_job_probe",
             return_value=lambda: "running",
         ),
         pytest.raises(RuntimeError, match="still active"),
@@ -336,24 +203,25 @@ def _full_run_s3_args(**overrides) -> Namespace:
 
 class FullRunS3OrchestrationTest(unittest.TestCase):
     def _patches(self):
-        return {
-            name: mock.patch(f"client.wrapper.{name}")
-            for name in (
-                "require_qsub",
-                "s3_access_preflight",
-                "ensure_empty_run_prefix",
-                "kubernetes_s3_auth_preflight",
-                "upload_exporters",
-                "run_kubernetes_s3_emulation",
-                "run_pbs_from_s3",
-                "wait_for_s3_marker",
-                "pbs_job_probe",
-                "kubernetes_job_probe",
-                "qdel_pbs_job",
-                "collect_s3_emulation_diagnostics",
-                "delete_s3_emulation_job",
-            )
+        workflow = "coinjoin_pipeline.execution.s3_workflow"
+        markers = "coinjoin_pipeline.execution.s3_markers"
+        wait_for_marker = mock.MagicMock()
+        targets = {
+            "require_qsub": f"{workflow}.require_qsub",
+            "stage_kubernetes_s3_run": f"{workflow}.stage_kubernetes_s3_run",
+            "run_kubernetes_s3_emulation": f"{workflow}.run_s3_kubernetes_emulation",
+            "run_pbs_from_s3": f"{workflow}.submit_s3_pbs_graph",
+            "kubernetes_job_probe": f"{workflow}.kubernetes_job_probe",
+            "collect_s3_emulation_diagnostics": f"{workflow}.collect_s3_emulation_diagnostics",
+            "delete_s3_emulation_job": f"{workflow}.delete_s3_emulation_job",
+            "pbs_job_probe": f"{markers}.pbs_job_probe",
+            "qdel_pbs_job": f"{markers}.qdel_pbs_job",
         }
+        patches = {name: mock.patch(target) for name, target in targets.items()}
+        # Emulation and PBS stage waits share one marker transport.
+        patches["wait_for_s3_marker"] = mock.patch(f"{workflow}.wait_for_s3_marker", wait_for_marker)
+        patches["wait_for_s3_marker_in_markers"] = mock.patch(f"{markers}.wait_for_s3_marker", wait_for_marker)
+        return patches
 
     def test_full_run_s3_waits_between_stages_in_order(self):
         patches = self._patches()
@@ -416,9 +284,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
             unified_report="report.job",
         )
         calls: list[str] = []
-        mocks["wait_for_s3_marker"].side_effect = (
-            lambda stage, *a, **k: calls.append(stage)
-        )
+        mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(stage)
 
         run_full_run_s3(_full_run_s3_args(mappingsPbs=True))
 
@@ -552,69 +418,6 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
 
 
 class WrapperExportTest(unittest.TestCase):
-    def test_pbs_from_s3_submits_parallel_analyzers_then_report(self):
-        # run_pbs_from_s3 takes <submission-dir>/.pbs-submit.lock and persists
-        # job IDs there; keep both out of the real runs root.
-        submission_dir = tempfile.TemporaryDirectory()
-        self.addCleanup(submission_dir.cleanup)
-        args = Namespace(
-            pbs_submission_dir=Path(submission_dir.name),
-            artifact_uri="s3://bucket/runs",
-            run_id="run-1",
-            s3_endpoint_url="https://s3.cl4.du.cesnet.cz",
-            s3_credentials_file="/storage/user/.aws/credentials",
-            s3_profile="coinjoin",
-            dry_run=False,
-            analysisPbs=True,
-            blocksciPbs=True,
-            pbs_image=None,
-            pbs_coinjoin_analysis_image=None,
-            pbs_blocksci_image=None,
-            pbs_ncpus=None,
-            pbs_mem=None,
-            pbs_scratch=None,
-            pbs_walltime=None,
-            coinjoin_type="wasabi2",
-            min_input_count=1,
-            joinmarket_detector="definite",
-            joinmarket_min_base_fee=5000,
-            joinmarket_percentage_fee=0.00004,
-            joinmarket_max_depth=200000,
-        )
-        with (
-            # The run prefix check before submission is covered in test_s3_backend.
-            mock.patch("client.wrapper.ensure_staged_exporters"),
-            mock.patch("client.wrapper.clear_s3_stage_markers"),
-            mock.patch(
-                "client.wrapper.submit_coinjoin_analysis_s3_pbs",
-                return_value="analysis.job",
-            ),
-            mock.patch(
-                "client.wrapper.submit_blocksci_s3_pbs",
-                return_value="blocksci.job",
-            ) as blocksci,
-            mock.patch(
-                "client.wrapper.submit_unified_report_s3_pbs",
-                return_value="report.job",
-            ) as report,
-        ):
-            job_ids = run_pbs_from_s3(args)
-        self.assertEqual(
-            job_ids,
-            S3PBSJobs(
-                coinjoin_analysis="analysis.job",
-                blocksci_work="blocksci.job",
-                unified_report="report.job",
-            ),
-        )
-        self.assertNotIn("dependency_job_id", blocksci.call_args.kwargs)
-        self.assertEqual(
-            report.call_args.kwargs["dependency_job_ids"],
-            ("analysis.job", "blocksci.job"),
-        )
-        self.assertEqual(report.call_args.kwargs["ncpus"], 2)
-        self.assertEqual(report.call_args.kwargs["mem"], "8gb")
-
     def test_stage_blocksci_script_preserves_script_in_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -654,7 +457,7 @@ class WrapperExportTest(unittest.TestCase):
     def test_pipeline_stage_announces_start_and_done(self):
         stream = io.StringIO()
 
-        with mock.patch("client.wrapper.sys.stdout", stream):
+        with mock.patch("coinjoin_pipeline.execution.pipeline_logging.sys.stdout", stream):
             with pipeline_stage("Example stage"):
                 pass
 
@@ -663,13 +466,18 @@ class WrapperExportTest(unittest.TestCase):
         self.assertIn("[pipeline] DONE: Example stage", output)
         self.assertIn(("=" * 88) + "\n" + ("=" * 88) + "\n" + ("=" * 88), output)
 
-    def test_captured_pipeline_stage_writes_merged_run_log_and_keeps_terminal_output(self):
+    def test_captured_pipeline_stage_writes_merged_run_log_and_keeps_terminal_output(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             run_dir = root / "run-a"
             terminal = io.StringIO()
 
-            with mock.patch("client.wrapper.sys.stdout", terminal), mock.patch("client.wrapper.sys.stderr", terminal):
+            with (
+                mock.patch("coinjoin_pipeline.execution.pipeline_logging.sys.stdout", terminal),
+                mock.patch("coinjoin_pipeline.execution.pipeline_logging.sys.stderr", terminal),
+            ):
                 with captured_pipeline_stage(root, "BlockSci analysis", run_dir) as stage_log:
                     print("standard output")
                     print("standard error", file=sys.stderr)
@@ -691,7 +499,10 @@ class WrapperExportTest(unittest.TestCase):
 
             failed_logs = list((root / "_failed").glob("*.log"))
             self.assertEqual(len(failed_logs), 1)
-            self.assertIn("[pipeline] FAILED: Docker emulation", failed_logs[0].read_text(encoding="utf-8"))
+            self.assertIn(
+                "[pipeline] FAILED: Docker emulation",
+                failed_logs[0].read_text(encoding="utf-8"),
+            )
 
     def test_completed_pending_emulation_log_can_be_relocated_to_its_new_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -711,57 +522,17 @@ class WrapperExportTest(unittest.TestCase):
             root = Path(tmpdir)
             run_dir = root / "run-a"
             with captured_pipeline_stage(root, "Export", run_dir) as stage_log:
-                run_command([
-                    sys.executable,
-                    "-c",
-                    "import sys; print('child stdout'); print('child stderr', file=sys.stderr)",
-                ])
+                run_command(
+                    [
+                        sys.executable,
+                        "-c",
+                        "import sys; print('child stdout'); print('child stderr', file=sys.stderr)",
+                    ]
+                )
 
             log_text = stage_log.path.read_text(encoding="utf-8")
             self.assertIn("child stdout", log_text)
             self.assertIn("child stderr", log_text)
-
-    def test_normalize_argv_defaults_to_full_run(self):
-        self.assertEqual(
-            normalize_argv(["--scenario", "overactive-local.json"]),
-            ["full-run", "--scenario", "overactive-local.json"],
-        )
-
-    def test_normalize_argv_defaults_to_full_run_with_parallel(self):
-        self.assertEqual(
-            normalize_argv(["--parallel", "--engine", "joinmarket"]),
-            ["full-run", "--parallel", "--engine", "joinmarket"],
-        )
-
-    def test_full_run_accepts_parallel_flag(self):
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(PROJECT_ROOT / "client" / "wrapper.py"),
-                "full-run",
-                "--engine",
-                "joinmarket",
-                "--parallel",
-                "--dry-run",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_min_input_count_rejects_zero_negative_and_non_numeric_values(self):
-        parser = build_parser()
-        for value in ("0", "-1", "not-a-number"):
-            with self.subTest(value=value), self.assertRaises(SystemExit):
-                parser.parse_args([
-                    "full-run",
-                    "--engine",
-                    "wasabi",
-                    "--min-input-count",
-                    value,
-                ])
 
     def test_blocksci_docker_stage_is_independent_and_can_defer_report(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -778,7 +549,7 @@ class WrapperExportTest(unittest.TestCase):
                 joinmarket_percentage_fee=0.00004,
                 joinmarket_max_depth=200000,
             )
-            with mock.patch("client.wrapper.run_command") as run_mock:
+            with mock.patch("coinjoin_pipeline.execution.containers.run_command") as run_mock:
                 run_blocksci_docker_stage(args, run_dir, include_report=False)
 
             command = run_mock.call_args.args[0]
@@ -786,302 +557,14 @@ class WrapperExportTest(unittest.TestCase):
             self.assertEqual(command[-1], "blocksci")
             self.assertEqual(run_mock.call_args.kwargs["env"]["BLOCKSCI_EXPORT_REPORT"], "false")
 
-    def test_parallel_analysis_supports_all_docker_pbs_combinations(self):
-        combinations = ((False, False), (True, True), (False, True), (True, False))
-        for analysis_pbs, blocksci_pbs in combinations:
-            with self.subTest(analysis_pbs=analysis_pbs, blocksci_pbs=blocksci_pbs):
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    logs_root = Path(tmpdir)
-                    run_dir = logs_root / "run-a"
-                    run_dir.mkdir()
-                    args = Namespace(
-                        analysisPbs=analysis_pbs,
-                        blocksciPbs=blocksci_pbs,
-                    )
-                    with mock.patch("client.wrapper.run_coinjoin_analysis_pbs_stage") as coinjoin_pbs_mock, \
-                         mock.patch("client.wrapper.run_blocksci_pbs_stage") as blocksci_pbs_mock, \
-                         mock.patch("client.wrapper.wait_for_pbs_marker"), \
-                         mock.patch("client.wrapper.run_coinjoin_analysis_docker_stage") as coinjoin_docker_mock, \
-                         mock.patch("client.wrapper.run_blocksci_docker_stage") as blocksci_docker_mock, \
-                         mock.patch("client.wrapper.run_blocksci_export_pbs_stage") as pbs_export_mock, \
-                         mock.patch("client.wrapper.run_export_only") as docker_export_mock:
-                        run_parallel_analysis(args, run_dir, logs_root)
-
-                    self.assertEqual(coinjoin_pbs_mock.called, analysis_pbs)
-                    self.assertEqual(coinjoin_docker_mock.called, not analysis_pbs)
-                    self.assertEqual(blocksci_pbs_mock.called, blocksci_pbs)
-                    self.assertEqual(blocksci_docker_mock.called, not blocksci_pbs)
-                    self.assertEqual(pbs_export_mock.called, blocksci_pbs)
-                    self.assertEqual(docker_export_mock.called, not blocksci_pbs)
-
-    def test_parallel_analysis_waits_for_both_and_skips_export_on_failure(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            logs_root = Path(tmpdir)
-            run_dir = logs_root / "run-a"
-            run_dir.mkdir()
-            args = Namespace(analysisPbs=False, blocksciPbs=False)
-            completed = []
-
-            def fail_coinjoin(_run_id):
-                completed.append("coinjoin")
-                raise subprocess.CalledProcessError(7, ["coinjoin_analysis"])
-
-            def finish_blocksci(_args, _run_dir, *, include_report):
-                self.assertFalse(include_report)
-                completed.append("blocksci")
-
-            with mock.patch("client.wrapper.run_coinjoin_analysis_docker_stage", side_effect=fail_coinjoin), \
-                 mock.patch("client.wrapper.run_blocksci_docker_stage", side_effect=finish_blocksci), \
-                 mock.patch("client.wrapper.run_export_only") as export_mock:
-                with self.assertRaisesRegex(RuntimeError, "coinjoin-analysis"):
-                    run_parallel_analysis(args, run_dir, logs_root)
-
-            self.assertCountEqual(completed, ["coinjoin", "blocksci"])
-            export_mock.assert_not_called()
-
-    def test_parallel_analysis_runs_mappings_after_baseline_before_export(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            logs_root = Path(tmpdir)
-            run_dir = logs_root / "run-a"
-            run_dir.mkdir()
-            args = Namespace(analysisPbs=False, blocksciPbs=False, mappingsPbs=True)
-            events = []
-            with mock.patch(
-                "client.wrapper.run_coinjoin_analysis_docker_stage",
-                side_effect=lambda _run_id: events.append("baseline"),
-            ), mock.patch(
-                "client.wrapper.run_blocksci_docker_stage",
-                side_effect=lambda *_args, **_kwargs: events.append("blocksci"),
-            ), mock.patch(
-                "client.wrapper.run_mappings_pbs_stage",
-                side_effect=lambda *_args, **_kwargs: events.append("mappings"),
-            ), mock.patch(
-                "client.wrapper.wait_for_pbs_marker",
-            ), mock.patch(
-                "client.wrapper.run_export_only",
-                side_effect=lambda *_args: events.append("export"),
-            ):
-                run_parallel_analysis(args, run_dir, logs_root)
-
-            self.assertLess(events.index("baseline"), events.index("mappings"))
-            self.assertLess(events.index("mappings"), events.index("export"))
-
-    def test_normalize_argv_keeps_explicit_action(self):
-        self.assertEqual(
-            normalize_argv(["emulate", "--scenario", "overactive-local.json"]),
-            ["emulate", "--scenario", "overactive-local.json"],
-        )
-
-    def test_normalize_argv_keeps_help_without_default_action(self):
-        self.assertEqual(normalize_argv(["--help"]), ["--help"])
-
-    def test_wrapper_help_exits_successfully(self):
-        result = subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"), "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        self.assertEqual(result.returncode, 0)
-        self.assertIn("full-run", result.stdout)
-
-    def test_full_run_requires_explicit_engine(self):
-        result = subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"), "full-run"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("--engine", result.stderr)
-
-    def test_mappings_pbs_is_rejected_for_unrelated_action(self):
-        result = subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"), "analyze",
-             "--engine", "wasabi", "--run-dir", "run-a", "--mappingsPbs"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("pbs-from-s3", result.stderr)
-
-    def test_mappings_pbs_requires_wasabi2_coinjoin_type(self):
-        result = subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"), "mappings",
-             "--engine", "wasabi", "--coinjoin-type", "joinmarket", "--run-dir", "run-a",
-             "--mappingsPbs", "--dry-run"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("requires --coinjoin-type wasabi2", result.stderr)
-
-    def test_dry_run_does_not_start_pipeline(self):
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(PROJECT_ROOT / "client" / "wrapper.py"),
-                "full-run",
-                "--engine",
-                "joinmarket",
-                "--dry-run",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        self.assertEqual(result.returncode, 0)
-        self.assertIn("[dry-run] action: full-run", result.stdout)
-        self.assertIn("No containers", result.stdout)
-
-    def test_pbs_from_s3_requires_transport_and_stage_options(self):
-        result = subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"),
-             "pbs-from-s3", "--engine", "wasabi", "--dry-run"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("requires --artifact-uri", result.stderr)
-
-    def test_full_run_s3_requires_kubernetes_driver(self):
-        result = subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"),
-             "full-run", "--engine", "wasabi", "--artifact-backend", "s3", "--dry-run"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("full-run --artifact-backend s3 requires --driver kubernetes", result.stderr)
-
-    def test_full_run_s3_requires_transport_and_stage_options(self):
-        result = subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"),
-             "full-run", "--engine", "wasabi", "--driver", "kubernetes",
-             "--artifact-backend", "s3", "--dry-run"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("full-run --artifact-backend s3 requires --artifact-uri", result.stderr)
-
-    def _full_run_s3_argv(self, *extra: str) -> list[str]:
-        return [
-            sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"),
-            "full-run", "--engine", "wasabi", "--driver", "kubernetes",
-            "--artifact-backend", "s3",
-            "--artifact-uri", "s3://bucket/runs",
-            "--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz",
-            "--s3-secret-name", "coinjoin-s3",
-            "--s3-credentials-file", "/storage/user/.aws/credentials",
-            "--s3-profile", "coinjoin",
-            "--run-id", "run-1",
-            "--reuse-namespace",
-            "--analysisPbs", "--blocksciPbs",
-            *extra,
-        ]
-
-    def test_full_run_s3_rejects_parallel(self):
-        result = subprocess.run(
-            self._full_run_s3_argv("--parallel", "--dry-run"),
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("does not support --parallel", result.stderr)
-
-    def test_full_run_s3_rejects_shared_storage_flags(self):
-        result = subprocess.run(
-            self._full_run_s3_argv("--copy-to-host", "--dry-run"),
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("does not support", result.stderr)
-
-    def test_full_run_s3_requires_both_analysis_stages(self):
-        arguments = self._full_run_s3_argv("--dry-run")
-        arguments.remove("--blocksciPbs")
-        result = subprocess.run(
-            arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("requires both --analysisPbs and --blocksciPbs", result.stderr)
-
-    def test_full_run_s3_requires_precreated_namespace(self):
-        arguments = self._full_run_s3_argv("--dry-run")
-        arguments.remove("--reuse-namespace")
-        result = subprocess.run(
-            arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("requires --reuse-namespace", result.stderr)
-
-    def test_full_run_s3_dry_run_renders_all_stages(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            scenarios_dir = Path(tmpdir) / "scenarios"
-            scenarios_dir.mkdir()
-            (scenarios_dir / "scenario.json").write_text("{}\n", encoding="utf-8")
-            env = dict(os.environ)
-            env["SCENARIOS_DIR"] = str(scenarios_dir)
-            env["EMULATION_LOGS_DIR"] = str(Path(tmpdir) / "emulation_logs")
-            result = subprocess.run(
-                self._full_run_s3_argv(
-                    "--scenario", "scenario.json",
-                    "--mappingsPbs",
-                    "--pbs-unified-report-ncpus", "1",
-                    "--pbs-unified-report-mem", "2gb",
-                    "--pbs-unified-report-scratch", "3gb",
-                    "--pbs-unified-report-walltime", "00:15:00",
-                    "--dry-run",
-                ),
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
-            )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Kubernetes S3-compatible resources", result.stdout)
-        self.assertIn("PBS S3-compatible script for coinjoin-analysis", result.stdout)
-        self.assertIn("PBS S3-compatible script for blocksci", result.stdout)
-        self.assertIn("PBS S3-compatible script for coinjoin-mappings", result.stdout)
-        self.assertIn("PBS S3-compatible script for unified-report", result.stdout)
-        self.assertIn("#PBS -l select=1:ncpus=1:mem=2gb:scratch_local=3gb", result.stdout)
-        self.assertIn("#PBS -l walltime=00:15:00", result.stdout)
-        self.assertIn("Would wait for s3://bucket/runs/run-1/.k8s/upload.done", result.stdout)
-        self.assertIn("Would wait for s3://bucket/runs/run-1/.pbs/coinjoin-analysis.done", result.stdout)
-        self.assertIn("Would wait for s3://bucket/runs/run-1/.pbs/blocksci.done", result.stdout)
-        self.assertIn("Would wait for s3://bucket/runs/run-1/.pbs/coinjoin-mappings.done", result.stdout)
-        self.assertIn("Would wait for s3://bucket/runs/run-1/.pbs/unified-report.done", result.stdout)
-
-    def test_kubernetes_s3_rejects_shared_storage_flags(self):
-        result = subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"), "emulate",
-             "--engine", "wasabi", "--driver", "kubernetes", "--artifact-backend", "s3",
-             "--artifact-uri", "s3://bucket/runs", "--s3-endpoint-url", "https://s3.cl4.du.cesnet.cz",
-             "--s3-secret-name", "coinjoin-s3", "--run-id", "run-1",
-             # Otherwise the missing frontend credentials are rejected first and
-             # this stops testing the flag incompatibility it is named after.
-             "--s3-credentials-file", "/storage/user/.aws/credentials",
-             "--s3-profile", "coinjoin",
-             "--reuse-namespace",
-             "--copy-to-host", "--dry-run"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("does not support", result.stderr)
-
-    def test_clean_requires_explicit_confirmation(self):
-        result = subprocess.run(
-            [sys.executable, str(PROJECT_ROOT / "client" / "wrapper.py"), "clean"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("--yes", result.stderr)
-
     def test_container_runtime_defaults_to_docker(self):
         self.assertEqual(container_runtime({}), "docker")
-        self.assertEqual(container_command({}), ["docker"])
         self.assertEqual(compose_command({}), ["docker", "compose"])
 
     def test_container_runtime_supports_podman(self):
         env = {"CONTAINER_RUNTIME": "podman"}
 
         self.assertEqual(container_runtime(env), "podman")
-        self.assertEqual(container_command(env), ["podman"])
         self.assertEqual(compose_command(env), ["podman", "compose"])
 
     def test_compose_command_can_be_overridden(self):
@@ -1096,7 +579,7 @@ class WrapperExportTest(unittest.TestCase):
         self.assertEqual(compose_env()["BLOCKSCI_MIN_INPUT_COUNT"], "default")
 
     def test_compose_env_sets_default_run_timezone(self):
-        self.assertEqual(compose_env()["RUN_TIMEZONE"], DEFAULT_RUN_TIMEZONE)
+        self.assertEqual(compose_env()["RUN_TIMEZONE"], "Europe/Prague")
 
     def test_compose_env_isolates_the_checkout_compose_project_and_notebook_port(self):
         env = compose_env()
@@ -1106,11 +589,7 @@ class WrapperExportTest(unittest.TestCase):
         self.assertLessEqual(int(env["BLOCKSCI_HOST_PORT"]), 29999)
 
     def test_compose_env_allows_run_timezone_override(self):
-        self.assertEqual(compose_env(run_timezone_name="UTC")["RUN_TIMEZONE"], "UTC")
-
-    def test_run_timezone_rejects_unknown_iana_name(self):
-        with self.assertRaises(ArgumentTypeError):
-            run_timezone("not/a-timezone")
+        self.assertEqual(compose_env(Namespace(run_timezone="UTC"))["RUN_TIMEZONE"], "UTC")
 
     def test_compose_env_targets_active_run_for_coinjoin_analysis(self):
         env = compose_env(active_run_id="run-a")
@@ -1166,9 +645,9 @@ class WrapperExportTest(unittest.TestCase):
         command = export_command("run-a", env)
 
         self.assertIn("--min-input-count 1", command)
-        self.assertIn("--markdown", command)
+        self.assertIn("/mnt/exporters/worker.py report", command)
         self.assertIn("--joinmarket-detector", command)
-        self.assertIn(f"{RUNS_ROOT_CONTAINER}/run-a/blocksci_data/config.json", command)
+        self.assertIn(f"--run-dir {RUNS_ROOT_CONTAINER}/run-a", command)
         self.assertIn(f"{RUNS_ROOT_CONTAINER}/run-a", command)
 
     def test_export_command_does_not_accept_test_value_environment(self):
@@ -1199,7 +678,7 @@ class WrapperExportTest(unittest.TestCase):
             (parsed / "block.dat").write_bytes(b"chain")
             parsed.parent.chmod(0o000)
             try:
-                self.assertTrue(blocksci_output_exists(run_dir))
+                self.assertTrue(exists_or_unreadable(parsed / "block.dat"))
             finally:
                 parsed.parent.chmod(0o700)
 
@@ -1209,7 +688,7 @@ class WrapperExportTest(unittest.TestCase):
             (run_dir / "blocksci_data").mkdir(parents=True)
             (run_dir / "blocksci_data" / "config.json").write_text("{}", encoding="utf-8")
 
-            self.assertFalse(blocksci_output_exists(run_dir))
+            self.assertFalse(exists_or_unreadable(run_dir / "blocksci_data" / "parsed" / "chain" / "block.dat"))
 
     def test_export_preflight_all_ready(self):
         error = export_preflight_error(
@@ -1228,9 +707,9 @@ class WrapperExportTest(unittest.TestCase):
         )
 
         assert error is not None
-        self.assertIn("CoinJoin output exists", error)
-        self.assertIn("BlockSci run output is missing", error)
-        self.assertIn("python3 client/wrapper.py analyze --run-dir 2026-05-24_16-58_default", error)
+        self.assertIn("blocksci-analysis_data/blocksci_analysis.json", error)
+        self.assertNotIn("coinjoin_tx_info.json", error)
+        self.assertIn("cjp analyze --run-dir 2026-05-24_16-58_default", error)
 
     def test_export_preflight_blocksci_only(self):
         error = export_preflight_error(
@@ -1240,10 +719,10 @@ class WrapperExportTest(unittest.TestCase):
         )
 
         assert error is not None
-        self.assertIn("BlockSci run output exists", error)
-        self.assertIn("CoinJoin output is missing", error)
+        self.assertIn("coinjoin-analysis_data/coinjoin_tx_info.json", error)
+        self.assertNotIn("blocksci_analysis.json", error)
         self.assertIn(
-            "python3 client/wrapper.py coinjoin-analysis --run-dir 2026-05-24_16-58_default",
+            "cjp coinjoin-analysis --run-dir 2026-05-24_16-58_default",
             error,
         )
 
@@ -1255,24 +734,9 @@ class WrapperExportTest(unittest.TestCase):
         )
 
         assert error is not None
-        self.assertIn("neither prerequisite is ready", error)
-        self.assertIn("Missing CoinJoin output", error)
-        self.assertIn("Missing BlockSci run output", error)
-
-    def test_blocksci_output_requires_run_local_parsed_chain(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            run_dir = Path(tmpdir) / "run-a"
-            blocksci_data = run_dir / "blocksci_data"
-            blocksci_data.mkdir(parents=True)
-            (blocksci_data / "config.json").write_text("{}", encoding="utf-8")
-
-            self.assertFalse(blocksci_output_exists(run_dir))
-
-            parsed_chain = blocksci_data / "parsed" / "chain"
-            parsed_chain.mkdir(parents=True)
-            (parsed_chain / "block.dat").write_bytes(b"parsed chain")
-
-            self.assertTrue(blocksci_output_exists(run_dir))
+        self.assertIn("missing analytical input", error)
+        self.assertIn("coinjoin-analysis_data/coinjoin_tx_info.json", error)
+        self.assertIn("blocksci-analysis_data/blocksci_analysis.json", error)
 
     def test_run_dirs_only_includes_grouped_runs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1306,7 +770,7 @@ class WrapperExportTest(unittest.TestCase):
         self.assertEqual(found, {"grouped-run"})
 
     def test_detect_active_run_requires_pinned_run_dir(self):
-        from client.wrapper import detect_active_run
+        from coinjoin_pipeline.execution.containers import detect_active_run
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1326,7 +790,7 @@ class WrapperExportTest(unittest.TestCase):
                 self.assertEqual(detect_active_run(root, set()), pinned.resolve())
 
     def test_detect_active_run_falls_back_without_pinned_id(self):
-        from client.wrapper import detect_active_run
+        from coinjoin_pipeline.execution.containers import detect_active_run
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1341,19 +805,22 @@ class WrapperExportTest(unittest.TestCase):
     def test_run_coinjoin_analysis_targets_requested_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            host_client_dir = root / "client"
+            checkout_dir = root / "checkout"
             run_dir = root / "emulation_logs" / "run-a"
-            host_client_dir.mkdir()
+            checkout_dir.mkdir()
             run_dir.mkdir(parents=True)
             (run_dir / "coinjoin_emulator_data" / "data").mkdir(parents=True)
             (run_dir / "coinjoin_emulator_data" / "scenario.json").write_text("{}", encoding="utf-8")
 
             env = {
-                "HOST_CLIENT_DIR": str(host_client_dir),
+                "SCENARIOS_DIR": str(checkout_dir / "scenarios"),
+                "EMULATION_LOGS_DIR": str(root / "emulation_logs"),
                 "CONTAINER_RUNTIME": "docker",
             }
-            with mock.patch.dict(os.environ, env, clear=False), \
-                mock.patch("client.wrapper.run_command") as run_mock:
+            with (
+                mock.patch.dict(os.environ, env, clear=False),
+                mock.patch("coinjoin_pipeline.execution.containers.run_command") as run_mock,
+            ):
                 run_coinjoin_analysis("run-a")
 
             run_env = run_mock.call_args.kwargs["env"]
@@ -1378,31 +845,27 @@ class WrapperExportTest(unittest.TestCase):
     def test_run_coinjoin_analysis_all_runs_processes_each_grouped_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            host_client_dir = root / "client"
-            host_client_dir.mkdir()
+            checkout_dir = root / "checkout"
+            checkout_dir.mkdir()
             for run_id in ("run-a", "run-b"):
                 run_dir = root / "emulation_logs" / run_id / "coinjoin_emulator_data"
                 (run_dir / "data").mkdir(parents=True)
                 (run_dir / "scenario.json").write_text("{}", encoding="utf-8")
 
             env = {
-                "HOST_CLIENT_DIR": str(host_client_dir),
+                "SCENARIOS_DIR": str(checkout_dir / "scenarios"),
+                "EMULATION_LOGS_DIR": str(root / "emulation_logs"),
                 "CONTAINER_RUNTIME": "docker",
             }
-            with mock.patch.dict(os.environ, env, clear=False), \
-                mock.patch("client.wrapper.run_command") as run_mock:
+            with (
+                mock.patch.dict(os.environ, env, clear=False),
+                mock.patch("coinjoin_pipeline.execution.containers.run_command") as run_mock,
+            ):
                 run_coinjoin_analysis(all_runs=True)
 
-            compose_calls = [
-                call
-                for call in run_mock.call_args_list
-                if "coinjoin_analysis" in call.args[0]
-            ]
+            compose_calls = [call for call in run_mock.call_args_list if "coinjoin_analysis" in call.args[0]]
             self.assertEqual(len(compose_calls), 2)
-            analysis_sources = {
-                call.kwargs["env"][COINJOIN_ANALYSIS_SOURCE_PATH_ENV]
-                for call in compose_calls
-            }
+            analysis_sources = {call.kwargs["env"][COINJOIN_ANALYSIS_SOURCE_PATH_ENV] for call in compose_calls}
             self.assertEqual(
                 analysis_sources,
                 {
@@ -1414,17 +877,23 @@ class WrapperExportTest(unittest.TestCase):
     def test_run_coinjoin_analysis_analyze_only_sets_compose_action(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            host_client_dir = root / "client"
+            checkout_dir = root / "checkout"
             run_dir = root / "emulation_logs" / "run-a"
-            host_client_dir.mkdir()
+            checkout_dir.mkdir()
             (run_dir / "coinjoin_emulator_data" / "data").mkdir(parents=True)
             analysis_dir = run_dir / "coinjoin-analysis_data"
             analysis_dir.mkdir()
             (analysis_dir / "coinjoin_tx_info.json").write_text("{}", encoding="utf-8")
 
-            env = {"HOST_CLIENT_DIR": str(host_client_dir), "CONTAINER_RUNTIME": "docker"}
-            with mock.patch.dict(os.environ, env, clear=False), \
-                mock.patch("client.wrapper.run_command") as run_mock:
+            env = {
+                "SCENARIOS_DIR": str(checkout_dir / "scenarios"),
+                "EMULATION_LOGS_DIR": str(root / "emulation_logs"),
+                "CONTAINER_RUNTIME": "docker",
+            }
+            with (
+                mock.patch.dict(os.environ, env, clear=False),
+                mock.patch("coinjoin_pipeline.execution.containers.run_command") as run_mock,
+            ):
                 run_coinjoin_analysis("run-a", analysis_action="analyze_only")
 
             self.assertEqual(
@@ -1435,16 +904,22 @@ class WrapperExportTest(unittest.TestCase):
     def test_run_coinjoin_analysis_analyze_only_requires_existing_baseline(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            host_client_dir = root / "client"
+            checkout_dir = root / "checkout"
             run_dir = root / "emulation_logs" / "run-a"
-            host_client_dir.mkdir()
+            checkout_dir.mkdir()
             (run_dir / "coinjoin_emulator_data" / "data").mkdir(parents=True)
             (run_dir / "coinjoin_emulator_data" / "scenario.json").write_text("{}", encoding="utf-8")
 
-            env = {"HOST_CLIENT_DIR": str(host_client_dir), "CONTAINER_RUNTIME": "docker"}
-            with mock.patch.dict(os.environ, env, clear=False), \
-                mock.patch("client.wrapper.run_command") as run_mock, \
-                self.assertRaises(SystemExit) as raised:
+            env = {
+                "SCENARIOS_DIR": str(checkout_dir / "scenarios"),
+                "EMULATION_LOGS_DIR": str(root / "emulation_logs"),
+                "CONTAINER_RUNTIME": "docker",
+            }
+            with (
+                mock.patch.dict(os.environ, env, clear=False),
+                mock.patch("coinjoin_pipeline.execution.containers.run_command") as run_mock,
+                self.assertRaises(SystemExit) as raised,
+            ):
                 run_coinjoin_analysis("run-a", analysis_action="analyze_only")
 
             self.assertEqual(raised.exception.code, 2)
@@ -1452,9 +927,8 @@ class WrapperExportTest(unittest.TestCase):
 
     def test_kubernetes_emulator_command_places_driver_before_subcommand(self):
         command = kubernetes_emulator_command(
-            scenario="/app/scenarios/overactive-local.json",
-            namespace="coinjoin-test",
-            image_prefix="ghcr.io/test/",
+            Namespace(namespace="coinjoin-test", image_prefix="ghcr.io/test/"),
+            "/app/scenarios/overactive-local.json",
             btc_data_path="/btc-data/custom",
         )
 
@@ -1486,17 +960,18 @@ class WrapperExportTest(unittest.TestCase):
 
     def test_local_kubernetes_manager_does_not_request_in_cluster_mode(self):
         for engine in ("wasabi", "joinmarket"):
-            with self.subTest(engine=engine), mock.patch.dict(
-                os.environ, {"KUBERNETES_SERVICE_HOST": "10.43.0.1"}
+            with (
+                self.subTest(engine=engine),
+                mock.patch.dict(os.environ, {"KUBERNETES_SERVICE_HOST": "10.43.0.1"}),
             ):
-                command = kubernetes_emulator_command(scenario="/scenario.json", engine=engine)
+                command = kubernetes_emulator_command(Namespace(engine=engine), "/scenario.json")
             self.assertNotIn("--in-cluster", command)
 
     def test_kubernetes_emulator_command_can_copy_btc_data_to_host(self):
         command = kubernetes_emulator_command(
-            scenario="/app/scenarios/overactive-local.json",
+            Namespace(copy_to_host=True),
+            "/app/scenarios/overactive-local.json",
             btc_data_path="/btc-data/custom",
-            copy_to_host=True,
         )
 
         self.assertIn("--download-btc-data", command)
@@ -1508,8 +983,8 @@ class WrapperExportTest(unittest.TestCase):
 
     def test_kubernetes_emulator_command_accepts_control_ip(self):
         command = kubernetes_emulator_command(
-            scenario="/app/scenarios/overactive-local.json",
-            engine="joinmarket",
+            Namespace(engine="joinmarket"),
+            "/app/scenarios/overactive-local.json",
             control_ip="172.17.0.1",
         )
 
@@ -1520,26 +995,20 @@ class WrapperExportTest(unittest.TestCase):
         self.assertNotIn("--joinmarket-descriptor-regtest-fallback", command)
 
     def test_kubernetes_emulator_command_omits_obsolete_fallback_for_wasabi(self):
-        command = kubernetes_emulator_command(
-            scenario="/app/scenarios/overactive-local.json",
-            engine="wasabi",
-        )
+        command = kubernetes_emulator_command(Namespace(engine="wasabi"), "/app/scenarios/overactive-local.json")
 
         self.assertNotIn("--joinmarket-descriptor-regtest-fallback", command)
 
     def test_kubernetes_emulator_command_can_reuse_namespace(self):
-        command = kubernetes_emulator_command(
-            scenario="/app/scenarios/overactive-local.json",
-            reuse_namespace=True,
-        )
+        command = kubernetes_emulator_command(Namespace(reuse_namespace=True), "/app/scenarios/overactive-local.json")
 
         self.assertEqual(command[-1], "--reuse-namespace")
 
     def test_kubernetes_emulator_command_can_request_local_build(self):
         command = kubernetes_emulator_command(
-            scenario="/app/scenarios/defaultJoinMarket.json",
-            engine="joinmarket",
-            coinjoin_infrastructure_local_build=True,
+            Namespace(engine="joinmarket"),
+            "/app/scenarios/defaultJoinMarket.json",
+            local_build=True,
         )
 
         self.assertIn("--coinjoin-infrastructure-local-build", command)
@@ -1549,9 +1018,7 @@ class WrapperExportTest(unittest.TestCase):
 
     def test_kubernetes_emulator_command_passes_btc_node_image_override(self):
         with mock.patch.dict(os.environ, {"COINJOIN_BTC_NODE_IMAGE": "btc-node:test"}, clear=False):
-            command = kubernetes_emulator_command(
-                scenario="/app/scenarios/overactive-local.json",
-            )
+            command = kubernetes_emulator_command(Namespace(), "/app/scenarios/overactive-local.json")
 
         self.assertEqual(command[command.index("--btc-node-image") + 1], "btc-node:test")
 
@@ -1562,7 +1029,10 @@ class WrapperExportTest(unittest.TestCase):
             calls.append(command)
             return subprocess.CompletedProcess(command, 0, "yes\n")
 
-        with mock.patch("client.kubernetes.subprocess.run", side_effect=fake_run):
+        with mock.patch(
+            "coinjoin_pipeline.execution.kubernetes.subprocess.run",
+            side_effect=fake_run,
+        ):
             kubernetes_auth_preflight(Path("/kube/config"), "coinjoin-test", reuse_namespace=False)
 
         self.assertEqual(
@@ -1570,9 +1040,23 @@ class WrapperExportTest(unittest.TestCase):
             [
                 _kubectl_cmd("get", "--raw=/version"),
                 _kubectl_cmd("auth", "can-i", "create", "pods", "--namespace", "coinjoin-test"),
-                _kubectl_cmd("auth", "can-i", "create", "services", "--namespace", "coinjoin-test"),
+                _kubectl_cmd(
+                    "auth",
+                    "can-i",
+                    "create",
+                    "services",
+                    "--namespace",
+                    "coinjoin-test",
+                ),
                 _kubectl_cmd("auth", "can-i", "delete", "pods", "--namespace", "coinjoin-test"),
-                _kubectl_cmd("auth", "can-i", "delete", "services", "--namespace", "coinjoin-test"),
+                _kubectl_cmd(
+                    "auth",
+                    "can-i",
+                    "delete",
+                    "services",
+                    "--namespace",
+                    "coinjoin-test",
+                ),
                 _kubectl_cmd("auth", "can-i", "create", "namespaces"),
                 _kubectl_cmd("auth", "can-i", "delete", "namespaces"),
             ],
@@ -1585,7 +1069,10 @@ class WrapperExportTest(unittest.TestCase):
             calls.append(command)
             return subprocess.CompletedProcess(command, 0, "yes\n")
 
-        with mock.patch("client.kubernetes.subprocess.run", side_effect=fake_run):
+        with mock.patch(
+            "coinjoin_pipeline.execution.kubernetes.subprocess.run",
+            side_effect=fake_run,
+        ):
             kubernetes_auth_preflight(Path("/kube/config"), "coinjoin-test", reuse_namespace=True)
 
         self.assertEqual(
@@ -1593,14 +1080,35 @@ class WrapperExportTest(unittest.TestCase):
             [
                 _kubectl_cmd("get", "--raw=/version"),
                 _kubectl_cmd("auth", "can-i", "create", "pods", "--namespace", "coinjoin-test"),
-                _kubectl_cmd("auth", "can-i", "create", "services", "--namespace", "coinjoin-test"),
+                _kubectl_cmd(
+                    "auth",
+                    "can-i",
+                    "create",
+                    "services",
+                    "--namespace",
+                    "coinjoin-test",
+                ),
                 _kubectl_cmd("auth", "can-i", "delete", "pods", "--namespace", "coinjoin-test"),
-                _kubectl_cmd("auth", "can-i", "delete", "services", "--namespace", "coinjoin-test"),
+                _kubectl_cmd(
+                    "auth",
+                    "can-i",
+                    "delete",
+                    "services",
+                    "--namespace",
+                    "coinjoin-test",
+                ),
                 _kubectl_cmd("get", "namespace", "coinjoin-test"),
                 _kubectl_cmd("auth", "can-i", "list", "pods", "--namespace", "coinjoin-test"),
                 _kubectl_cmd("auth", "can-i", "list", "services", "--namespace", "coinjoin-test"),
                 _kubectl_cmd("auth", "can-i", "delete", "pods", "--namespace", "coinjoin-test"),
-                _kubectl_cmd("auth", "can-i", "delete", "services", "--namespace", "coinjoin-test"),
+                _kubectl_cmd(
+                    "auth",
+                    "can-i",
+                    "delete",
+                    "services",
+                    "--namespace",
+                    "coinjoin-test",
+                ),
             ],
         )
 
@@ -1612,11 +1120,12 @@ class WrapperExportTest(unittest.TestCase):
             output = "no\n" if command[3:7] == ["auth", "can-i", "create", "pods"] else "yes\n"
             return subprocess.CompletedProcess(command, 0, output)
 
-        with mock.patch("client.kubernetes.subprocess.run", side_effect=fake_run):
+        with mock.patch(
+            "coinjoin_pipeline.execution.kubernetes.subprocess.run",
+            side_effect=fake_run,
+        ):
             with self.assertRaises(SystemExit) as context:
-                kubernetes_auth_preflight(
-                    Path("/kube/config"), "coinjoin-test", reuse_namespace=False
-                )
+                kubernetes_auth_preflight(Path("/kube/config"), "coinjoin-test", reuse_namespace=False)
 
         self.assertEqual(context.exception.code, 2)
         self.assertEqual(
@@ -1646,15 +1155,18 @@ class WrapperExportTest(unittest.TestCase):
                 )
             return subprocess.CompletedProcess(command, 0, stdout="yes\n", stderr="")
 
-        with mock.patch("client.kubernetes.subprocess.run", side_effect=fake_run):
+        with mock.patch(
+            "coinjoin_pipeline.execution.kubernetes.subprocess.run",
+            side_effect=fake_run,
+        ):
             kubernetes_auth_preflight(Path("/kube/config"), "coinjoin-test", reuse_namespace=False)
 
     def test_compose_manager_command_sets_default_emulator_image_prefix(self):
         compose_yaml = (PROJECT_ROOT / "compose.yaml").read_text(encoding="utf-8")
 
         self.assertIn(
-            "python manager.py --engine ${COINJOIN_ENGINE:-wasabi} --run-timezone \\\"$${RUN_TIMEZONE}\\\" run "
-            "$${PIPELINE_RUN_ID:+--run-id \\\"$${PIPELINE_RUN_ID}\\\"} "
+            'python manager.py --engine ${COINJOIN_ENGINE:-wasabi} --run-timezone \\"$${RUN_TIMEZONE}\\" run '
+            '$${PIPELINE_RUN_ID:+--run-id \\"$${PIPELINE_RUN_ID}\\"} '
             "${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:+--coinjoin-infrastructure-local-build}",
             compose_yaml,
         )
@@ -1700,39 +1212,38 @@ class WrapperExportTest(unittest.TestCase):
         self.assertNotIn("COINJOIN_EMULATOR_JOINMARKET_CLIENT_SERVER_IMAGE", compose_yaml)
         self.assertNotIn("COINJOIN_EMULATOR_IRC_SERVER_IMAGE", compose_yaml)
 
-    def test_compose_caps_blocksci_to_the_exported_run_tip(self):
-        compose_yaml = (PROJECT_ROOT / "compose.yaml").read_text(encoding="utf-8")
-
-        self.assertIn("EXPORTED_MAX_BLOCK", compose_yaml)
-        self.assertIn('BLOCKSCI_MAX_BLOCK="$$((EXPORTED_MAX_BLOCK + 1))"', compose_yaml)
-        self.assertIn('--max-block "$$BLOCKSCI_MAX_BLOCK"', compose_yaml)
-
     def test_kubernetes_emulation_mounts_scenarios_at_container_scenario_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            host_client_dir = root / "client"
-            scenarios_dir = host_client_dir / "scenarios"
+            checkout_dir = root / "checkout"
+            scenarios_dir = checkout_dir / "scenarios"
             kubeconfig = root / "kubeconfig.yaml"
             scenarios_dir.mkdir(parents=True)
             kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
 
             env = {
-                "HOST_CLIENT_DIR": str(host_client_dir),
+                "SCENARIOS_DIR": str(checkout_dir / "scenarios"),
+                "EMULATION_LOGS_DIR": str(root / "logs"),
                 "CONTAINER_RUNTIME": "podman",
                 "COINJOIN_EMULATOR_IMAGE": "coinjoin-emulator:test",
                 "KUBERNETES_STORAGE_UID": "1234",
                 "KUBERNETES_STORAGE_GID": "5678",
                 "KUBERNETES_IMAGE_PULL_POLICY": "IfNotPresent",
             }
-            with mock.patch.dict(os.environ, env, clear=False), \
-                mock.patch("client.wrapper.run_command") as run_mock, \
-                mock.patch("client.wrapper.populate_btc_data_volume") as populate_mock, \
-                mock.patch("client.wrapper.kubernetes_auth_preflight"):
+            with (
+                mock.patch.dict(os.environ, env, clear=False),
+                mock.patch("coinjoin_pipeline.execution.containers.run_command") as run_mock,
+                mock.patch("coinjoin_pipeline.execution.kubernetes_launch.populate_btc_data_volume") as populate_mock,
+                mock.patch("coinjoin_pipeline.execution.kubernetes_launch.kubernetes_auth_preflight"),
+            ):
                 run_kubernetes_emulation(
-                    scenario="overactive-local.json",
-                    namespace="coinjoin-test",
-                    kubeconfig=str(kubeconfig),
-                    run_timezone_name="UTC",
+                    Namespace(
+                        scenario="overactive-local.json",
+                        namespace="coinjoin-test",
+                        kubeconfig=str(kubeconfig),
+                        run_timezone="UTC",
+                    ),
+                    btc_datadir=str(root / "btc-data/data"),
                 )
 
             docker_cmd = run_mock.call_args.args[0]
@@ -1763,26 +1274,27 @@ class WrapperExportTest(unittest.TestCase):
     def test_kubernetes_emulation_uses_requested_container_network(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            host_client_dir = root / "client"
-            scenarios_dir = host_client_dir / "scenarios"
+            checkout_dir = root / "checkout"
+            scenarios_dir = checkout_dir / "scenarios"
             kubeconfig = root / "kubeconfig.yaml"
             scenarios_dir.mkdir(parents=True)
             kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
 
             env = {
-                "HOST_CLIENT_DIR": str(host_client_dir),
+                "SCENARIOS_DIR": str(checkout_dir / "scenarios"),
+                "EMULATION_LOGS_DIR": str(root / "logs"),
                 "CONTAINER_RUNTIME": "docker",
                 "COINJOIN_EMULATOR_IMAGE": "coinjoin-emulator:test",
                 "KUBERNETES_EMULATOR_CONTAINER_NETWORK": "k3d-coinjoin-test",
             }
-            with mock.patch.dict(os.environ, env, clear=False), \
-                mock.patch("client.wrapper.run_command") as run_mock, \
-                mock.patch("client.wrapper.populate_btc_data_volume"), \
-                mock.patch("client.wrapper.kubernetes_auth_preflight"):
+            with (
+                mock.patch.dict(os.environ, env, clear=False),
+                mock.patch("coinjoin_pipeline.execution.containers.run_command") as run_mock,
+                mock.patch("coinjoin_pipeline.execution.kubernetes_launch.populate_btc_data_volume"),
+                mock.patch("coinjoin_pipeline.execution.kubernetes_launch.kubernetes_auth_preflight"),
+            ):
                 run_kubernetes_emulation(
-                    scenario="overactive-local.json",
-                    namespace="coinjoin-test",
-                    kubeconfig=str(kubeconfig),
+                    Namespace(scenario="overactive-local.json", namespace="coinjoin-test", kubeconfig=str(kubeconfig))
                 )
 
             docker_cmd = run_mock.call_args.args[0]
@@ -1794,28 +1306,29 @@ class WrapperExportTest(unittest.TestCase):
     def test_kubernetes_emulation_copy_to_host_preserves_download_flow(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            host_client_dir = root / "client"
-            scenarios_dir = host_client_dir / "scenarios"
+            checkout_dir = root / "checkout"
+            scenarios_dir = checkout_dir / "scenarios"
             kubeconfig = root / "kubeconfig.yaml"
             scenarios_dir.mkdir(parents=True)
             kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
 
             env = {
-                "HOST_CLIENT_DIR": str(host_client_dir),
+                "SCENARIOS_DIR": str(checkout_dir / "scenarios"),
+                "EMULATION_LOGS_DIR": str(root / "logs"),
                 "CONTAINER_RUNTIME": "podman",
                 "COINJOIN_EMULATOR_IMAGE": "coinjoin-emulator:test",
                 "KUBERNETES_COPY_TO_HOST_DIR": str(root / "kubernetes-download"),
                 "KUBERNETES_STORAGE_UID": "1234",
                 "KUBERNETES_STORAGE_GID": "5678",
             }
-            with mock.patch.dict(os.environ, env, clear=False), \
-                mock.patch("client.wrapper.run_command") as run_mock, \
-                mock.patch("client.wrapper.populate_btc_data_volume") as populate_mock, \
-                mock.patch("client.wrapper.kubernetes_auth_preflight"):
+            with (
+                mock.patch.dict(os.environ, env, clear=False),
+                mock.patch("coinjoin_pipeline.execution.containers.run_command") as run_mock,
+                mock.patch("coinjoin_pipeline.execution.kubernetes_launch.populate_btc_data_volume") as populate_mock,
+                mock.patch("coinjoin_pipeline.execution.kubernetes_launch.kubernetes_auth_preflight"),
+            ):
                 run_kubernetes_emulation(
-                    scenario="overactive-local.json",
-                    kubeconfig=str(kubeconfig),
-                    copy_to_host=True,
+                    Namespace(scenario="overactive-local.json", kubeconfig=str(kubeconfig), copy_to_host=True)
                 )
 
             docker_cmd = run_mock.call_args.args[0]
@@ -1835,22 +1348,24 @@ class WrapperExportTest(unittest.TestCase):
     def test_kubernetes_emulation_copy_to_host_requires_explicit_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            host_client_dir = root / "client"
-            scenarios_dir = host_client_dir / "scenarios"
+            checkout_dir = root / "checkout"
+            scenarios_dir = checkout_dir / "scenarios"
             kubeconfig = root / "kubeconfig.yaml"
             scenarios_dir.mkdir(parents=True)
             kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
 
             env = {
-                "HOST_CLIENT_DIR": str(host_client_dir),
+                "SCENARIOS_DIR": str(checkout_dir / "scenarios"),
+                "EMULATION_LOGS_DIR": str(root / "logs"),
                 "CONTAINER_RUNTIME": "podman",
                 "COINJOIN_EMULATOR_IMAGE": "coinjoin-emulator:test",
             }
-            with mock.patch.dict(os.environ, env, clear=True), self.assertRaises(SystemExit) as error:
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                self.assertRaises(SystemExit) as error,
+            ):
                 run_kubernetes_emulation(
-                    scenario="overactive-local.json",
-                    kubeconfig=str(kubeconfig),
-                    copy_to_host=True,
+                    Namespace(scenario="overactive-local.json", kubeconfig=str(kubeconfig), copy_to_host=True)
                 )
 
             self.assertEqual(error.exception.code, 2)
@@ -1858,7 +1373,10 @@ class WrapperExportTest(unittest.TestCase):
     def test_container_run_pull_args_default_to_always_for_registry_images(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(
-                container_run_pull_args("ghcr.io/ondrejman/emulator-manager:latest", "COINJOIN_EMULATOR_PULL_POLICY"),
+                container_run_pull_args(
+                    "ghcr.io/ondrejman/emulator-manager:latest",
+                    "COINJOIN_EMULATOR_PULL_POLICY",
+                ),
                 ["--pull=always"],
             )
 
@@ -1872,7 +1390,10 @@ class WrapperExportTest(unittest.TestCase):
     def test_container_run_pull_args_honor_env_override(self):
         with mock.patch.dict(os.environ, {"COINJOIN_EMULATOR_PULL_POLICY": "never"}, clear=True):
             self.assertEqual(
-                container_run_pull_args("ghcr.io/ondrejman/emulator-manager:latest", "COINJOIN_EMULATOR_PULL_POLICY"),
+                container_run_pull_args(
+                    "ghcr.io/ondrejman/emulator-manager:latest",
+                    "COINJOIN_EMULATOR_PULL_POLICY",
+                ),
                 ["--pull=never"],
             )
 

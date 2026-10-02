@@ -2,53 +2,36 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import json
 import re
 import unicodedata
+from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from .commands import option_value
+from .configuration import PipelineConfiguration
 from .manifest import atomic_write
 
-# Mirrors the run-id validation in commands.py and coinjoin-emulator's CLI.
-RUN_ID_PATTERN = re.compile(
-    r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?"
-)
 MAX_RUN_ID_LENGTH = 63
-
-
-def valid_run_id(run_id: str) -> bool:
-    return (
-        len(run_id) <= MAX_RUN_ID_LENGTH
-        and ".." not in run_id
-        and RUN_ID_PATTERN.fullmatch(run_id) is not None
-    )
 
 
 def slugify_run_component(value: str, *, max_length: int) -> str:
     """Return a lowercase ASCII run-ID component with alphanumeric edges."""
-    ascii_value = (
-        unicodedata.normalize("NFKD", value)
-        .encode("ascii", "ignore")
-        .decode("ascii")
-        .lower()
-    )
+    ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii").lower()
     slug = re.sub(r"[^a-z0-9]+", "-", ascii_value).strip("-")
     slug = slug[:max_length].rstrip("-")
     return slug or "scenario"
 
 
-def run_id_for(arguments: list[str]) -> str:
-    explicit_run_id = option_value(arguments, "--run-id")
+def run_id_for(config: PipelineConfiguration) -> str:
+    explicit_run_id = config.run_id
     if explicit_run_id:
         return explicit_run_id
 
-    timezone = option_value(arguments, "--run-timezone") or "Europe/Prague"
-    scenario_arg = option_value(arguments, "--scenario")
-    engine = option_value(arguments, "--engine") or "wasabi"
+    timezone = config.run_timezone or "Europe/Prague"
+    scenario_arg = config.scenario
+    engine = config.engine or "wasabi"
     scenario_name = "default-joinmarket" if engine == "joinmarket" else "overactive-local"
     if scenario_arg:
         candidate = Path(scenario_arg).expanduser()
@@ -69,20 +52,6 @@ def run_id_for(arguments: list[str]) -> str:
     return f"{timestamp}_{slug}"
 
 
-def manifest_target(
-    action: str, arguments: list[str], runs_root: Path, run_id: str | None = None,
-) -> Path | None:
-    run_dir = option_value(arguments, "--run-dir")
-    if run_dir:
-        target = Path(run_dir).expanduser()
-        if not target.is_absolute():
-            target = runs_root / target
-        return target / "research_manifest.json"
-    if action in {"full-run", "emulate"}:
-        return runs_root / (run_id or run_id_for(arguments)) / "research_manifest.json"
-    return None
-
-
 def store_host_manifest(target: Path, manifest: dict[str, object]) -> None:
     try:
         existing = json.loads(target.read_text(encoding="utf-8")) if target.is_file() else {}
@@ -90,5 +59,11 @@ def store_host_manifest(target: Path, manifest: dict[str, object]) -> None:
         existing = {}
     if not isinstance(existing, dict):
         existing = {}
+    existing.setdefault("schema_version", 1)
+    existing.setdefault(
+        "mode",
+        "external" if manifest.get("action") == "external analyze" else "emulator",
+    )
+    existing.setdefault("run_id", target.parent.name)
     existing["host_launcher"] = manifest
     atomic_write(target, existing)

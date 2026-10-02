@@ -118,9 +118,7 @@ def import_blocksci_bindings() -> BlocksciBindings:
             and (candidate / "blockscipy" / "blocksci" / "__init__.py").is_file()
         )
 
-    sys.path[:] = [
-        entry for entry in original_path if not is_blocksci_source_parent(entry)
-    ]
+    sys.path[:] = [entry for entry in original_path if not is_blocksci_source_parent(entry)]
     try:
         return cast(BlocksciBindings, importlib.import_module("blocksci"))
     finally:
@@ -225,14 +223,12 @@ def _sorted_by_index(records: list[IORecord]) -> list[IORecord]:
 
 
 def normalize_blocksci_tx(tx: object) -> TransactionRecord:
-    inputs = _sorted_by_index([
-        _normalize_input(input_value, index)
-        for index, input_value in enumerate(_iter_attr(tx, "inputs"))
-    ])
-    outputs = _sorted_by_index([
-        _normalize_output(output_value, index)
-        for index, output_value in enumerate(_iter_attr(tx, "outputs"))
-    ])
+    inputs = _sorted_by_index(
+        [_normalize_input(input_value, index) for index, input_value in enumerate(_iter_attr(tx, "inputs"))]
+    )
+    outputs = _sorted_by_index(
+        [_normalize_output(output_value, index) for index, output_value in enumerate(_iter_attr(tx, "outputs"))]
+    )
     return {
         "txid": to_json_text(safe_attr(tx, "hash")),
         "broadcast_time": to_json_text(safe_attr(tx, "block_time")),
@@ -273,11 +269,7 @@ def _scan_coinjoins_by_subset_matching(
         joinmarket_percentage_fee,
         joinmarket_max_depth,
     )
-    skipped_txids = sorted(
-        txid
-        for txid in (to_json_text(safe_attr(tx, "hash")) for tx in skipped)
-        if txid
-    )
+    skipped_txids = sorted(txid for txid in (to_json_text(safe_attr(tx, "hash")) for tx in skipped) if txid)
     return txes, skipped_txids
 
 
@@ -294,11 +286,7 @@ def _filter_raw_coinjoin_txes(
 
 def _records_by_txid(txes: Iterable[object]) -> dict[str, TransactionRecord]:
     records = [normalize_blocksci_tx(tx) for tx in txes]
-    return {
-        txid: record
-        for record in sorted(records, key=lambda item: item["txid"] or "")
-        if (txid := record["txid"])
-    }
+    return {txid: record for record in sorted(records, key=lambda item: item["txid"] or "") if (txid := record["txid"])}
 
 
 def export_blocksci_records(
@@ -331,10 +319,7 @@ def export_blocksci_records(
 
 def build_default_coinjoin_clustering_heuristic() -> ClusteringHeuristic:
     coinjoin_heuristics = _require_blocksci().heuristics.coinjoin
-    return (
-        coinjoin_heuristics.one_output_consolidation_2hops
-        & coinjoin_heuristics.two_equal_output_consolidation_1hop
-    )
+    return coinjoin_heuristics.one_output_consolidation_2hops & coinjoin_heuristics.two_equal_output_consolidation_1hop
 
 
 def export_blocksci_cluster_assignments(
@@ -390,9 +375,7 @@ def _run_coinjoin_clustering(
     )
 
 
-def _cluster_index_for_address(
-    chain: BlocksciChain, clusterer: CoinjoinClusterer, address_text: str
-) -> str | None:
+def _cluster_index_for_address(chain: BlocksciChain, clusterer: CoinjoinClusterer, address_text: str) -> str | None:
     """Return the cluster index for ``address_text``, or None if it is not comparable."""
     try:
         address = chain.address_from_string(address_text)

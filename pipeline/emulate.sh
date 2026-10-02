@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# EXPERIMENTAL: local Docker path. Not part of the Kubernetes → S3 → PBS path that the thesis results come from.
 set -euo pipefail
 
 COINJOIN_ENGINE="${COINJOIN_ENGINE:-wasabi}"
@@ -9,12 +10,10 @@ else
 fi
 COMPOSE_FILE="${COMPOSE_FILE:-}"
 PROJECT_NAME="${COINJOIN_COMPOSE_PROJECT:-blocksci-emulator}"
-if [[ -z "${HOST_CLIENT_DIR:-}" ]]; then
-  HOST_CLIENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/client" && pwd)"
-fi
-export SCENARIOS_DIR="${SCENARIOS_DIR:-${HOST_CLIENT_DIR}/scenarios}"
-HOST_ROOT_DIR="$(dirname "${HOST_CLIENT_DIR}")"
-export EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR:-${HOST_ROOT_DIR}/emulation_logs}"
+HOST_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export SCENARIOS_DIR="${SCENARIOS_DIR:-${HOST_ROOT_DIR}/../scenarios}"
+export NOTEBOOKS_DIR="${NOTEBOOKS_DIR:-${HOST_ROOT_DIR}/../coinjoin-runs/.notebooks}"
+export EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR:-${HOST_ROOT_DIR}/../coinjoin-runs}"
 if [[ -z "${COMPOSE_FILE}" ]]; then
   COMPOSE_FILE="${HOST_ROOT_DIR}/compose.yaml"
 fi
@@ -86,7 +85,6 @@ if [[ $# -gt 0 ]]; then
     SCENARIO_PATH="$SCENARIO_INPUT"
   else
     SCENARIO_TRIMMED="${SCENARIO_INPUT#./}"
-    SCENARIO_TRIMMED="${SCENARIO_TRIMMED#client/scenarios/}"
     SCENARIO_TRIMMED="${SCENARIO_TRIMMED#scenarios/}"
     SCENARIO_PATH="/app/scenarios/${SCENARIO_TRIMMED}"
   fi

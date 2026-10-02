@@ -5,18 +5,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from exporters.common import load_json
 
 JsonValue = object
 JsonObject = dict
-
-
-def load_json(path: Path) -> JsonObject:
-    with path.open("r", encoding="utf-8") as file:
-        data = json.load(file)
-    if not isinstance(data, dict):
-        raise ValueError(f"Expected JSON object in {path}")
-    return data
 
 
 def save_text(path: Path, text: str) -> None:
@@ -250,11 +248,13 @@ def render_emulator_detection(report: JsonObject, explorer_base_url: str) -> lis
     ]
 
     if "coinjoin_analysis" in detector_evaluations:
-        lines.extend([
-            "",
-            "> `coinjoin-analysis` metrics use the normalized baseline after applying the "
-            "false-positive sidecar files recorded in this report.",
-        ])
+        lines.extend(
+            [
+                "",
+                "> `coinjoin-analysis` metrics use the normalized baseline after applying the "
+                "false-positive sidecar files recorded in this report.",
+            ]
+        )
 
     divergence_lines = []
     for detector, matrix in detector_evaluations.items():
@@ -269,26 +269,20 @@ def render_emulator_detection(report: JsonObject, explorer_base_url: str) -> lis
                 f"- {detector_label}: {len(false_negative_txids)} emulator_data CoinJoin transaction(s) missed."
             )
             for txid in false_negative_txids[:10]:
-                divergence_lines.append(
-                    f"  - false negative: {tx_value(txid, explorer_base_url)}"
-                )
+                divergence_lines.append(f"  - false negative: {tx_value(txid, explorer_base_url)}")
         if false_positive_txids:
             divergence_lines.append(
                 f"- {detector_label}: {len(false_positive_txids)} non-CoinJoin transaction(s) detected."
             )
             for txid in false_positive_txids[:10]:
-                divergence_lines.append(
-                    f"  - false positive: {tx_value(txid, explorer_base_url)}"
-                )
+                divergence_lines.append(f"  - false positive: {tx_value(txid, explorer_base_url)}")
         if out_of_scope_txids:
             divergence_lines.append(
                 f"- {detector_label}: {len(out_of_scope_txids)} detected transaction(s) were outside the "
                 "exported emulator transaction universe."
             )
             for txid in out_of_scope_txids[:10]:
-                divergence_lines.append(
-                    f"  - out of scope: {tx_value(txid, explorer_base_url)}"
-                )
+                divergence_lines.append(f"  - out of scope: {tx_value(txid, explorer_base_url)}")
 
     if divergence_lines:
         lines.extend(["", "## Emulator Data Detection Divergences", "", *divergence_lines])
@@ -759,28 +753,52 @@ def render_coinjoin_mappings(report: JsonObject) -> list[str]:
     enum_summary = enumerator.get("summary") or {}
     sake = mappings.get("sake") or {}
     sake_summary = sake.get("summary") or {}
-    lines = ["", "## CoinJoin Mapping Analysis", "", *table(
-        ["metric", "value"],
-        [["stage status", mappings.get("status")],
-         ["enumerated transactions", enum_summary.get("transactions")],
-         ["completed", enum_summary.get("completed")],
-         ["timed out", enum_summary.get("timed_out")],
-         ["errors", enum_summary.get("errors")],
-         ["Sake seed", sake.get("seed")],
-         ["Sake output match rate", metric_value(sake_summary.get("output_match_rate"))],
-         ["Sake wallet match rate", metric_value(sake_summary.get("wallet_match_rate"))],
-         ["Sake length match rate", metric_value(sake_summary.get("length_match_rate"))],
-         ["Sake full CoinJoin match rate", metric_value(sake_summary.get("full_coinjoin_match_rate"))]],
-    ), "", "### Per-transaction mapping results", ""]
+    lines = [
+        "",
+        "## CoinJoin Mapping Analysis",
+        "",
+        *table(
+            ["metric", "value"],
+            [
+                ["stage status", mappings.get("status")],
+                ["enumerated transactions", enum_summary.get("transactions")],
+                ["completed", enum_summary.get("completed")],
+                ["timed out", enum_summary.get("timed_out")],
+                ["errors", enum_summary.get("errors")],
+                ["Sake seed", sake.get("seed")],
+                ["Sake output match rate", metric_value(sake_summary.get("output_match_rate"))],
+                ["Sake wallet match rate", metric_value(sake_summary.get("wallet_match_rate"))],
+                ["Sake length match rate", metric_value(sake_summary.get("length_match_rate"))],
+                ["Sake full CoinJoin match rate", metric_value(sake_summary.get("full_coinjoin_match_rate"))],
+            ],
+        ),
+        "",
+        "### Per-transaction mapping results",
+        "",
+    ]
     rows = []
     sake_transactions = sake.get("transactions") or {}
     for txid, item in sorted((enumerator.get("transactions") or {}).items()):
         sake_item = sake_transactions.get(txid) or {}
-        rows.append([txid, item.get("status"), item.get("mapping_count"), item.get("retried"),
-                     sake_item.get("matched_outputs"), sake_item.get("total_outputs"),
-                     sake_item.get("full_coinjoin_match")])
-    lines.extend(table(["txid", "status", "mappings", "retried", "Sake matched outputs",
-                        "Sake total outputs", "Sake full match"], rows) if rows else ["No transactions."])
+        rows.append(
+            [
+                txid,
+                item.get("status"),
+                item.get("mapping_count"),
+                item.get("retried"),
+                sake_item.get("matched_outputs"),
+                sake_item.get("total_outputs"),
+                sake_item.get("full_coinjoin_match"),
+            ]
+        )
+    lines.extend(
+        table(
+            ["txid", "status", "mappings", "retried", "Sake matched outputs", "Sake total outputs", "Sake full match"],
+            rows,
+        )
+        if rows
+        else ["No transactions."]
+    )
     return lines
 
 
@@ -805,98 +823,104 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
         for warning in warnings:
             lines.append(f"> **{warning.get('code')}:** {warning.get('message')}")
     lines.extend(render_integration_diagnostics(report))
-    lines.extend([
-        "",
-        "## Run",
-        "",
-        *table(
-            ["field", "value"],
-            [
-                ["run id", run.get("id")],
-                ["mode", run.get("mode")],
-                ["network", run.get("network")],
-                ["evaluation scope", report.get("evaluation_scope")],
-                ["run time", run.get("started_at")],
-                ["scenario", run.get("scenario_name")],
-                ["scenario rounds", scenario.get("rounds")],
-                ["scenario blocks", scenario.get("blocks")],
-                ["scenario wallets", scenario.get("wallet_count")],
-                ["coinjoin type", run.get("coinjoin_type")],
-                ["BlockSci min input count", run.get("blocksci_min_input_count")],
-                ["FirstWasabi2Block", run.get("first_wasabi2_block")],
-                ["JoinMarket detector", run.get("joinmarket_detector")],
-                ["JoinMarket min base fee", run.get("joinmarket_min_base_fee")],
-                ["JoinMarket percentage fee", run.get("joinmarket_percentage_fee")],
-                ["JoinMarket max depth", run.get("joinmarket_max_depth")],
-                ["scenario sha256", run.get("scenario_sha256")],
-            ],
-        ),
-        "",
-        "## Detection Summary",
-        "",
-        *table(
-            ["metric", "value"],
-            [
-                ["coinjoin-analysis coinjoins", summary.get("coinjoin_analysis_coinjoins")],
-                ["BlockSci detected coinjoins", summary.get("blocksci_detected_coinjoins")],
-                ["matched by both", summary.get("matched_by_both")],
-                ["missed by BlockSci", summary.get("missed_by_blocksci")],
-                ["BlockSci only", summary.get("blocksci_only")],
-                ["BlockSci JoinMarket skipped", summary.get("blocksci_joinmarket_skipped")],
-                ["BlockSci agreement rate", summary.get("blocksci_agreement_rate")],
-                [
-                    "coinjoin-analysis coverage by BlockSci",
-                    summary.get("coinjoin_analysis_coverage_by_blocksci"),
-                ],
-            ],
-        ),
-        "",
-        "## Divergence Counts",
-        "",
-        *table(
-            ["type", "count"],
-            [
-                ["missed by BlockSci", divergence_counts.get("missed_by_blocksci", 0)],
-                ["BlockSci only", divergence_counts.get("blocksci_only", 0)],
-                ["shared transaction mismatches", divergence_counts.get("shared_tx_mismatches", 0)],
-            ],
-        ),
-    ])
-
-    if report.get("evaluation_scope") == "baseline_agreement_only":
-        lines.extend([
+    lines.extend(
+        [
             "",
-            "> This report compares BlockSci with `coinjoin-analysis`. It has no emulator ground truth; "
-            "precision, recall, and F1 are intentionally unavailable.",
-        ])
-    elif report.get("evaluation_scope") == "emulator_labels_unavailable":
-        label_provenance = (report.get("emulator_data") or {}).get("label_provenance") or {}
-        unavailable_reason = label_provenance.get("unavailable_reason")
-        lines.extend([
-            "",
-            "> Independent emulator producer labels were unavailable. Transaction labels remain unknown; "
-            "precision, recall, and F1 are intentionally unavailable.",
-        ])
-        if unavailable_reason:
-            lines.append(f"> Reason: {unavailable_reason}")
-    baseline_filter = report.get("baseline_filter") or {}
-    if baseline_filter.get("enabled"):
-        source_names = ", ".join(
-            str(source.get("file")) for source in baseline_filter.get("sources", [])
-        )
-        lines.extend([
-            "",
-            "## Baseline False-Positive Filter",
+            "## Run",
             "",
             *table(
                 ["field", "value"],
                 [
-                    ["source files", source_names],
-                    ["listed unique TXIDs", baseline_filter.get("listed_txids")],
-                    ["filtered baseline TXIDs", baseline_filter.get("filtered_count")],
+                    ["run id", run.get("id")],
+                    ["mode", run.get("mode")],
+                    ["network", run.get("network")],
+                    ["evaluation scope", report.get("evaluation_scope")],
+                    ["run time", run.get("started_at")],
+                    ["scenario", run.get("scenario_name")],
+                    ["scenario rounds", scenario.get("rounds")],
+                    ["scenario blocks", scenario.get("blocks")],
+                    ["scenario wallets", scenario.get("wallet_count")],
+                    ["coinjoin type", run.get("coinjoin_type")],
+                    ["BlockSci min input count", run.get("blocksci_min_input_count")],
+                    ["FirstWasabi2Block", run.get("first_wasabi2_block")],
+                    ["JoinMarket detector", run.get("joinmarket_detector")],
+                    ["JoinMarket min base fee", run.get("joinmarket_min_base_fee")],
+                    ["JoinMarket percentage fee", run.get("joinmarket_percentage_fee")],
+                    ["JoinMarket max depth", run.get("joinmarket_max_depth")],
+                    ["scenario sha256", run.get("scenario_sha256")],
                 ],
             ),
-        ])
+            "",
+            "## Detection Summary",
+            "",
+            *table(
+                ["metric", "value"],
+                [
+                    ["coinjoin-analysis coinjoins", summary.get("coinjoin_analysis_coinjoins")],
+                    ["BlockSci detected coinjoins", summary.get("blocksci_detected_coinjoins")],
+                    ["matched by both", summary.get("matched_by_both")],
+                    ["missed by BlockSci", summary.get("missed_by_blocksci")],
+                    ["BlockSci only", summary.get("blocksci_only")],
+                    ["BlockSci JoinMarket skipped", summary.get("blocksci_joinmarket_skipped")],
+                    ["BlockSci agreement rate", summary.get("blocksci_agreement_rate")],
+                    [
+                        "coinjoin-analysis coverage by BlockSci",
+                        summary.get("coinjoin_analysis_coverage_by_blocksci"),
+                    ],
+                ],
+            ),
+            "",
+            "## Divergence Counts",
+            "",
+            *table(
+                ["type", "count"],
+                [
+                    ["missed by BlockSci", divergence_counts.get("missed_by_blocksci", 0)],
+                    ["BlockSci only", divergence_counts.get("blocksci_only", 0)],
+                    ["shared transaction mismatches", divergence_counts.get("shared_tx_mismatches", 0)],
+                ],
+            ),
+        ]
+    )
+
+    if report.get("evaluation_scope") == "baseline_agreement_only":
+        lines.extend(
+            [
+                "",
+                "> This report compares BlockSci with `coinjoin-analysis`. It has no emulator ground truth; "
+                "precision, recall, and F1 are intentionally unavailable.",
+            ]
+        )
+    elif report.get("evaluation_scope") == "emulator_labels_unavailable":
+        label_provenance = (report.get("emulator_data") or {}).get("label_provenance") or {}
+        unavailable_reason = label_provenance.get("unavailable_reason")
+        lines.extend(
+            [
+                "",
+                "> Independent emulator producer labels were unavailable. Transaction labels remain unknown; "
+                "precision, recall, and F1 are intentionally unavailable.",
+            ]
+        )
+        if unavailable_reason:
+            lines.append(f"> Reason: {unavailable_reason}")
+    baseline_filter = report.get("baseline_filter") or {}
+    if baseline_filter.get("enabled"):
+        source_names = ", ".join(str(source.get("file")) for source in baseline_filter.get("sources", []))
+        lines.extend(
+            [
+                "",
+                "## Baseline False-Positive Filter",
+                "",
+                *table(
+                    ["field", "value"],
+                    [
+                        ["source files", source_names],
+                        ["listed unique TXIDs", baseline_filter.get("listed_txids")],
+                        ["filtered baseline TXIDs", baseline_filter.get("filtered_count")],
+                    ],
+                ),
+            ]
+        )
     lines.extend(render_run_manifest(report))
     lines.extend(render_coinjoin_mappings(report))
     lines.extend(render_emulator_detection(report, explorer_base_url))

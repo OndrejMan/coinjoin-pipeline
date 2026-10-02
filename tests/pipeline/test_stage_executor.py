@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import sys
 import threading
 from dataclasses import dataclass, field
-import sys
 from pathlib import Path
 
 import pytest
@@ -10,13 +10,22 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2] / "pipeline"
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from client.stage_executor import (
+from coinjoin_pipeline.execution.stage_executor import (
     StageExecutionError,
     StageSubmission,
-    execute_parallel_analysis,
-    execute_serial_analysis,
+    execute_analysis,
 )
-from client.stages import StageGraph, StageKind, StagePlan, analysis_plan
+from coinjoin_pipeline.execution.stages import (
+    StageGraph,
+    StageKind,
+    StagePlan,
+    analysis_plan,
+)
+
+
+def _execute_parallel(graph: StageGraph, runner) -> None:
+    execute_analysis(graph, runner, max_workers=len(graph))
+
 
 # A gate that a healthy test releases quickly; the timeout only stops a broken
 # executor from hanging the suite.
@@ -84,7 +93,6 @@ def _parallel_plan(*, mappings_pbs: bool = True):
         analysis_pbs=False,
         blocksci_pbs=False,
         mappings_pbs=mappings_pbs,
-        parallel=True,
     )
 
 
@@ -93,13 +101,17 @@ def test_serial_executor_obeys_declared_dependencies() -> None:
         analysis_pbs=False,
         blocksci_pbs=False,
         mappings_pbs=True,
-        parallel=False,
     )
     runner = RecordingRunner()
 
-    execute_serial_analysis(plan, runner)
+    execute_analysis(plan, runner, max_workers=1)
 
-    assert runner.events == ["coinjoin-analysis", "coinjoin-mappings", "blocksci"]
+    assert runner.events == [
+        "coinjoin-analysis",
+        "blocksci",
+        "coinjoin-mappings",
+        "unified-report",
+    ]
 
 
 def test_parallel_executor_does_not_export_after_a_failure() -> None:
@@ -107,39 +119,48 @@ def test_parallel_executor_does_not_export_after_a_failure() -> None:
     runner = RecordingRunner(failing_stage="coinjoin-analysis")
 
     with pytest.raises(StageExecutionError, match="coinjoin-analysis"):
-        execute_parallel_analysis(plan, runner)
+        _execute_parallel(plan, runner)
 
 
-def test_parallel_executor_leaves_the_report_to_the_caller() -> None:
+def test_parallel_executor_runs_report_after_its_dependencies() -> None:
     # The report joins both analyzers, but its stage logging and its
     # local-export-versus-PBS choice belong to the wrapper.
     plan = _parallel_plan()
     runner = RecordingRunner()
 
-    execute_parallel_analysis(plan, runner)
+    _execute_parallel(plan, runner)
 
-    assert "unified-report" not in runner.submitted
+    assert runner.events[-1] == "unified-report"
     assert sorted(runner.events) == [
         "blocksci",
         "coinjoin-analysis",
         "coinjoin-mappings",
+        "unified-report",
     ]
+
+
+def test_executor_logs_each_stage_so_the_report_order_is_visible(capsys) -> None:
+    # The local-docker and PBS e2e tests read these lines to prove the report
+    # started only after both analyzers finished.
+    _execute_parallel(_parallel_plan(mappings_pbs=False), RecordingRunner())
+
+    lines = capsys.readouterr().out.splitlines()
+    report = lines.index("[pipeline] stage unified-report: started")
+    assert lines.index("[pipeline] stage coinjoin-analysis: done") < report
+    assert lines.index("[pipeline] stage blocksci: done") < report
+    assert lines[-1] == "[pipeline] stage unified-report: done"
 
 
 def test_parallel_executor_submits_mappings_only_after_the_baseline_finished() -> None:
     plan = _parallel_plan()
     runner = RecordingRunner()
 
-    execute_parallel_analysis(plan, runner)
+    _execute_parallel(plan, runner)
 
-    assert runner.log.index(("submit", "coinjoin-mappings")) > runner.log.index(
-        ("wait", "coinjoin-analysis")
-    )
+    assert runner.log.index(("submit", "coinjoin-mappings")) > runner.log.index(("wait", "coinjoin-analysis"))
     # Both independent analyzers are submitted in the first pass, before any
     # join happens; only the dependent stage waits for its upstream.
-    assert runner.log.index(("submit", "blocksci")) < runner.log.index(
-        ("submit", "coinjoin-mappings")
-    )
+    assert runner.log.index(("submit", "blocksci")) < runner.log.index(("submit", "coinjoin-mappings"))
 
 
 def test_parallel_executor_never_submits_a_stage_whose_dependency_failed() -> None:
@@ -147,7 +168,7 @@ def test_parallel_executor_never_submits_a_stage_whose_dependency_failed() -> No
     runner = RecordingRunner(failing_stage="coinjoin-analysis")
 
     with pytest.raises(StageExecutionError, match="coinjoin-analysis"):
-        execute_parallel_analysis(plan, runner)
+        _execute_parallel(plan, runner)
 
     assert "coinjoin-mappings" not in runner.submitted
     # BlockSci does not depend on the baseline, so it still ran to completion.
@@ -159,11 +180,11 @@ def test_parallel_executor_reports_a_refused_submission() -> None:
     runner = RecordingRunner(failing_submit="blocksci")
 
     with pytest.raises(StageExecutionError, match="blocksci: submit refused"):
-        execute_parallel_analysis(plan, runner)
+        _execute_parallel(plan, runner)
 
     # A stage that could not be submitted must not stop the independent
     # baseline, nor the mappings stage that depends only on it.
-    assert runner.events == ["coinjoin-analysis", "coinjoin-mappings"]
+    assert runner.events == ["coinjoin-analysis"]
 
 
 def test_parallel_executor_cancels_a_sibling_that_is_still_running() -> None:
@@ -172,7 +193,7 @@ def test_parallel_executor_cancels_a_sibling_that_is_still_running() -> None:
     runner.hold("coinjoin-analysis")
 
     with pytest.raises(StageExecutionError, match="blocksci"):
-        execute_parallel_analysis(plan, runner)
+        _execute_parallel(plan, runner)
 
     assert runner.cancelled == ["coinjoin-analysis"]
 
@@ -185,7 +206,7 @@ def test_parallel_executor_does_not_cancel_work_that_already_finished() -> None:
     runner.hold("blocksci")
 
     with pytest.raises(StageExecutionError, match="coinjoin-mappings"):
-        execute_parallel_analysis(plan, runner)
+        _execute_parallel(plan, runner)
 
     assert runner.cancelled == ["blocksci"]
 
@@ -195,24 +216,28 @@ def test_parallel_executor_does_not_submit_more_work_after_wait_failure() -> Non
     runner.hold("coinjoin-analysis")
 
     with pytest.raises(StageExecutionError, match="blocksci"):
-        execute_parallel_analysis(_parallel_plan(), runner)
+        _execute_parallel(_parallel_plan(), runner)
 
     assert "coinjoin-mappings" not in runner.submitted
 
 
-def test_parallel_executor_keeps_original_error_when_cancellation_fails(monkeypatch) -> None:
+def test_parallel_executor_keeps_original_error_when_cancellation_fails(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(sys.modules[__name__], "GATE_TIMEOUT_SECONDS", 0.1)
     runner = RecordingRunner(failing_stage="blocksci", failing_cancel="coinjoin-analysis")
     runner.hold("coinjoin-analysis")
     runner.hold("coinjoin-mappings")
-    plan = StageGraph((
-        StagePlan("coinjoin-analysis", StageKind.BASELINE, "pbs"),
-        StagePlan("blocksci", StageKind.BLOCKSCI_WORK, "pbs"),
-        StagePlan("coinjoin-mappings", StageKind.MAPPINGS, "pbs"),
-    ))
+    plan = StageGraph(
+        (
+            StagePlan("coinjoin-analysis", StageKind.BASELINE, "pbs"),
+            StagePlan("blocksci", StageKind.BLOCKSCI_WORK, "pbs"),
+            StagePlan("coinjoin-mappings", StageKind.MAPPINGS, "pbs"),
+        )
+    )
 
     with pytest.raises(StageExecutionError, match="blocksci: expected failure") as error:
-        execute_parallel_analysis(plan, runner)
+        _execute_parallel(plan, runner)
 
     assert "cancel refused" in str(error.value)
     assert runner.cancelled == ["coinjoin-analysis", "coinjoin-mappings"]
@@ -231,6 +256,6 @@ def test_parallel_executor_cancels_submitted_work_on_interrupt(monkeypatch) -> N
 
     monkeypatch.setattr(runner, "submit", interrupted_submit)
     with pytest.raises(KeyboardInterrupt):
-        execute_parallel_analysis(_parallel_plan(), runner)
+        _execute_parallel(_parallel_plan(), runner)
 
     assert runner.cancelled == ["coinjoin-analysis"]

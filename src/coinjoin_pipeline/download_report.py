@@ -3,27 +3,22 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import os
-from pathlib import Path
-import re
 import shutil
-import subprocess
 import sys
 import tempfile
-from urllib.parse import urlparse
+from pathlib import Path
 
+from exporters.artifact_paths import REPORT_DIR, REPORT_JSON
 
-RUN_ID_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
-PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-AWS_SCRUB_VARIABLES = (
-    "AWS_ACCESS_KEY_ID",
-    "AWS_SECRET_ACCESS_KEY",
-    "AWS_SESSION_TOKEN",
-    "AWS_PROFILE",
-    "AWS_DEFAULT_PROFILE",
-    "AWS_REGION",
-    "AWS_DEFAULT_REGION",
+from .storage.s3 import (
+    ArtifactTransportError,
+    S3Access,
+    access_from_values,
+    run_s5cmd,
+    s3_object_exists,
+    validate_artifact_uri,
+    validate_run_id,
 )
 
 
@@ -35,9 +30,7 @@ def validate_output_directory(output_dir: Path, runs_root: Path) -> Path:
     """Refuse broad or unrecognizable destinations before atomic replacement."""
     expanded = output_dir.expanduser()
     if expanded.is_symlink():
-        raise ValueError(
-            f"existing report output must not be a symbolic link: {expanded}"
-        )
+        raise ValueError(f"existing report output must not be a symbolic link: {expanded}")
     destination = expanded.resolve()
     protected = {
         Path("/").resolve(),
@@ -46,27 +39,15 @@ def validate_output_directory(output_dir: Path, runs_root: Path) -> Path:
         runs_root.expanduser().resolve(),
     }
     if destination in protected or not destination.name:
-        raise ValueError(
-            f"refusing unsafe report output directory: {destination}"
-        )
+        raise ValueError(f"refusing unsafe report output directory: {destination}")
     if destination.exists():
         if not destination.is_dir():
+            raise ValueError(f"existing report output must be a real directory: {destination}")
+        if not (destination / REPORT_JSON).is_file():
             raise ValueError(
-                f"existing report output must be a real directory: {destination}"
-            )
-        if not (destination / "unified_report.json").is_file():
-            raise ValueError(
-                "refusing to replace an existing directory that is not a "
-                f"recognized pipeline report: {destination}"
+                f"refusing to replace an existing directory that is not a recognized pipeline report: {destination}"
             )
     return destination
-
-
-@dataclass(frozen=True)
-class S3Access:
-    endpoint_url: str
-    credentials_file: Path
-    profile: str
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -98,109 +79,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        help=(
-            "Destination directory (default: "
-            "RUNS_ROOT/RUN_ID/coinjoinPipeline_data)."
-        ),
+        help=("Destination directory (default: RUNS_ROOT/RUN_ID/coinjoinPipeline_data)."),
     )
     return parser
-
-
-def _validate_run_id(value: str) -> str:
-    if len(value) > 63 or ".." in value or not RUN_ID_RE.fullmatch(value):
-        raise ValueError(
-            "run ID must be at most 63 characters, begin and end with an "
-            "alphanumeric character, contain only [A-Za-z0-9._-], and must "
-            "not contain '..'"
-        )
-    return value
-
-
-def _validate_artifact_uri(value: str | None) -> str:
-    if not value:
-        raise ValueError("--artifact-uri is required (or set ARTIFACT_URI)")
-    parsed = urlparse(value)
-    if (
-        parsed.scheme != "s3"
-        or not parsed.netloc
-        or any(char.isspace() for char in value)
-    ):
-        raise ValueError(
-            "artifact URI must use s3://, include a bucket, and contain no whitespace"
-        )
-    return value.rstrip("/")
-
-
-def _validate_endpoint(value: str | None) -> str:
-    if not value:
-        raise ValueError("--s3-endpoint-url is required (or set S3_ENDPOINT_URL)")
-    parsed = urlparse(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError("S3 endpoint URL must be an HTTP(S) URL")
-    if parsed.username or parsed.password or parsed.query or parsed.fragment:
-        raise ValueError(
-            "S3 endpoint URL must not contain credentials, query, or fragment"
-        )
-    return value.rstrip("/")
-
-
-def _validate_access(args: argparse.Namespace) -> S3Access:
-    if not args.s3_credentials_file:
-        raise ValueError(
-            "--s3-credentials-file is required (or set S3_CREDENTIALS_FILE)"
-        )
-    credentials = Path(args.s3_credentials_file).expanduser()
-    if not credentials.is_absolute():
-        raise ValueError("S3 credentials file must be an absolute path")
-    if not credentials.is_file():
-        raise ValueError(f"S3 credentials file not found: {credentials}")
-    if not args.s3_profile:
-        raise ValueError("--s3-profile is required (or set S3_PROFILE)")
-    if not PROFILE_RE.fullmatch(args.s3_profile):
-        raise ValueError(
-            "S3 profile must match [A-Za-z0-9][A-Za-z0-9._-]*"
-        )
-    return S3Access(
-        endpoint_url=_validate_endpoint(args.s3_endpoint_url),
-        credentials_file=credentials,
-        profile=args.s3_profile,
-    )
-
-
-def _run_s5cmd(access: S3Access, *arguments: str) -> subprocess.CompletedProcess[str]:
-    environment = {
-        key: value
-        for key, value in os.environ.items()
-        if key not in AWS_SCRUB_VARIABLES
-    }
-    return subprocess.run(
-        [
-            "s5cmd",
-            "--credentials-file",
-            str(access.credentials_file),
-            "--profile",
-            access.profile,
-            "--endpoint-url",
-            access.endpoint_url,
-            *arguments,
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=environment,
-    )
-
-
-def _object_exists(access: S3Access, uri: str) -> bool:
-    result = _run_s5cmd(access, "ls", uri)
-    if result.returncode == 0:
-        return True
-    detail = (result.stderr or result.stdout or "").strip()
-    if "no object found" in detail.lower():
-        return False
-    raise DownloadError(
-        f"s5cmd could not inspect {uri} (exit {result.returncode}): {detail}"
-    )
 
 
 def download_report(
@@ -212,36 +93,27 @@ def download_report(
     run_prefix = f"{artifact_uri}/{run_id}"
     failed_marker = f"{run_prefix}/.pbs/unified-report.failed"
     done_marker = f"{run_prefix}/.pbs/unified-report.done"
-    if _object_exists(access, failed_marker):
-        raise DownloadError(
-            "the unified-report PBS stage recorded failure: " + failed_marker
-        )
-    if not _object_exists(access, done_marker):
-        raise DownloadError(
-            "the unified report is not complete: missing " + done_marker
-        )
+    if s3_object_exists(access, failed_marker):
+        raise DownloadError("the unified-report PBS stage recorded failure: " + failed_marker)
+    if not s3_object_exists(access, done_marker):
+        raise DownloadError("the unified report is not complete: missing " + done_marker)
 
     output_dir.parent.mkdir(parents=True, exist_ok=True)
-    source = f"{run_prefix}/coinjoinPipeline_data/"
+    source = f"{run_prefix}/{REPORT_DIR}/"
     with tempfile.TemporaryDirectory(
         prefix=f".{output_dir.name}.download-",
         dir=output_dir.parent,
     ) as staging_name:
         staging_dir = Path(staging_name)
-        result = _run_s5cmd(access, "sync", source, f"{staging_dir}/")
+        result = run_s5cmd(access, "sync", source, f"{staging_dir}/")
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "").strip()
-            raise DownloadError(
-                f"s5cmd report download failed (exit {result.returncode}): {detail}"
-            )
+            raise DownloadError(f"s5cmd report download failed (exit {result.returncode}): {detail}")
 
-        staged_json = staging_dir / "unified_report.json"
+        staged_json = staging_dir / REPORT_JSON
         staged_markdown = staging_dir / "unified_report.md"
         if not staged_json.is_file():
-            raise DownloadError(
-                "download completed but unified_report.json is missing from "
-                f"{source}"
-            )
+            raise DownloadError(f"download completed but {REPORT_JSON} is missing from {source}")
 
         has_markdown = staged_markdown.is_file()
         markdown_report = output_dir / "unified_report.md"
@@ -267,16 +139,21 @@ def download_report(
             else:
                 backup_dir.unlink()
 
-    json_report = output_dir / "unified_report.json"
+    json_report = output_dir / REPORT_JSON
     return json_report, markdown_report if has_markdown else None
 
 
 def main(argv: list[str] | None = None, *, runs_root: Path | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        run_id = _validate_run_id(args.run_id)
-        artifact_uri = _validate_artifact_uri(args.artifact_uri)
-        access = _validate_access(args)
+        run_id = validate_run_id(args.run_id)
+        artifact_uri = validate_artifact_uri(args.artifact_uri)
+        access = access_from_values(
+            args.s3_endpoint_url,
+            args.s3_credentials_file,
+            args.s3_profile,
+            check_file=True,
+        )
     except ValueError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
@@ -291,17 +168,15 @@ def main(argv: list[str] | None = None, *, runs_root: Path | None = None) -> int
     root = (runs_root or Path.cwd() / "coinjoin-runs").expanduser().resolve()
     try:
         output_dir = validate_output_directory(
-            args.output_dir if args.output_dir else root / run_id / "coinjoinPipeline_data",
+            args.output_dir if args.output_dir else root / run_id / REPORT_DIR,
             root,
         )
     except ValueError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
     try:
-        json_report, markdown_report = download_report(
-            access, artifact_uri, run_id, output_dir
-        )
-    except (DownloadError, OSError) as error:
+        json_report, markdown_report = download_report(access, artifact_uri, run_id, output_dir)
+    except (DownloadError, ArtifactTransportError, OSError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 5
 

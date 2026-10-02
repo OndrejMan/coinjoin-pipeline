@@ -6,6 +6,7 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
+from exporters.artifact_paths import report_input_hashes
 from exporters.common import (
     JsonObject,
     digest_from_reference,
@@ -110,9 +111,7 @@ def build_run_manifest(
             os.environ.get("EMULATOR_IMAGE"),
         ),
         "uploader": first_present(uploader_image, os.environ.get("COINJOIN_UPLOADER_IMAGE")),
-        "unified_report": first_present(
-            unified_report_image, os.environ.get("COINJOIN_UNIFIED_REPORT_IMAGE")
-        ),
+        "unified_report": first_present(unified_report_image, os.environ.get("COINJOIN_UNIFIED_REPORT_IMAGE")),
     }
     return {
         "run_id": run_dir.name,
@@ -182,6 +181,7 @@ def build_run_manifest(
             "exporters_sha256": tree_sha256(exporters_root),
             "exporters_git_dirty": git_tree_is_dirty(exporters_root),
         },
+        "inputs": report_input_hashes(run_dir),
     }
 
 

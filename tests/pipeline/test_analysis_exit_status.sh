@@ -36,7 +36,6 @@ set +e
   cd "${PROJECT_DIR}"
   PATH="${FAKE_BIN}:${PATH}" \
   ACTIVE_RUN_ID="analysis-exit-status-test" \
-  HOST_CLIENT_DIR="${PROJECT_DIR}/client" \
   COMPOSE_FILE="${PROJECT_DIR}/compose.yaml" \
   bash analysis.sh
 )

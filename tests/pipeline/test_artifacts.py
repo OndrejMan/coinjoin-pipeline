@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pipeline"))
 
-from client.artifacts import (  # noqa: E402
+from coinjoin_pipeline.storage.s3 import (  # noqa: E402
     PROBE_QUEUED,
     PROBE_RUNNING,
     PROBE_TERMINAL,
@@ -42,13 +42,8 @@ def _completed(returncode: int, stderr: str = "") -> subprocess.CompletedProcess
 def test_validates_s3_compatible_parameters() -> None:
     assert validate_artifact_uri("s3://bucket/runs/") == "s3://bucket/runs"
     assert validate_run_id("wasabi-test_001.2") == "wasabi-test_001.2"
-    assert (
-        validate_s3_endpoint_url("https://s3.cl4.du.cesnet.cz/")
-        == "https://s3.cl4.du.cesnet.cz"
-    )
-    assert validate_credentials_file("/storage/user/.aws/credentials").startswith(
-        "/storage/"
-    )
+    assert validate_s3_endpoint_url("https://s3.cl4.du.cesnet.cz/") == "https://s3.cl4.du.cesnet.cz"
+    assert validate_credentials_file("/storage/user/.aws/credentials").startswith("/storage/")
 
 
 @pytest.mark.parametrize(
@@ -86,15 +81,15 @@ def test_scrubbed_environment_drops_aws_variables_and_keeps_others() -> None:
 
 
 def test_s3_object_exists_distinguishes_absent_from_errors() -> None:
-    with mock.patch("client.artifacts.subprocess.run", return_value=_completed(0)):
+    with mock.patch("coinjoin_pipeline.storage.s3.subprocess.run", return_value=_completed(0)):
         assert s3_object_exists(ACCESS, "s3://bucket/runs/run-1/.k8s/upload.done") is True
     with mock.patch(
-        "client.artifacts.subprocess.run",
+        "coinjoin_pipeline.storage.s3.subprocess.run",
         return_value=_completed(1, 'ERROR "ls s3://...": no object found'),
     ):
         assert s3_object_exists(ACCESS, "s3://bucket/runs/run-1/.k8s/upload.done") is False
     with mock.patch(
-        "client.artifacts.subprocess.run",
+        "coinjoin_pipeline.storage.s3.subprocess.run",
         return_value=_completed(1, "InvalidAccessKeyId"),
     ):
         with pytest.raises(ArtifactTransportError, match="InvalidAccessKeyId"):
@@ -102,59 +97,59 @@ def test_s3_object_exists_distinguishes_absent_from_errors() -> None:
 
 
 def test_run_s5cmd_reports_missing_binary() -> None:
-    with mock.patch("client.artifacts.subprocess.run", side_effect=FileNotFoundError):
+    with mock.patch("coinjoin_pipeline.storage.s3.subprocess.run", side_effect=FileNotFoundError):
         with pytest.raises(ArtifactTransportError, match="s5cmd is required"):
             run_s5cmd(ACCESS, "ls", "s3://bucket/key")
 
 
 def test_ensure_empty_run_prefix_rejects_every_existing_artifact() -> None:
-    with mock.patch("client.artifacts.s3_object_exists", return_value=True) as exists:
+    with mock.patch("coinjoin_pipeline.storage.s3.s3_object_exists", return_value=True) as exists:
         with pytest.raises(ArtifactTransportError, match="fresh --run-id"):
             ensure_empty_run_prefix(ACCESS, "s3://bucket/runs", "run-1")
     exists.assert_called_once_with(ACCESS, "s3://bucket/runs/run-1/*")
-    with mock.patch("client.artifacts.s3_object_exists", return_value=False):
+    with mock.patch("coinjoin_pipeline.storage.s3.s3_object_exists", return_value=False):
         ensure_empty_run_prefix(ACCESS, "s3://bucket/runs", "run-1")
 
 
 def test_clear_stage_markers_treats_missing_as_success_and_deletes_existing() -> None:
     with (
         mock.patch(
-            "client.artifacts.s3_object_exists",
+            "coinjoin_pipeline.storage.s3.s3_object_exists",
             side_effect=[False, True, False],
         ) as exists,
         mock.patch(
-            "client.artifacts.run_s5cmd",
+            "coinjoin_pipeline.storage.s3.run_s5cmd",
             return_value=_completed(0),
         ) as s5cmd,
     ):
-        clear_s3_stage_markers(
-            ACCESS, "s3://bucket/runs", "run-1", "blocksci"
-        )
+        clear_s3_stage_markers(ACCESS, "s3://bucket/runs", "run-1", "blocksci")
 
-    s5cmd.assert_called_once_with(
-        ACCESS, "rm", "s3://bucket/runs/run-1/.pbs/blocksci.done"
-    )
+    s5cmd.assert_called_once_with(ACCESS, "rm", "s3://bucket/runs/run-1/.pbs/blocksci.done")
     assert exists.call_count == 3
 
 
 def test_clear_stage_markers_propagates_delete_errors() -> None:
     with (
-        mock.patch("client.artifacts.s3_object_exists", return_value=True),
+        mock.patch("coinjoin_pipeline.storage.s3.s3_object_exists", return_value=True),
         mock.patch(
-            "client.artifacts.run_s5cmd",
+            "coinjoin_pipeline.storage.s3.run_s5cmd",
             return_value=_completed(1, "AccessDenied"),
         ),
         pytest.raises(ArtifactTransportError, match="AccessDenied"),
     ):
-        clear_s3_stage_markers(
-            ACCESS, "s3://bucket/runs", "run-1", "blocksci"
-        )
+        clear_s3_stage_markers(ACCESS, "s3://bucket/runs", "run-1", "blocksci")
 
 
 def _wait(done: str, failed: str, exists, probe=None, timeout: int = 60) -> None:
-    with mock.patch("client.artifacts.s3_object_exists", side_effect=exists):
+    with mock.patch("coinjoin_pipeline.storage.s3.s3_object_exists", side_effect=exists):
         wait_for_s3_marker(
-            "stage", done, failed, ACCESS, timeout_seconds=timeout, poll_interval=0, probe=probe
+            "stage",
+            done,
+            failed,
+            ACCESS,
+            timeout_seconds=timeout,
+            poll_interval=0,
+            probe=probe,
         )
 
 
@@ -164,7 +159,11 @@ def test_wait_for_s3_marker_returns_on_done() -> None:
 
 def test_wait_for_s3_marker_raises_on_failed_marker() -> None:
     with pytest.raises(ArtifactTransportError, match="stage failed"):
-        _wait("s3://b/r/.done", "s3://b/r/.failed", lambda access, uri: uri.endswith(".failed"))
+        _wait(
+            "s3://b/r/.done",
+            "s3://b/r/.failed",
+            lambda access, uri: uri.endswith(".failed"),
+        )
 
 
 def test_wait_for_s3_marker_times_out() -> None:
@@ -202,7 +201,7 @@ def test_wait_for_s3_marker_extends_start_deadline_while_job_queued() -> None:
 
 def test_wait_for_s3_marker_enforces_explicit_queued_start_deadline() -> None:
     with (
-        mock.patch("client.artifacts.s3_object_exists", return_value=False),
+        mock.patch("coinjoin_pipeline.storage.s3.s3_object_exists", return_value=False),
         pytest.raises(ArtifactTransportError, match="Timed out"),
     ):
         wait_for_s3_marker(

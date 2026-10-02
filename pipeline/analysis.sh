@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
+# EXPERIMENTAL: local Docker path. Not part of the Kubernetes → S3 → PBS path that the thesis results come from.
 set -euo pipefail
 
-if [[ -z "${HOST_CLIENT_DIR:-}" ]]; then
-	HOST_CLIENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/client" && pwd)"
-fi
-
-export SCENARIOS_DIR="${SCENARIOS_DIR:-${HOST_CLIENT_DIR}/scenarios}"
-export NOTEBOOKS_DIR="${NOTEBOOKS_DIR:-${HOST_CLIENT_DIR}/notebooks}"
-HOST_ROOT_DIR="$(dirname "${HOST_CLIENT_DIR}")"
-export EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR:-${HOST_ROOT_DIR}/emulation_logs}"
+HOST_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export SCENARIOS_DIR="${SCENARIOS_DIR:-${HOST_ROOT_DIR}/../scenarios}"
+export NOTEBOOKS_DIR="${NOTEBOOKS_DIR:-${HOST_ROOT_DIR}/../coinjoin-runs/.notebooks}"
+export EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR:-${HOST_ROOT_DIR}/../coinjoin-runs}"
 export EXPORTERS_DIR="${EXPORTERS_DIR:-${HOST_ROOT_DIR}/exporters}"
 if [[ -n "${ACTIVE_RUN_ID:-}" ]]; then
 	export COINJOIN_ANALYSIS_SOURCE_PATH="${COINJOIN_ANALYSIS_SOURCE_PATH:-${EMULATION_LOGS_DIR}/${ACTIVE_RUN_ID}/coinjoin-analysis_data}"

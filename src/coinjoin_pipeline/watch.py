@@ -3,20 +3,22 @@
 from __future__ import annotations
 
 import argparse
-from collections import deque
-from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 import queue
 import re
 import subprocess
 import sys
 import threading
 import time
+from collections import deque
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TextIO
 
-from .commands import RUN_ID_RE
+from .execution.pbs.defaults import PBS_TERMINAL_STATES
+from .execution.pbs.status import job_details
+from .storage.s3 import RUN_ID_RE
 
 DEFAULT_NAMESPACE = "coinjoin"
 DEFAULT_WAIT_SECONDS = 120
@@ -30,14 +32,17 @@ ENGINE_SELECTORS = {
     "joinmarket": "app=joinmarket-distributor",
 }
 OUTER_POD_SELECTOR = "app.kubernetes.io/name=coinjoin-s3"
-PBS_SUBMISSION_RE = re.compile(
-    r"\[pbs\] Submitted (?P<stage>[a-z0-9-]+)(?: S3-compatible)? PBS job: (?P<job_id>\S+)"
-)
-# Must stay identical to client.pbs.PBS_TERMINAL_STATES. The watcher runs
-# in-process from the installed package while pipeline/client is only reachable
-# as a subprocess runtime root, so the set cannot be imported; the parity is
-# asserted by tests/pipeline/test_pbs.py::PBSStateSetParityTest instead.
-PBS_TERMINAL_STATES = {"C", "F", "X"}
+PBS_SUBMISSION_RE = re.compile(r"\[pbs\] Submitted (?P<stage>[a-z0-9-]+)(?: S3-compatible)? PBS job: (?P<job_id>\S+)")
+
+
+def _pbs_job_details(stage: str, job_id: str) -> PbsJob:
+    fields = job_details(job_id)
+    if fields is None:
+        raise RuntimeError(f"cannot inspect PBS job {job_id}: job not found")
+    output = fields.get("Output_Path")
+    if not output:
+        raise RuntimeError(f"PBS job {job_id} has no Output_Path")
+    return PbsJob(stage, job_id, _pbs_output_path(output), fields.get("job_state", "?"))
 
 
 def _run_id(value: str) -> str:
@@ -92,9 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=tuple(ENGINE_SELECTORS),
         help="Run engine; inferred from the outer controller pod when omitted.",
     )
-    parser.add_argument(
-        "--frontend-log", type=Path, help="Also follow the local full-run tee log."
-    )
+    parser.add_argument("--frontend-log", type=Path, help="Also follow the local full-run tee log.")
     parser.add_argument(
         "--pbs",
         action="store_true",
@@ -117,16 +120,10 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Run directory containing .pbs/*.jobid (auto-detected when omitted).",
     )
-    parser.add_argument(
-        "--save", type=Path, help="Write the unified prefixed stream to this file."
-    )
-    parser.add_argument(
-        "--tail", type=int, default=200, help="Initial lines per selected source."
-    )
+    parser.add_argument("--save", type=Path, help="Write the unified prefixed stream to this file.")
+    parser.add_argument("--tail", type=int, default=200, help="Initial lines per selected source.")
     parser.add_argument("--wait-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
-    parser.add_argument(
-        "--no-follow", action="store_true", help="Print current logs and exit."
-    )
+    parser.add_argument("--no-follow", action="store_true", help="Print current logs and exit.")
     return parser
 
 
@@ -141,15 +138,11 @@ def _newest_pod(payload: str) -> str | None:
         return None
     if not items:
         return None
-    newest = max(
-        items, key=lambda item: item.get("metadata", {}).get("creationTimestamp", "")
-    )
+    newest = max(items, key=lambda item: item.get("metadata", {}).get("creationTimestamp", ""))
     return newest.get("metadata", {}).get("name")
 
 
-def _discover_pod(
-    kubectl: list[str], selector: str, *, wait_seconds: int, description: str
-) -> str:
+def _discover_pod(kubectl: list[str], selector: str, *, wait_seconds: int, description: str) -> str:
     deadline = time.monotonic() + wait_seconds
     last_error = ""
     while True:
@@ -181,9 +174,7 @@ def _discover_engine(kubectl: list[str], outer_pod: str) -> str:
     try:
         containers = json.loads(result.stdout).get("spec", {}).get("containers", [])
     except (json.JSONDecodeError, AttributeError) as error:
-        raise RuntimeError(
-            f"Could not parse engine metadata for pod {outer_pod}"
-        ) from error
+        raise RuntimeError(f"Could not parse engine metadata for pod {outer_pod}") from error
     for container in containers:
         if container.get("name") != "controller":
             continue
@@ -205,44 +196,10 @@ def _kubernetes_log_command(
     return command
 
 
-def _parse_qstat(payload: str) -> dict[str, str]:
-    fields: dict[str, str] = {}
-    current: str | None = None
-    for line in payload.splitlines():
-        match = re.match(r"^\s*([A-Za-z][A-Za-z0-9_.-]*)\s*=\s*(.*)$", line)
-        if match:
-            current = match.group(1)
-            fields[current] = match.group(2).strip()
-        elif current is not None and line[:1].isspace():
-            fields[current] += line.strip()
-    return fields
-
-
 def _pbs_output_path(value: str) -> Path:
     # OpenPBS reports Output_Path as "submission-host:/absolute/path".
     path = value.split(":", 1)[1] if ":" in value else value
     return Path(path).expanduser()
-
-
-def _pbs_job_details(stage: str, job_id: str) -> PbsJob:
-    errors: list[str] = []
-    for command in (["qstat", "-x", "-f", job_id], ["qstat", "-f", job_id]):
-        result = subprocess.run(command, check=False, capture_output=True, text=True)
-        if result.returncode != 0:
-            errors.append((result.stderr or result.stdout).strip())
-            continue
-        fields = _parse_qstat(result.stdout)
-        output = fields.get("Output_Path")
-        if not output:
-            raise RuntimeError(f"PBS job {job_id} has no Output_Path")
-        return PbsJob(
-            stage=stage,
-            job_id=job_id,
-            output_path=_pbs_output_path(output),
-            state=fields.get("job_state", "?"),
-        )
-    detail = next((error for error in errors if error), "job not found")
-    raise RuntimeError(f"cannot inspect PBS job {job_id}: {detail}")
 
 
 def _job_ids_from_frontend_log(path: Path) -> dict[str, str]:
@@ -377,7 +334,8 @@ def stream_sources(
 
     try:
         for name, command in sources.items():
-            process = subprocess.Popen(
+            # Several sources stream at once; the finally block below reaps them.
+            process = subprocess.Popen(  # pylint: disable=consider-using-with
                 command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -385,9 +343,7 @@ def stream_sources(
                 bufsize=1,
             )
             processes[name] = process
-            thread = threading.Thread(
-                target=_reader, args=(name, process, messages), daemon=True
-            )
+            thread = threading.Thread(target=_reader, args=(name, process, messages), daemon=True)
             thread.start()
             threads.append(thread)
 
@@ -427,11 +383,7 @@ def stream_sources(
         if save_file is not None:
             save_file.close()
 
-    failures = [
-        process.returncode
-        for process in processes.values()
-        if process.returncode not in {0, None}
-    ]
+    failures = [process.returncode for process in processes.values() if process.returncode not in {0, None}]
     return 5 if failures else 0
 
 
@@ -447,11 +399,7 @@ def main(
 
     watch_kubernetes = not args.pbs_only
     watch_pbs = args.pbs or args.pbs_only or bool(args.pbs_job)
-    components = (
-        ALL_COMPONENTS
-        if args.all
-        else {item.strip() for item in args.components.split(",") if item.strip()}
-    )
+    components = ALL_COMPONENTS if args.all else {item.strip() for item in args.components.split(",") if item.strip()}
     unknown = components - VALID_COMPONENTS
     if unknown or not components:
         print(
@@ -489,8 +437,7 @@ def main(
                     return 2
             if "coordinator" in components and selected_engine != "wasabi":
                 print(
-                    "ERROR: coordinator is Wasabi-specific; use --components engine "
-                    "for JoinMarket runs",
+                    "ERROR: coordinator is Wasabi-specific; use --components engine for JoinMarket runs",
                     file=sys.stderr,
                 )
                 return 2
@@ -511,9 +458,7 @@ def main(
                     print(f"ERROR: {error}", file=sys.stderr)
                     return 2
                 container = None
-            sources[component] = _kubernetes_log_command(
-                kubectl, pod, container, tail=args.tail, follow=follow
-            )
+            sources[component] = _kubernetes_log_command(kubectl, pod, container, tail=args.tail, follow=follow)
 
     frontend_log = args.frontend_log.expanduser().resolve() if args.frontend_log else None
     if frontend_log is None and watch_pbs:
@@ -533,19 +478,19 @@ def main(
     pbs_jobs: dict[str, PbsJob] = {}
     if watch_pbs:
         default_runs_root = (
-            runs_root
-            or Path(
-                os.environ.get(
-                    "EMULATION_LOGS_DIR",
-                    Path.cwd() / "coinjoin-runs",
+            (
+                runs_root
+                or Path(
+                    os.environ.get(
+                        "EMULATION_LOGS_DIR",
+                        Path.cwd() / "coinjoin-runs",
+                    )
                 )
             )
-        ).expanduser().resolve()
-        run_dir = (
-            args.run_dir.expanduser().resolve()
-            if args.run_dir
-            else default_runs_root / args.run_id
+            .expanduser()
+            .resolve()
         )
+        run_dir = args.run_dir.expanduser().resolve() if args.run_dir else default_runs_root / args.run_id
         job_ids = _job_ids_from_run_dir(run_dir)
         if frontend_log is not None:
             job_ids.update(_job_ids_from_frontend_log(frontend_log))
@@ -556,8 +501,7 @@ def main(
             return 2
         if not job_ids:
             print(
-                "ERROR: no PBS job IDs found; pass --frontend-log LOG, --run-dir DIR, "
-                "or --pbs-job STAGE=JOB_ID",
+                "ERROR: no PBS job IDs found; pass --frontend-log LOG, --run-dir DIR, or --pbs-job STAGE=JOB_ID",
                 file=sys.stderr,
             )
             return 2
@@ -577,8 +521,7 @@ def main(
             return 2
         if not pbs_jobs:
             print(
-                "ERROR: none of the discovered PBS jobs could be inspected: "
-                f"{', '.join(skipped)}",
+                f"ERROR: none of the discovered PBS jobs could be inspected: {', '.join(skipped)}",
                 file=sys.stderr,
             )
             return 2

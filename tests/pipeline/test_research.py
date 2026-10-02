@@ -9,7 +9,7 @@ from unittest import mock
 PROJECT_ROOT = Path(__file__).resolve().parents[2] / "pipeline"
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from client.research import (  # noqa: E402
+from coinjoin_pipeline.execution.research import (  # noqa: E402
     dry_run_external,
     external_analyze,
     external_command,
@@ -54,7 +54,7 @@ class ResearchPreflightTests(unittest.TestCase):
 
     def test_external_command_quotes_run_id(self):
         args = argparse.Namespace(run_id="run with spaces", network="bitcoin", coinjoin_type="wasabi2")
-        self.assertIn("--run-dir 'run with spaces'", external_command(args))
+        self.assertIn("--run-dir '/runs/run with spaces'", external_command(args))
 
     def test_external_dry_run_does_not_create_run_directory(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -74,7 +74,7 @@ class ResearchPreflightTests(unittest.TestCase):
                 runtime="docker",
             )
 
-            with mock.patch("client.research.runtime_check"):
+            with mock.patch("coinjoin_pipeline.execution.research.runtime_check"):
                 dry_run_external(args)
             self.assertFalse(args.runs_root.exists())
 
@@ -91,12 +91,19 @@ class ResearchPreflightTests(unittest.TestCase):
             config.write_text("{}")
             report = run_dir / "coinjoinPipeline_data" / "unified_report.json"
             report.parent.mkdir()
-            report.write_text(json.dumps({
-                "run_manifest": {"images": {"blocksci": "blocksci:test"}},
-                "integration_diagnostics": {"status": "ok"},
-            }))
+            report.write_text(
+                json.dumps(
+                    {
+                        "run_manifest": {"images": {"blocksci": "blocksci:test"}},
+                        "integration_diagnostics": {"status": "ok"},
+                    }
+                )
+            )
             args = argparse.Namespace(runs_root=root, run_dir="run", runtime="docker", blocksci_image=None)
-            with mock.patch("client.research.runtime_check"), mock.patch("client.research.subprocess.run") as run_mock:
+            with (
+                mock.patch("coinjoin_pipeline.execution.research.runtime_check"),
+                mock.patch("coinjoin_pipeline.execution.research.subprocess.run") as run_mock,
+            ):
                 validate_existing_run(args)
 
             command = run_mock.call_args.args[0]
@@ -145,7 +152,7 @@ class ResearchPreflightTests(unittest.TestCase):
                 blocksci_image="blocksci:test",
             )
 
-            with mock.patch("client.research.subprocess.run") as run_mock:
+            with mock.patch("coinjoin_pipeline.execution.research.subprocess.run") as run_mock:
                 external_analyze(args)
 
             command = run_mock.call_args.args[0]

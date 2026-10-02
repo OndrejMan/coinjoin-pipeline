@@ -7,12 +7,13 @@ import os
 import shutil
 import sys
 
-from .download_report import (
-    RUN_ID_RE,
+from .storage.s3 import (
+    ArtifactTransportError,
     S3Access,
-    _run_s5cmd,
-    _validate_access,
-    _validate_artifact_uri,
+    access_from_values,
+    run_s5cmd,
+    validate_artifact_uri,
+    validate_run_id,
 )
 
 
@@ -23,10 +24,7 @@ class CleanError(RuntimeError):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="coinjoin-pipeline clean-s3",
-        description=(
-            "Delete every object under an S3 run root (or a single run). "
-            "This is irreversible."
-        ),
+        description=("Delete every object under an S3 run root (or a single run). This is irreversible."),
     )
     parser.add_argument(
         "--artifact-uri",
@@ -65,16 +63,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _validate_run_id(value: str) -> str:
-    if len(value) > 63 or ".." in value or not RUN_ID_RE.fullmatch(value):
-        raise ValueError(
-            "run ID must be at most 63 characters, begin and end with an "
-            "alphanumeric character, contain only [A-Za-z0-9._-], and must "
-            "not contain '..'"
-        )
-    return value
-
-
 def _target_prefix(artifact_uri: str, run_id: str | None) -> str:
     if run_id is None:
         return artifact_uri
@@ -83,27 +71,23 @@ def _target_prefix(artifact_uri: str, run_id: str | None) -> str:
 
 def list_objects(access: S3Access, prefix: str) -> list[str]:
     """Return the object URIs living under ``prefix`` (recursively)."""
-    result = _run_s5cmd(access, "ls", f"{prefix}/*")
+    result = run_s5cmd(access, "ls", f"{prefix}/*")
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         if "no object found" in detail.lower():
             return []
-        raise CleanError(
-            f"s5cmd could not inspect {prefix} (exit {result.returncode}): {detail}"
-        )
+        raise CleanError(f"s5cmd could not inspect {prefix} (exit {result.returncode}): {detail}")
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
 def delete_prefix(access: S3Access, prefix: str) -> None:
     """Recursively delete every object under ``prefix``."""
-    result = _run_s5cmd(access, "rm", f"{prefix}/*")
+    result = run_s5cmd(access, "rm", f"{prefix}/*")
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         if "no object found" in detail.lower():
             return
-        raise CleanError(
-            f"s5cmd delete failed for {prefix} (exit {result.returncode}): {detail}"
-        )
+        raise CleanError(f"s5cmd delete failed for {prefix} (exit {result.returncode}): {detail}")
 
 
 def _confirm(prefix: str, count: int) -> bool:
@@ -126,11 +110,17 @@ def _confirm(prefix: str, count: int) -> bool:
 
 
 def main(argv: list[str] | None = None, *, runs_root: object = None) -> int:
+    del runs_root  # the host dispatch passes it to every utility; S3 cleanup has no local runs
     args = build_parser().parse_args(argv)
     try:
-        artifact_uri = _validate_artifact_uri(args.artifact_uri)
-        run_id = _validate_run_id(args.run_id) if args.run_id else None
-        access = _validate_access(args)
+        artifact_uri = validate_artifact_uri(args.artifact_uri)
+        run_id = validate_run_id(args.run_id) if args.run_id else None
+        access = access_from_values(
+            args.s3_endpoint_url,
+            args.s3_credentials_file,
+            args.s3_profile,
+            check_file=True,
+        )
     except ValueError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
@@ -145,7 +135,7 @@ def main(argv: list[str] | None = None, *, runs_root: object = None) -> int:
     prefix = _target_prefix(artifact_uri, run_id)
     try:
         objects = list_objects(access, prefix)
-    except CleanError as error:
+    except (CleanError, ArtifactTransportError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 5
 
@@ -164,7 +154,7 @@ def main(argv: list[str] | None = None, *, runs_root: object = None) -> int:
 
     try:
         delete_prefix(access, prefix)
-    except CleanError as error:
+    except (CleanError, ArtifactTransportError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 5
 

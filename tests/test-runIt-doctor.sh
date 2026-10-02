@@ -55,20 +55,28 @@ run_it() {
   return "${RUN_STATUS}"
 }
 
-# The wrapper is no longer started through `docker run`, so "did the CLI get
-# past its gates" is now the dry-run confirmation it prints just before exec.
+# The CLI prints the run configuration only after every gate has passed.
 launched() {
-  grep -q 'validation passed' "${RUN_OUT}"
+  grep -q '^Run configuration: ' "${RUN_OUT}"
 }
 
-# A run that passes every gate probes the runtime and the workload images.
-run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/overactive-local.json --dry-run
+# `doctor` probes the runtime and every workload image.
+run_it bash "${LAUNCHER}" doctor
 grep -q '^info ' "${FAKE_LOG}"
 grep -q '^manifest inspect ghcr.io/ondrejman/blocksci-complete:latest ' "${FAKE_LOG}"
-launched
+grep -q '^doctor OK' "${RUN_OUT}"
 # The retired wrapper image must not be probed any more.
 if grep -q 'coinjoin-pipeline:latest' "${FAKE_LOG}"; then
   echo "FAIL: the wrapper image is gone and must not be preflighted" >&2
+  exit 1
+fi
+
+# A dry run passes the configuration gates without contacting the runtime;
+# the runtime and image gates apply to live runs (exercised below).
+run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/overactive-local.json --dry-run
+launched
+if [[ -s "${FAKE_LOG}" ]]; then
+  echo "FAIL: a dry run contacted the container runtime" >&2
   exit 1
 fi
 
@@ -81,9 +89,10 @@ if grep -q 'PBS Bitcoin datadir' "${TMP_DIR}/pbs-env.out"; then
   exit 1
 fi
 
-# A runtime failure and a strict scenario failure both prevent launch.
+# A runtime failure and a strict scenario failure both prevent launch. The
+# daemon gate runs only for live runs; it fails before anything is executed.
 set +e
-FAIL_INFO=1 run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/overactive-local.json --dry-run >"${TMP_DIR}/daemon.out" 2>&1
+FAIL_INFO=1 run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/overactive-local.json >"${TMP_DIR}/daemon.out" 2>&1
 daemon_exit=$?
 set -e
 [[ "${daemon_exit}" -ne 0 ]]
@@ -104,16 +113,18 @@ if launched; then
 fi
 
 # Images may be supplied locally; otherwise an inaccessible registry blocks execution.
-mkdir -p "${FAKE_LOGS}/existing-run"
-run_it env LOCAL_IMAGES=1 bash "${LAUNCHER}" export --engine wasabi --run-dir existing-run --dry-run
+run_it env LOCAL_IMAGES=1 bash "${LAUNCHER}" doctor
 grep -q '^image inspect ghcr.io/ondrejman/blocksci-complete:latest ' "${FAKE_LOG}"
 if grep -q '^manifest inspect ' "${FAKE_LOG}"; then
   echo "FAIL: locally available image was unnecessarily resolved from registry" >&2
   exit 1
 fi
 
+# A live `analyze` needs the BlockSci and coinjoin-analysis images locally;
+# the image gate fails before anything is executed.
+mkdir -p "${FAKE_LOGS}/existing-run"
 set +e
-FAIL_MANIFEST=1 run_it bash "${LAUNCHER}" export --engine wasabi --run-dir existing-run --dry-run >"${TMP_DIR}/image.out" 2>&1
+FAIL_MANIFEST=1 run_it bash "${LAUNCHER}" analyze --engine wasabi --run-dir existing-run >"${TMP_DIR}/image.out" 2>&1
 image_exit=$?
 set -e
 [[ "${image_exit}" -ne 0 ]]

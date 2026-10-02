@@ -182,10 +182,16 @@ if ! grep -q "\[pipeline\] DONE: Parallel analysis" "${RUN_LOG}"; then
   echo "FAIL: expected 'Parallel analysis' pipeline stage to complete" >&2
   exit 1
 fi
-if ! grep -q "\[pipeline\] START: Unified report export" "${RUN_LOG}"; then
-  echo "FAIL: expected parallel run to follow with the unified report export stage" >&2
-  exit 1
-fi
+# The report is a node of the analysis graph: it may start only after both
+# analyzers have finished.
+report_line="$(grep -n '\[pipeline\] stage unified-report: started' "${RUN_LOG}" | head -n 1 | cut -d: -f1)"
+for analyzer in coinjoin-analysis blocksci; do
+  done_line="$(grep -n "\[pipeline\] stage ${analyzer}: done" "${RUN_LOG}" | head -n 1 | cut -d: -f1)"
+  if [[ -z "${report_line}" || -z "${done_line}" || "${done_line}" -gt "${report_line}" ]]; then
+    echo "FAIL: expected the unified report to start after ${analyzer} finished" >&2
+    exit 1
+  fi
+done
 
 list_run_dirs >"${AFTER_FILE}"
 

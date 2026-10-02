@@ -1,8 +1,8 @@
 import argparse
 import json
-from pathlib import Path
 import sys
 import types
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -10,16 +10,18 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "pipeline"))
 
+from exporters import cli as report_cli  # noqa: E402
+from exporters.analysis_artifact import load_analysis
 from exporters.blocksci_export.analysis import (  # noqa: E402
     SCHEMA_VERSION,
     detector_parameters,
     exported_addresses,
-    load_analysis,
     write_analysis,
 )
-from exporters import cli as report_cli  # noqa: E402
-from exporters.blocksci_export.detector import assert_real_blocksci  # noqa: E402
-from exporters.blocksci_export.detector import import_blocksci_bindings  # noqa: E402
+from exporters.blocksci_export.detector import (
+    assert_real_blocksci,  # noqa: E402
+    import_blocksci_bindings,  # noqa: E402
+)
 
 
 def parameters() -> dict:
@@ -75,9 +77,7 @@ def test_load_analysis_rejects_parameter_mismatch(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    loaded = load_analysis(
-        artifact, run_id="run-1", expected_parameters=parameters()
-    )
+    loaded = load_analysis(artifact, run_id="run-1", expected_parameters=parameters())
     assert loaded["records"] == {}
 
     mismatched = {**parameters(), "min_input_count": 1}
@@ -106,7 +106,7 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
         blocksci_image="blocksci:test",
         coinjoin_analysis_image="analysis:test",
         coinjoin_emulator_image="emulator:test",
-        uploader_image="uploader@sha256:" + "a"*64,
+        uploader_image="uploader@sha256:" + "a" * 64,
         unified_report_image="python:3.12-slim-bookworm",
     )
     fake_blocksci = mock.Mock()
@@ -146,9 +146,7 @@ def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-1"
     baseline_dir = run_dir / "coinjoin-analysis_data"
     baseline_dir.mkdir(parents=True)
-    (baseline_dir / "coinjoin_tx_info.json").write_text(
-        '{"coinjoins": {}}', encoding="utf-8"
-    )
+    (baseline_dir / "coinjoin_tx_info.json").write_text('{"coinjoins": {}}', encoding="utf-8")
     emulator_dir = run_dir / "coinjoin_emulator_data"
     emulator_dir.mkdir()
     (emulator_dir / "scenario.json").write_text('{"name": "fixture"}', encoding="utf-8")
@@ -172,10 +170,8 @@ def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:
     )
 
     with (
-        mock.patch.object(report_cli, "blocksci", None),
-        mock.patch.object(
-            report_cli,
-            "export_blocksci_records",
+        mock.patch(
+            "exporters.blocksci_export.detector.export_blocksci_records",
             side_effect=AssertionError("BlockSci must not be queried"),
         ),
         mock.patch.object(report_cli, "build_emulator_data", return_value=None),
@@ -267,7 +263,9 @@ def test_io_records_carry_the_bare_address_for_every_script_type() -> None:
     from exporters.blocksci_export.detector import _base_io_record
 
     taproot = types.SimpleNamespace(
-        index=2, value=2097152, address=_PrettyPrintedAddress("bcrt1pguuun", "WitnessUnknownAddress")
+        index=2,
+        value=2097152,
+        address=_PrettyPrintedAddress("bcrt1pguuun", "WitnessUnknownAddress"),
     )
     opreturn = types.SimpleNamespace(index=0, value=0, address=_AddressWithoutString())
     missing = types.SimpleNamespace(index=1, value=5, address=None)

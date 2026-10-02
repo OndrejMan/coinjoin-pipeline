@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# EXPERIMENTAL: local Docker path. Not part of the Kubernetes → S3 → PBS path that the thesis results come from.
 set -euo pipefail
 
 PROJECT_NAME="${COINJOIN_COMPOSE_PROJECT:-blocksci-emulator}"

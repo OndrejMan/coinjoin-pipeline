@@ -13,13 +13,13 @@ from exporters.common import (
     SCHEMA_VERSION,
     WASABI2_THRESHOLD_CHANGE_BLOCK,
     JsonObject,
+    compute_rate,
     parse_run_started_at,
 )
 from exporters.comparison import (
     build_detection_confusion_matrix,
     build_divergences,
     compare_records,
-    compute_rate,
     evaluate_cluster_assignments,
 )
 from exporters.heuristics import add_blocksci_heuristic_explanations
@@ -67,11 +67,13 @@ def build_report(
         enumerator_summary = (coinjoin_mappings.get("enumerator") or {}).get("summary") or {}
         sake_summary = (coinjoin_mappings.get("sake") or {}).get("summary") or {}
         if (
-            any((
-                enumerator_summary.get("timed_out"),
-                enumerator_summary.get("errors"),
-                sake_summary.get("errors"),
-            ))
+            any(
+                (
+                    enumerator_summary.get("timed_out"),
+                    enumerator_summary.get("errors"),
+                    sake_summary.get("errors"),
+                )
+            )
             and coinjoin_mappings.get("status") == "complete"
         ):
             coinjoin_mappings = {**coinjoin_mappings, "status": "partial"}
@@ -193,15 +195,17 @@ def build_report(
     if coinjoin_mappings:
         enumerator_summary = (coinjoin_mappings.get("enumerator") or {}).get("summary") or {}
         sake_summary = (coinjoin_mappings.get("sake") or {}).get("summary") or {}
-        summary.update({
-            "mapping_transactions": enumerator_summary.get("transactions"),
-            "mapping_completed": enumerator_summary.get("completed"),
-            "mapping_timed_out": enumerator_summary.get("timed_out"),
-            "mapping_errors": enumerator_summary.get("errors"),
-            "sake_output_match_rate": sake_summary.get("output_match_rate"),
-            "sake_wallet_match_rate": sake_summary.get("wallet_match_rate"),
-            "sake_full_coinjoin_match_rate": sake_summary.get("full_coinjoin_match_rate"),
-        })
+        summary.update(
+            {
+                "mapping_transactions": enumerator_summary.get("transactions"),
+                "mapping_completed": enumerator_summary.get("completed"),
+                "mapping_timed_out": enumerator_summary.get("timed_out"),
+                "mapping_errors": enumerator_summary.get("errors"),
+                "sake_output_match_rate": sake_summary.get("output_match_rate"),
+                "sake_wallet_match_rate": sake_summary.get("wallet_match_rate"),
+                "sake_full_coinjoin_match_rate": sake_summary.get("full_coinjoin_match_rate"),
+            }
+        )
     divergences = build_divergences(transactions)
     summary["divergence_counts"] = {name: len(items) for name, items in divergences.items()}
     run_manifest = build_run_manifest(
@@ -231,14 +235,18 @@ def build_report(
     run_manifest["network"] = network
     if coinjoin_mappings:
         provenance = coinjoin_mappings.get("provenance") or {}
-        run_manifest["images"].update({
-            "mappings_enumerator": provenance.get("enumerator_image"),
-            "sake": provenance.get("sake_image"),
-        })
-        run_manifest["image_digests"].update({
-            "mappings_enumerator": provenance.get("enumerator_image_digest"),
-            "sake": provenance.get("sake_image_digest"),
-        })
+        run_manifest["images"].update(
+            {
+                "mappings_enumerator": provenance.get("enumerator_image"),
+                "sake": provenance.get("sake_image"),
+            }
+        )
+        run_manifest["image_digests"].update(
+            {
+                "mappings_enumerator": provenance.get("enumerator_image_digest"),
+                "sake": provenance.get("sake_image_digest"),
+            }
+        )
         run_manifest["mapping_parameters"] = (coinjoin_mappings.get("enumerator") or {}).get("parameters")
         run_manifest["sake_seed"] = (coinjoin_mappings.get("sake") or {}).get("seed")
 
@@ -268,7 +276,9 @@ def build_report(
             "schema_version": emulator_data.get("schema_version"),
             "summary": emulator_data.get("summary"),
             "label_provenance": emulator_data.get("label_provenance"),
-        } if emulator_data else None,
+        }
+        if emulator_data
+        else None,
         # Compatibility alias retained for schema 1.x consumers. New consumers
         # should read both analyzers from detector_evaluations.
         "detection_confusion_matrix": blocksci_detection_confusion_matrix,

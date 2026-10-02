@@ -354,7 +354,7 @@ echo "Running the S3-compatible full-run for run ${RUN_ID}..."
 set +e
 (
   cd "${PROJECT_DIR}"
-  PYTHONPATH="${PROJECT_DIR}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+  PYTHONPATH="${PROJECT_DIR}/src:${PROJECT_DIR}/pipeline${PYTHONPATH:+:${PYTHONPATH}}" \
     timeout --foreground "${KUBERNETES_S3_TIMEOUT}" \
     python3 -m coinjoin_pipeline.cli full-run \
     --engine "${ENGINE}" \

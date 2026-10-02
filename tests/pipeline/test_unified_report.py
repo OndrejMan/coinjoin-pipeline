@@ -24,37 +24,37 @@ except ImportError:
 else:
     _ = _blocksci
 
-from exporters import unified_report
-from exporters.heuristics import WASABI2_BLOCKSCI_DENOMINATIONS
-from exporters.markdown_report import render_report
-from exporters.unified_report import (
-    SCHEMA_VERSION,
-    build_scenario_checks,
-    build_emulator_data,
-    build_integration_diagnostics,
-    build_report,
-    build_run_manifest,
-    compare_run_manifests,
-    evaluate_cluster_assignments,
+from exporters.blocksci_export import detector as unified_report
+from exporters.blocksci_export.detector import (
+    export_blocksci_cluster_assignments,
+    export_blocksci_records,
+)
+from exporters.cli import parse_args
+from exporters.common import SCHEMA_VERSION, save_json, sha256_json
+from exporters.comparison import evaluate_cluster_assignments
+from exporters.emulator_data import build_emulator_data, load_wasabi_round_labels
+from exporters.heuristics import (
+    WASABI2_BLOCKSCI_DENOMINATIONS,
     explain_joinmarket_definite_heuristic,
     explain_joinmarket_possible_heuristic,
     explain_wasabi2_heuristic,
-    export_blocksci_records,
-    export_blocksci_cluster_assignments,
+)
+from exporters.integration_diagnostics import (
+    build_integration_diagnostics,
     exported_block_targets,
+)
+from exporters.manifest import build_run_manifest, compare_run_manifests
+from exporters.markdown_report import render_report
+from exporters.normalization import (
     fill_missing_block_heights,
     filter_coinjoin_analysis_false_positives,
     load_exported_block_tx_index,
     load_false_positive_txids,
-    load_scenario,
-    load_wasabi_round_labels,
     normalize_coinjoin_analysis,
-    normalize_scenario,
-    parse_args,
-    parse_min_input_count,
-    save_json,
-    sha256_json,
 )
+from exporters.parameters import parse_min_input_count
+from exporters.report_builder import build_report
+from exporters.scenario import build_scenario_checks, load_scenario, normalize_scenario
 
 
 def coinjoin_analysis_fixture():
@@ -64,12 +64,28 @@ def coinjoin_analysis_fixture():
                 "txid": "txA",
                 "broadcast_time": "2026-01-01 00:00:00.000",
                 "inputs": {
-                    "0": {"value": 150000, "address": "input-a", "wallet_name": "wallet-000"},
+                    "0": {
+                        "value": 150000,
+                        "address": "input-a",
+                        "wallet_name": "wallet-000",
+                    },
                 },
                 "outputs": {
-                    "0": {"value": 100000, "address": "output-a0", "wallet_name": "wallet-000"},
-                    "1": {"value": 50000, "address": "output-a1", "wallet_name": "wallet-000"},
-                    "2": {"value": 50000, "address": "output-a2", "wallet_name": "wallet-000"},
+                    "0": {
+                        "value": 100000,
+                        "address": "output-a0",
+                        "wallet_name": "wallet-000",
+                    },
+                    "1": {
+                        "value": 50000,
+                        "address": "output-a1",
+                        "wallet_name": "wallet-000",
+                    },
+                    "2": {
+                        "value": 50000,
+                        "address": "output-a2",
+                        "wallet_name": "wallet-000",
+                    },
                 },
             }
         }
@@ -89,18 +105,58 @@ def wasabi2_passing_coinjoin_fixture():
                 "txid": "txA",
                 "block_height": 226,
                 "inputs": {
-                    "0": {"value": 5000, "address": "input-a0", "wallet_name": "wallet-000"},
-                    "1": {"value": 4000, "address": "input-a1", "wallet_name": "wallet-001"},
-                    "2": {"value": 3000, "address": "input-a2", "wallet_name": "wallet-002"},
-                    "3": {"value": 2000, "address": "input-a3", "wallet_name": "wallet-003"},
-                    "4": {"value": 1000, "address": "input-a4", "wallet_name": "wallet-004"},
+                    "0": {
+                        "value": 5000,
+                        "address": "input-a0",
+                        "wallet_name": "wallet-000",
+                    },
+                    "1": {
+                        "value": 4000,
+                        "address": "input-a1",
+                        "wallet_name": "wallet-001",
+                    },
+                    "2": {
+                        "value": 3000,
+                        "address": "input-a2",
+                        "wallet_name": "wallet-002",
+                    },
+                    "3": {
+                        "value": 2000,
+                        "address": "input-a3",
+                        "wallet_name": "wallet-003",
+                    },
+                    "4": {
+                        "value": 1000,
+                        "address": "input-a4",
+                        "wallet_name": "wallet-004",
+                    },
                 },
                 "outputs": {
-                    "0": {"value": 5000, "address": "output-a0", "wallet_name": "wallet-000"},
-                    "1": {"value": 5000, "address": "output-a1", "wallet_name": "wallet-001"},
-                    "2": {"value": 5000, "address": "output-a2", "wallet_name": "wallet-002"},
-                    "3": {"value": 5000, "address": "output-a3", "wallet_name": "wallet-003"},
-                    "4": {"value": 5000, "address": "output-a4", "wallet_name": "wallet-004"},
+                    "0": {
+                        "value": 5000,
+                        "address": "output-a0",
+                        "wallet_name": "wallet-000",
+                    },
+                    "1": {
+                        "value": 5000,
+                        "address": "output-a1",
+                        "wallet_name": "wallet-001",
+                    },
+                    "2": {
+                        "value": 5000,
+                        "address": "output-a2",
+                        "wallet_name": "wallet-002",
+                    },
+                    "3": {
+                        "value": 5000,
+                        "address": "output-a3",
+                        "wallet_name": "wallet-003",
+                    },
+                    "4": {
+                        "value": 5000,
+                        "address": "output-a4",
+                        "wallet_name": "wallet-004",
+                    },
                 },
             }
         }
@@ -114,23 +170,83 @@ def joinmarket_passing_coinjoin_fixture():
                 "txid": "txA",
                 "block_height": 42,
                 "inputs": {
-                    "0": {"value": 195002, "address": "input-a0", "wallet_name": "wallet-000"},
-                    "1": {"value": 455004, "address": "input-a1", "wallet_name": "wallet-001"},
-                    "2": {"value": 46682, "address": "input-a2", "wallet_name": "wallet-002"},
-                    "3": {"value": 2955004, "address": "input-a3", "wallet_name": "wallet-003"},
-                    "4": {"value": 2915006, "address": "input-a4", "wallet_name": "wallet-004"},
+                    "0": {
+                        "value": 195002,
+                        "address": "input-a0",
+                        "wallet_name": "wallet-000",
+                    },
+                    "1": {
+                        "value": 455004,
+                        "address": "input-a1",
+                        "wallet_name": "wallet-001",
+                    },
+                    "2": {
+                        "value": 46682,
+                        "address": "input-a2",
+                        "wallet_name": "wallet-002",
+                    },
+                    "3": {
+                        "value": 2955004,
+                        "address": "input-a3",
+                        "wallet_name": "wallet-003",
+                    },
+                    "4": {
+                        "value": 2915006,
+                        "address": "input-a4",
+                        "wallet_name": "wallet-004",
+                    },
                 },
                 "outputs": {
-                    "0": {"value": 40000, "address": "mix-a0", "wallet_name": "wallet-000"},
-                    "1": {"value": 40000, "address": "mix-a1", "wallet_name": "wallet-001"},
-                    "2": {"value": 40000, "address": "mix-a2", "wallet_name": "wallet-002"},
-                    "3": {"value": 40000, "address": "mix-a3", "wallet_name": "wallet-003"},
-                    "4": {"value": 40000, "address": "mix-a4", "wallet_name": "wallet-004"},
-                    "5": {"value": 160002, "address": "change-a0", "wallet_name": "wallet-000"},
-                    "6": {"value": 420004, "address": "change-a1", "wallet_name": "wallet-001"},
-                    "7": {"value": 11682, "address": "change-a2", "wallet_name": "wallet-002"},
-                    "8": {"value": 2920004, "address": "change-a3", "wallet_name": "wallet-003"},
-                    "9": {"value": 2880006, "address": "change-a4", "wallet_name": "wallet-004"},
+                    "0": {
+                        "value": 40000,
+                        "address": "mix-a0",
+                        "wallet_name": "wallet-000",
+                    },
+                    "1": {
+                        "value": 40000,
+                        "address": "mix-a1",
+                        "wallet_name": "wallet-001",
+                    },
+                    "2": {
+                        "value": 40000,
+                        "address": "mix-a2",
+                        "wallet_name": "wallet-002",
+                    },
+                    "3": {
+                        "value": 40000,
+                        "address": "mix-a3",
+                        "wallet_name": "wallet-003",
+                    },
+                    "4": {
+                        "value": 40000,
+                        "address": "mix-a4",
+                        "wallet_name": "wallet-004",
+                    },
+                    "5": {
+                        "value": 160002,
+                        "address": "change-a0",
+                        "wallet_name": "wallet-000",
+                    },
+                    "6": {
+                        "value": 420004,
+                        "address": "change-a1",
+                        "wallet_name": "wallet-001",
+                    },
+                    "7": {
+                        "value": 11682,
+                        "address": "change-a2",
+                        "wallet_name": "wallet-002",
+                    },
+                    "8": {
+                        "value": 2920004,
+                        "address": "change-a3",
+                        "wallet_name": "wallet-003",
+                    },
+                    "9": {
+                        "value": 2880006,
+                        "address": "change-a4",
+                        "wallet_name": "wallet-004",
+                    },
                 },
             }
         }
@@ -275,9 +391,7 @@ class FakeBlockSciModule:
     def __init__(self, tx_heights, block_count, detector_results=None):
         self.tx_heights = tx_heights
         self.block_count = block_count
-        self.heuristics = types.SimpleNamespace(
-            coinjoin=FakeJoinMarketHeuristics(detector_results or {})
-        )
+        self.heuristics = types.SimpleNamespace(coinjoin=FakeJoinMarketHeuristics(detector_results or {}))
 
     def Blockchain(self, config):
         return FakeBlockchain(config, self.tx_heights, self.block_count)
@@ -326,9 +440,7 @@ class UnifiedReportTest(unittest.TestCase):
         chain = RawChain()
         fake_blocksci = types.SimpleNamespace(Blockchain=lambda _config: chain)
         with mock.patch.object(unified_report, "blocksci", fake_blocksci):
-            records, skipped = export_blocksci_records(
-                Path("/tmp/config.json"), "wasabi2", None
-            )
+            records, skipped = export_blocksci_records(Path("/tmp/config.json"), "wasabi2", None)
 
         self.assertEqual(records, {})
         self.assertEqual(skipped, [])
@@ -353,12 +465,26 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertIn("precision, recall, and F1 are intentionally unavailable", markdown)
 
     def test_run_manifest_records_reproduction_command(self):
-        with mock.patch.dict(os.environ, {"REPRODUCTION_COMMAND": "./runIt.sh full-run --engine joinmarket"}):
+        with mock.patch.dict(
+            os.environ,
+            {"REPRODUCTION_COMMAND": "./runIt.sh full-run --engine joinmarket"},
+        ):
             manifest = build_run_manifest(
-                Path("/tmp/run"), None, "joinmarket", "joinmarket", 1, 0,
-                "definite", 5000, 0.00004, 200000,
+                Path("/tmp/run"),
+                None,
+                "joinmarket",
+                "joinmarket",
+                1,
+                0,
+                "definite",
+                5000,
+                0.00004,
+                200000,
             )
-        self.assertEqual(manifest["execution"]["reproduction_command"], "./runIt.sh full-run --engine joinmarket")
+        self.assertEqual(
+            manifest["execution"]["reproduction_command"],
+            "./runIt.sh full-run --engine joinmarket",
+        )
 
     def test_parse_args_rejects_removed_test_values(self):
         with self.assertRaises(SystemExit):
@@ -377,20 +503,22 @@ class UnifiedReportTest(unittest.TestCase):
                 parse_args(["--min-input-count", value])
 
     def test_parse_args_accepts_joinmarket_detector_settings(self):
-        args = parse_args([
-            "--engine",
-            "joinmarket",
-            "--coinjoin-type",
-            "joinmarket",
-            "--joinmarket-detector",
-            "possible",
-            "--joinmarket-min-base-fee",
-            "7000",
-            "--joinmarket-percentage-fee",
-            "0.001",
-            "--joinmarket-max-depth",
-            "100",
-        ])
+        args = parse_args(
+            [
+                "--engine",
+                "joinmarket",
+                "--coinjoin-type",
+                "joinmarket",
+                "--joinmarket-detector",
+                "possible",
+                "--joinmarket-min-base-fee",
+                "7000",
+                "--joinmarket-percentage-fee",
+                "0.001",
+                "--joinmarket-max-depth",
+                "100",
+            ]
+        )
 
         self.assertEqual(args.engine, "joinmarket")
         self.assertEqual(args.joinmarket_detector, "possible")
@@ -399,25 +527,30 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(args.joinmarket_max_depth, 100)
 
     def test_parse_args_accepts_manifest_provenance(self):
-        args = parse_args([
-            "--blocksci-image",
-            "blocksci:test",
-            "--coinjoin-analysis-image",
-            "coinjoin-analysis:test",
-            "--coinjoin-emulator-image",
-            "coinjoin-emulator:test",
-            "--uploader-image",
-            "uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "--unified-report-image",
-            "python:3.12-slim-bookworm",
-            "--emulator-git-commit",
-            "abc123",
-        ])
+        args = parse_args(
+            [
+                "--blocksci-image",
+                "blocksci:test",
+                "--coinjoin-analysis-image",
+                "coinjoin-analysis:test",
+                "--coinjoin-emulator-image",
+                "coinjoin-emulator:test",
+                "--uploader-image",
+                "uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "--unified-report-image",
+                "python:3.12-slim-bookworm",
+                "--emulator-git-commit",
+                "abc123",
+            ]
+        )
 
         self.assertEqual(args.blocksci_image, "blocksci:test")
         self.assertEqual(args.coinjoin_analysis_image, "coinjoin-analysis:test")
         self.assertEqual(args.coinjoin_emulator_image, "coinjoin-emulator:test")
-        self.assertEqual(args.uploader_image, "uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        self.assertEqual(
+            args.uploader_image,
+            "uploader@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )
         self.assertEqual(args.unified_report_image, "python:3.12-slim-bookworm")
         self.assertEqual(args.emulator_git_commit, "abc123")
 
@@ -520,7 +653,10 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(report["run"]["started_at"], "2026-05-24T15:42:00")
         self.assertEqual(report["run"]["scenario_name"], "default")
         self.assertEqual(report["run"]["scenario_sha256"], sha256_json(scenario_fixture()))
-        self.assertEqual(report["run_manifest"]["scenario"]["sha256"], sha256_json(scenario_fixture()))
+        self.assertEqual(
+            report["run_manifest"]["scenario"]["sha256"],
+            sha256_json(scenario_fixture()),
+        )
         self.assertEqual(report["run_manifest"]["execution"]["engine"], "wasabi")
         self.assertEqual(report["run_manifest"]["execution"]["coinjoin_type"], "wasabi2")
         self.assertEqual(report["run_manifest"]["detector"]["blocksci_min_input_count"], None)
@@ -624,12 +760,25 @@ class UnifiedReportTest(unittest.TestCase):
             )
 
         self.assertEqual(report["run_manifest"]["image_digests"]["blocksci"], "sha256:blocksci")
-        self.assertEqual(report["run_manifest"]["image_digests"]["coinjoin_analysis"], "sha256:analysis")
-        self.assertEqual(report["run_manifest"]["image_digests"]["coinjoin_emulator"], "sha256:emulator")
+        self.assertEqual(
+            report["run_manifest"]["image_digests"]["coinjoin_analysis"],
+            "sha256:analysis",
+        )
+        self.assertEqual(
+            report["run_manifest"]["image_digests"]["coinjoin_emulator"],
+            "sha256:emulator",
+        )
         self.assertEqual(report["run_manifest"]["image_digests"]["uploader"], "sha256:uploader")
 
     def test_build_report_includes_integration_diagnostics(self):
-        diagnostics = {"status": "ok", "problems": [], "images": {}, "chain": {}, "target_txids": {}, "detector": {}}
+        diagnostics = {
+            "status": "ok",
+            "problems": [],
+            "images": {},
+            "chain": {},
+            "target_txids": {},
+            "detector": {},
+        }
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir) / "run"
             run_dir.mkdir()
@@ -650,13 +799,10 @@ class UnifiedReportTest(unittest.TestCase):
             block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
             block_dir.mkdir(parents=True)
             txid = "a" * 64
-            coordinator_dir = (
-                run_dir / "coinjoin_emulator_data" / "data" / "wasabi-coordinator"
-            )
+            coordinator_dir = run_dir / "coinjoin_emulator_data" / "data" / "wasabi-coordinator"
             coordinator_dir.mkdir(parents=True)
             (coordinator_dir / "Logs.txt").write_text(
-                "2026-01-01 00:00:00 [INFO] Round (abc): "
-                f"Successfully broadcast the coinjoin: {txid}.\n",
+                f"2026-01-01 00:00:00 [INFO] Round (abc): Successfully broadcast the coinjoin: {txid}.\n",
                 encoding="utf-8",
             )
             write_producer_label_manifest(
@@ -669,7 +815,11 @@ class UnifiedReportTest(unittest.TestCase):
                     {
                         "height": 1,
                         "tx": [
-                            {"txid": "coinbase", "vin": [{"coinbase": "00"}], "vout": []},
+                            {
+                                "txid": "coinbase",
+                                "vin": [{"coinbase": "00"}],
+                                "vout": [],
+                            },
                             {
                                 "txid": "funding",
                                 "vin": [{"txid": "coinbase", "vout": 0}],
@@ -677,7 +827,10 @@ class UnifiedReportTest(unittest.TestCase):
                                     {
                                         "value": 0.0015,
                                         "n": 0,
-                                        "scriptPubKey": {"address": "input-a", "type": "witness_v0_keyhash"},
+                                        "scriptPubKey": {
+                                            "address": "input-a",
+                                            "type": "witness_v0_keyhash",
+                                        },
                                     }
                                 ],
                             },
@@ -688,7 +841,10 @@ class UnifiedReportTest(unittest.TestCase):
                                     {
                                         "value": 0.001,
                                         "n": 0,
-                                        "scriptPubKey": {"address": "output-a0", "type": "witness_v0_keyhash"},
+                                        "scriptPubKey": {
+                                            "address": "output-a0",
+                                            "type": "witness_v0_keyhash",
+                                        },
                                     }
                                 ],
                             },
@@ -707,8 +863,14 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertFalse(emulator_data["transactions"]["funding"]["is_coinjoin"])
         self.assertTrue(emulator_data["transactions"][txid]["is_coinjoin"])
         self.assertEqual(emulator_data["transactions"][txid]["round_id"], "abc")
-        self.assertEqual(emulator_data["transactions"][txid]["inputs"][0]["wallet_name"], "wallet-000")
-        self.assertEqual(emulator_data["transactions"][txid]["outputs"][0]["wallet_name"], "wallet-000")
+        self.assertEqual(
+            emulator_data["transactions"][txid]["inputs"][0]["wallet_name"],
+            "wallet-000",
+        )
+        self.assertEqual(
+            emulator_data["transactions"][txid]["outputs"][0]["wallet_name"],
+            "wallet-000",
+        )
         self.assertTrue(emulator_data["label_provenance"]["independent"])
         self.assertFalse(emulator_data["label_provenance"]["baseline_used_for_labels"])
 
@@ -754,13 +916,17 @@ class UnifiedReportTest(unittest.TestCase):
                 block_dir / "block_1.json",
                 {
                     "height": 1,
-                    "tx": [{"txid": "txA", "vin": [{"txid": "funding", "vout": 0}], "vout": []}],
+                    "tx": [
+                        {
+                            "txid": "txA",
+                            "vin": [{"txid": "funding", "vout": 0}],
+                            "vout": [],
+                        }
+                    ],
                 },
             )
 
-            emulator_data = build_emulator_data(
-                run_dir, coinjoin_analysis_fixture(), "wasabi2"
-            )
+            emulator_data = build_emulator_data(run_dir, coinjoin_analysis_fixture(), "wasabi2")
             report = build_report(
                 run_dir,
                 normalize_coinjoin_analysis(coinjoin_analysis_fixture()),
@@ -775,7 +941,10 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertIsNone(report["detection_confusion_matrix"])
         self.assertIsNone(report["detector_evaluations"])
         self.assertEqual(report["evaluation_scope"], "emulator_labels_unavailable")
-        self.assertIn("Independent emulator producer labels were unavailable", render_report(report))
+        self.assertIn(
+            "Independent emulator producer labels were unavailable",
+            render_report(report),
+        )
 
     def test_verified_empty_producer_source_labels_transactions_negative(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -795,7 +964,13 @@ class UnifiedReportTest(unittest.TestCase):
                 block_dir / "block_1.json",
                 {
                     "height": 1,
-                    "tx": [{"txid": "txA", "vin": [{"txid": "funding", "vout": 0}], "vout": []}],
+                    "tx": [
+                        {
+                            "txid": "txA",
+                            "vin": [{"txid": "funding", "vout": 0}],
+                            "vout": [],
+                        }
+                    ],
                 },
             )
 
@@ -833,10 +1008,7 @@ class UnifiedReportTest(unittest.TestCase):
                     "tx": [
                         {
                             "txid": "candidate",
-                            "vin": [
-                                {"txid": f"funding-{index}", "vout": 0}
-                                for index in range(5)
-                            ],
+                            "vin": [{"txid": f"funding-{index}", "vout": 0} for index in range(5)],
                             "vout": [],
                         }
                     ],
@@ -850,9 +1022,15 @@ class UnifiedReportTest(unittest.TestCase):
             )
 
         self.assertFalse(emulator_data["label_provenance"]["independent"])
-        self.assertIn("no parseable broadcast records", emulator_data["label_provenance"]["unavailable_reason"])
+        self.assertIn(
+            "no parseable broadcast records",
+            emulator_data["label_provenance"]["unavailable_reason"],
+        )
         self.assertIsNone(emulator_data["transactions"]["candidate"]["is_coinjoin"])
-        self.assertEqual(emulator_data["summary"]["wasabi_parseability_candidate_txids"], ["candidate"])
+        self.assertEqual(
+            emulator_data["summary"]["wasabi_parseability_candidate_txids"],
+            ["candidate"],
+        )
 
     def test_manifest_zero_positive_count_allows_high_input_non_coinjoin(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -873,11 +1051,13 @@ class UnifiedReportTest(unittest.TestCase):
                 block_dir / "block_1.json",
                 {
                     "height": 1,
-                    "tx": [{
-                        "txid": "batch-payment",
-                        "vin": [{"txid": f"funding-{index}", "vout": 0} for index in range(5)],
-                        "vout": [],
-                    }],
+                    "tx": [
+                        {
+                            "txid": "batch-payment",
+                            "vin": [{"txid": f"funding-{index}", "vout": 0} for index in range(5)],
+                            "vout": [],
+                        }
+                    ],
                 },
             )
 
@@ -905,7 +1085,10 @@ class UnifiedReportTest(unittest.TestCase):
             emulator_data = build_emulator_data(run_dir, coinjoin_analysis_fixture(), "wasabi2")
 
         self.assertFalse(emulator_data["label_provenance"]["independent"])
-        self.assertIn("does not match manifest", emulator_data["label_provenance"]["unavailable_reason"])
+        self.assertIn(
+            "does not match manifest",
+            emulator_data["label_provenance"]["unavailable_reason"],
+        )
 
     def test_unmatched_producer_positive_fails_closed_and_is_rendered(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -917,8 +1100,7 @@ class UnifiedReportTest(unittest.TestCase):
             coordinator_dir.mkdir(parents=True)
             missing_txid = "a" * 64
             (coordinator_dir / "Logs.txt").write_text(
-                "2026-01-01 00:00:00 [INFO] Round (abc): "
-                f"Successfully broadcast the coinjoin: {missing_txid}.\n",
+                f"2026-01-01 00:00:00 [INFO] Round (abc): Successfully broadcast the coinjoin: {missing_txid}.\n",
                 encoding="utf-8",
             )
             write_producer_label_manifest(
@@ -969,7 +1151,13 @@ class UnifiedReportTest(unittest.TestCase):
                 block_dir / "block_1.json",
                 {
                     "height": 1,
-                    "tx": [{"txid": "txA", "vin": [{"txid": "funding", "vout": 0}], "vout": []}],
+                    "tx": [
+                        {
+                            "txid": "txA",
+                            "vin": [{"txid": "funding", "vout": 0}],
+                            "vout": [],
+                        }
+                    ],
                 },
             )
 
@@ -980,7 +1168,10 @@ class UnifiedReportTest(unittest.TestCase):
             )
 
         self.assertFalse(emulator_data["label_provenance"]["independent"])
-        self.assertIn("does not match manifest", emulator_data["label_provenance"]["unavailable_reason"])
+        self.assertIn(
+            "does not match manifest",
+            emulator_data["label_provenance"]["unavailable_reason"],
+        )
         self.assertIsNone(emulator_data["transactions"]["txA"]["is_coinjoin"])
 
     def test_exported_block_targets_ignore_coinbase_and_capture_max_height(self):
@@ -1135,7 +1326,9 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(diagnostics["target_txids"]["missing"], 1)
         self.assertIn("missing from BlockSci", " ".join(diagnostics["problems"]))
 
-    def test_integration_diagnostics_not_ok_when_joinmarket_direct_detector_disagrees(self):
+    def test_integration_diagnostics_not_ok_when_joinmarket_direct_detector_disagrees(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)
             block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
@@ -1170,22 +1363,24 @@ class UnifiedReportTest(unittest.TestCase):
             block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
             block_dir.mkdir(parents=True)
             (run_dir / "coinjoin_emulator_data" / "data" / "joinmarket_round_events.json").write_text(
-                json.dumps([
-                    {
-                        "round_id": 1,
-                        "status": "confirmed",
-                        "taker": "jcs-000",
-                        "candidate_makers": ["jcs-001", "jcs-002"],
-                        "destination_address": "output-a0",
-                        "destination_matches": [{"txid": "txA", "block_height": 0}],
-                    },
-                    {
-                        "round_id": 2,
-                        "status": "failed",
-                        "destination_address": "failed-destination",
-                        "txid": "txB",
-                    },
-                ]),
+                json.dumps(
+                    [
+                        {
+                            "round_id": 1,
+                            "status": "confirmed",
+                            "taker": "jcs-000",
+                            "candidate_makers": ["jcs-001", "jcs-002"],
+                            "destination_address": "output-a0",
+                            "destination_matches": [{"txid": "txA", "block_height": 0}],
+                        },
+                        {
+                            "round_id": 2,
+                            "status": "failed",
+                            "destination_address": "failed-destination",
+                            "txid": "txB",
+                        },
+                    ]
+                ),
                 encoding="utf-8",
             )
             write_producer_label_manifest(
@@ -1202,22 +1397,38 @@ class UnifiedReportTest(unittest.TestCase):
                             "txid": "funding",
                             "vin": [{"coinbase": "00"}],
                             "vout": [
-                                {"n": 0, "value": 0.0015, "scriptPubKey": {"address": "input-a"}},
+                                {
+                                    "n": 0,
+                                    "value": 0.0015,
+                                    "scriptPubKey": {"address": "input-a"},
+                                },
                             ],
                         },
                         {
                             "txid": "txA",
                             "vin": [{"txid": "funding", "vout": 0}],
                             "vout": [
-                                {"n": 0, "value": 0.001, "scriptPubKey": {"address": "output-a0"}},
-                                {"n": 1, "value": 0.0005, "scriptPubKey": {"address": "output-a1"}},
+                                {
+                                    "n": 0,
+                                    "value": 0.001,
+                                    "scriptPubKey": {"address": "output-a0"},
+                                },
+                                {
+                                    "n": 1,
+                                    "value": 0.0005,
+                                    "scriptPubKey": {"address": "output-a1"},
+                                },
                             ],
                         },
                         {
                             "txid": "txB",
                             "vin": [{"txid": "funding", "vout": 0}],
                             "vout": [
-                                {"n": 0, "value": 0.001, "scriptPubKey": {"address": "failed-destination"}},
+                                {
+                                    "n": 0,
+                                    "value": 0.001,
+                                    "scriptPubKey": {"address": "failed-destination"},
+                                },
                             ],
                         },
                     ],
@@ -1239,9 +1450,7 @@ class UnifiedReportTest(unittest.TestCase):
             run_dir = Path(tmpdir)
             block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
             block_dir.mkdir(parents=True)
-            label_path = (
-                run_dir / "coinjoin_emulator_data" / "data" / "joinmarket_round_events.json"
-            )
+            label_path = run_dir / "coinjoin_emulator_data" / "data" / "joinmarket_round_events.json"
             save_json(
                 label_path,
                 [
@@ -1265,7 +1474,11 @@ class UnifiedReportTest(unittest.TestCase):
                     "height": 7,
                     "tx": [
                         {"txid": "funding", "vin": [{"coinbase": "00"}], "vout": []},
-                        {"txid": "txA", "vin": [{"txid": "funding", "vout": 0}], "vout": []},
+                        {
+                            "txid": "txA",
+                            "vin": [{"txid": "funding", "vout": 0}],
+                            "vout": [],
+                        },
                     ],
                 },
             )
@@ -1284,25 +1497,29 @@ class UnifiedReportTest(unittest.TestCase):
             ("duplicate_destination", ["txA", "txB"]),
         ]
         for status, txids in cases:
-            with self.subTest(status=status, txids=txids), tempfile.TemporaryDirectory() as tmpdir:
+            with (
+                self.subTest(status=status, txids=txids),
+                tempfile.TemporaryDirectory() as tmpdir,
+            ):
                 run_dir = Path(tmpdir)
                 data_dir = run_dir / "coinjoin_emulator_data" / "data"
                 block_dir = data_dir / "btc-node"
                 block_dir.mkdir(parents=True)
-                save_json(data_dir / "joinmarket_round_events.json", [
-                    {
-                        "export_round_id": 1,
-                        "status": status,
-                        "destination_matches": [
-                            {"txid": txid, "block_height": 7} for txid in txids
-                        ],
-                    },
-                    {
-                        "export_round_id": 2,
-                        "status": "confirmed",
-                        "destination_matches": [{"txid": "txC", "block_height": 7}],
-                    },
-                ])
+                save_json(
+                    data_dir / "joinmarket_round_events.json",
+                    [
+                        {
+                            "export_round_id": 1,
+                            "status": status,
+                            "destination_matches": [{"txid": txid, "block_height": 7} for txid in txids],
+                        },
+                        {
+                            "export_round_id": 2,
+                            "status": "confirmed",
+                            "destination_matches": [{"txid": "txC", "block_height": 7}],
+                        },
+                    ],
+                )
                 # Even a hash-valid manifest with a matching positive count cannot
                 # declare a capture complete when a round has conflicting evidence.
                 write_producer_label_manifest(
@@ -1311,29 +1528,32 @@ class UnifiedReportTest(unittest.TestCase):
                     ["joinmarket_round_events.json"],
                     positive_count=1,
                 )
-                save_json(block_dir / "block_7.json", {
-                    "height": 7,
-                    "tx": [
-                        {"txid": txid, "vin": [{"txid": "funding", "vout": 0}], "vout": []}
-                        for txid in ("txA", "txB", "txC")
-                    ],
-                })
+                save_json(
+                    block_dir / "block_7.json",
+                    {
+                        "height": 7,
+                        "tx": [
+                            {
+                                "txid": txid,
+                                "vin": [{"txid": "funding", "vout": 0}],
+                                "vout": [],
+                            }
+                            for txid in ("txA", "txB", "txC")
+                        ],
+                    },
+                )
 
                 emulator_data = build_emulator_data(run_dir, coinjoin_analysis_fixture(), "joinmarket")
 
                 self.assertFalse(emulator_data["label_provenance"]["independent"])
                 self.assertIn(status, emulator_data["label_provenance"]["unavailable_reason"])
                 self.assertEqual(len(emulator_data["transactions"]), 3)
-                self.assertTrue(all(
-                    tx["is_coinjoin"] is None for tx in emulator_data["transactions"].values()
-                ))
+                self.assertTrue(all(tx["is_coinjoin"] is None for tx in emulator_data["transactions"].values()))
 
     def test_build_emulator_data_rejects_malformed_joinmarket_label_source(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)
-            label_path = (
-                run_dir / "coinjoin_emulator_data" / "data" / "joinmarket_round_events.json"
-            )
+            label_path = run_dir / "coinjoin_emulator_data" / "data" / "joinmarket_round_events.json"
             label_path.parent.mkdir(parents=True)
             save_json(label_path, {"round_id": 1})
             write_producer_label_manifest(
@@ -1450,7 +1670,9 @@ class UnifiedReportTest(unittest.TestCase):
         )
         self.assertIn("outside the exported emulator transaction universe", render_report(report))
 
-    def test_detector_evaluation_excludes_unknown_labels_from_classification_counts(self):
+    def test_detector_evaluation_excludes_unknown_labels_from_classification_counts(
+        self,
+    ):
         emulator_data = emulator_data_fixture()
         emulator_data["transactions"]["txC"]["is_coinjoin"] = None
         emulator_data["summary"]["non_coinjoin_transactions"] = 1
@@ -1603,7 +1825,10 @@ class UnifiedReportTest(unittest.TestCase):
 
         self.assertIsNone(error)
         self.assertEqual(predicted, {"known-a": "7"})
-        self.assertEqual(FakeCoinjoinClusterManager.arguments["coinjoin_txes"], ["tx:cj-a", "tx:cj-b"])
+        self.assertEqual(
+            FakeCoinjoinClusterManager.arguments["coinjoin_txes"],
+            ["tx:cj-a", "tx:cj-b"],
+        )
 
     def test_export_blocksci_cluster_assignments_creates_output_parent(self):
         class FakeHeuristic:
@@ -1676,7 +1901,14 @@ class UnifiedReportTest(unittest.TestCase):
         try:
             predicted, error = export_blocksci_cluster_assignments(
                 Path("/tmp/config.json"),
-                {"transactions": {"tx": {"inputs": [{"address": "a", "wallet_name": "w"}], "outputs": []}}},
+                {
+                    "transactions": {
+                        "tx": {
+                            "inputs": [{"address": "a", "wallet_name": "w"}],
+                            "outputs": [],
+                        }
+                    }
+                },
                 [],
                 Path("/tmp/clusters"),
             )
@@ -1699,7 +1931,14 @@ class UnifiedReportTest(unittest.TestCase):
         try:
             predicted, error = export_blocksci_cluster_assignments(
                 Path("/tmp/config.json"),
-                {"transactions": {"tx": {"inputs": [{"address": "a", "wallet_name": "w"}], "outputs": []}}},
+                {
+                    "transactions": {
+                        "tx": {
+                            "inputs": [{"address": "a", "wallet_name": "w"}],
+                            "outputs": [],
+                        }
+                    }
+                },
                 ["cj"],
                 Path("/tmp/clusters"),
             )
@@ -1724,7 +1963,12 @@ class UnifiedReportTest(unittest.TestCase):
                 }
             }
         }
-        predicted = {"a1": "cluster-1", "a2": "cluster-2", "b1": "cluster-1", "b2": "cluster-3"}
+        predicted = {
+            "a1": "cluster-1",
+            "a2": "cluster-2",
+            "b1": "cluster-1",
+            "b2": "cluster-3",
+        }
 
         evaluation = evaluate_cluster_assignments(emulator_data, predicted)
 
@@ -1756,7 +2000,10 @@ class UnifiedReportTest(unittest.TestCase):
             report["divergences"]["missed_by_blocksci"][0]["reason"],
             "coinjoin-analysis reported CoinJoin, BlockSci did not detect it",
         )
-        self.assertEqual(report["divergences"]["missed_by_blocksci"][0]["coinjoin_analysis"]["wallets"], ["wallet-000"])
+        self.assertEqual(
+            report["divergences"]["missed_by_blocksci"][0]["coinjoin_analysis"]["wallets"],
+            ["wallet-000"],
+        )
         self.assertEqual(report["divergences"]["blocksci_only"][0]["txid"], "txB")
         self.assertIsNone(report["divergences"]["blocksci_only"][0]["coinjoin_analysis"])
         explanation = report["transactions"]["txA"]["coinjoin_analysis"]["blocksci_heuristic_explanation"]
@@ -1863,7 +2110,10 @@ class UnifiedReportTest(unittest.TestCase):
 
         explanation = report["transactions"]["txA"]["coinjoin_analysis"]["blocksci_heuristic_explanation"]
         self.assertEqual(explanation["heuristic"], "joinmarket_definite")
-        self.assertIn("subset_partition_after_fee", [rule["name"] for rule in explanation["rules"]])
+        self.assertIn(
+            "subset_partition_after_fee",
+            [rule["name"] for rule in explanation["rules"]],
+        )
 
     def test_build_report_adds_possible_joinmarket_explanation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1871,11 +2121,20 @@ class UnifiedReportTest(unittest.TestCase):
             run_dir.mkdir()
 
             coinjoin_analysis = normalize_coinjoin_analysis(joinmarket_passing_coinjoin_fixture())
-            report = build_report(run_dir, coinjoin_analysis, {}, "joinmarket", joinmarket_detector="possible")
+            report = build_report(
+                run_dir,
+                coinjoin_analysis,
+                {},
+                "joinmarket",
+                joinmarket_detector="possible",
+            )
 
         explanation = report["transactions"]["txA"]["coinjoin_analysis"]["blocksci_heuristic_explanation"]
         self.assertEqual(explanation["heuristic"], "joinmarket_possible")
-        self.assertIn("two_bucket_subset_after_fee", [rule["name"] for rule in explanation["rules"]])
+        self.assertIn(
+            "two_bucket_subset_after_fee",
+            [rule["name"] for rule in explanation["rules"]],
+        )
 
     def test_fill_missing_block_height_from_exported_blocks(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1902,10 +2161,11 @@ class UnifiedReportTest(unittest.TestCase):
         tx_record = report["transactions"]["txA"]["coinjoin_analysis"]
         self.assertEqual(tx_record["block_height"], 226)
         self.assertTrue(tx_record["block_height_inferred"])
-        self.assertEqual(report["divergences"]["missed_by_blocksci"][0]["coinjoin_analysis"]["block_height"], 226)
-        self.assertTrue(
-            report["divergences"]["missed_by_blocksci"][0]["coinjoin_analysis"]["block_height_inferred"]
+        self.assertEqual(
+            report["divergences"]["missed_by_blocksci"][0]["coinjoin_analysis"]["block_height"],
+            226,
         )
+        self.assertTrue(report["divergences"]["missed_by_blocksci"][0]["coinjoin_analysis"]["block_height_inferred"])
         markdown = render_report(report)
         self.assertIn(
             "| missed_by_blocksci | [txA](http://localhost:3002/tx/txA) | "
@@ -2031,15 +2291,17 @@ class UnifiedReportTest(unittest.TestCase):
 
         markdown = render_report(report)
         self.assertIn(
-            "| output_address_types | yes | WITNESS_PUBKEYHASH, "
-            "WITNESS_UNKNOWN (taproot/witness_v1_taproot) |",
+            "| output_address_types | yes | WITNESS_PUBKEYHASH, WITNESS_UNKNOWN (taproot/witness_v1_taproot) |",
             markdown,
         )
         self.assertIn(
             "BlockSci classifies taproot / witness v1 outputs as WITNESS_UNKNOWN in this build.",
             markdown,
         )
-        self.assertIn("| 1 | 50,000 | output-a1 | witness_v1_taproot | WITNESS_UNKNOWN |", markdown)
+        self.assertIn(
+            "| 1 | 50,000 | output-a1 | witness_v1_taproot | WITNESS_UNKNOWN |",
+            markdown,
+        )
 
     def test_build_report_field_mismatch(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2055,7 +2317,10 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertIn("outputs[1].value: coinjoin_analysis=50000, blocksci=40000", mismatches)
         self.assertEqual(report["summary"]["divergence_counts"]["shared_tx_mismatches"], 1)
         self.assertEqual(report["divergences"]["shared_tx_mismatches"][0]["txid"], "txA")
-        self.assertEqual(report["divergences"]["shared_tx_mismatches"][0]["mismatch_count"], len(mismatches))
+        self.assertEqual(
+            report["divergences"]["shared_tx_mismatches"][0]["mismatch_count"],
+            len(mismatches),
+        )
 
     def test_render_markdown_report(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2167,7 +2432,10 @@ class UnifiedReportTest(unittest.TestCase):
         markdown = render_report(report)
 
         self.assertIn("Inner report integration is NOT OK.", markdown)
-        self.assertIn("- BlockSci chain height 1 does not match max exported block height 2", markdown)
+        self.assertIn(
+            "- BlockSci chain height 1 does not match max exported block height 2",
+            markdown,
+        )
 
     def test_render_markdown_pass_but_missed_heuristic_message(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2206,7 +2474,10 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertIn("#### BlockSci Heuristic Explanation", markdown)
         self.assertIn("joinmarket_definite", json.dumps(report))
         self.assertIn("subset_partition_after_fee", markdown)
-        self.assertIn("Python mirror passes; likely difference is runtime BlockSci image/cache mismatch", markdown)
+        self.assertIn(
+            "Python mirror passes; likely difference is runtime BlockSci image/cache mismatch",
+            markdown,
+        )
 
     def test_render_markdown_skipped_joinmarket_transactions_and_digests(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2256,13 +2527,7 @@ class UnifiedReportTest(unittest.TestCase):
 
             self.assertEqual(
                 output_path.read_text(encoding="utf-8"),
-                '{\n'
-                '  "a": {\n'
-                '    "c": 3,\n'
-                '    "d": 4\n'
-                '  },\n'
-                '  "b": 1\n'
-                '}\n',
+                '{\n  "a": {\n    "c": 3,\n    "d": 4\n  },\n  "b": 1\n}\n',
             )
 
     def test_normalize_scenario(self):
@@ -2343,14 +2608,10 @@ class UnifiedReportTest(unittest.TestCase):
             (analysis_dir / "false_cjtxs.json").write_text(
                 json.dumps({"manual": ["txA", "not-in-baseline"]}), encoding="utf-8"
             )
-            (analysis_dir / "false_cjtxs.json.reviewed").write_text(
-                json.dumps({"reuse": ["txA"]}), encoding="utf-8"
-            )
+            (analysis_dir / "false_cjtxs.json.reviewed").write_text(json.dumps({"reuse": ["txA"]}), encoding="utf-8")
 
             txids, sources = load_false_positive_txids(analysis_dir)
-            filtered, removed = filter_coinjoin_analysis_false_positives(
-                coinjoin_analysis_fixture(), txids
-            )
+            filtered, removed = filter_coinjoin_analysis_false_positives(coinjoin_analysis_fixture(), txids)
             report = build_report(
                 Path(tmpdir) / "run",
                 normalize_coinjoin_analysis(filtered),
@@ -2360,9 +2621,10 @@ class UnifiedReportTest(unittest.TestCase):
             )
 
         self.assertEqual(txids, {"txA", "not-in-baseline"})
-        self.assertEqual([source["file"] for source in sources], [
-            "false_cjtxs.json", "false_cjtxs.json.reviewed"
-        ])
+        self.assertEqual(
+            [source["file"] for source in sources],
+            ["false_cjtxs.json", "false_cjtxs.json.reviewed"],
+        )
         self.assertEqual(removed, ["txA"])
         self.assertNotIn("txA", filtered["coinjoins"])
         baseline_matrix = report["detector_evaluations"]["coinjoin_analysis"]
@@ -2381,13 +2643,22 @@ class UnifiedReportTest(unittest.TestCase):
             },
             "enumerator": {
                 "parameters": {"mode": "numeric"},
-                "summary": {"transactions": 1, "completed": 0, "timed_out": 1, "errors": 0},
+                "summary": {
+                    "transactions": 1,
+                    "completed": 0,
+                    "timed_out": 1,
+                    "errors": 0,
+                },
                 "transactions": {"txA": {"status": "timeout", "mapping_count": None, "retried": True}},
             },
             "sake": {
                 "seed": 42,
-                "summary": {"output_match_rate": 0.5, "wallet_match_rate": 0.25,
-                            "length_match_rate": 0.75, "full_coinjoin_match_rate": 0.0},
+                "summary": {
+                    "output_match_rate": 0.5,
+                    "wallet_match_rate": 0.25,
+                    "length_match_rate": 0.75,
+                    "full_coinjoin_match_rate": 0.0,
+                },
                 "transactions": {},
             },
         }
@@ -2452,12 +2723,17 @@ class ScenarioFundsCheckTest(unittest.TestCase):
         coinjoins = {
             "tx0": {
                 "total_input_sats": 100,
-                "inputs": [{"wallet_name": "wallet-000"}, {"wallet_name": "wallet-001"}],
+                "inputs": [
+                    {"wallet_name": "wallet-000"},
+                    {"wallet_name": "wallet-001"},
+                ],
                 "outputs": [],
             }
         }
         checks = build_scenario_checks(
-            {"wallet_count": 10, "total_initial_funds_sats": 1000}, coinjoins, "joinmarket"
+            {"wallet_count": 10, "total_initial_funds_sats": 1000},
+            coinjoins,
+            "joinmarket",
         )
 
         self.assertEqual(checks["wallet_count_rule"], "subset")
@@ -2472,9 +2748,7 @@ class ScenarioFundsCheckTest(unittest.TestCase):
                 "outputs": [],
             }
         }
-        checks = build_scenario_checks(
-            {"wallet_count": 10, "total_initial_funds_sats": 1000}, coinjoins, "wasabi2"
-        )
+        checks = build_scenario_checks({"wallet_count": 10, "total_initial_funds_sats": 1000}, coinjoins, "wasabi2")
 
         self.assertEqual(checks["wallet_count_rule"], "exact")
         self.assertFalse(checks["wallet_count_matches"])

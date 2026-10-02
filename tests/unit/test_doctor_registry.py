@@ -23,7 +23,9 @@ def test_registry_probe_uses_an_image_name_without_transport(runtime, tmp_path):
             return subprocess.CompletedProcess(command, int(command[-1] != reference))
         return subprocess.CompletedProcess(command, 0)
 
-    with mock.patch("coinjoin_pipeline.doctor.shutil.which", return_value=f"/bin/{runtime}"), \
-         mock.patch("coinjoin_pipeline.doctor.subprocess.run", side_effect=run):
+    with (
+        mock.patch("coinjoin_pipeline.doctor.shutil.which", return_value=f"/bin/{runtime}"),
+        mock.patch("coinjoin_pipeline.doctor.subprocess.run", side_effect=run),
+    ):
         assert check(runtime, Path(tmp_path), images) == []
     assert [f"/bin/{runtime}", "manifest", "inspect", reference] in calls

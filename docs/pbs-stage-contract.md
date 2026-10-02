@@ -1,7 +1,7 @@
 # PBS stage contract
 
 How the pipeline frontend and PBS compute jobs coordinate. The implementation
-lives in `pipeline/client/pbs.py` and the `pipeline/client/*_template.sh`
+lives in `src/coinjoin_pipeline/execution/pbs/` and the `src/coinjoin_pipeline/execution/*_template.sh`
 scripts; this page documents the on-disk protocol so that changes on either
 side stay compatible.
 
@@ -12,13 +12,13 @@ side stay compatible.
 | `blocksci`          | `--blocksciPbs`                       | `blocksci_template.sh`            |
 | `coinjoin-analysis` | `--analysisPbs`                       | `coinjoin_analysis_template.sh`   |
 | `coinjoin-mappings` | `--mappingsPbs`                       | `mappings_template.sh`            |
-| `unified-report`    | parallel mode after both analyzers    | `blocksci_template.sh` (report-only command) |
+| `unified-report`    | serial or parallel, after analyzers    | `blocksci_template.sh` (report-only command) |
 | S3 analyzer variants | `pbs-from-s3`, `full-run --artifact-backend s3` | `coinjoin_analysis_s3_template.sh`, `blocksci_s3_template.sh` |
 | S3 `coinjoin-mappings` | Wasabi `--mappingsPbs` | `mappings_s3_template.sh` |
 | S3 `blocksci-parse` | reusable BlockSci workflow | `blocksci_parse_s3_template.sh` |
 | S3 `blocksci-update` | versioned incremental external-Bitcoin cache update | `blocksci_update_s3_template.sh` |
 | S3 cached work | `detect`, `script`, or `notebook` over a reusable parse | `blocksci_analyze_s3_template.sh` |
-| S3 `unified-report` | both S3 analyzer flags, after both jobs | `unified_report_s3_template.sh` |
+| S3 `unified-report` | BlockSci detect selected, after selected analyzers | `unified_report_s3_template.sh` |
 
 ## Marker files
 
@@ -44,8 +44,12 @@ both analyzers have uploaded their S3 outputs successfully. The BlockSci job
 persists `blocksci-analysis_data/blocksci_analysis.json` containing normalized
 detector records, integration diagnostics, skipped txids, and address-cluster
 assignments. The report job consumes that artifact and does not load BlockSci,
-its parsed index, or raw Bitcoin data. A blocksci-only S3 submission keeps the
-combined parser-and-report behavior for compatibility.
+its parsed index, or raw Bitcoin data. A blocksci-only S3 submission also submits
+a report job after BlockSci, consuming the baseline already stored in that run.
+The artifact reader accepts schema 1.0 (emulator mode) and 1.1 (explicit mode).
+Parse and update jobs now stage and mount the shared `exporters/worker.py` payload.
+The S3 exit trap is rendered from `pbs_stage.sh`; finalization, failed transfers
+and signals preserve a nonzero exit status, and terminal markers follow outputs.
 
 For Wasabi 2 with `--mappingsPbs`, the S3 mappings job downloads
 `coinjoin-analysis_data/coinjoin_tx_info.json`, preserves the shared-storage
@@ -82,11 +86,11 @@ is not reusable as a target; choose another fresh `--run-id` after diagnosis.
 For parse-only `pbs-from-s3` submissions, the producer may replace emulator
 inputs with exactly one source. An external Bitcoin source is either a coin
 directory under `/storage` containing `blocks/`, or a
-`bitcoin-block-archive` S3 prefix containing `archive-manifest.json`, every
-listed `blk*.dat`, and its `.sha256` sidecar. The latter is restored to PBS
-scratch and fails closed unless manifest schema 1 is contiguous from
-`blk00000.dat`, every size and SHA-256 matches, and its recorded archive height
-covers the requested inclusive maximum. An external BlockSci source is a
+`bitcoin-block-archive` S3 prefix containing `blk*.dat` files, each with its
+schema-1 `blkNNNNN.dat.json` sidecar. The latter is restored to PBS scratch and
+fails closed unless the files are contiguous from `blk00000.dat`, every size and
+SHA-256 matches its sidecar, and the sidecars' `height_ranges` cover every height
+from 0 through the requested inclusive maximum. An external BlockSci source is a
 directory under `/storage` containing `config.json` and
 `parsed/chain/block.dat`; it is copied into the run layout and its
 `chainConfig.dataDirectory` is canonicalized before archiving. The cache

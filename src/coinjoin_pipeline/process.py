@@ -22,7 +22,8 @@ def run(
     if replace:
         os.execvpe(argv[0], argv, env)
     try:
-        process = subprocess.Popen(argv, env=env)
+        # Not a `with` block: the handlers below must signal the child while it runs.
+        process = subprocess.Popen(argv, env=env)  # pylint: disable=consider-using-with
     except OSError:
         return 127
     interrupted = False

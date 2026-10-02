@@ -63,7 +63,7 @@ jobs:
             core.info(`Branch ${branch} has no open pull request: running.`);
             core.setOutput('should-run', 'true');
 
-  command-builder-unit-tests:
+  configuration-unit-tests:
     runs-on: [self-hosted, x64]
     needs: gate
     if: needs.gate.outputs.should-run == 'true'
@@ -82,12 +82,17 @@ jobs:
               raise SystemExit(f"Expected Python 3.14, got {sys.version}")
           PY
 
-      - name: Run command_builder unit tests
-        run: python3 -m unittest discover -s tests -v
+      - name: Run configuration unit tests
+        run: |
+          uv sync --frozen --extra test
+          uv run --extra test pytest -q tests/unit tests/pipeline
+
+      - name: Run static checks
+        run: uv run lint --check
 
   podman-wrapper:
     runs-on: [self-hosted, x64]
-    needs: command-builder-unit-tests
+    needs: configuration-unit-tests
 
     steps:
       - name: Checkout repository
