@@ -103,6 +103,7 @@ def test_zero_is_a_supplied_maximum_height():
                 "bitcoin_blocks_uri": "s3://blocks/mainnet",
                 "network": "bitcoin",
                 "max_block": 0,
+                "expected_block_hash": "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f",
             },
             "artifacts": {
                 "uri": "s3://bucket/runs",

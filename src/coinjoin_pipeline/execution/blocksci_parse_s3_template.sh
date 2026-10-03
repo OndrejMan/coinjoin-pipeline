@@ -44,6 +44,7 @@ MANIFEST_EXTRA=""
 {produce_index}
 test -f "$RUN_WORK/blocksci_data/config.json" || {{ echo "BlockSci parser did not produce blocksci_data/config.json" >&2; exit 1; }}
 test -f "$RUN_WORK/blocksci_data/parsed/chain/block.dat" || {{ echo "BlockSci parser did not produce parsed/chain/block.dat" >&2; exit 1; }}
+{verify_index}
 echo "[blocksci-parse] archiving reusable parsed index"
 tar -C "$RUN_WORK" -czf "$CACHE_DIR/blocksci_data.tar.gz" blocksci_data
 (

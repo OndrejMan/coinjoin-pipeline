@@ -191,6 +191,25 @@ def test_parse_only_stages_the_worker_and_publishes_only_cache(backend):
     assert backend.staged == ["run-1"]
 
 
+@pytest.mark.parametrize("task,workflow", [("parse", "reusable"), ("update", "cached")])
+def test_archive_checkpoint_reaches_parse_and_update_renderer(backend, task, workflow):
+    s3_submission.submit_s3_pbs_graph(
+        backend.config(
+            analysisPbs=False,
+            blocksci_workflow=workflow,
+            blocksci_task=task,
+            blocksci_bitcoin_blocks_uri="s3://bucket/mainnet",
+            blocksci_network="bitcoin",
+            blocksci_max_block=12,
+            blocksci_expected_block_hash="a" * 64,
+            blocksci_cache_source_run_id="previous" if task == "update" else None,
+        )
+    )
+    values = backend.rendered[f"render_blocksci_{task}_s3_pbs"]
+    assert values["expected_block_hash"] == "a" * 64
+    assert values["external_max_block"] == 12
+
+
 def test_cached_notebook_has_no_report_or_worker_staging(backend):
     s3_submission.submit_s3_pbs_graph(
         backend.config(analysisPbs=False, blocksci_workflow="cached", blocksci_task="notebook")

@@ -51,6 +51,7 @@ def source_manifest(path: Path, files: Files, *, max_block: int, last_file: int)
             {
                 "source_kind": "bitcoin-blocks-s3",
                 "exported_max_block": max_block,
+                "exported_block_hash": "a" * 64,
                 "block_archive_last_file": last_file,
                 "block_archive_index_sha256": index_sha256(files, last_file),
             }
@@ -195,6 +196,7 @@ def test_update_skips_older_files_without_new_heights(tmp_path: Path) -> None:
             {
                 "source_kind": "bitcoin-blocks-s3",
                 "exported_max_block": 12,
+                "exported_block_hash": "a" * 64,
                 "block_archive_last_file": 1,
                 "block_archive_index_sha256": "0" * 64,
             },
@@ -204,6 +206,7 @@ def test_update_skips_older_files_without_new_heights(tmp_path: Path) -> None:
             {
                 "source_kind": "bitcoin-blocks-s3",
                 "exported_max_block": 12,
+                "exported_block_hash": "a" * 64,
                 "block_archive_last_file": 9,
                 "block_archive_index_sha256": "0" * 64,
             },
@@ -213,6 +216,7 @@ def test_update_skips_older_files_without_new_heights(tmp_path: Path) -> None:
             {
                 "source_kind": "bitcoin-blocks-s3",
                 "exported_max_block": 40,
+                "exported_block_hash": "a" * 64,
                 "block_archive_last_file": 1,
                 "block_archive_index_sha256": index_sha256(TEN_PER_FILE, 1),
             },
@@ -225,6 +229,16 @@ def test_update_refuses_a_cache_it_cannot_resume(tmp_path: Path, manifest: dict[
     path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(AssertionError, match=message):
         select(tmp_path, TEN_PER_FILE, 33, path)
+
+
+def test_update_rejects_old_cache_without_verified_tip_before_downloading_blocks(tmp_path: Path) -> None:
+    manifest = source_manifest(tmp_path / "manifest.json", TEN_PER_FILE, max_block=12, last_file=1)
+    value = json.loads(manifest.read_text())
+    del value["exported_block_hash"]
+    manifest.write_text(json.dumps(value))
+    with pytest.raises(AssertionError, match="lacks a verified block hash; parse it again"):
+        select(tmp_path, TEN_PER_FILE, 33, manifest)
+    assert not (tmp_path / "download.s5cmd").exists()
 
 
 def test_select_rejects_a_gap_in_the_archive(tmp_path: Path) -> None:
@@ -323,6 +337,8 @@ def test_pbs_fragment_parses_then_updates_from_the_archive(tmp_path: Path) -> No
     downloaded, fields = run_download(tmp_path, 12)
     assert downloaded == ["blk00000.dat", "blk00001.dat"]
     parse_manifest = json.loads('{"source_kind": "bitcoin-blocks-s3", "exported_max_block": 12' + fields + "}")
+    # The post-parser verification, separate from this download fragment, adds this field.
+    parse_manifest["exported_block_hash"] = "a" * 64
 
     # The archive grows; the update reuses the parse manifest exactly as the cache stores it.
     archive_dir = tmp_path / "s3" / "bucket" / "blocks"
@@ -345,6 +361,9 @@ def test_pbs_fragment_refuses_an_archive_rewritten_under_the_cache(tmp_path: Pat
     cache.mkdir()
     manifest = cache / "manifest.json"
     manifest.write_text('{"source_kind": "bitcoin-blocks-s3", "exported_max_block": 12' + fields + "}", "utf-8")
+    recorded = json.loads(manifest.read_text())
+    recorded["exported_block_hash"] = "a" * 64
+    manifest.write_text(json.dumps(recorded))
 
     (archive_dir / "blk00000.dat").write_bytes(b"other node")
     (archive_dir / "blk00000.dat.json").write_text(

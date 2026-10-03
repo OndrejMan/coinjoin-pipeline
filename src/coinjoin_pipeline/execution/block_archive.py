@@ -16,6 +16,10 @@ missing number and takes the highest block it has seen as the chain tip:
   indexed it in. The previous scan's files must be unchanged, which the
   ``block_archive_index_sha256`` recorded in the cache manifest proves.
 
+Height coverage is a preflight, not proof of a connected or canonical chain.
+After parsing, exporters/verify_chain.py checks the actual index and checkpoint
+before the PBS job may publish its cache.
+
 The script runs on the PBS host's ``python3``, so it stays Python 3.8 syntax.
 """
 
@@ -145,6 +149,9 @@ def read_source_manifest(path: Path) -> tuple[int, int, str]:
         )
     if max_block is None:
         raise ArchiveError("Source cache manifest has no exported_max_block")
+    block_hash = manifest.get("exported_block_hash")
+    if not isinstance(block_hash, str) or SHA256_HEX.fullmatch(block_hash) is None:
+        raise ArchiveError("Source cache lacks a verified block hash; parse it again with this pipeline")
     return max_block, last_file, digest
 
 

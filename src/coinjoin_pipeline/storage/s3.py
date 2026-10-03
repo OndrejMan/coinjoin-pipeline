@@ -318,6 +318,7 @@ def ensure_empty_run_prefix(access: S3Access, artifact_uri: str, run_id: str) ->
 # useless; checking them turns a late node-side failure into a frontend error.
 REQUIRED_EXPORTERS = (
     "worker.py",
+    "verify_chain.py",
     "parameters.py",
     "analysis_artifact.py",
     "unified_report.py",

@@ -81,6 +81,7 @@ singularity exec \
   --env PBS_RUN_ID="$RUN_ID" "$IMAGE" \
   bash -c 'cd "/runs/emulation/logs/$PBS_RUN_ID" && {command}'
 
+{verify_index}
 echo "[blocksci-update] archiving updated reusable index"
 tar -C "$RUN_WORK" -czf "$CACHE_DIR/blocksci_data.tar.gz" blocksci_data
 (

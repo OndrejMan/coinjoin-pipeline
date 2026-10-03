@@ -240,8 +240,14 @@ fi
 export PBS_CLIENT_WORKDIR="${WORK_ROOT}" EMULATION_LOGS_DIR="${LOGS_ROOT}"
 
 submit_blocksci() {
-  local run_id="$1"
-  shift
+  local run_id="$1" checkpoint_height="$2" checkpoint_hash
+  shift 2
+  checkpoint_hash="$(python3 - "${WORK_ROOT}/rpc-heights.json" "$checkpoint_height" <<'PY'
+import json, sys
+heights = json.load(open(sys.argv[1], encoding="utf-8"))
+print(next(digest for digest, height in heights.items() if height == int(sys.argv[2])))
+PY
+)"
   (
     cd "${PROJECT_DIR}"
     PYTHONPATH="${PROJECT_DIR}/src:${PROJECT_DIR}/pipeline${PYTHONPATH:+:${PYTHONPATH}}" \
@@ -249,6 +255,7 @@ submit_blocksci() {
       --engine joinmarket --artifact-uri "${ARTIFACT_URI}" --run-id "${run_id}" \
       --s3-endpoint-url "${S3_ENDPOINT_URL}" --s3-credentials-file "${CREDENTIALS_FILE}" --s3-profile "${S3_PROFILE}" \
       --blocksciPbs "$@" --blocksci-bitcoin-blocks-uri "${BLOCKS_URI}" --blocksci-network bitcoin \
+      --blocksci-expected-block-hash "$checkpoint_hash" \
       "${PBS_IMAGE_ARGS[@]}" --pbs-ncpus 2 --pbs-mem 4gb --pbs-scratch 2gb --pbs-walltime 00:20:00
   ) 2>&1 | tee -a "${PIPELINE_OUTPUT_FILE}"
 }
@@ -275,7 +282,7 @@ fetch_cache() {
 }
 
 echo "Submitting BlockSci S3 parse for ${RUN_ID}..."
-submit_blocksci "${RUN_ID}" --blocksci-workflow reusable --blocksci-task parse --blocksci-max-block 1
+submit_blocksci "${RUN_ID}" 1 --blocksci-workflow reusable --blocksci-task parse --blocksci-max-block 1
 wait_for_stage "${RUN_ID}" blocksci-parse
 fetch_cache "${RUN_ID}" blocksci-parse
 
@@ -285,13 +292,13 @@ archive_blocks
 s5 cp "${BLOCKS_URI}/blk00001.dat.json" "${WORK_ROOT}/blk00001.dat.json" >/dev/null
 
 echo "Submitting incremental BlockSci update ${RUN_ID} -> ${UPDATE_RUN_ID}..."
-submit_blocksci "${UPDATE_RUN_ID}" --blocksci-workflow cached --blocksci-task update \
+submit_blocksci "${UPDATE_RUN_ID}" 3 --blocksci-workflow cached --blocksci-task update \
   --blocksci-cache-source-run-id "${RUN_ID}" --blocksci-max-block 3
 wait_for_stage "${UPDATE_RUN_ID}" blocksci-update
 fetch_cache "${UPDATE_RUN_ID}" blocksci-update
 
 echo "Submitting reference full parse ${FULL_RUN_ID}..."
-submit_blocksci "${FULL_RUN_ID}" --blocksci-workflow reusable --blocksci-task parse --blocksci-max-block 3
+submit_blocksci "${FULL_RUN_ID}" 3 --blocksci-workflow reusable --blocksci-task parse --blocksci-max-block 3
 wait_for_stage "${FULL_RUN_ID}" blocksci-parse
 fetch_cache "${FULL_RUN_ID}" blocksci-full-parse
 
@@ -319,6 +326,10 @@ first, second = load("blk00000.dat.json"), load("blk00001.dat.json")
 parse = load("blocksci-parse-manifest.json")
 update = load("blocksci-update-manifest.json")
 full = load("blocksci-full-parse-manifest.json")
+checkpoints = {height: digest for digest, height in load("rpc-heights.json").items()}
+for manifest, height in ((parse, 1), (update, 3), (full, 3)):
+    if manifest.get("exported_block_hash") != checkpoints[height]:
+        raise SystemExit(f"FAIL: cache has no verified checkpoint at height {height}: {manifest}")
 if first.get("schema_version") != 1 or first.get("file") != "blk00000.dat" or first.get("height_ranges") != [[0, 1]]:
     raise SystemExit("FAIL: blk00000.dat sidecar has wrong coverage")
 if second.get("file") != "blk00001.dat" or second.get("height_ranges") != [[2, 3]]:

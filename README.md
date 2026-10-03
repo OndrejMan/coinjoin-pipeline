@@ -288,7 +288,15 @@ downloads every schema-1 `blkNNNNN.dat.json` sidecar, then only the prefix
 (plus a six-block selection margin).
 It checks each downloaded file's size and SHA-256 against its sidecar and
 refuses a requested height that the sidecars' `height_ranges` do not cover from
-height 0. The cache manifest records the last archive file scanned and a digest
+height 0. Height ranges are only a preflight: they can include different forks.
+Before publishing the cache, the job opens the actual parsed BlockSci index,
+requires exactly `max_block + 1` blocks, and verifies the target block hash.
+Mainnet archive parses and updates require `blocksci.expected_block_hash`
+(`--blocksci-expected-block-hash`), pinned independently from a trusted Core
+with `bitcoin-cli getblockhash HEIGHT`. Change this hash whenever `max_block`
+changes. PBS does not fetch a checkpoint from an external service.
+The manifest records the observed `exported_max_block` and `exported_block_hash`,
+the last archive file scanned and a digest
 of the scanned files, which an incremental update needs. The second job compares the cached BlockSci index with a
 `coinjoin_tx_info.json` produced from Dumplings; it reports baseline agreement,
 not ground-truth precision/recall.
@@ -521,7 +529,12 @@ run. It never overwrites the source cache, so a parser or upload failure leaves
 the last successful generation intact. From the block archive it downloads only
 the last file the source cache scanned, the newer files, and any older file that
 holds a height above the source maximum, after checking that the files the
-source cache indexed are unchanged. Use the new target run ID for later
+source cache indexed are unchanged. Archive updates also verify that the
+result preserves the source cache's block hash at its recorded height. Older
+archive caches without `exported_block_hash` must be parsed again; they are
+rejected before block downloads. A mainnet archive update needs a new
+`--blocksci-expected-block-hash` for its target `--blocksci-max-block`.
+Use the new target run ID for later
 `cached` script or notebook jobs.
 
 After either command finishes, use the normal `cached` `notebook` or `script`

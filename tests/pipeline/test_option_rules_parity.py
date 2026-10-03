@@ -47,6 +47,8 @@ VALID = {
         "bitcoin",
         "--blocksci-max-block",
         "850100",
+        "--blocksci-expected-block-hash",
+        "a" * 64,
     ],
     "cached update": [
         *PBS_FROM_S3,
@@ -79,12 +81,18 @@ VALID = {
         "bitcoin",
         "--blocksci-max-block",
         "850100",
+        "--blocksci-expected-block-hash",
+        "a" * 64,
     ],
     "S3 emulation": ["emulate", *S3_EMULATION, *S3],
     "S3 full-run": ["full-run", *S3_EMULATION, *S3, "--analysisPbs", "--blocksciPbs"],
 }
 
 INVALID = {
+    "mainnet archive without a checkpoint": VALID["reusable parse from a bitcoin-blocks URI"][:-2],
+    "mainnet archive with a malformed checkpoint": [
+        *VALID["reusable parse from a bitcoin-blocks URI"][:-1], "not-a-block-hash",
+    ],
     "mappings without its PBS stage": [
         "mappings",
         "--engine",

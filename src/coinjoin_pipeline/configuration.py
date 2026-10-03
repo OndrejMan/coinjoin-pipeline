@@ -115,6 +115,7 @@ class BlockSciConfiguration(ConfigurationModel):
     external_baseline_uri: str | None = option(None, name="external_baseline_uri")
     network: BlockSciNetwork | None = option(None, name="blocksci_network")
     max_block: int | None = option(None, name="blocksci_max_block", minimum=0)
+    expected_block_hash: str | None = option(None, name="blocksci_expected_block_hash")
 
 
 @dataclass(frozen=True, slots=True)

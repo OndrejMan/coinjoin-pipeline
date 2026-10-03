@@ -314,6 +314,7 @@ def test_s3_bitcoin_archive_parse_verifies_manifest_checksums_and_height() -> No
             max_block_expression="900001",
         ),
         bitcoin_blocks_uri="s3://bucket/bitcoin-mainnet/blocks",
+        expected_block_hash="a" * 64,
         external_network="bitcoin",
         external_max_block=900000,
     )
@@ -326,6 +327,9 @@ def test_s3_bitcoin_archive_parse_verifies_manifest_checksums_and_height() -> No
     assert "checksum mismatch" in script
     assert "--source-manifest" not in script.split("<<'PY'")[0]
     assert '"bitcoin-blocks-s3" "bitcoin" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA"' in script
+    assert script.index("bash -c") < script.index("/mnt/exporters/verify_chain.py")
+    assert script.index("/mnt/exporters/verify_chain.py") < script.index('tar -C "$RUN_WORK" -czf')
+    assert "--expected-block-hash " + "a" * 64 in script
 
 
 def test_s3_bitcoin_archive_parse_uploads_failure_log_before_marker(
@@ -364,6 +368,7 @@ def test_s3_bitcoin_archive_parse_uploads_failure_log_before_marker(
         image="docker://blocksci",
         command="true",
         bitcoin_blocks_uri="s3://bucket/bitcoin-blocks",
+        expected_block_hash="a" * 64,
         external_network="bitcoin",
         external_max_block=1,
     )
@@ -452,6 +457,7 @@ def test_incremental_blocksci_update_from_the_block_archive_downloads_only_new_f
         image="docker://blocksci",
         command=blocksci_update_pbs_command("run-1"),
         bitcoin_blocks_uri="s3://bucket/bitcoin-blocks/",
+        expected_block_hash="a" * 64,
         external_network="bitcoin",
         external_max_block=850100,
     )
@@ -465,6 +471,9 @@ def test_incremental_blocksci_update_from_the_block_archive_downloads_only_new_f
     # The archive is read only after the source cache proved its maximum block.
     assert script.index("SOURCE_MAX_BLOCK=") < script.index('run "$ARCHIVE_WORK/download.s5cmd"')
     assert script.index('run "$ARCHIVE_WORK/download.s5cmd"') < script.index("singularity exec")
+    assert script.index("worker.py update") < script.index("/mnt/exporters/verify_chain.py")
+    assert script.index("/mnt/exporters/verify_chain.py") < script.index('tar -C "$RUN_WORK" -czf')
+    assert '--source-manifest "/runs/emulation/logs/$RUN_ID/source-blocksci-parse_data/manifest.json"' in script
 
 
 @pytest.mark.parametrize(

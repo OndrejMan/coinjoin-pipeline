@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from exporters.verify_chain import is_block_hash
+
 from coinjoin_pipeline.storage.s3 import (
     S3Target,
     render_s5cmd_check,
@@ -19,6 +21,7 @@ from coinjoin_pipeline.storage.s3 import (
 )
 
 from .defaults import (
+    BLOCKSCI_IMAGE_PYTHON_COMMAND,
     DEFAULT_BLOCKSCI_MEM,
     DEFAULT_BLOCKSCI_NCPUS,
     DEFAULT_BLOCKSCI_SCRATCH,
@@ -136,6 +139,29 @@ python3 "$ARCHIVE_WORK/block_archive.py" select "$ARCHIVE_WORK/sidecars" "$BITCO
 {render_s5cmd_run('"$ARCHIVE_WORK/download.s5cmd"')}
 python3 "$ARCHIVE_WORK/block_archive.py" verify "$BITCOIN_DATADIR/blocks" --max-block "$EXPORTED_MAX_BLOCK"{update}
 MANIFEST_EXTRA="$(cat "$ARCHIVE_WORK/manifest-fields.json")\""""
+
+
+def _verify_block_archive_chain(network: str, expected_hash: str | None, *, update: bool = False) -> str:
+    if network == "bitcoin" and expected_hash is None:
+        raise PBSError("Mainnet block archives require --blocksci-expected-block-hash at --blocksci-max-block")
+    if expected_hash is not None and not is_block_hash(expected_hash):
+        raise PBSError("Expected block hash must be 64 lowercase hexadecimal characters")
+    checkpoint = f" --expected-block-hash {shell_value(expected_hash)}" if expected_hash is not None else ""
+    source = (
+        ' --source-manifest "/runs/emulation/logs/$RUN_ID/source-blocksci-parse_data/manifest.json"' if update else ""
+    )
+    return f"""echo "[block-archive] verifying the parsed chain before cache publication"
+singularity exec \\
+  --bind "$RUNS_ROOT:/runs/emulation/logs:rw" \\
+  --bind "$RUN_WORK/.pipeline/exporters:/mnt/exporters:ro" "$IMAGE" \\
+  env {BLOCKSCI_IMAGE_PYTHON_COMMAND} /mnt/exporters/verify_chain.py "/runs/emulation/logs/$RUN_ID/blocksci_data/config.json" \\
+  --max-block "$EXPORTED_MAX_BLOCK" --network {shell_value(network)}{checkpoint}{source} \\
+  --output "/runs/emulation/logs/$RUN_ID/blocksci_data/chain-verification.json"
+VERIFIED_CHAIN="$(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["exported_max_block"], d["exported_block_hash"])' "$RUN_WORK/blocksci_data/chain-verification.json")"
+read -r EXPORTED_MAX_BLOCK EXPORTED_BLOCK_HASH <<< "$VERIFIED_CHAIN"
+MANIFEST_EXTRA="$MANIFEST_EXTRA,
+  \\"exported_block_hash\\": \\"$EXPORTED_BLOCK_HASH\\""
+"""
 
 
 def _parse_chain(message: str, command: str) -> str:
@@ -331,6 +357,7 @@ def render_blocksci_parse_s3_pbs(
     walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
     external_bitcoin_datadir: Path | None = None,
     bitcoin_blocks_uri: str | None = None,
+    expected_block_hash: str | None = None,
     external_blocksci_dir: Path | None = None,
     external_network: str | None = None,
     external_max_block: int | None = None,
@@ -350,6 +377,7 @@ def render_blocksci_parse_s3_pbs(
         raise PBSError("Choose only one external Bitcoin or BlockSci source")
 
     download_inputs = ""
+    verify_index = ""
     source_kind = "emulator"
     network = "bitcoin_regtest"
     source_description = "emulator Bitcoin and exported-block inputs"
@@ -368,6 +396,7 @@ def render_blocksci_parse_s3_pbs(
         blocks_uri = _block_archive_uri(bitcoin_blocks_uri)
         network = _require_external_chain(external_network, external_max_block)
         source_kind = "bitcoin-blocks-s3"
+        verify_index = _verify_block_archive_chain(network, expected_block_hash)
         source_description = "verified Bitcoin block archive from S3"
         prepare_source = (
             f"BITCOIN_BLOCKS_URI={shell_value(blocks_uri)}\n"
@@ -455,6 +484,7 @@ def render_blocksci_parse_s3_pbs(
         network=network,
         prepare_source=prepare_source,
         produce_index=produce_index,
+        verify_index=verify_index,
         upload_log=render_s5cmd_cp('"$JOB_LOG"', '"$ARTIFACT_URI/$RUN_ID/logs/blocksci-parse.pbs.log"'),
         upload_cache=render_s5cmd_sync('"$CACHE_DIR/"', '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/"'),
     )
@@ -470,6 +500,7 @@ def render_blocksci_update_s3_pbs(
     external_max_block: int,
     external_bitcoin_datadir: Path | None = None,
     bitcoin_blocks_uri: str | None = None,
+    expected_block_hash: str | None = None,
     ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
     mem: str = DEFAULT_BLOCKSCI_MEM,
     scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
@@ -488,6 +519,7 @@ def render_blocksci_update_s3_pbs(
     if source_run_id == target.run_id:
         raise PBSError("Incremental BlockSci update requires different source and target run IDs")
     _require_external_chain(external_network, external_max_block)
+    verify_index = ""
     if external_bitcoin_datadir is not None and bitcoin_blocks_uri is None:
         bitcoin_path = _require_bitcoin_datadir(external_bitcoin_datadir)
         source_kind = "external-bitcoin"
@@ -499,6 +531,7 @@ def render_blocksci_update_s3_pbs(
         prepare_blocks = ""
     elif bitcoin_blocks_uri is not None and external_bitcoin_datadir is None:
         source_kind = "bitcoin-blocks-s3"
+        verify_index = _verify_block_archive_chain(external_network, expected_block_hash, update=True)
         prepare_source = f"BITCOIN_BLOCKS_URI={shell_value(_block_archive_uri(bitcoin_blocks_uri))}"
         prepare_blocks = (
             'echo "[blocksci-update] downloading block archive files after block $SOURCE_MAX_BLOCK"\n'
@@ -517,6 +550,7 @@ def render_blocksci_update_s3_pbs(
         source_kind=source_kind,
         prepare_source=prepare_source,
         prepare_blocks=prepare_blocks,
+        verify_index=verify_index,
         command=command,
         ncpus=ncpus,
         mem=mem,

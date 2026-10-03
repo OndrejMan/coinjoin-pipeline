@@ -99,8 +99,20 @@ sidecar, then only the file prefix holding heights up to the requested maximum
 plus six (`execution/block_archive.py`), and fails closed unless the files are
 contiguous from `blk00000.dat`, every size and SHA-256 matches its sidecar, and
 the sidecars' `height_ranges` cover every height from 0 through the requested
-inclusive maximum. Its manifest adds `block_archive_last_file` and
-`block_archive_index_sha256` for a later update. An external BlockSci source is a
+inclusive maximum. These ranges do not prove a connected or canonical chain.
+After parsing and before creating/uploading the cache tarball,
+`exporters/verify_chain.py` opens the actual index with no height limit and
+requires exactly `max_block + 1` blocks. It compares the target block hash to
+`--blocksci-expected-block-hash` (`blocksci.expected_block_hash` in YAML),
+which is mandatory for mainnet archive sources and must come from a trusted
+source such as `bitcoin-cli getblockhash HEIGHT`. The PBS job makes no network
+request for the checkpoint. A short/overlong index or hash mismatch fails the
+stage instead of publishing a cache. Its manifest records the observed
+`exported_max_block` / `exported_block_hash` and adds `block_archive_last_file`
+and `block_archive_index_sha256` for a later update. Updates require a source
+cache with a recorded block hash and verify that the new index preserves that
+hash at the source height. Older archive caches without this hash require a
+fresh parse. An external BlockSci source is a
 directory under `/storage` containing `config.json` and
 `parsed/chain/block.dat`; it is copied into the run layout and its
 `chainConfig.dataDirectory` is canonicalized before archiving. The cache

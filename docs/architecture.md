@@ -50,6 +50,7 @@ artifact with image digests and exporter hashes.
 | Scenario lookup and host/container scenario paths | `execution/scenarios.py` |
 | S3 access for run, watch/download/cleanup consumers | `storage/s3.py` |
 | Container workload shared by Docker and Apptainer | `pipeline/exporters/worker.py` |
+| Parsed block-archive cache height, checkpoint and update continuity verification | `pipeline/exporters/verify_chain.py` |
 | Heavy BlockSci results | `pipeline/exporters/blocksci_export/analysis.py` |
 | Artifact reader independent of BlockSci | `pipeline/exporters/analysis_artifact.py` |
 | Report assembly and presentation | `pipeline/exporters/cli.py`, `report_builder.py`, `markdown_report.py` |
