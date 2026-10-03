@@ -177,6 +177,11 @@ def render_s5cmd_cp(source_expr: str, destination_expr: str) -> str:
     return f"{_prefix()} cp {source_expr} {destination_expr}"
 
 
+def render_s5cmd_run(commands_file_expr: str) -> str:
+    """Run the s5cmd commands listed one per line in a file, in parallel."""
+    return f"{_prefix()} run {commands_file_expr}"
+
+
 def shell_assignment(name: str, value: str) -> str:
     return f"{name}={shlex.quote(value)}"
 

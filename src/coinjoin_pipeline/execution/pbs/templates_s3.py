@@ -8,6 +8,7 @@ from coinjoin_pipeline.storage.s3 import (
     S3Target,
     render_s5cmd_check,
     render_s5cmd_cp,
+    render_s5cmd_run,
     render_s5cmd_sync,
     shell_value,
     validate_artifact_uri,
@@ -105,6 +106,36 @@ def _require_bitcoin_datadir(path: Path) -> Path:
     if not (bitcoin_path / "blocks").is_dir():
         raise PBSError(f"External Bitcoin coin directory must contain blocks/: {bitcoin_path}")
     return bitcoin_path
+
+
+def _block_archive_uri(bitcoin_blocks_uri: str) -> str:
+    try:
+        return validate_artifact_uri(bitcoin_blocks_uri)
+    except ValueError as error:
+        raise PBSError(f"Invalid Bitcoin block archive URI: {error}") from error
+
+
+def _download_block_archive(source_manifest: str | None = None) -> str:
+    """Fetch only the archive files a parse or an update of `source_manifest` needs.
+
+    Expects ``$BITCOIN_BLOCKS_URI``, ``$EXPORTED_MAX_BLOCK`` and ``$RUN_WORK``;
+    leaves the files in ``$BITCOIN_DATADIR/blocks`` and the cache manifest
+    fields that let a later update resume in ``$MANIFEST_EXTRA``.
+    """
+    helper = (EXECUTION_DIR / "block_archive.py").read_text(encoding="utf-8")
+    update = f' --source-manifest "{source_manifest}"' if source_manifest is not None else ""
+    return f"""BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"
+ARCHIVE_WORK="$RUN_WORK/block-archive"
+mkdir -p "$BITCOIN_DATADIR/blocks" "$ARCHIVE_WORK/sidecars"
+cat >"$ARCHIVE_WORK/block_archive.py" <<'PY'
+{helper}PY
+{render_s5cmd_cp('"$BITCOIN_BLOCKS_URI/blk*.dat.json"', '"$ARCHIVE_WORK/sidecars/"')}
+python3 "$ARCHIVE_WORK/block_archive.py" select "$ARCHIVE_WORK/sidecars" "$BITCOIN_DATADIR/blocks" \\
+  --uri "$BITCOIN_BLOCKS_URI" --max-block "$EXPORTED_MAX_BLOCK"{update} \\
+  --commands "$ARCHIVE_WORK/download.s5cmd" --manifest-fields "$ARCHIVE_WORK/manifest-fields.json"
+{render_s5cmd_run('"$ARCHIVE_WORK/download.s5cmd"')}
+python3 "$ARCHIVE_WORK/block_archive.py" verify "$BITCOIN_DATADIR/blocks" --max-block "$EXPORTED_MAX_BLOCK"{update}
+MANIFEST_EXTRA="$(cat "$ARCHIVE_WORK/manifest-fields.json")\""""
 
 
 def _parse_chain(message: str, command: str) -> str:
@@ -334,23 +365,15 @@ def render_blocksci_parse_s3_pbs(
         )
         produce_index = _parse_chain("parsing external chain through block $EXPORTED_MAX_BLOCK", command)
     elif bitcoin_blocks_uri is not None:
-        try:
-            blocks_uri = validate_artifact_uri(bitcoin_blocks_uri)
-        except ValueError as error:
-            raise PBSError(f"Invalid Bitcoin block archive URI: {error}") from error
+        blocks_uri = _block_archive_uri(bitcoin_blocks_uri)
         network = _require_external_chain(external_network, external_max_block)
         source_kind = "bitcoin-blocks-s3"
         source_description = "verified Bitcoin block archive from S3"
-        blocks_uri_assignment = shell_value(blocks_uri)
-        # The verifier is embedded so the job can check the archive before anything else is downloaded.
-        verify_archive = (EXECUTION_DIR / "verify_block_archive.py").read_text(encoding="utf-8")
-        prepare_source = f"""BITCOIN_BLOCKS_URI={blocks_uri_assignment}
-EXPORTED_MAX_BLOCK={external_max_block}
-BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"
-mkdir -p "$BITCOIN_DATADIR/blocks"
-{render_s5cmd_sync('"$BITCOIN_BLOCKS_URI/*"', '"$BITCOIN_DATADIR/blocks/"')}
-python3 - "$BITCOIN_DATADIR/blocks" "$EXPORTED_MAX_BLOCK" <<'PY'
-{verify_archive}PY"""
+        prepare_source = (
+            f"BITCOIN_BLOCKS_URI={shell_value(blocks_uri)}\n"
+            f"EXPORTED_MAX_BLOCK={external_max_block}\n"
+            f"{_download_block_archive()}"
+        )
         produce_index = _parse_chain(
             "parsing verified S3 block archive through block $EXPORTED_MAX_BLOCK",
             command,
@@ -443,23 +466,46 @@ def render_blocksci_update_s3_pbs(
     image: str,
     command: str,
     *,
-    external_bitcoin_datadir: Path,
     external_network: str,
     external_max_block: int,
+    external_bitcoin_datadir: Path | None = None,
+    bitcoin_blocks_uri: str | None = None,
     ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
     mem: str = DEFAULT_BLOCKSCI_MEM,
     scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
     walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
 ) -> str:
-    """Render a job that incrementally updates one S3 cache into a fresh run."""
+    """Render a job that incrementally updates one S3 cache into a fresh run.
+
+    The cache must come from the same source: BlockSci remembers each block by
+    its file number and offset, which only that Bitcoin datadir or block
+    archive can resolve.
+    """
     try:
         source_run_id = validate_run_id(source_run_id)
     except ValueError as error:
         raise PBSError(str(error)) from error
     if source_run_id == target.run_id:
         raise PBSError("Incremental BlockSci update requires different source and target run IDs")
-    bitcoin_path = _require_bitcoin_datadir(external_bitcoin_datadir)
     _require_external_chain(external_network, external_max_block)
+    if external_bitcoin_datadir is not None and bitcoin_blocks_uri is None:
+        bitcoin_path = _require_bitcoin_datadir(external_bitcoin_datadir)
+        source_kind = "external-bitcoin"
+        prepare_source = (
+            f"BITCOIN_DATADIR={shell_value(str(bitcoin_path))}\n"
+            'test -d "$BITCOIN_DATADIR/blocks" || { '
+            'echo "External Bitcoin coin directory must contain blocks/: $BITCOIN_DATADIR" >&2; exit 1; }'
+        )
+        prepare_blocks = ""
+    elif bitcoin_blocks_uri is not None and external_bitcoin_datadir is None:
+        source_kind = "bitcoin-blocks-s3"
+        prepare_source = f"BITCOIN_BLOCKS_URI={shell_value(_block_archive_uri(bitcoin_blocks_uri))}"
+        prepare_blocks = (
+            'echo "[blocksci-update] downloading block archive files after block $SOURCE_MAX_BLOCK"\n'
+            + _download_block_archive("$SOURCE_CACHE_DIR/manifest.json")
+        )
+    else:
+        raise PBSError("Incremental BlockSci update requires exactly one external Bitcoin datadir or block archive")
     return _render_stage(
         "blocksci_update_s3_template.sh",
         "blocksci-update",
@@ -468,7 +514,9 @@ def render_blocksci_update_s3_pbs(
         source_run_id=shell_value(source_run_id),
         network=shell_value(external_network),
         exported_max_block=external_max_block,
-        bitcoin_datadir=shell_value(str(bitcoin_path)),
+        source_kind=source_kind,
+        prepare_source=prepare_source,
+        prepare_blocks=prepare_blocks,
         command=command,
         ncpus=ncpus,
         mem=mem,

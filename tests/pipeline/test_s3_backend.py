@@ -40,6 +40,7 @@ from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_mappings_s3_pbs,
     render_unified_report_s3_pbs,
 )
+from coinjoin_pipeline.execution.pbs.validation import PBSError
 from coinjoin_pipeline.execution.s3_emulation import run_s3_kubernetes_emulation
 from coinjoin_pipeline.execution.s3_markers import rollback_s3_pbs_submissions
 from coinjoin_pipeline.execution.s3_staging import pbs_stages_need_exporters
@@ -318,12 +319,13 @@ def test_s3_bitcoin_archive_parse_verifies_manifest_checksums_and_height() -> No
     )
 
     subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert 'sync "$BITCOIN_BLOCKS_URI/*" "$BITCOIN_DATADIR/blocks/"' in script
-    assert 'python3 - "$BITCOIN_DATADIR/blocks" "$EXPORTED_MAX_BLOCK"' in script
-    assert 'glob("blk*.dat.json")' in script
+    assert 'sync "$BITCOIN_BLOCKS_URI/*"' not in script
+    assert 'cp "$BITCOIN_BLOCKS_URI/blk*.dat.json" "$ARCHIVE_WORK/sidecars/"' in script
+    assert 'run "$ARCHIVE_WORK/download.s5cmd"' in script
+    assert 'block_archive.py" verify "$BITCOIN_DATADIR/blocks" --max-block "$EXPORTED_MAX_BLOCK"\n' in script
     assert "checksum mismatch" in script
-    assert "does not cover heights 0.." in script
-    assert '"bitcoin-blocks-s3" "bitcoin" "$EXPORTED_MAX_BLOCK"' in script
+    assert "--source-manifest" not in script.split("<<'PY'")[0]
+    assert '"bitcoin-blocks-s3" "bitcoin" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA"' in script
 
 
 def test_s3_bitcoin_archive_parse_uploads_failure_log_before_marker(
@@ -441,6 +443,44 @@ def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target(
     assert "worker.py update --run-dir /runs/emulation/logs/run-1" in script
     assert "Target maximum block" in script
     assert ".pbs/blocksci-update.done" in script
+
+
+def test_incremental_blocksci_update_from_the_block_archive_downloads_only_new_files() -> None:
+    script = render_blocksci_update_s3_pbs(
+        **COMMON,
+        source_run_id="run-0",
+        image="docker://blocksci",
+        command=blocksci_update_pbs_command("run-1"),
+        bitcoin_blocks_uri="s3://bucket/bitcoin-blocks/",
+        external_network="bitcoin",
+        external_max_block=850100,
+    )
+
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert "BITCOIN_BLOCKS_URI=s3://bucket/bitcoin-blocks\n" in script
+    assert 'grep -Fq \'"source_kind": "bitcoin-blocks-s3"\'' in script
+    assert '--source-manifest "$SOURCE_CACHE_DIR/manifest.json"' in script
+    assert '"source_kind": "bitcoin-blocks-s3",\\n' in script
+    assert '"$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA" "$SOURCE_RUN_ID"' in script
+    # The archive is read only after the source cache proved its maximum block.
+    assert script.index("SOURCE_MAX_BLOCK=") < script.index('run "$ARCHIVE_WORK/download.s5cmd"')
+    assert script.index('run "$ARCHIVE_WORK/download.s5cmd"') < script.index("singularity exec")
+
+
+@pytest.mark.parametrize(
+    "sources", [{}, {"bitcoin_blocks_uri": "s3://bucket/blocks", "external_bitcoin_datadir": Path("/x")}]
+)
+def test_incremental_blocksci_update_needs_exactly_one_source(sources: dict[str, object]) -> None:
+    with pytest.raises(PBSError, match="exactly one"):
+        render_blocksci_update_s3_pbs(
+            **COMMON,
+            source_run_id="run-0",
+            image="docker://blocksci",
+            command="true",
+            external_network="bitcoin",
+            external_max_block=1,
+            **sources,
+        )
 
 
 def test_external_blocksci_import_repackages_index_without_parser() -> None:

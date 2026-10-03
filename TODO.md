@@ -29,13 +29,14 @@ shared graph nodes, in-cluster scripts as `.sh` files). These were left on purpo
 
 ## 3. Incremental update from the S3 block archive
 
-`--blocksci-task update` accepts only an `external-bitcoin` cache
-(`blocksci_update_s3_template.sh`). A cache parsed from the bitcoin-block-archive
-S3 prefix records `source_kind: bitcoin-blocks-s3`, so every height bump means a full
-archive download and re-parse (~700 GB on mainnet). Either teach the update job to
-extend a `bitcoin-blocks-s3` cache from newly archived block files, or document the full
-re-parse as the supported path. (From the 2026-09-18 archive review; its XOR and
-prune-verification findings are fixed in bitcoin-block-archive.)
+Implemented: a `bitcoin-blocks-s3` cache updates with `--blocksci-task update
+--blocksci-bitcoin-blocks-uri`, and both parse and update download only the
+block files they need (`execution/block_archive.py`). Still unverified: the
+extended `tests/test-bitcoin-block-archive-s3-minio.sh` (parse → archive grows →
+update, compared with a full parse) has not run yet, and no update has run on
+MetaCentrum. The update relies on BlockSci reading only `newestBlock.nFile`
+onwards for headers and each new block from its own `nFile`
+(`tools/parser/chain_index.cpp`, `block_processor.cpp`).
 
 ## 4. Verification still owed
 

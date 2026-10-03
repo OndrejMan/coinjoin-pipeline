@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Public Bitcoin fixture -> bitcoin-block-archive Docker image -> MinIO ->
-# PBS/Apptainer BlockSci parse. Only mainnet genesis and height 1 are
-# downloaded, so this is a real Core block-file archive without a full chain.
+# PBS/Apptainer BlockSci parse, then an incremental update after the archive
+# grows, checked against a full parse of the grown archive. Only mainnet
+# heights 0-3 are downloaded, so this is a real Core block-file archive
+# without a full chain.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -67,6 +69,8 @@ RESULT_DIR="${TEST_RESULT_DIR:-${PROJECT_DIR}/emulation_logs/_test-results/bitco
 E2E_TIMEOUT="${BITCOIN_BLOCK_ARCHIVE_S3_TIMEOUT:-35m}"
 ESPLORA_API="${ESPLORA_API:-https://blockstream.info/api}"
 RUN_ID="bitcoin-block-archive-e2e-${RUN_TOKEN}"
+UPDATE_RUN_ID="${RUN_ID}-u"
+FULL_RUN_ID="${RUN_ID}-f"
 BUCKET="coinjoin-e2e"
 BLOCKS_URI="s3://${BUCKET}/bitcoin-blocks"
 ARTIFACT_URI="s3://${BUCKET}/runs"
@@ -91,8 +95,12 @@ dump_diagnostics() {
     if [[ -n "${S3_ENDPOINT_URL}" ]]; then
       s5 cp "${ARTIFACT_URI}/${RUN_ID}/logs/blocksci-parse.pbs.log" \
         "${WORK_ROOT}/blocksci-parse.pbs.log" >/dev/null 2>&1 || true
+      s5 cp "${ARTIFACT_URI}/${FULL_RUN_ID}/logs/blocksci-parse.pbs.log" \
+        "${WORK_ROOT}/blocksci-full-parse.pbs.log" >/dev/null 2>&1 || true
     fi
-    [[ ! -s "${WORK_ROOT}/blocksci-parse.pbs.log" ]] || tail -n 200 "${WORK_ROOT}/blocksci-parse.pbs.log"
+    for log in blocksci-parse.pbs.log blocksci-full-parse.pbs.log; do
+      [[ ! -s "${WORK_ROOT}/${log}" ]] || { echo "----- ${log}"; tail -n 200 "${WORK_ROOT}/${log}"; }
+    done
     find "${LOGS_ROOT}" -type f -name '*.pbs.log' -print -exec tail -n 200 {} \; 2>/dev/null || true
   } >"${DIAGNOSTICS_FILE}" 2>&1
   cat "${DIAGNOSTICS_FILE}" >&2
@@ -103,7 +111,8 @@ cleanup() {
   trap - EXIT
   (( status == 0 )) || dump_diagnostics || true
   mkdir -p "${RESULT_DIR}"
-  for artifact in blk00000.dat.json blocksci-parse-manifest.json blocksci-parse.pbs.log pipeline-output.log diagnostics.txt; do
+  for artifact in blk00000.dat.json blk00001.dat.json blocksci-parse-manifest.json blocksci-update-manifest.json \
+    blocksci-full-parse-manifest.json blocksci-parse.pbs.log blocksci-full-parse.pbs.log pipeline-output.log diagnostics.txt; do
     [[ -s "${WORK_ROOT}/${artifact}" ]] && cp "${WORK_ROOT}/${artifact}" "${RESULT_DIR}/${artifact}"
   done
   docker rm -f "${PBS_CONTAINER_NAME}" "${MINIO_CONTAINER_NAME}" >/dev/null 2>&1 || true
@@ -115,7 +124,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "${WORK_ROOT}/bin" "${WORK_ROOT}/blocks" "${WORK_ROOT}/state" "${LOGS_ROOT}"
+mkdir -p "${WORK_ROOT}/bin" "${WORK_ROOT}/blocks" "${WORK_ROOT}/later-blocks" "${WORK_ROOT}/state" "${LOGS_ROOT}"
 chmod 0777 "${WORK_ROOT}" "${WORK_ROOT}/state" "${LOGS_ROOT}"
 if ! docker image inspect "${S5CMD_IMAGE}" >/dev/null 2>&1; then docker pull "${S5CMD_IMAGE}"; fi
 S5CMD_CONTAINER="$(docker create "${S5CMD_IMAGE}")"
@@ -137,15 +146,18 @@ for _ in $(seq 1 60); do s5 ls >/dev/null 2>&1 && break; sleep 2; done
 s5 ls >/dev/null || { echo "FAIL: MinIO did not become ready" >&2; exit 1; }
 s5 mb "s3://${BUCKET}" >/dev/null
 
-echo "Downloading public Bitcoin blocks 0 and 1 from ${ESPLORA_API}..."
-python3 - "${ESPLORA_API}" "${WORK_ROOT}/blocks/blk00000.dat" "${WORK_ROOT}/rpc-heights.json" <<'PY'
+echo "Downloading public Bitcoin blocks 0-3 from ${ESPLORA_API}..."
+# blk00000 holds heights 0-1 and is archived first; blk00001 (heights 2-3)
+# joins the archive only after the first parse, as a growing node's would.
+python3 - "${ESPLORA_API}" "${WORK_ROOT}/blocks/blk00000.dat" "${WORK_ROOT}/later-blocks/blk00001.dat" \
+  "${WORK_ROOT}/rpc-heights.json" <<'PY'
 import json, struct, sys
 import urllib.request
 from pathlib import Path
 
-api, destination, mapping_path = sys.argv[1:]
+api, first_file, second_file, mapping_path = sys.argv[1:]
 records = []
-for height in (0, 1):
+for height in range(4):
     with urllib.request.urlopen(f"{api}/block-height/{height}", timeout=60) as response:
         block_hash = response.read().decode("ascii").strip()
     with urllib.request.urlopen(f"{api}/block/{block_hash}/raw", timeout=120) as response:
@@ -153,11 +165,12 @@ for height in (0, 1):
     if len(raw) < 81:
         raise SystemExit(f"public block {height} is unexpectedly short")
     records.append((block_hash, height, raw))
-with Path(destination).open("wb") as stream:
-    for _, _, raw in records:
-        stream.write(bytes.fromhex("f9beb4d9"))
-        stream.write(struct.pack("<I", len(raw)))
-        stream.write(raw)
+for destination, file_records in ((first_file, records[:2]), (second_file, records[2:])):
+    with Path(destination).open("wb") as stream:
+        for _, _, raw in file_records:
+            stream.write(bytes.fromhex("f9beb4d9"))
+            stream.write(struct.pack("<I", len(raw)))
+            stream.write(raw)
 Path(mapping_path).write_text(json.dumps({block_hash: height for block_hash, height, _ in records}), encoding="utf-8")
 PY
 
@@ -172,7 +185,7 @@ heights = json.load(open(sys.argv[1], encoding="utf-8"))
 print(json.dumps({"height": heights[sys.argv[2]]}))
 PY
     ;;
-  getblockchaininfo) printf '{"blocks": 1}\n' ;;
+  getblockchaininfo) printf '{"blocks": 3, "pruned": false}\n' ;;
   *) echo "unsupported fixture RPC: ${2:-}" >&2; exit 2 ;;
 esac
 SH
@@ -189,21 +202,24 @@ docker image inspect "${BITCOIN_BLOCK_ARCHIVE_IMAGE}" >/dev/null 2>&1 || {
   echo "FAIL: bitcoin-block-archive image is unavailable: ${BITCOIN_BLOCK_ARCHIVE_IMAGE}" >&2
   exit 2
 }
-docker run --rm --user "$(id -u):$(id -g)" \
-  -e FAKE_RPC_HEIGHTS=/fixture/rpc-heights.json \
-  -e S3_ACCESS_KEY_ID="${MINIO_ROOT_USER}" \
-  -e S3_SECRET_ACCESS_KEY="${MINIO_ROOT_PASSWORD}" \
-  -e S3_ENDPOINT_URL="${S3_ENDPOINT_URL}" \
-  -e S3_DESTINATION="${BLOCKS_URI}" \
-  -e S3_PROFILE="${S3_PROFILE}" \
-  -v "${WORK_ROOT}/blocks:/blocks:ro" \
-  -v "${WORK_ROOT}/state:/state" \
-  -v "${WORK_ROOT}/fake-bitcoin-cli:/fixture/fake-bitcoin-cli:ro" \
-  -v "${WORK_ROOT}/rpc-heights.json:/fixture/rpc-heights.json:ro" \
-  "${BITCOIN_BLOCK_ARCHIVE_IMAGE}" \
-  --block-dir /blocks --state-dir /state \
-  --bitcoin-cli /fixture/fake-bitcoin-cli --bitcoin-datadir /fixture/bitcoin \
-  --keep-latest-files 0 --no-stop-on-error
+archive_blocks() {
+  docker run --rm --user "$(id -u):$(id -g)" \
+    -e FAKE_RPC_HEIGHTS=/fixture/rpc-heights.json \
+    -e S3_ACCESS_KEY_ID="${MINIO_ROOT_USER}" \
+    -e S3_SECRET_ACCESS_KEY="${MINIO_ROOT_PASSWORD}" \
+    -e S3_ENDPOINT_URL="${S3_ENDPOINT_URL}" \
+    -e S3_DESTINATION="${BLOCKS_URI}" \
+    -e S3_PROFILE="${S3_PROFILE}" \
+    -v "${WORK_ROOT}/blocks:/blocks:ro" \
+    -v "${WORK_ROOT}/state:/state" \
+    -v "${WORK_ROOT}/fake-bitcoin-cli:/fixture/fake-bitcoin-cli:ro" \
+    -v "${WORK_ROOT}/rpc-heights.json:/fixture/rpc-heights.json:ro" \
+    "${BITCOIN_BLOCK_ARCHIVE_IMAGE}" \
+    --block-dir /blocks --state-dir /state \
+    --bitcoin-cli /fixture/fake-bitcoin-cli --bitcoin-datadir /fixture/bitcoin \
+    --keep-latest-files 0
+}
+archive_blocks
 s5 cp "${BLOCKS_URI}/blk00000.dat.json" "${WORK_ROOT}/blk00000.dat.json" >/dev/null
 
 export PBS_CONTAINER_NAME PBS_WORKDIR_HOST="${WORK_ROOT}" PBS_WORKDIR_CONTAINER="${WORK_ROOT}"
@@ -222,33 +238,105 @@ else
 fi
 
 export PBS_CLIENT_WORKDIR="${WORK_ROOT}" EMULATION_LOGS_DIR="${LOGS_ROOT}"
-echo "Submitting BlockSci S3 parse for ${RUN_ID}..."
-(
-  cd "${PROJECT_DIR}"
-  PYTHONPATH="${PROJECT_DIR}/src:${PROJECT_DIR}/pipeline${PYTHONPATH:+:${PYTHONPATH}}" \
-    timeout --foreground "${E2E_TIMEOUT}" python3 -m coinjoin_pipeline.cli pbs-from-s3 \
-    --engine joinmarket --artifact-uri "${ARTIFACT_URI}" --run-id "${RUN_ID}" \
-    --s3-endpoint-url "${S3_ENDPOINT_URL}" --s3-credentials-file "${CREDENTIALS_FILE}" --s3-profile "${S3_PROFILE}" \
-    --blocksciPbs --blocksci-workflow reusable --blocksci-task parse \
-    --blocksci-bitcoin-blocks-uri "${BLOCKS_URI}" --blocksci-network bitcoin --blocksci-max-block 1 \
-    "${PBS_IMAGE_ARGS[@]}" --pbs-ncpus 2 --pbs-mem 4gb --pbs-scratch 2gb --pbs-walltime 00:20:00
-) 2>&1 | tee "${PIPELINE_OUTPUT_FILE}"
 
-deadline=$((SECONDS + ${BITCOIN_BLOCK_ARCHIVE_S3_WAIT_SECONDS:-1800}))
-until s5 ls "${ARTIFACT_URI}/${RUN_ID}/.pbs/blocksci-parse.done" >/dev/null 2>&1; do
-  if s5 ls "${ARTIFACT_URI}/${RUN_ID}/.pbs/blocksci-parse.failed" >/dev/null 2>&1; then echo "FAIL: BlockSci parse failed" >&2; exit 1; fi
-  if (( SECONDS >= deadline )); then echo "FAIL: timed out waiting for BlockSci parse" >&2; exit 1; fi
-  sleep 5
+submit_blocksci() {
+  local run_id="$1"
+  shift
+  (
+    cd "${PROJECT_DIR}"
+    PYTHONPATH="${PROJECT_DIR}/src:${PROJECT_DIR}/pipeline${PYTHONPATH:+:${PYTHONPATH}}" \
+      timeout --foreground "${E2E_TIMEOUT}" python3 -m coinjoin_pipeline.cli pbs-from-s3 \
+      --engine joinmarket --artifact-uri "${ARTIFACT_URI}" --run-id "${run_id}" \
+      --s3-endpoint-url "${S3_ENDPOINT_URL}" --s3-credentials-file "${CREDENTIALS_FILE}" --s3-profile "${S3_PROFILE}" \
+      --blocksciPbs "$@" --blocksci-bitcoin-blocks-uri "${BLOCKS_URI}" --blocksci-network bitcoin \
+      "${PBS_IMAGE_ARGS[@]}" --pbs-ncpus 2 --pbs-mem 4gb --pbs-scratch 2gb --pbs-walltime 00:20:00
+  ) 2>&1 | tee -a "${PIPELINE_OUTPUT_FILE}"
+}
+
+wait_for_stage() {
+  local run_id="$1" stage="$2"
+  local deadline=$((SECONDS + ${BITCOIN_BLOCK_ARCHIVE_S3_WAIT_SECONDS:-1800}))
+  until s5 ls "${ARTIFACT_URI}/${run_id}/.pbs/${stage}.done" >/dev/null 2>&1; do
+    if s5 ls "${ARTIFACT_URI}/${run_id}/.pbs/${stage}.failed" >/dev/null 2>&1; then
+      echo "FAIL: ${stage} failed for ${run_id}" >&2
+      exit 1
+    fi
+    if (( SECONDS >= deadline )); then echo "FAIL: timed out waiting for ${stage} of ${run_id}" >&2; exit 1; fi
+    sleep 5
+  done
+}
+
+fetch_cache() {
+  local run_id="$1" name="$2"
+  s5 cp "${ARTIFACT_URI}/${run_id}/blocksci-parse_data/manifest.json" "${WORK_ROOT}/${name}-manifest.json" >/dev/null
+  s5 cp "${ARTIFACT_URI}/${run_id}/blocksci-parse_data/blocksci_data.tar.gz" "${WORK_ROOT}/${name}.tar.gz" >/dev/null
+  mkdir -p "${WORK_ROOT}/${name}"
+  tar -C "${WORK_ROOT}/${name}" -xzf "${WORK_ROOT}/${name}.tar.gz"
+}
+
+echo "Submitting BlockSci S3 parse for ${RUN_ID}..."
+submit_blocksci "${RUN_ID}" --blocksci-workflow reusable --blocksci-task parse --blocksci-max-block 1
+wait_for_stage "${RUN_ID}" blocksci-parse
+fetch_cache "${RUN_ID}" blocksci-parse
+
+echo "Growing the archive by blk00001.dat (heights 2-3)..."
+cp "${WORK_ROOT}/later-blocks/blk00001.dat" "${WORK_ROOT}/blocks/blk00001.dat"
+archive_blocks
+s5 cp "${BLOCKS_URI}/blk00001.dat.json" "${WORK_ROOT}/blk00001.dat.json" >/dev/null
+
+echo "Submitting incremental BlockSci update ${RUN_ID} -> ${UPDATE_RUN_ID}..."
+submit_blocksci "${UPDATE_RUN_ID}" --blocksci-workflow cached --blocksci-task update \
+  --blocksci-cache-source-run-id "${RUN_ID}" --blocksci-max-block 3
+wait_for_stage "${UPDATE_RUN_ID}" blocksci-update
+fetch_cache "${UPDATE_RUN_ID}" blocksci-update
+
+echo "Submitting reference full parse ${FULL_RUN_ID}..."
+submit_blocksci "${FULL_RUN_ID}" --blocksci-workflow reusable --blocksci-task parse --blocksci-max-block 3
+wait_for_stage "${FULL_RUN_ID}" blocksci-parse
+fetch_cache "${FULL_RUN_ID}" blocksci-full-parse
+
+# The incremental index must describe the same chain as a parse from scratch.
+for chain_file in block.dat tx_hashes.dat; do
+  cmp -s "${WORK_ROOT}/blocksci-update/blocksci_data/parsed/chain/${chain_file}" \
+    "${WORK_ROOT}/blocksci-full-parse/blocksci_data/parsed/chain/${chain_file}" || {
+    echo "FAIL: incremental update and full parse differ in parsed/chain/${chain_file}" >&2
+    exit 1
+  }
 done
-s5 cp "${ARTIFACT_URI}/${RUN_ID}/blocksci-parse_data/manifest.json" "${WORK_ROOT}/blocksci-parse-manifest.json" >/dev/null
-python3 - "${WORK_ROOT}/blk00000.dat.json" "${WORK_ROOT}/blocksci-parse-manifest.json" <<'PY'
+
+python3 - "${WORK_ROOT}" <<'PY'
 import json, sys
-archive, cache = (json.load(open(path, encoding="utf-8")) for path in sys.argv[1:])
-if archive.get("schema_version") != 1 or archive.get("height_ranges") != [[0, 1]]:
-    raise SystemExit("FAIL: archive sidecar has wrong coverage")
-if archive.get("file") != "blk00000.dat":
-    raise SystemExit("FAIL: archive sidecar has wrong block inventory")
-if cache.get("source_kind") != "bitcoin-blocks-s3" or cache.get("network") != "bitcoin" or cache.get("exported_max_block") != 1:
+from pathlib import Path
+
+root = Path(sys.argv[1])
+
+
+def load(name):
+    return json.loads((root / name).read_text(encoding="utf-8"))
+
+
+first, second = load("blk00000.dat.json"), load("blk00001.dat.json")
+parse = load("blocksci-parse-manifest.json")
+update = load("blocksci-update-manifest.json")
+full = load("blocksci-full-parse-manifest.json")
+if first.get("schema_version") != 1 or first.get("file") != "blk00000.dat" or first.get("height_ranges") != [[0, 1]]:
+    raise SystemExit("FAIL: blk00000.dat sidecar has wrong coverage")
+if second.get("file") != "blk00001.dat" or second.get("height_ranges") != [[2, 3]]:
+    raise SystemExit("FAIL: blk00001.dat sidecar has wrong coverage")
+if parse.get("source_kind") != "bitcoin-blocks-s3" or parse.get("network") != "bitcoin" or parse.get("exported_max_block") != 1:
     raise SystemExit("FAIL: parsed cache does not preserve the S3 fixture provenance")
-print("PASS: public Bitcoin fixture -> bitcoin-block-archive -> MinIO -> PBS BlockSci parse")
+if parse.get("block_archive_last_file") != 0:
+    raise SystemExit(f"FAIL: parsed cache does not record its last archive file: {parse}")
+expected_update = {
+    "source_kind": "bitcoin-blocks-s3",
+    "exported_max_block": 3,
+    "cache_operation": "incremental-update",
+    "source_exported_max_block": 1,
+    "block_archive_last_file": 1,
+}
+if any(update.get(key) != value for key, value in expected_update.items()):
+    raise SystemExit(f"FAIL: updated cache manifest is wrong: {update}")
+if update.get("block_archive_index_sha256") != full.get("block_archive_index_sha256"):
+    raise SystemExit("FAIL: update and full parse indexed different archive files")
+print("PASS: public Bitcoin fixture -> bitcoin-block-archive -> MinIO -> PBS BlockSci parse -> incremental update")
 PY

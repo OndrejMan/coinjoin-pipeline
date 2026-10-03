@@ -283,10 +283,13 @@ thresholds, and leaves the larger global/mainnet PBS defaults unchanged.
 
 When the Bitcoin Core node is pruned after archival by
 `bitcoin-block-archive`, use the S3 archive variant instead. The parser job
-downloads the complete archive to PBS scratch, requires contiguous
-`blk00000.dat…` files, checks each one's size and SHA-256 against its schema-1
-`blkNNNNN.dat.json` sidecar, and refuses a requested height that the sidecars'
-`height_ranges` do not cover from height 0. The second job compares the cached BlockSci index with a
+downloads every schema-1 `blkNNNNN.dat.json` sidecar, then only the prefix
+`blk00000.dat…` of block files that holds heights up to the requested maximum
+(plus a six-block selection margin).
+It checks each downloaded file's size and SHA-256 against its sidecar and
+refuses a requested height that the sidecars' `height_ranges` do not cover from
+height 0. The cache manifest records the last archive file scanned and a digest
+of the scanned files, which an incremental update needs. The second job compares the cached BlockSci index with a
 `coinjoin_tx_info.json` produced from Dumplings; it reports baseline agreement,
 not ground-truth precision/recall.
 
@@ -488,7 +491,10 @@ publishes the same checksummed cache:
 
 To incrementally advance an external mainnet cache after Bitcoin Core has
 received newer blocks, use the existing cache run as the source and a fresh
-run ID as the target:
+run ID as the target. Use the same block source as the source cache: a cache
+parsed from a coin directory updates from that directory, and a cache parsed
+from the block archive updates with `--blocksci-bitcoin-blocks-uri` instead of
+`--blocksci-external-bitcoin-datadir`:
 
 ```bash
 ./runIt.sh pbs-from-s3 \
@@ -512,7 +518,10 @@ by the source cache. The target prefix must be completely empty. The job
 verifies and extracts the source cache, runs only the incremental
 `blocksci_parser update`, and uploads a new checksummed cache under the target
 run. It never overwrites the source cache, so a parser or upload failure leaves
-the last successful generation intact. Use the new target run ID for later
+the last successful generation intact. From the block archive it downloads only
+the last file the source cache scanned, the newer files, and any older file that
+holds a height above the source maximum, after checking that the files the
+source cache indexed are unchanged. Use the new target run ID for later
 `cached` script or notebook jobs.
 
 After either command finishes, use the normal `cached` `notebook` or `script`

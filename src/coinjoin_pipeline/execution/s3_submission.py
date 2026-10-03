@@ -251,14 +251,14 @@ class S3StageRunner:
 
     def _submit_update(self, stage: StagePlan) -> None:
         image, resources = self._blocksci_resources()
+        external_bitcoin = self.args.blocksci.external_bitcoin_datadir
         script = render_blocksci_update_s3_pbs(
             target=self.target,
             source_run_id=required(self.args.blocksci.cache_source_run_id, "--blocksci-cache-source-run-id"),
             image=image,
             command=blocksci_update_pbs_command(self.target.run_id),
-            external_bitcoin_datadir=Path(
-                required(self.args.blocksci.external_bitcoin_datadir, "--blocksci-external-bitcoin-datadir")
-            ),
+            external_bitcoin_datadir=Path(external_bitcoin) if external_bitcoin else None,
+            bitcoin_blocks_uri=self.args.blocksci.bitcoin_blocks_uri,
             external_network=required(self.args.blocksci.network, "--blocksci-network"),
             external_max_block=required(self.args.blocksci.max_block, "--blocksci-max-block"),
             **resources,

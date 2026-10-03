@@ -16,7 +16,7 @@ side stay compatible.
 | S3 analyzer variants | `pbs-from-s3`, `full-run --artifact-backend s3` | `coinjoin_analysis_s3_template.sh`, `blocksci_s3_template.sh` |
 | S3 `coinjoin-mappings` | Wasabi `--mappingsPbs` | `mappings_s3_template.sh` |
 | S3 `blocksci-parse` | reusable BlockSci workflow | `blocksci_parse_s3_template.sh` |
-| S3 `blocksci-update` | versioned incremental external-Bitcoin cache update | `blocksci_update_s3_template.sh` |
+| S3 `blocksci-update` | versioned incremental cache update from a coin directory or the block archive | `blocksci_update_s3_template.sh` |
 | S3 cached work | `detect`, `script`, or `notebook` over a reusable parse | `blocksci_analyze_s3_template.sh` |
 | S3 `unified-report` | BlockSci detect selected, after selected analyzers | `unified_report_s3_template.sh` |
 
@@ -72,7 +72,10 @@ closed if the archive or checksum is absent or invalid.
 
 `--blocksci-workflow cached --blocksci-task update` is the only S3 parser
 resume path. It requires a source cache run, a different fresh target run,
-and an external Bitcoin coin directory under `/storage`. Before submission,
+and the source cache's block source: an external Bitcoin coin directory under
+`/storage` for an `external-bitcoin` cache, or the `bitcoin-block-archive` S3
+prefix for a `bitcoin-blocks-s3` cache (BlockSci remembers each block by file
+number and offset, which only that source resolves). Before submission,
 the frontend verifies that the source manifest exists and that the entire
 target run prefix is empty. The `blocksci-update` job then verifies the source
 manifest and archive checksum, requires matching BlockSci image and network,
@@ -80,17 +83,24 @@ extracts the index, rewrites its run-local parsed-data path and inclusive
 maximum height, and invokes only `blocksci_parser ... update`—never
 `generate-config`. On success it publishes a new schema-1.0 cache whose
 manifest records `cache_operation`, `source_run_id`, and
-`source_exported_max_block`. The source run is never modified. A failed target
+`source_exported_max_block`. From the block archive the job downloads every
+sidecar, refuses the update unless the digest of the files the source cache
+scanned (`block_archive_index_sha256`, through `block_archive_last_file`) still
+matches, and downloads only that last file onwards plus older files holding a
+height above the source maximum. The source run is never modified. A failed target
 is not reusable as a target; choose another fresh `--run-id` after diagnosis.
 
 For parse-only `pbs-from-s3` submissions, the producer may replace emulator
 inputs with exactly one source. An external Bitcoin source is either a coin
 directory under `/storage` containing `blocks/`, or a
 `bitcoin-block-archive` S3 prefix containing `blk*.dat` files, each with its
-schema-1 `blkNNNNN.dat.json` sidecar. The latter is restored to PBS scratch and
-fails closed unless the files are contiguous from `blk00000.dat`, every size and
-SHA-256 matches its sidecar, and the sidecars' `height_ranges` cover every height
-from 0 through the requested inclusive maximum. An external BlockSci source is a
+schema-1 `blkNNNNN.dat.json` sidecar. For the latter the job downloads every
+sidecar, then only the file prefix holding heights up to the requested maximum
+plus six (`execution/block_archive.py`), and fails closed unless the files are
+contiguous from `blk00000.dat`, every size and SHA-256 matches its sidecar, and
+the sidecars' `height_ranges` cover every height from 0 through the requested
+inclusive maximum. Its manifest adds `block_archive_last_file` and
+`block_archive_index_sha256` for a later update. An external BlockSci source is a
 directory under `/storage` containing `config.json` and
 `parsed/chain/block.dat`; it is copied into the run layout and its
 `chainConfig.dataDirectory` is canonicalized before archiving. The cache

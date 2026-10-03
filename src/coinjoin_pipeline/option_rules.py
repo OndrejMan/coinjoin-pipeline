@@ -123,8 +123,10 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
     if blocksci_task == "update":
         if not source_cache_run_id:
             errors.append("--blocksci-task update requires --blocksci-cache-source-run-id")
-        if not external_bitcoin:
-            errors.append("--blocksci-task update requires --blocksci-external-bitcoin-datadir")
+        if not (external_bitcoin or bitcoin_blocks_uri):
+            errors.append(
+                "--blocksci-task update requires --blocksci-external-bitcoin-datadir or --blocksci-bitcoin-blocks-uri"
+            )
         if external_index:
             errors.append("--blocksci-task update does not support --blocksci-external-blocksci-dir")
         target_run_id = config.run_id
@@ -143,7 +145,7 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
             action == "pbs-from-s3"
             and blocksci_workflow == "cached"
             and blocksci_task == "update"
-            and external_bitcoin
+            and (external_bitcoin or bitcoin_blocks_uri)
             and not external_index
         )
         if not (parse_source or update_source):
