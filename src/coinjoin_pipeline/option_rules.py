@@ -40,6 +40,8 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
     blocksci_pbs = _supplied(config, "stages.blocksci", config.stages.blocksci)
     mappings_pbs = _supplied(config, "stages.mappings", config.stages.mappings)
     errors: list[str] = []
+    if config.run_dir is not None and config.all_runs:
+        errors.append("--run-dir and --all-runs are mutually exclusive")
     if action in {"analyze", "export", "coinjoin-analysis", "coinjoin", "mappings"}:
         if not _supplied(config, "run_dir", config.run_dir) and not _supplied(config, "all_runs", config.all_runs):
             errors.append(f"{action} requires --run-dir (or --all-runs where supported)")

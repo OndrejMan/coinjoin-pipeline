@@ -89,6 +89,7 @@ VALID = {
 }
 
 INVALID = {
+    "conflicting run selectors": ["coinjoin-analysis", "--run-dir", "run-1", "--all-runs"],
     "mainnet archive without a checkpoint": VALID["reusable parse from a bitcoin-blocks URI"][:-2],
     "mainnet archive with a malformed checkpoint": [
         *VALID["reusable parse from a bitcoin-blocks URI"][:-1], "not-a-block-hash",
