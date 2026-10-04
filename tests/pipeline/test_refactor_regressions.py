@@ -1,4 +1,5 @@
 import json
+import shlex
 from pathlib import Path
 from unittest import mock
 
@@ -276,6 +277,31 @@ def test_report_never_fills_producer_digest_from_current_host(tmp_path, monkeypa
     manifest = json.loads((run / "coinjoinPipeline_data/unified_report.json").read_text())["run_manifest"]
     assert manifest["images"][component] == reference
     assert manifest["image_digests"][component] == producer_digest
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_external_detector_overrides_reach_worker(tmp_path, monkeypatch, dry_run):
+    argv = [
+        "external", "analyze", "--run-id", "probe", "--runs-root", str(tmp_path),
+        "--bitcoin-datadir", str(tmp_path / "bitcoin"), "--baseline", str(tmp_path / "baseline.json"),
+        "--coinjoin-type", "joinmarket", "--min-input-count", "7", "--joinmarket-detector", "possible",
+        "--joinmarket-min-base-fee", "123", "--joinmarket-percentage-fee", "0.001",
+        "--joinmarket-max-depth", "42",
+    ]
+    if dry_run:
+        argv.append("--dry-run")
+    config = RunContext.prepare(load_configuration(argv), "test").config
+    operation = "dry_run_external" if dry_run else "external_analyze"
+    with mock.patch.object(research, operation) as execute:
+        research.run_external_configuration(config)
+    command = research.external_command(execute.call_args.args[0])
+    monkeypatch.setenv("BLOCKSCI_MIN_INPUT_COUNT", "99")
+    monkeypatch.setenv("BLOCKSCI_JOINMARKET_DETECTOR", "definite")
+    args = worker.parse_args(shlex.split(command)[2:])
+    assert detector_parameters(args) == {
+        "coinjoin_type": "joinmarket", "min_input_count": 7, "joinmarket_detector": "possible",
+        "joinmarket_min_base_fee": 123, "joinmarket_percentage_fee": 0.001, "joinmarket_max_depth": 42,
+    }
 
 
 def test_invalid_timezone_is_an_input_error_before_run_id_generation(capsys):

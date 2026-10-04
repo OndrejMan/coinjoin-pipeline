@@ -9,6 +9,8 @@ from unittest import mock
 PROJECT_ROOT = Path(__file__).resolve().parents[2] / "pipeline"
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from coinjoin_pipeline.configuration import PipelineConfiguration
+from coinjoin_pipeline.execution.pbs.commands import detector_arguments
 from coinjoin_pipeline.execution.research import (  # noqa: E402
     dry_run_external,
     external_analyze,
@@ -53,7 +55,10 @@ class ResearchPreflightTests(unittest.TestCase):
             self.assertEqual(require_baseline(valid), valid.resolve())
 
     def test_external_command_quotes_run_id(self):
-        args = argparse.Namespace(run_id="run with spaces", network="bitcoin", coinjoin_type="wasabi2")
+        args = argparse.Namespace(
+            run_id="run with spaces", network="bitcoin", coinjoin_type="wasabi2",
+            detector_arguments=detector_arguments(PipelineConfiguration()),
+        )
         self.assertIn("--run-dir '/runs/run with spaces'", external_command(args))
 
     def test_external_dry_run_does_not_create_run_directory(self):
@@ -71,6 +76,7 @@ class ResearchPreflightTests(unittest.TestCase):
                 baseline=baseline,
                 network="bitcoin",
                 coinjoin_type="wasabi2",
+                detector_arguments=detector_arguments(PipelineConfiguration()),
                 runtime="docker",
             )
 
@@ -142,6 +148,7 @@ class ResearchPreflightTests(unittest.TestCase):
             args = argparse.Namespace(
                 runs_root=root / "runs",
                 run_id="external-run",
+                detector_arguments=detector_arguments(PipelineConfiguration()),
                 resume=False,
                 bitcoin_datadir=datadir,
                 baseline=baseline,

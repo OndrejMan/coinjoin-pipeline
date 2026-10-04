@@ -21,6 +21,7 @@ from exporters.common import load_json
 
 from coinjoin_pipeline.configuration import ContainerRuntime
 from coinjoin_pipeline.execution.locks import acquire_lock
+from coinjoin_pipeline.execution.pbs.commands import detector_arguments
 from coinjoin_pipeline.execution.run_catalog import (
     create_external_manifest,
     discover_runs,
@@ -313,8 +314,7 @@ def external_command(args: argparse.Namespace) -> str:
             args.network,
             "--disk",
             "/mnt/data",
-            "--coinjoin-type",
-            args.coinjoin_type,
+            *args.detector_arguments,
             "--skip-clustering",
             "--report",
         ]
@@ -382,6 +382,7 @@ def run_external_configuration(config):
         run_id=config.run_id,
         runtime=config.runtime,
         coinjoin_type=config.coinjoin_type,
+        detector_arguments=detector_arguments(config),
         resume=config.external.resume,
         dry_run=config.dry_run,
         bitcoin_datadir=Path(config.external.bitcoin_datadir) if config.external.bitcoin_datadir else None,
