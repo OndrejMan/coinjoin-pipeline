@@ -256,6 +256,28 @@ def test_report_keeps_its_uploader_image_when_the_producer_recorded_none(tmp_pat
     assert report["run_manifest"]["image_digests"]["uploader"] == "sha256:" + "a" * 64
 
 
+@pytest.mark.parametrize("component", ["blocksci", "coinjoin_analysis", "coinjoin_emulator", "uploader"])
+@pytest.mark.parametrize("pinned", [False, True])
+def test_report_never_fills_producer_digest_from_current_host(tmp_path, monkeypatch, component, pinned):
+    run = tmp_path / "run-a"
+    report_inputs(run)
+    path = run / "blocksci-analysis_data/blocksci_analysis.json"
+    data = json.loads(path.read_text())
+    producer_digest = "sha256:" + "a" * 64 if pinned else None
+    reference = "image@" + producer_digest if pinned else "image:producer"
+    data["image_provenance"] = {component: {"reference": reference, "repo_digest": None}}
+    path.write_text(json.dumps(data))
+    environment_prefix = "COINJOIN_UPLOADER" if component == "uploader" else component.upper()
+    monkeypatch.setenv(environment_prefix + "_IMAGE_DIGEST", "sha256:" + "b" * 64)
+    monkeypatch.setenv(environment_prefix + "_IMAGE", "image:other")
+    with mock.patch("exporters.manifest.docker_image_digest", return_value="sha256:" + "c" * 64) as inspect:
+        assert report_cli.main(["--run-dir", str(run)]) == 0
+    assert mock.call(reference) not in inspect.call_args_list
+    manifest = json.loads((run / "coinjoinPipeline_data/unified_report.json").read_text())["run_manifest"]
+    assert manifest["images"][component] == reference
+    assert manifest["image_digests"][component] == producer_digest
+
+
 def test_invalid_timezone_is_an_input_error_before_run_id_generation(capsys):
     assert cli.main(["emulate", "--run-timezone", "missing/timezone", "--dry-run"]) == 2
     assert "invalid run timezone" in capsys.readouterr().err

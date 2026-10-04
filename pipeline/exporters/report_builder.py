@@ -62,6 +62,7 @@ def build_report(
     mode: str = "emulator",
     network: str | None = None,
     coinjoin_mappings: JsonObject | None = None,
+    image_provenance: JsonObject | None = None,
 ) -> JsonObject:
     if coinjoin_mappings:
         enumerator_summary = (coinjoin_mappings.get("enumerator") or {}).get("summary") or {}
@@ -230,6 +231,7 @@ def build_report(
         uploader_image_digest=uploader_image_digest,
         unified_report_image_digest=unified_report_image_digest,
         emulator_git_commit=emulator_git_commit,
+        image_provenance=image_provenance,
     )
     run_manifest["mode"] = mode
     run_manifest["network"] = network

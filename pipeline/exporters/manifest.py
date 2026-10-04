@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Literal
 
 from exporters.artifact_paths import report_input_hashes
 from exporters.common import (
@@ -15,6 +16,7 @@ from exporters.common import (
     git_commit_for_path,
     git_tree_is_dirty,
     nested_get,
+    to_json_text,
     tree_sha256,
 )
 from exporters.report_types import DetectorManifest, ImageFields, RunManifest
@@ -71,6 +73,32 @@ def build_detector_manifest(
     return detector
 
 
+def resolve_manifest_images(
+    images: ImageFields,
+    supplied_digests: ImageFields,
+    provenance: JsonObject | None,
+) -> tuple[ImageFields, ImageFields]:
+    """Keep each recorded producer identity together, including unknown digests."""
+    references = images.copy()
+    digests = supplied_digests.copy()
+    components: tuple[Literal["blocksci", "coinjoin_analysis", "coinjoin_emulator", "uploader", "unified_report"], ...] = (
+        "blocksci", "coinjoin_analysis", "coinjoin_emulator", "uploader", "unified_report",
+    )
+    for component in components:
+        reference = images[component]
+        recorded = (provenance or {}).get(component)
+        if isinstance(recorded, dict) and (recorded.get("reference") or recorded.get("repo_digest")):
+            # A tag may have moved since analysis. Neither the current daemon
+            # nor this process's environment can fill a missing producer digest.
+            reference = to_json_text(recorded.get("reference"))
+            digest = to_json_text(recorded.get("repo_digest")) or digest_from_reference(reference)
+        else:
+            digest = supplied_digests.get(component) or digest_from_reference(reference) or docker_image_digest(reference)
+        references[component] = reference
+        digests[component] = digest
+    return references, digests
+
+
 def build_run_manifest(
     run_dir: Path,
     scenario: JsonObject | None,
@@ -93,6 +121,7 @@ def build_run_manifest(
     uploader_image_digest: str | None = None,
     unified_report_image_digest: str | None = None,
     emulator_git_commit: str | None = None,
+    image_provenance: JsonObject | None = None,
 ) -> RunManifest:
     exporters_root = Path(__file__).resolve().parent
     inferred_engine = engine or os.environ.get("COINJOIN_ENGINE")
@@ -113,6 +142,23 @@ def build_run_manifest(
         "uploader": first_present(uploader_image, os.environ.get("COINJOIN_UPLOADER_IMAGE")),
         "unified_report": first_present(unified_report_image, os.environ.get("COINJOIN_UNIFIED_REPORT_IMAGE")),
     }
+    images, image_digests = resolve_manifest_images(
+        images,
+        {
+            "blocksci": first_present(blocksci_image_digest, os.environ.get("BLOCKSCI_IMAGE_DIGEST")),
+            "coinjoin_analysis": first_present(
+                coinjoin_analysis_image_digest, os.environ.get("COINJOIN_ANALYSIS_IMAGE_DIGEST"),
+            ),
+            "coinjoin_emulator": first_present(
+                coinjoin_emulator_image_digest,
+                os.environ.get("COINJOIN_EMULATOR_IMAGE_DIGEST"),
+                os.environ.get("EMULATOR_IMAGE_DIGEST"),
+            ),
+            "uploader": uploader_image_digest,
+            "unified_report": unified_report_image_digest,
+        },
+        image_provenance,
+    )
     return {
         "run_id": run_dir.name,
         "scenario": {
@@ -134,37 +180,7 @@ def build_run_manifest(
             joinmarket_max_depth,
         ),
         "images": images,
-        "image_digests": {
-            "blocksci": first_present(
-                blocksci_image_digest,
-                os.environ.get("BLOCKSCI_IMAGE_DIGEST"),
-                docker_image_digest(images.get("blocksci")),
-            ),
-            "coinjoin_analysis": first_present(
-                coinjoin_analysis_image_digest,
-                os.environ.get("COINJOIN_ANALYSIS_IMAGE_DIGEST"),
-                docker_image_digest(images.get("coinjoin_analysis")),
-            ),
-            "coinjoin_emulator": first_present(
-                coinjoin_emulator_image_digest,
-                os.environ.get("COINJOIN_EMULATOR_IMAGE_DIGEST"),
-                os.environ.get("EMULATOR_IMAGE_DIGEST"),
-                docker_image_digest(images.get("coinjoin_emulator")),
-            ),
-            # The lock files still carry floating tags, so the reference-only
-            # path yields null everywhere; the daemon lookup (a no-op on a
-            # Docker-less frontend) keeps provenance usable until they are pinned.
-            "uploader": first_present(
-                uploader_image_digest,
-                digest_from_reference(images.get("uploader")),
-                docker_image_digest(images.get("uploader")),
-            ),
-            "unified_report": first_present(
-                unified_report_image_digest,
-                digest_from_reference(images.get("unified_report")),
-                docker_image_digest(images.get("unified_report")),
-            ),
-        },
+        "image_digests": image_digests,
         "source_commits": {
             "coinjoin_emulator": first_present(
                 emulator_git_commit,
