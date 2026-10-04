@@ -244,9 +244,9 @@ it downloads only public mainnet heights 0 and 1, builds and runs the
 environment secrets, and verifies the PBS BlockSci S3 restore and parse.
 
 The same run can be described in YAML. `--fromConfiguration` is retained as a
-compatibility spelling; new scripts may use `--from-configuration`. The
-configuration is translated to the normal CLI arguments before validation, so
-the same S3/PBS checks and research manifest apply. For an S3 `full-run`, a
+compatibility spelling; new scripts may use `--from-configuration`. YAML and
+CLI options decode into the same typed configuration (explicit CLI options
+override YAML values), so the same S3/PBS checks and research manifest apply. For an S3 `full-run`, a
 missing `run_id` is generated automatically; `pbs.analysis`, `pbs.blocksci`,
 and `pbs.mappings` enable their corresponding PBS stages.
 
