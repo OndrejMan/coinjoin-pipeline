@@ -6,9 +6,9 @@ import hashlib
 import json
 import subprocess
 from collections import Counter
-from functools import partial
 from collections.abc import Mapping
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
