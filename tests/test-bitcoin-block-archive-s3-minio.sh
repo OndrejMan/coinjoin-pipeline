@@ -303,13 +303,26 @@ wait_for_stage "${FULL_RUN_ID}" blocksci-parse
 fetch_cache "${FULL_RUN_ID}" blocksci-full-parse
 
 # The incremental index must describe the same chain as a parse from scratch.
-for chain_file in block.dat tx_hashes.dat; do
-  cmp -s "${WORK_ROOT}/blocksci-update/blocksci_data/parsed/chain/${chain_file}" \
-    "${WORK_ROOT}/blocksci-full-parse/blocksci_data/parsed/chain/${chain_file}" || {
-    echo "FAIL: incremental update and full parse differ in parsed/chain/${chain_file}" >&2
-    exit 1
-  }
-done
+cmp -s "${WORK_ROOT}/blocksci-update/blocksci_data/parsed/chain/tx_hashes.dat" \
+  "${WORK_ROOT}/blocksci-full-parse/blocksci_data/parsed/chain/tx_hashes.dat" || {
+  echo "FAIL: incremental update and full parse differ in parsed/chain/tx_hashes.dat" >&2
+  exit 1
+}
+# block.dat stores RawBlock structs whose 4 trailing padding bytes are never
+# initialised, so compare the 84 bytes of fields in each 88-byte record.
+python3 - "${WORK_ROOT}/blocksci-update/blocksci_data/parsed/chain/block.dat" \
+  "${WORK_ROOT}/blocksci-full-parse/blocksci_data/parsed/chain/block.dat" <<'PY'
+import sys
+from pathlib import Path
+
+RECORD, FIELDS = 88, 84
+update, full = (Path(path).read_bytes() for path in sys.argv[1:3])
+if len(update) != len(full) or len(full) % RECORD:
+    sys.exit(f"FAIL: block.dat sizes {len(update)} and {len(full)} are not equal multiples of {RECORD}")
+for offset in range(0, len(full), RECORD):
+    if update[offset:offset + FIELDS] != full[offset:offset + FIELDS]:
+        sys.exit(f"FAIL: incremental update and full parse differ in block {offset // RECORD} of parsed/chain/block.dat")
+PY
 
 python3 - "${WORK_ROOT}" <<'PY'
 import json, sys
