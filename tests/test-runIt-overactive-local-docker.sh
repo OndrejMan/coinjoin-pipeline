@@ -9,7 +9,7 @@ BEFORE_FILE="$(mktemp)"
 AFTER_FILE="$(mktemp)"
 RUN_LOG="$(mktemp)"
 RUN_PID=""
-RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS:-3600}"
+RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS:-14400}"
 IMAGE_MODE="${1:-upstream}"
 
 if [[ $# -gt 1 || ( "${IMAGE_MODE}" != "upstream" && "${IMAGE_MODE}" != "local" ) ]]; then

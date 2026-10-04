@@ -17,7 +17,7 @@ RUN_LOG="${TMP_DIR}/pipeline.log"
 FAKE_BIN="${TMP_DIR}/bin"
 DOCKER_LOG="${TMP_DIR}/docker.called"
 RUN_PID=""
-RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS:-3600}"
+RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS:-14400}"
 IMAGE_MODE="${1:-upstream}"
 COMPOSE_PROJECT="cjp-overactive-local-podman-${RANDOM}"
 

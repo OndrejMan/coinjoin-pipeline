@@ -60,7 +60,7 @@ BTC_NODE_SOURCE_IMAGE="${BTC_NODE_IMAGE:-}"
 MINIO_IMAGE="${MINIO_IMAGE:-pgsty/minio:RELEASE.2026-08-04T00-00-00Z}"
 RESULT_DIR="${TEST_RESULT_DIR:-${PROJECT_DIR}/emulation_logs/_test-results/kubernetes-s3-minio-${RUN_TOKEN}}"
 KEEP_WORK="${KEEP_TEST_WORK:-0}"
-KUBERNETES_S3_TIMEOUT="${KUBERNETES_S3_TIMEOUT:-85m}"
+KUBERNETES_S3_TIMEOUT="${KUBERNETES_S3_TIMEOUT:-240m}"
 # A Wasabi wallet creates only after it has downloaded the complete filter
 # chain. A loaded k3d node can take longer than the emulator's 900-second
 # default, so give this intentionally heavyweight integration test headroom.
@@ -380,7 +380,7 @@ set +e
     --pbs-mem 4gb \
     --pbs-scratch 2gb \
     --pbs-walltime 00:30:00 \
-    --emulation-timeout 3600
+    --emulation-timeout 10800
 ) 2>&1 | tee "${PIPELINE_OUTPUT_FILE}"
 PIPELINE_STATUS=${PIPESTATUS[0]}
 set -e

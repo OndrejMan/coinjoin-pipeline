@@ -246,7 +246,7 @@ jobs:
           CONTAINER_RUNTIME: docker
           EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-emulation-logs
           WAIT_TIMEOUT: 240s
-          EMULATION_TIMEOUT: 90m
+          EMULATION_TIMEOUT: 240m
         run: ./tests/test-kubernetes-k3d.sh
 
   pbs-apptainer-image:
@@ -306,7 +306,7 @@ jobs:
   kubernetes-pbs-wasabi:
     runs-on: [self-hosted, x64]
     needs: pbs-fixture-analysis
-    timeout-minutes: 90
+    timeout-minutes: 300
     env:
       COINJOIN_EMULATOR_SOURCE_DIR: ${{ github.workspace }}/coinjoin-emulator
 
@@ -409,7 +409,7 @@ jobs:
           IMAGE_PREFIX: ghcr.io/ondrejman/
           EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-parallel-pbs-logs
           PBS_TEST_STORAGE_ROOT: /storage/github-runner
-          KUBERNETES_PBS_TIMEOUT: 85m
+          KUBERNETES_PBS_TIMEOUT: 240m
           TEST_RESULT_DIR: ${{ github.workspace }}/github-test-results
         run: ./tests/test-parallel-pbs-analysis.sh all
 
@@ -466,7 +466,7 @@ jobs:
           COINJOIN_EMULATOR_IMAGE: ghcr.io/ondrejman/emulator-manager:latest
           IMAGE_PREFIX: ghcr.io/ondrejman/
           PBS_TEST_STORAGE_ROOT: /storage/github-runner
-          KUBERNETES_S3_TIMEOUT: 85m
+          KUBERNETES_S3_TIMEOUT: 240m
           TEST_RESULT_DIR: ${{ github.workspace }}/github-test-results
         run: ./tests/test-kubernetes-s3-minio.sh wasabi
 
