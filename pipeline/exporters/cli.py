@@ -136,15 +136,19 @@ def assemble_report(args: argparse.Namespace) -> int:
         mode=args.mode,
     )
     # Analyzer image identity belongs to the artifact producer, not to images
-    # currently installed on the host assembling this report.
+    # currently installed on the host assembling this report. A value the
+    # producer did not know must not erase one this job was given.
     provenance = analysis.get("image_provenance")
     if provenance is None:
         provenance = (analysis.get("integration_diagnostics") or {}).get("images", {})
     for component in ("blocksci", "coinjoin_analysis", "coinjoin_emulator", "uploader"):
         recorded = provenance.get(component)
-        if isinstance(recorded, dict):
-            setattr(args, component + "_image", recorded.get("reference"))
-            setattr(args, component + "_image_digest", recorded.get("repo_digest"))
+        if not isinstance(recorded, dict):
+            continue
+        if recorded.get("reference") is not None:
+            setattr(args, component + "_image", recorded["reference"])
+        if recorded.get("repo_digest") is not None:
+            setattr(args, component + "_image_digest", recorded["repo_digest"])
     first_wasabi2_block = analysis["first_wasabi2_block"]
     blocksci_records = analysis["records"]
     blocksci_skipped_txids = analysis["skipped_txids"]

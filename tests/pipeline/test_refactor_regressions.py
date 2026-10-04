@@ -243,6 +243,19 @@ def test_report_preserves_producer_image_instead_of_current_host_image(tmp_path)
     assert report["run_manifest"]["image_digests"]["blocksci"] == "sha256:producer"
 
 
+def test_report_keeps_its_uploader_image_when_the_producer_recorded_none(tmp_path):
+    run = tmp_path / "run-a"
+    report_inputs(run)
+    path = run / "blocksci-analysis_data/blocksci_analysis.json"
+    data = json.loads(path.read_text())
+    data["image_provenance"] = {"uploader": {"reference": None, "image_id": None, "repo_digest": None}}
+    path.write_text(json.dumps(data))
+    assert report_cli.main(["--run-dir", str(run), "--uploader-image", "uploader@sha256:" + "a" * 64]) == 0
+    report = json.loads((run / "coinjoinPipeline_data/unified_report.json").read_text())
+    assert report["run_manifest"]["images"]["uploader"] == "uploader@sha256:" + "a" * 64
+    assert report["run_manifest"]["image_digests"]["uploader"] == "sha256:" + "a" * 64
+
+
 def test_invalid_timezone_is_an_input_error_before_run_id_generation(capsys):
     assert cli.main(["emulate", "--run-timezone", "missing/timezone", "--dry-run"]) == 2
     assert "invalid run timezone" in capsys.readouterr().err
