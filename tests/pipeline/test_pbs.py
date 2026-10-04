@@ -449,6 +449,25 @@ class PBSTemplateTest(unittest.TestCase):
         self.assertIn("--min-input-count default", command)
         self.assertNotIn("unified_report.py", command)
 
+    def test_blocksci_pbs_command_names_the_run_images(self):
+        # --cleanenv drops the image variables, so provenance must travel as options.
+        command = blocksci_pbs_command(
+            "run-a",
+            PipelineConfiguration.from_flat(
+                {
+                    "pbs_blocksci_image": "ghcr.io/x/blocksci@sha256:" + "b" * 64,
+                    "emulator_image": "ghcr.io/x/emulator:v1",
+                    "uploader_image": "ghcr.io/x/uploader:v1",
+                }
+            ),
+            include_report=False,
+        )
+
+        self.assertIn("--blocksci-image docker://ghcr.io/x/blocksci@sha256:" + "b" * 64, command)
+        self.assertIn("--coinjoin-analysis-image docker://ghcr.io/ondrejman/coinjoin-analysis:", command)
+        self.assertIn("--coinjoin-emulator-image ghcr.io/x/emulator:v1", command)
+        self.assertIn("--uploader-image ghcr.io/x/uploader:v1", command)
+
     def test_blocksci_export_pbs_command_is_report_only(self):
         command = blocksci_export_pbs_command(
             "run-a",

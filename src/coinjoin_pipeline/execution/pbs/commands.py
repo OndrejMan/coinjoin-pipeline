@@ -8,9 +8,10 @@ from typing import Literal
 from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, BLOCKSCI_CUSTOM_ANALYSIS_DIR
 
 from coinjoin_pipeline.configuration import PipelineConfiguration
+from coinjoin_pipeline.execution.pbs_settings import resolve_pbs_image
 from coinjoin_pipeline.storage.s3 import shell_assignment
 
-from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND
+from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND, DEFAULT_BLOCKSCI_IMAGE, DEFAULT_COINJOIN_ANALYSIS_IMAGE
 from .validation import PBSError, require_safe_image
 
 
@@ -136,6 +137,28 @@ def detector_arguments(config: PipelineConfiguration) -> list[str]:
     return arguments
 
 
+def analysis_image_arguments(config: PipelineConfiguration) -> list[str]:
+    """Name the images of this run for the analysis artifact's provenance.
+
+    ``singularity exec --cleanenv`` drops the image variables the local
+    container path relies on, so the PBS worker receives them as options.
+    """
+    arguments: list[str] = []
+    for flag, image in (
+        ("--blocksci-image", resolve_pbs_image(config, DEFAULT_BLOCKSCI_IMAGE, "pbs_blocksci_image")),
+        (
+            "--coinjoin-analysis-image",
+            resolve_pbs_image(config, DEFAULT_COINJOIN_ANALYSIS_IMAGE, "pbs_coinjoin_analysis_image"),
+        ),
+        ("--coinjoin-emulator-image", config.images.emulator),
+        ("--uploader-image", config.images.uploader),
+    ):
+        if image:
+            require_safe_image(image, f"{flag} value")
+            arguments.extend([flag, image])
+    return arguments
+
+
 def worker_command(
     phase: Literal["run", "analyze", "report"],
     run_id: str,
@@ -148,5 +171,7 @@ def worker_command(
         f"/runs/emulation/logs/{run_id}",
         *detector_arguments(config),
     ]
+    if phase != "report":
+        arguments.extend(analysis_image_arguments(config))
     python = "python3" if phase == "report" else BLOCKSCI_IMAGE_PYTHON_COMMAND
     return python + " " + shlex.join(arguments)
