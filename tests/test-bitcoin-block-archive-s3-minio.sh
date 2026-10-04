@@ -302,28 +302,6 @@ submit_blocksci "${FULL_RUN_ID}" 3 --blocksci-workflow reusable --blocksci-task 
 wait_for_stage "${FULL_RUN_ID}" blocksci-parse
 fetch_cache "${FULL_RUN_ID}" blocksci-full-parse
 
-# The incremental index must describe the same chain as a parse from scratch.
-cmp -s "${WORK_ROOT}/blocksci-update/blocksci_data/parsed/chain/tx_hashes.dat" \
-  "${WORK_ROOT}/blocksci-full-parse/blocksci_data/parsed/chain/tx_hashes.dat" || {
-  echo "FAIL: incremental update and full parse differ in parsed/chain/tx_hashes.dat" >&2
-  exit 1
-}
-# block.dat stores RawBlock structs whose 4 trailing padding bytes are never
-# initialised, so compare the 84 bytes of fields in each 88-byte record.
-python3 - "${WORK_ROOT}/blocksci-update/blocksci_data/parsed/chain/block.dat" \
-  "${WORK_ROOT}/blocksci-full-parse/blocksci_data/parsed/chain/block.dat" <<'PY'
-import sys
-from pathlib import Path
-
-RECORD, FIELDS = 88, 84
-update, full = (Path(path).read_bytes() for path in sys.argv[1:3])
-if len(update) != len(full) or len(full) % RECORD:
-    sys.exit(f"FAIL: block.dat sizes {len(update)} and {len(full)} are not equal multiples of {RECORD}")
-for offset in range(0, len(full), RECORD):
-    if update[offset:offset + FIELDS] != full[offset:offset + FIELDS]:
-        sys.exit(f"FAIL: incremental update and full parse differ in block {offset // RECORD} of parsed/chain/block.dat")
-PY
-
 python3 - "${WORK_ROOT}" <<'PY'
 import json, sys
 from pathlib import Path
@@ -334,6 +312,22 @@ root = Path(sys.argv[1])
 def load(name):
     return json.loads((root / name).read_text(encoding="utf-8"))
 
+
+def chain_records(cache, chain_file, record, fields):
+    """Split a parsed/chain file into `record`-byte records, keeping the first `fields` bytes of each."""
+    data = (root / cache / "blocksci_data/parsed/chain" / chain_file).read_bytes()
+    if len(data) % record:
+        raise SystemExit(f"FAIL: {cache} {chain_file} is not a whole number of {record}-byte records")
+    return [data[offset:offset + fields] for offset in range(0, len(data), record)]
+
+
+# The incremental index must describe the same chain as a parse from scratch.
+# block.dat holds 88-byte RawBlock structs whose last 4 bytes are padding that
+# BlockSci leaves uninitialised, so only the 84 bytes of fields are compared.
+for chain_file, record, fields in (("block.dat", 88, 84), ("tx_hashes.dat", 32, 32)):
+    incremental = chain_records("blocksci-update", chain_file, record, fields)
+    if incremental != chain_records("blocksci-full-parse", chain_file, record, fields):
+        raise SystemExit(f"FAIL: incremental update and full parse differ in parsed/chain/{chain_file}")
 
 first, second = load("blk00000.dat.json"), load("blk00001.dat.json")
 parse = load("blocksci-parse-manifest.json")
