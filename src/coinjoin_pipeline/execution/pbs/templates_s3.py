@@ -102,18 +102,23 @@ def _require_external_chain(network: str | None, max_block: int | None) -> str:
     return network
 
 
-def _require_bitcoin_datadir(path: Path) -> Path:
+def _bitcoin_datadir_source(path: Path) -> str:
+    """Point ``$BITCOIN_DATADIR`` at a shared Bitcoin Core coin directory."""
     bitcoin_path = path.expanduser().resolve()
     require_storage_path(bitcoin_path)
     require_existing_path(bitcoin_path, "external Bitcoin coin directory")
     if not (bitcoin_path / "blocks").is_dir():
         raise PBSError(f"External Bitcoin coin directory must contain blocks/: {bitcoin_path}")
-    return bitcoin_path
+    return (
+        f"BITCOIN_DATADIR={shell_value(str(bitcoin_path))}\n"
+        'test -d "$BITCOIN_DATADIR/blocks" || { '
+        'echo "External Bitcoin coin directory must contain blocks/: $BITCOIN_DATADIR" >&2; exit 1; }'
+    )
 
 
-def _block_archive_uri(bitcoin_blocks_uri: str) -> str:
+def _block_archive_source(bitcoin_blocks_uri: str) -> str:
     try:
-        return validate_artifact_uri(bitcoin_blocks_uri)
+        return f"BITCOIN_BLOCKS_URI={shell_value(validate_artifact_uri(bitcoin_blocks_uri))}"
     except ValueError as error:
         raise PBSError(f"Invalid Bitcoin block archive URI: {error}") from error
 
@@ -164,16 +169,97 @@ MANIFEST_EXTRA="$MANIFEST_EXTRA,
 """
 
 
-def _parse_chain(message: str, command: str) -> str:
+def _parse_chain(message: str, command: str, *, stage: str = "blocksci-parse") -> str:
     """Run the parser over ``$BITCOIN_DATADIR`` inside the BlockSci image."""
     return (
-        f'echo "[blocksci-parse] {message}"\n'
+        f'echo "[{stage}] {message}"\n'
         "singularity exec \\\n"
         '  --bind "$RUNS_ROOT:/runs/emulation/logs:rw" \\\n'
         '  --bind "$RUN_WORK/.pipeline/exporters:/mnt/exporters:ro" \\\n'
         '  --bind "$BITCOIN_DATADIR:/mnt/data:ro" \\\n'
         '  --env PBS_RUN_ID="$RUN_ID" --env PBS_EXPORTED_MAX_BLOCK="$EXPORTED_MAX_BLOCK" "$IMAGE" \\\n'
         f"  bash -c 'cd \"/runs/emulation/logs/$PBS_RUN_ID\" && {command}'"
+    )
+
+
+# An index copied from another location still names its old parsed directory.
+CANONICALIZE_INDEX = (
+    'CANONICAL_PARSED="/runs/emulation/logs/$RUN_ID/blocksci_data/parsed"\n'
+    'sed -i -E \'s#("dataDirectory"[[:space:]]*:[[:space:]]*)"[^"]*"#\\1"\''
+    '"$CANONICAL_PARSED"'
+    '\'"#\' "$RUN_WORK/blocksci_data/config.json"\n'
+    'grep -Fq "$CANONICAL_PARSED" "$RUN_WORK/blocksci_data/config.json" || { '
+    'echo "Could not canonicalize BlockSci dataDirectory" >&2; exit 1; }'
+)
+
+
+def _restore_cache(cache_dir: str, run_id: str, label: str, checks: str = "") -> str:
+    """Check a downloaded cache against its manifest and checksum, then unpack it.
+
+    ``checks`` holds extra manifest assertions; the index lands in ``$RUN_WORK/blocksci_data``.
+    """
+    manifest = f'"{cache_dir}/manifest.json"'
+    return "\n".join(
+        (
+            f'test -f "{cache_dir}/blocksci_data.tar.gz" || '
+            f'{{ echo "{label} is missing blocksci_data.tar.gz" >&2; exit 1; }}',
+            f'test -f "{cache_dir}/blocksci_data.tar.gz.sha256" || '
+            f'{{ echo "{label} is missing its SHA-256 sidecar" >&2; exit 1; }}',
+            f'test -f {manifest} || {{ echo "{label} is missing manifest.json" >&2; exit 1; }}',
+            f'grep -Fq \'"schema_version": "1.0"\' {manifest} || '
+            f'{{ echo "{label} manifest has an unsupported schema" >&2; exit 1; }}',
+            f'grep -Fq "\\"run_id\\": \\"{run_id}\\"" {manifest} || '
+            f'{{ echo "{label} run ID does not match {run_id}" >&2; exit 1; }}',
+            f'grep -Fq "\\"blocksci_image\\": \\"$IMAGE\\"" {manifest} || '
+            f'{{ echo "{label} was produced by a different BlockSci image" >&2; exit 1; }}',
+            *([checks] if checks else []),
+            f'SIDECAR_SHA="$(cut -d \' \' -f 1 "{cache_dir}/blocksci_data.tar.gz.sha256")"',
+            f'grep -Fq "\\"archive_sha256\\": \\"$SIDECAR_SHA\\"" {manifest} || '
+            f'{{ echo "{label} manifest SHA-256 does not match its sidecar" >&2; exit 1; }}',
+            "(",
+            f'  cd "{cache_dir}"',
+            "  sha256sum -c blocksci_data.tar.gz.sha256",
+            ")",
+            f'tar -C "$RUN_WORK" -xzf "{cache_dir}/blocksci_data.tar.gz"',
+            'test -f "$RUN_WORK/blocksci_data/config.json" || '
+            f'{{ echo "{label} did not contain blocksci_data/config.json" >&2; exit 1; }}',
+            'test -f "$RUN_WORK/blocksci_data/parsed/chain/block.dat" || '
+            f'{{ echo "{label} did not contain parsed/chain/block.dat" >&2; exit 1; }}',
+        )
+    )
+
+
+def _publish_cache(stage: str, source_kind: str, network: str) -> str:
+    """Archive ``$RUN_WORK/blocksci_data`` with a checksum and manifest, then upload it.
+
+    ``$MANIFEST_EXTRA`` carries the fields that only some sources record.
+    """
+    manifest_format = (
+        r"'{\n"
+        r'  "schema_version": "1.0",\n'
+        r'  "run_id": "%s",\n'
+        r'  "blocksci_image": "%s",\n'
+        r'  "source_kind": "%s",\n'
+        r'  "network": "%s",\n'
+        r'  "exported_max_block": %s%s,\n'
+        r'  "archive": "blocksci_data.tar.gz",\n'
+        r'  "archive_sha256": "%s"\n'
+        r"}\n'"
+    )
+    return "\n".join(
+        (
+            f'echo "[{stage}] archiving reusable index"',
+            'tar -C "$RUN_WORK" -czf "$CACHE_DIR/blocksci_data.tar.gz" blocksci_data',
+            "(",
+            '  cd "$CACHE_DIR"',
+            "  sha256sum blocksci_data.tar.gz > blocksci_data.tar.gz.sha256",
+            ")",
+            f"printf {manifest_format} \\",
+            f'  "$RUN_ID" "$IMAGE" "{source_kind}" "{network}" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA" '
+            '"$(cut -d \' \' -f 1 "$CACHE_DIR/blocksci_data.tar.gz.sha256")" \\',
+            '  > "$CACHE_DIR/manifest.json"',
+            render_s5cmd_sync('"$CACHE_DIR/"', '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/"'),
+        )
     )
 
 
@@ -382,27 +468,19 @@ def render_blocksci_parse_s3_pbs(
     network = "bitcoin_regtest"
     source_description = "emulator Bitcoin and exported-block inputs"
     if external_bitcoin_datadir is not None:
-        bitcoin_path = _require_bitcoin_datadir(external_bitcoin_datadir)
+        datadir_source = _bitcoin_datadir_source(external_bitcoin_datadir)
         network = _require_external_chain(external_network, external_max_block)
         source_kind = "external-bitcoin"
         source_description = "external Bitcoin Core block directory"
-        prepare_source = (
-            f"BITCOIN_DATADIR={shell_value(str(bitcoin_path))}\n"
-            f"EXPORTED_MAX_BLOCK={external_max_block}\n"
-            'test -d "$BITCOIN_DATADIR/blocks"'
-        )
+        prepare_source = f"{datadir_source}\nEXPORTED_MAX_BLOCK={external_max_block}"
         produce_index = _parse_chain("parsing external chain through block $EXPORTED_MAX_BLOCK", command)
     elif bitcoin_blocks_uri is not None:
-        blocks_uri = _block_archive_uri(bitcoin_blocks_uri)
+        archive_source = _block_archive_source(bitcoin_blocks_uri)
         network = _require_external_chain(external_network, external_max_block)
         source_kind = "bitcoin-blocks-s3"
         verify_index = _verify_block_archive_chain(network, expected_block_hash)
         source_description = "verified Bitcoin block archive from S3"
-        prepare_source = (
-            f"BITCOIN_BLOCKS_URI={shell_value(blocks_uri)}\n"
-            f"EXPORTED_MAX_BLOCK={external_max_block}\n"
-            f"{_download_block_archive()}"
-        )
+        prepare_source = f"{archive_source}\nEXPORTED_MAX_BLOCK={external_max_block}\n{_download_block_archive()}"
         produce_index = _parse_chain(
             "parsing verified S3 block archive through block $EXPORTED_MAX_BLOCK",
             command,
@@ -425,12 +503,7 @@ def render_blocksci_parse_s3_pbs(
         )
         produce_index = (
             'cp -a "$EXTERNAL_BLOCKSCI_DIR" "$RUN_WORK/blocksci_data"\n'
-            'CANONICAL_PARSED="/runs/emulation/logs/$RUN_ID/blocksci_data/parsed"\n'
-            'sed -i -E \'s#("dataDirectory"[[:space:]]*:[[:space:]]*)"[^"]*"#\\1"\''
-            '"$CANONICAL_PARSED"'
-            '\'"#\' "$RUN_WORK/blocksci_data/config.json"\n'
-            'grep -Fq "$CANONICAL_PARSED" "$RUN_WORK/blocksci_data/config.json" || { '
-            'echo "Could not canonicalize external BlockSci dataDirectory" >&2; exit 1; }\n'
+            f"{CANONICALIZE_INDEX}\n"
             'MAX_BLOCK_NUM="$(sed -nE \'s/.*"maxBlockNum"[[:space:]]*:[[:space:]]*([0-9]+).*/\\1/p\' '
             '"$RUN_WORK/blocksci_data/config.json" | head -n 1)"\n'
             'test -n "$MAX_BLOCK_NUM" && [ "$MAX_BLOCK_NUM" -gt 0 ] || { '
@@ -474,19 +547,16 @@ def render_blocksci_parse_s3_pbs(
         "blocksci-parse",
         target,
         image=image,
-        command=command,
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
         walltime=walltime,
         source_description=source_description,
-        source_kind=source_kind,
-        network=network,
         prepare_source=prepare_source,
         produce_index=produce_index,
         verify_index=verify_index,
+        publish_cache=_publish_cache("blocksci-parse", source_kind, network),
         upload_log=render_s5cmd_cp('"$JOB_LOG"', '"$ARTIFACT_URI/$RUN_ID/logs/blocksci-parse.pbs.log"'),
-        upload_cache=render_s5cmd_sync('"$CACHE_DIR/"', '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/"'),
     )
 
 
@@ -521,24 +591,25 @@ def render_blocksci_update_s3_pbs(
     _require_external_chain(external_network, external_max_block)
     verify_index = ""
     if external_bitcoin_datadir is not None and bitcoin_blocks_uri is None:
-        bitcoin_path = _require_bitcoin_datadir(external_bitcoin_datadir)
         source_kind = "external-bitcoin"
-        prepare_source = (
-            f"BITCOIN_DATADIR={shell_value(str(bitcoin_path))}\n"
-            'test -d "$BITCOIN_DATADIR/blocks" || { '
-            'echo "External Bitcoin coin directory must contain blocks/: $BITCOIN_DATADIR" >&2; exit 1; }'
-        )
+        prepare_source = _bitcoin_datadir_source(external_bitcoin_datadir)
         prepare_blocks = ""
     elif bitcoin_blocks_uri is not None and external_bitcoin_datadir is None:
         source_kind = "bitcoin-blocks-s3"
         verify_index = _verify_block_archive_chain(external_network, expected_block_hash, update=True)
-        prepare_source = f"BITCOIN_BLOCKS_URI={shell_value(_block_archive_uri(bitcoin_blocks_uri))}"
+        prepare_source = _block_archive_source(bitcoin_blocks_uri)
         prepare_blocks = (
             'echo "[blocksci-update] downloading block archive files after block $SOURCE_MAX_BLOCK"\n'
             + _download_block_archive("$SOURCE_CACHE_DIR/manifest.json")
         )
     else:
         raise PBSError("Incremental BlockSci update requires exactly one external Bitcoin datadir or block archive")
+    source_checks = (
+        f'grep -Fq \'"source_kind": "{source_kind}"\' "$SOURCE_CACHE_DIR/manifest.json" || '
+        f'{{ echo "Incremental update requires a {source_kind} cache" >&2; exit 1; }}\n'
+        'grep -Fq "\\"network\\": \\"$NETWORK\\"" "$SOURCE_CACHE_DIR/manifest.json" || '
+        '{ echo "Source cache network does not match $NETWORK" >&2; exit 1; }'
+    )
     return _render_stage(
         "blocksci_update_s3_template.sh",
         "blocksci-update",
@@ -547,11 +618,9 @@ def render_blocksci_update_s3_pbs(
         source_run_id=shell_value(source_run_id),
         network=shell_value(external_network),
         exported_max_block=external_max_block,
-        source_kind=source_kind,
         prepare_source=prepare_source,
         prepare_blocks=prepare_blocks,
         verify_index=verify_index,
-        command=command,
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
@@ -560,7 +629,12 @@ def render_blocksci_update_s3_pbs(
             '"$ARTIFACT_URI/$SOURCE_RUN_ID/blocksci-parse_data/*"',
             '"$SOURCE_CACHE_DIR/"',
         ),
-        upload_cache=render_s5cmd_sync('"$CACHE_DIR/"', '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/"'),
+        restore_cache=_restore_cache("$SOURCE_CACHE_DIR", "$SOURCE_RUN_ID", "Source cache", source_checks),
+        canonicalize_index=CANONICALIZE_INDEX,
+        parse_chain=_parse_chain(
+            "parsing blocks $((SOURCE_MAX_BLOCK + 1)) through $EXPORTED_MAX_BLOCK", command, stage="blocksci-update"
+        ),
+        publish_cache=_publish_cache("blocksci-update", source_kind, "$NETWORK"),
     )
 
 
@@ -721,6 +795,7 @@ def render_blocksci_analyze_s3_pbs(
         scratch=scratch,
         walltime=walltime,
         download_inputs="\n".join(downloads),
+        restore_cache=_restore_cache("$CACHE_DIR", "$RUN_ID", "Reusable BlockSci cache"),
         prepare_mode=prepare_mode,
         extra_binds=extra_binds,
         connection_help=connection_help,

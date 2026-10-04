@@ -34,21 +34,7 @@ test -r "$S3_CREDENTIALS_FILE" || {{ echo "S3 credentials file is not readable: 
 export TMPDIR="$SCRATCHDIR" SINGULARITY_CACHEDIR="$SCRATCHDIR" SINGULARITY_TMPDIR="$SCRATCHDIR" SINGULARITY_LOCALCACHEDIR="$SCRATCHDIR"
 echo "[$MODE] downloading required reusable BlockSci inputs"
 {download_inputs}
-test -f "$CACHE_DIR/blocksci_data.tar.gz" || {{ echo "Reusable BlockSci cache is missing blocksci-parse_data/blocksci_data.tar.gz" >&2; exit 1; }}
-test -f "$CACHE_DIR/blocksci_data.tar.gz.sha256" || {{ echo "Reusable BlockSci cache is missing its SHA-256 sidecar" >&2; exit 1; }}
-test -f "$CACHE_DIR/manifest.json" || {{ echo "Reusable BlockSci cache is missing blocksci-parse_data/manifest.json" >&2; exit 1; }}
-grep -Fq "\"schema_version\": \"1.0\"" "$CACHE_DIR/manifest.json" || {{ echo "Unsupported reusable BlockSci cache manifest schema" >&2; exit 1; }}
-grep -Fq "\"run_id\": \"$RUN_ID\"" "$CACHE_DIR/manifest.json" || {{ echo "Reusable BlockSci cache run ID does not match $RUN_ID" >&2; exit 1; }}
-grep -Fq "\"blocksci_image\": \"$IMAGE\"" "$CACHE_DIR/manifest.json" || {{ echo "Reusable BlockSci cache was produced by a different BlockSci image" >&2; exit 1; }}
-SIDECAR_SHA="$(cut -d ' ' -f 1 "$CACHE_DIR/blocksci_data.tar.gz.sha256")"
-grep -Fq "\"archive_sha256\": \"$SIDECAR_SHA\"" "$CACHE_DIR/manifest.json" || {{ echo "Reusable BlockSci cache manifest SHA-256 does not match its sidecar" >&2; exit 1; }}
-(
-  cd "$CACHE_DIR"
-  sha256sum -c blocksci_data.tar.gz.sha256
-)
-tar -C "$RUN_WORK" -xzf "$CACHE_DIR/blocksci_data.tar.gz"
-test -f "$RUN_WORK/blocksci_data/config.json" || {{ echo "Reusable BlockSci cache did not contain blocksci_data/config.json" >&2; exit 1; }}
-test -f "$RUN_WORK/blocksci_data/parsed/chain/block.dat" || {{ echo "Reusable BlockSci cache did not contain parsed/chain/block.dat" >&2; exit 1; }}
+{restore_cache}
 {prepare_mode}
 EXTRA_BINDS=()
 {extra_binds}

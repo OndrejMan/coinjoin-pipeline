@@ -45,14 +45,5 @@ MANIFEST_EXTRA=""
 test -f "$RUN_WORK/blocksci_data/config.json" || {{ echo "BlockSci parser did not produce blocksci_data/config.json" >&2; exit 1; }}
 test -f "$RUN_WORK/blocksci_data/parsed/chain/block.dat" || {{ echo "BlockSci parser did not produce parsed/chain/block.dat" >&2; exit 1; }}
 {verify_index}
-echo "[blocksci-parse] archiving reusable parsed index"
-tar -C "$RUN_WORK" -czf "$CACHE_DIR/blocksci_data.tar.gz" blocksci_data
-(
-  cd "$CACHE_DIR"
-  sha256sum blocksci_data.tar.gz > blocksci_data.tar.gz.sha256
-)
-printf '{{\n  "schema_version": "1.0",\n  "run_id": "%s",\n  "blocksci_image": "%s",\n  "source_kind": "%s",\n  "network": "%s",\n  "exported_max_block": %s%s,\n  "archive": "blocksci_data.tar.gz",\n  "archive_sha256": "%s"\n}}\n' \
-  "$RUN_ID" "$IMAGE" "{source_kind}" "{network}" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA" "$(cut -d ' ' -f 1 "$CACHE_DIR/blocksci_data.tar.gz.sha256")" \
-  > "$CACHE_DIR/manifest.json"
-{upload_cache}
+{publish_cache}
 echo "[blocksci-parse] reusable cache upload complete"

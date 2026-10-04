@@ -442,8 +442,9 @@ def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target(
     assert '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/"' in script
     assert "sha256sum -c blocksci_data.tar.gz.sha256" in script
     assert '"source_kind": "external-bitcoin"' in script
-    assert '"cache_operation": "incremental-update"' in script
-    assert '"source_run_id": "%s"' in script
+    assert '"external-bitcoin" "$NETWORK" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA"' in script
+    assert '\\"cache_operation\\": \\"incremental-update\\"' in script
+    assert '\\"source_run_id\\": \\"$SOURCE_RUN_ID\\"' in script
     assert "generate-config" not in script
     assert "worker.py update --run-dir /runs/emulation/logs/run-1" in script
     assert "Target maximum block" in script
@@ -466,8 +467,7 @@ def test_incremental_blocksci_update_from_the_block_archive_downloads_only_new_f
     assert "BITCOIN_BLOCKS_URI=s3://bucket/bitcoin-blocks\n" in script
     assert 'grep -Fq \'"source_kind": "bitcoin-blocks-s3"\'' in script
     assert '--source-manifest "$SOURCE_CACHE_DIR/manifest.json"' in script
-    assert '"source_kind": "bitcoin-blocks-s3",\\n' in script
-    assert '"$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA" "$SOURCE_RUN_ID"' in script
+    assert '"bitcoin-blocks-s3" "$NETWORK" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA"' in script
     # The archive is read only after the source cache proved its maximum block.
     assert script.index("SOURCE_MAX_BLOCK=") < script.index('run "$ARCHIVE_WORK/download.s5cmd"')
     assert script.index('run "$ARCHIVE_WORK/download.s5cmd"') < script.index("singularity exec")
