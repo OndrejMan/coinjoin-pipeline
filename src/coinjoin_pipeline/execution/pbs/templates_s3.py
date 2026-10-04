@@ -45,20 +45,44 @@ from .validation import (
 )
 
 
-def _s3_values(
-    target: S3Target,
-) -> dict[str, str]:
-    return {
-        "artifact_uri": shell_value(validate_artifact_uri(target.artifact_uri)),
-        "run_id": shell_value(validate_run_id(target.run_id)),
-        "endpoint_url": shell_value(validate_s3_endpoint_url(target.endpoint_url)),
-        "credentials_file": shell_value(validate_credentials_file(target.credentials_file)),
-        "profile": shell_value(validate_s3_profile(target.profile)),
-    }
-
-
 EXECUTION_DIR = Path(__file__).parent.parent
 EXTERNAL_NETWORKS = {"bitcoin", "bitcoin_testnet", "bitcoin_regtest"}
+
+
+def _stage_header(target: S3Target, stage_name: str) -> str:
+    """Define the S3 target, the scratch run directory and the stage's status markers."""
+    return "\n".join(
+        (
+            f"ARTIFACT_URI={shell_value(validate_artifact_uri(target.artifact_uri))}",
+            f"RUN_ID={shell_value(validate_run_id(target.run_id))}",
+            f"S3_ENDPOINT_URL={shell_value(validate_s3_endpoint_url(target.endpoint_url))}",
+            f"S3_CREDENTIALS_FILE={shell_value(validate_credentials_file(target.credentials_file))}",
+            f"S3_PROFILE={shell_value(validate_s3_profile(target.profile))}",
+            'test -n "${SCRATCHDIR:-}" || { echo "SCRATCHDIR is not set" >&2; exit 1; }',
+            'RUNS_ROOT="$SCRATCHDIR/coinjoin-run"',
+            'RUN_WORK="$RUNS_ROOT/$RUN_ID"',
+            f'FAILED_MARKER="$RUN_WORK/.pbs/{stage_name}.failed"',
+            f'DONE_MARKER="$RUN_WORK/.pbs/{stage_name}.done"',
+        )
+    )
+
+
+def _stage_bootstrap(stage_name: str) -> str:
+    """Publish the status markers and install the exit trap that writes them."""
+    done = render_s5cmd_cp('"$DONE_MARKER"', f'"$ARTIFACT_URI/$RUN_ID/.pbs/{stage_name}.done"')
+    failed = render_s5cmd_cp('"$FAILED_MARKER"', f'"$ARTIFACT_URI/$RUN_ID/.pbs/{stage_name}.failed"')
+    trap = (EXECUTION_DIR / "pbs_stage.sh").read_text(encoding="utf-8")
+    return f"publish_done() {{\n  {done}\n}}\npublish_failed() {{\n  {failed}\n}}\n{trap}"
+
+
+# Runs inside the trap, so a missing credential or s5cmd still publishes the failure.
+STAGE_SETUP = (
+    'test -r "$S3_CREDENTIALS_FILE" || '
+    '{ echo "S3 credentials file is not readable: $S3_CREDENTIALS_FILE" >&2; exit 1; }\n'
+    f"{render_s5cmd_check()}\n"
+    'export TMPDIR="$SCRATCHDIR" SINGULARITY_CACHEDIR="$SCRATCHDIR" '
+    'SINGULARITY_TMPDIR="$SCRATCHDIR" SINGULARITY_LOCALCACHEDIR="$SCRATCHDIR"'
+)
 
 
 def _render_stage(
@@ -80,16 +104,18 @@ def _render_stage(
         require_safe_image(image)
         values["image"] = shell_value(image)
     template = (EXECUTION_DIR / template_name).read_text(encoding="utf-8")
-    return render_template(
-        template,
-        **_s3_values(target),
+    return template.format(
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
         walltime=walltime,
-        s5cmd_check=render_s5cmd_check(),
-        upload_failed=render_s5cmd_cp('"$FAILED_MARKER"', f'"$ARTIFACT_URI/$RUN_ID/.pbs/{stage_name}.failed"'),
-        upload_done=render_s5cmd_cp('"$DONE_MARKER"', f'"$ARTIFACT_URI/$RUN_ID/.pbs/{stage_name}.done"'),
+        stage_header=_stage_header(target, stage_name),
+        bootstrap=_stage_bootstrap(stage_name),
+        stage_setup=STAGE_SETUP,
+        download_exporters=render_s5cmd_sync(
+            '"$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/*"',
+            '"$RUN_WORK/.pipeline/exporters/"',
+        ),
         **values,
     )
 
@@ -857,12 +883,3 @@ def render_unified_report_s3_pbs(
             '"$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"',
         ),
     )
-
-
-def render_template(template: str, **values) -> str:
-    bootstrap = (EXECUTION_DIR / "pbs_stage.sh").read_text(encoding="utf-8")
-    download_exporters = render_s5cmd_sync(
-        '"$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/*"',
-        '"$RUN_WORK/.pipeline/exporters/"',
-    )
-    return template.format(bootstrap=bootstrap, download_exporters=download_exporters, **values)

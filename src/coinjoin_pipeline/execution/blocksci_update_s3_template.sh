@@ -5,39 +5,22 @@
 #PBS -j oe
 set -euo pipefail
 
-ARTIFACT_URI={artifact_uri}
-RUN_ID={run_id}
+{stage_header}
 SOURCE_RUN_ID={source_run_id}
-S3_ENDPOINT_URL={endpoint_url}
-S3_CREDENTIALS_FILE={credentials_file}
-S3_PROFILE={profile}
 IMAGE={image}
 NETWORK={network}
 EXPORTED_MAX_BLOCK={exported_max_block}
-test -n "${{SCRATCHDIR:-}}" || {{ echo "SCRATCHDIR is not set" >&2; exit 1; }}
-RUNS_ROOT="$SCRATCHDIR/coinjoin-run"
-RUN_WORK="$RUNS_ROOT/$RUN_ID"
 SOURCE_CACHE_DIR="$RUN_WORK/source-blocksci-parse_data"
 CACHE_DIR="$RUN_WORK/blocksci-parse_data"
-FAILED_MARKER="$RUN_WORK/.pbs/blocksci-update.failed"
-DONE_MARKER="$RUN_WORK/.pbs/blocksci-update.done"
 mkdir -p "$RUN_WORK/.pbs" "$SOURCE_CACHE_DIR" "$CACHE_DIR"
 stage_finalize() {{
   :
 }}
-publish_done() {{
-  {upload_done}
-}}
-publish_failed() {{
-  {upload_failed}
-}}
 {bootstrap}
-test -r "$S3_CREDENTIALS_FILE" || {{ echo "S3 credentials file is not readable: $S3_CREDENTIALS_FILE" >&2; exit 1; }}
+{stage_setup}
 {prepare_source}
-{s5cmd_check}
 mkdir -p "$RUN_WORK/.pipeline/exporters"
 {download_exporters}
-export TMPDIR="$SCRATCHDIR" SINGULARITY_CACHEDIR="$SCRATCHDIR" SINGULARITY_TMPDIR="$SCRATCHDIR" SINGULARITY_LOCALCACHEDIR="$SCRATCHDIR"
 
 echo "[blocksci-update] restoring verified cache from run $SOURCE_RUN_ID"
 {download_source_cache}

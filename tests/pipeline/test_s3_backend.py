@@ -165,7 +165,7 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
         sake_image="docker://sake",
     )
     for script in (coinjoin, blocksci, mappings, report):
-        assert "$SCRATCHDIR/coinjoin-run/$RUN_ID" in script
+        assert 'RUNS_ROOT="$SCRATCHDIR/coinjoin-run"\nRUN_WORK="$RUNS_ROOT/$RUN_ID"' in script
         assert "s5cmd --credentials-file" in script
         assert '--profile "$S3_PROFILE"' in script
         assert '--endpoint-url "$S3_ENDPOINT_URL"' in script

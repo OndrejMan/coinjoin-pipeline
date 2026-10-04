@@ -5,39 +5,22 @@
 #PBS -j oe
 set -euo pipefail
 
-ARTIFACT_URI={artifact_uri}
-RUN_ID={run_id}
-S3_ENDPOINT_URL={endpoint_url}
-S3_CREDENTIALS_FILE={credentials_file}
-S3_PROFILE={profile}
+{stage_header}
 IMAGE={image}
-test -n "${{SCRATCHDIR:-}}" || {{ echo "SCRATCHDIR is not set" >&2; exit 1; }}
-RUNS_ROOT="$SCRATCHDIR/coinjoin-run"
-RUN_WORK="$RUNS_ROOT/$RUN_ID"
 CACHE_DIR="$RUN_WORK/blocksci-parse_data"
 mkdir -p "$RUN_WORK/.pbs" "$RUN_WORK/logs" "$RUN_WORK/coinjoin_emulator_data/data/btc-node" "$CACHE_DIR"
 JOB_LOG="$RUN_WORK/logs/blocksci-parse.pbs.log"
-FAILED_MARKER="$RUN_WORK/.pbs/blocksci-parse.failed"
-DONE_MARKER="$RUN_WORK/.pbs/blocksci-parse.done"
 stage_finalize() {{
   exec 1>&3 2>&4
   exec 3>&- 4>&-
   {upload_log} || upload_status=$?
 }}
-publish_done() {{
-  {upload_done}
-}}
-publish_failed() {{
-  {upload_failed}
-}}
 {bootstrap}
 exec 3>&1 4>&2
 exec >"$JOB_LOG" 2>&1
-test -r "$S3_CREDENTIALS_FILE" || {{ echo "S3 credentials file is not readable: $S3_CREDENTIALS_FILE" >&2; exit 1; }}
-{s5cmd_check}
+{stage_setup}
 mkdir -p "$RUN_WORK/.pipeline/exporters"
 {download_exporters}
-export TMPDIR="$SCRATCHDIR" SINGULARITY_CACHEDIR="$SCRATCHDIR" SINGULARITY_TMPDIR="$SCRATCHDIR" SINGULARITY_LOCALCACHEDIR="$SCRATCHDIR"
 echo "[blocksci-parse] preparing {source_description}"
 MANIFEST_EXTRA=""
 {prepare_source}

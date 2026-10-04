@@ -5,34 +5,18 @@
 #PBS -j oe
 set -euo pipefail
 
-ARTIFACT_URI={artifact_uri}
-RUN_ID={run_id}
-S3_ENDPOINT_URL={endpoint_url}
-S3_CREDENTIALS_FILE={credentials_file}
-S3_PROFILE={profile}
+{stage_header}
 ENUMERATOR_IMAGE={enumerator_image}
 SAKE_IMAGE={sake_image}
-test -n "${{SCRATCHDIR:-}}" || {{ echo "SCRATCHDIR is not set" >&2; exit 1; }}
-RUN_WORK="$SCRATCHDIR/coinjoin-run/$RUN_ID"
 OUT="$RUN_WORK/coinjoin-mappings_data"
-FAILED_MARKER="$RUN_WORK/.pbs/coinjoin-mappings.failed"
-DONE_MARKER="$RUN_WORK/.pbs/coinjoin-mappings.done"
 mkdir -p "$RUN_WORK/.pbs" "$RUN_WORK/coinjoin-analysis_data" "$OUT"
 stage_finalize() {{
   if [ -d "$OUT" ]; then
     {upload_outputs} || upload_status=$?
   fi
 }}
-publish_done() {{
-  {upload_done}
-}}
-publish_failed() {{
-  {upload_failed}
-}}
 {bootstrap}
-test -r "$S3_CREDENTIALS_FILE" || {{ echo "S3 credentials file is not readable: $S3_CREDENTIALS_FILE" >&2; exit 1; }}
-{s5cmd_check}
-export TMPDIR="$SCRATCHDIR" SINGULARITY_CACHEDIR="$SCRATCHDIR" SINGULARITY_TMPDIR="$SCRATCHDIR" SINGULARITY_LOCALCACHEDIR="$SCRATCHDIR"
+{stage_setup}
 
 echo "[coinjoin-mappings] downloading coinjoin-analysis input"
 {download_input}
