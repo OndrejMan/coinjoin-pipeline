@@ -87,6 +87,7 @@ def write_analysis(args: argparse.Namespace) -> Path:
             image_digests={
                 **{
                     name: getattr(args, name + "_image_digest", None)
+                    or digest_from_reference(getattr(args, name + "_image", None))
                     for name in ("blocksci", "coinjoin_analysis", "coinjoin_emulator")
                 },
                 "uploader": digest_from_reference(args.uploader_image),

@@ -1274,6 +1274,29 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(diagnostics["images"]["blocksci"]["status"], "not_ok")
         self.assertIn("blocksci image provenance is incomplete", diagnostics["problems"][0])
 
+    def test_integration_diagnostics_accepts_repo_digest_without_local_image_id(self):
+        # Singularity on PBS has no daemon that could report an image id.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            (run_dir / "coinjoin_emulator_data" / "data" / "btc-node").mkdir(parents=True)
+            save_json(
+                run_dir / "coinjoin_emulator_data" / "data" / "btc-node" / "block_0.json",
+                {"height": 0, "tx": []},
+            )
+
+            diagnostics = build_integration_diagnostics(
+                run_dir,
+                Path("/tmp/config.json"),
+                FakeBlockSciModule({}, 1),
+                {},
+                "wasabi2",
+                complete_image_refs(),
+                image_digests=complete_image_digests(),
+            )
+
+        self.assertEqual(diagnostics["images"]["blocksci"]["status"], "ok")
+        self.assertEqual(diagnostics["status"], "ok")
+
     def test_integration_diagnostics_not_ok_when_chain_height_differs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)

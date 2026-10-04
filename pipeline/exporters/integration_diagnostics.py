@@ -108,12 +108,15 @@ def build_image_diagnostics(
         component_problems = []
         if not reference:
             component_problems.append("missing image reference")
-        if not image_id:
+        # A repo digest identifies the image by itself. Singularity on PBS has
+        # no daemon to report a local image id, so requiring one there would
+        # make a digest-pinned run incomplete forever.
+        if not image_id and not repo_digest:
             component_problems.append("missing image id")
         if not repo_digest:
             component_problems.append("missing repo digest")
         inspect_error = inspected.get("inspect_error")
-        if inspect_error and (not image_id or not repo_digest):
+        if inspect_error and not repo_digest:
             component_problems.append(f"image inspect failed: {inspect_error}")
 
         status = "ok" if not component_problems else "not_ok"
