@@ -25,6 +25,7 @@ RUN_MANIFEST = "research_manifest.json"
 SCENARIO_FILE = EMULATOR_DIR + "/scenario.json"
 LABEL_MANIFEST_FILE = EMULATOR_DIR + "/data/coinjoin_label_manifest.json"
 ROUND_EVENTS_FILE = EMULATOR_DIR + "/data/joinmarket_round_events.json"
+POSTMIX_SPENDS_FILE = EMULATOR_DIR + "/data/postmix_spends.json"
 BASELINE_FILE = COINJOIN_ANALYSIS_DIR + "/coinjoin_tx_info.json"
 FALSE_CJTXS_FILE = COINJOIN_ANALYSIS_DIR + "/false_cjtxs.json"
 # Every false-positive sidecar, including the numbered copies of extra inputs.
@@ -35,6 +36,8 @@ ANALYSIS_ARTIFACT_FILE = BLOCKSCI_ANALYSIS_DIR + "/" + ANALYSIS_ARTIFACT_NAME
 MAPPINGS_FILE = MAPPINGS_DIR + "/coinjoin_mappings.json"
 REPORT_JSON = "unified_report.json"
 REPORT_MARKDOWN = "unified_report.md"
+LIQUIDITY_DATASET = "liquidity_dataset.json"
+LIQUIDITY_EVENTS_CSV = "liquidity_events.csv"
 REPORT_FILE = REPORT_DIR + "/" + REPORT_JSON
 REPORT_MARKDOWN_FILE = REPORT_DIR + "/" + REPORT_MARKDOWN
 EXPORTED_BLOCKS_DIR = EMULATOR_DIR + "/data/btc-node"
@@ -51,6 +54,7 @@ REPORT_INPUT_FILES = (
     SCENARIO_FILE,
     LABEL_MANIFEST_FILE,
     ROUND_EVENTS_FILE,
+    POSTMIX_SPENDS_FILE,
     BASELINE_FILE,
     ANALYSIS_ARTIFACT_FILE,
     MAPPINGS_FILE,

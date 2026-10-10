@@ -221,3 +221,40 @@ for the report and its Markdown, `stale`. Every run-relative path comes from
 Runs made with an emulator image that predates the producer-label manifest
 always classify as `emulator_labels_unavailable` after re-export; regenerate
 them with a rebuilt emulator image if ground-truth metrics are needed.
+
+## Liquidity evaluation
+
+`liquidity_evaluation` in `unified_report.json` (schema 1.9) follows the
+transaction-centric pool liquidity of Svenda et al., PETS 2026, section 4.3.2.
+`pipeline/exporters/liquidity.py` classifies every coinjoin input and output
+twice:
+
+- Ground truth: the producer coinjoin labels mark the mix boundary and the
+  exported blocks give each output's spender. An input from a coinjoin is
+  `MIX_REMIX`, any other input `MIX_ENTER`; an output spent by a coinjoin is
+  `MIX_REMIX`, by another transaction `MIX_LEAVE`, and an unspent one
+  `MIX_STAY`. Wallet ownership comes from the same address mapping as the
+  clustering evaluation.
+- Observed: the `mix_event_type` coinjoin-analysis wrote into
+  `coinjoin_tx_info.json`.
+
+Both give the interim pool liquidity (inflow minus outflow, an outflow charged
+to the coinjoin that created the output), its variant charging only outputs that
+leave within `WINDOW_COINJOINS`, the outputs unmoved for at least that window and
+the actively remixed liquidity. Mainnet analysis uses a one-month window; an
+emulated run lasts hours, so the window counts later coinjoins instead.
+
+The ground truth is also split by wallet. A wallet whose own interim liquidity
+reaches at least half of the pool's at its peak is a large wallet. For each,
+`fin` measures what the observed curve reveals: the wallet's share of the inflow
+in the coinjoin with the largest observed inflow, and the wallet's share of the
+value leaving the mix in the descending part of the observed curve (from its peak
+to the lowest point after it), compared to its share of all leaving value
+(`lift`). This is the attribution argument of section 5.3.
+
+`postmix_spends` checks the emulator's spend schedule
+(`coinjoin_emulator_data/data/postmix_spends.json`) against the exported blocks.
+The per-event dataset is written next to the report as `liquidity_dataset.json`
+and `liquidity_events.csv`. Without emulator data or independent coinjoin labels
+the section is `available: false` with a reason.
+

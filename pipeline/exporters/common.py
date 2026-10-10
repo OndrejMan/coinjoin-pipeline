@@ -21,7 +21,7 @@ JsonValue = object
 # are typed in exporters.report_types instead.
 JsonObject = dict
 
-SCHEMA_VERSION = "1.8"
+SCHEMA_VERSION = "1.9"
 EMULATOR_DATA_SCHEMA_VERSION = "1.0"
 SATS_IN_BTC = 100_000_000
 DEFAULT_FIRST_WASABI2_BLOCK = 0

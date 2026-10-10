@@ -26,6 +26,7 @@ from exporters.common import (
     save_json,
 )
 from exporters.emulator_data import build_emulator_data
+from exporters.liquidity import build_liquidity, save_liquidity_dataset
 from exporters.normalization import (
     fill_missing_block_heights,
     filter_coinjoin_analysis_false_positives,
@@ -200,6 +201,9 @@ def assemble_report(args: argparse.Namespace) -> int:
         "filtered_txids": filtered_txids,
         "filtered_count": len(filtered_txids),
     }
+    report["liquidity_evaluation"], liquidity_dataset = build_liquidity(run_dir, emulator_data, coinjoin_analysis_data)
+    if liquidity_dataset is not None:
+        save_liquidity_dataset(output_dir, liquidity_dataset)
     save_json(output_path, report)
     print(f"Unified report saved to {output_path}")
     if args.markdown:

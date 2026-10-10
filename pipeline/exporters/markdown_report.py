@@ -355,6 +355,110 @@ def render_clustering_evaluation(report: JsonObject) -> list[str]:
     return lines
 
 
+def render_liquidity_evaluation(report: JsonObject) -> list[str]:
+    liquidity = report.get("liquidity_evaluation")
+    if not liquidity:
+        return []
+    lines = ["", "## Liquidity Evaluation", ""]
+    if not liquidity.get("available"):
+        lines.append(liquidity.get("reason") or "Liquidity evaluation is not available for this run.")
+        return lines
+
+    ground_truth = liquidity.get("ground_truth") or {}
+    observed = liquidity.get("observed") or {}
+    agreement = liquidity.get("classification_agreement") or {}
+    lines.extend(
+        table(
+            ["metric", "ground truth", "coinjoin-analysis"],
+            [
+                [name, sats(ground_truth.get(field)), sats(observed.get(field))]
+                for name, field in (
+                    ("entered", "entered_sats"),
+                    ("left", "left_sats"),
+                    ("stayed", "stayed_sats"),
+                    ("peak interim liquidity", "peak_interim_sats"),
+                    ("final interim liquidity", "final_interim_sats"),
+                )
+            ],
+        )
+    )
+    lines.extend(
+        [
+            "",
+            *table(
+                ["metric", "value"],
+                [
+                    ["coinjoins", liquidity.get("coinjoins")],
+                    ["max interim difference", sats(liquidity.get("interim_max_abs_difference_sats"))],
+                    ["classified inputs and outputs", agreement.get("classified")],
+                    ["classification agreement", metric_value(agreement.get("agreement_rate"))],
+                    ["dominant wallet", liquidity.get("dominant_wallet")],
+                ],
+            ),
+        ]
+    )
+    disagreements = [
+        [key, count]
+        for key, count in (agreement.get("confusion") or {}).items()
+        if key.split("->")[0].split(":")[1] != key.split("->")[1]
+    ]
+    if disagreements:
+        lines.extend(
+            ["", "### Classification Disagreements", "", *table(["ground truth -> observed", "count"], disagreements)]
+        )
+
+    large_wallets = liquidity.get("large_wallets") or []
+    if large_wallets:
+        rows = []
+        for wallet in large_wallets:
+            fin = wallet.get("fin") or {}
+            rows.append(
+                [
+                    wallet.get("wallet"),
+                    metric_value(wallet.get("peak_pool_share")),
+                    wallet.get("first_enter_index"),
+                    fin.get("observed_entry_index"),
+                    wallet.get("last_leave_index"),
+                    fin.get("descending_window"),
+                    metric_value(fin.get("window_leave_precision")),
+                    metric_value(fin.get("lift")),
+                ]
+            )
+        lines.extend(
+            [
+                "",
+                "### Large Wallets",
+                "",
+                *table(
+                    [
+                        "wallet",
+                        "peak pool share",
+                        "first entry",
+                        "observed entry",
+                        "last leave",
+                        "descending window",
+                        "leave precision",
+                        "lift",
+                    ],
+                    rows,
+                ),
+            ]
+        )
+
+    spends = liquidity.get("postmix_spends")
+    if spends:
+        lines.extend(
+            [
+                "",
+                f"Scheduled postmix spends: {spends.get('scheduled')} "
+                f"({', '.join(f'{status} {count}' for status, count in (spends.get('by_status') or {}).items())}); "
+                f"{spends.get('confirmed_postmix')} confirmed as spends of coinjoin outputs.",
+            ]
+        )
+    lines.extend(["", "Per-wallet events: " + ", ".join(f"`{name}`" for name in liquidity.get("dataset_files") or [])])
+    return lines
+
+
 def render_skipped_transactions(report: JsonObject, explorer_base_url: str) -> list[str]:
     skipped_txids = report.get("blocksci_skipped_txids") or []
     if not skipped_txids:
@@ -926,6 +1030,7 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
     lines.extend(render_emulator_detection(report, explorer_base_url))
     lines.extend(render_skipped_transactions(report, explorer_base_url))
     lines.extend(render_clustering_evaluation(report))
+    lines.extend(render_liquidity_evaluation(report))
     lines.extend(
         [
             "",
