@@ -1,0 +1,53 @@
+# Liquidity experiment (assignment point 3): a 4.95 BTC wallet enters a ~4.45 BTC
+# background pool at round 6, spends a fifth of it at rounds 12, 14 and 16 and the
+# rest at round 18. Swap the scenario for liquidity-small-wallet.json (control) or
+# liquidity-two-large-wallets.json; scripts/generate_liquidity_scenarios.py makes all three.
+# 24 Wasabi rounds take about three hours.
+action: full-run
+engine: wasabi
+coinjoin_type: wasabi2
+driver: kubernetes
+scenario: scenarios/liquidity-large-wallet.json
+min_input_count: 10
+emulation_timeout: 43200
+
+kubernetes:
+  namespace: man5-ns
+  reuse_namespace: true
+  kubeconfig: /storage/brno2/home/xman/.kube/kuba-cluster.yaml
+
+artifacts:
+  backend: s3
+  uri: s3://xman-coinjoin/runs
+  endpoint_url: https://s3.cl4.du.cesnet.cz
+  secret_name: coinjoin-s3-credentials
+  credentials_file: /storage/brno2/home/xman/.aws/credentials
+  profile: coinjoin
+
+stages:
+  analysis: true
+  blocksci: true
+  mappings: false
+
+blocksci:
+  workflow: combined
+  task: detect
+
+pbs:
+  analysis:
+    ncpus: 2
+    mem: 8gb
+    scratch: 50gb
+    walltime: "08:00:00"
+
+  blocksci:
+    ncpus: 8
+    mem: 64gb
+    scratch: 100gb
+    walltime: "24:00:00"
+
+  unified_report:
+    ncpus: 2
+    mem: 8gb
+    scratch: 10gb
+    walltime: "01:00:00"

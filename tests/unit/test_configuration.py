@@ -143,6 +143,7 @@ def test_effective_env_defaults_are_validated(monkeypatch):
     [
         "wasabi-s3-no-mappings.yaml",
         "wasabi-s3-pbs-no-mappings.yaml",
+        "wasabi-liquidity-s3.yaml",
         "metacentrum-mainnet-s3-blocks-parse.yaml",
         "metacentrum-mainnet-dumplings-report.yaml",
     ],
