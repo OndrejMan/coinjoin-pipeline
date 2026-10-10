@@ -82,3 +82,19 @@ class ScenarioValidationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "positive 'value'"):
                 validate_scenario(path, "wasabi")
 
+    def test_postmix_spend_sets_exactly_one_amount(self):
+        for spend in ({"delay_rounds": 2}, {"value": 10, "all": True}, {"value": 0, "all": True}):
+            with self.subTest(spend=spend), tempfile.TemporaryDirectory() as temp:
+                path = self.wasabi_scenario(temp, {"funds": [1000], "wasabi": {"postmix_spends": [spend]}})
+                with self.assertRaisesRegex(ValueError, "either a positive 'value'"):
+                    validate_scenario(path, "wasabi")
+
+    def test_postmix_spends_are_wasabi_only(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = self.wasabi_scenario(
+                temp,
+                {"funds": [1000], "joinmarket": {"role": "taker"}, "wasabi": {"postmix_spends": [{"all": True}]}},
+            )
+            with self.assertRaisesRegex(ValueError, "Wasabi wallets only"):
+                validate_scenario(path, "joinmarket")
+

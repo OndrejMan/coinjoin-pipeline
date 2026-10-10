@@ -43,6 +43,20 @@ def fund_value(fund: object) -> int | None:
     return value
 
 
+def validate_postmix_spends(index: int, spends: object) -> None:
+    """Check the emulator's postmix spend schedule of one Wasabi wallet."""
+    if not isinstance(spends, list):
+        raise ValueError(f"Wallet {index} wasabi.postmix_spends must be a list")
+    for spend in spends:
+        if not isinstance(spend, dict):
+            raise ValueError(f"Wallet {index} postmix spends must be objects")
+        has_value = fund_value(spend) is not None
+        if has_value == (spend.get("all") is True) or ("value" in spend and not has_value):
+            raise ValueError(
+                f"Wallet {index} postmix spend must set either a positive 'value' in satoshis or 'all': true"
+            )
+
+
 def validate_scenario(path: Path, engine: str) -> dict[str, object]:
     data = load_scenario(path)
     for field in ("name", "rounds", "blocks", "default_version", "wallets"):
@@ -80,6 +94,10 @@ def validate_scenario(path: Path, engine: str) -> dict[str, object]:
             raise ValueError(f"Wasabi scenario cannot contain JoinMarket configuration (wallet {index})")
         if isinstance(wallet.get("wasabi"), dict):
             wasabi_wallets += 1
+            if wallet["wasabi"].get("postmix_spends") is not None:
+                if engine == "joinmarket":
+                    raise ValueError(f"postmix_spends are implemented for Wasabi wallets only (wallet {index})")
+                validate_postmix_spends(index, wallet["wasabi"]["postmix_spends"])
     if engine == "joinmarket" and (makers == 0 or takers == 0):
         raise ValueError("JoinMarket scenario requires at least one maker and one taker")
 
