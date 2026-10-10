@@ -19,7 +19,10 @@ def normalize_scenario(scenario: JsonObject, source_path: Path) -> JsonObject:
     total_initial_funds = 0
 
     for index, wallet in enumerate(scenario.get("wallets", [])):
-        funds = [coerce_sats(value) or 0 for value in wallet.get("funds", [])]
+        # A delayed fund is an object carrying its amount in "value".
+        funds = [
+            coerce_sats(fund.get("value") if isinstance(fund, dict) else fund) or 0 for fund in wallet.get("funds", [])
+        ]
         total_funds = sum(funds)
         total_initial_funds += total_funds
 

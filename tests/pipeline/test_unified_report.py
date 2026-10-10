@@ -2611,6 +2611,20 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(scenario["wallets"][0]["joinmarket"], {"role": "taker"})
         self.assertEqual(scenario["wallets"][1]["joinmarket"], {"role": "maker"})
 
+    def test_normalize_scenario_counts_delayed_funds(self):
+        fixture = {
+            "name": "liquidity",
+            "rounds": 1,
+            "blocks": 0,
+            "default_version": "2.6.0",
+            "wallets": [{"funds": [1000, {"value": 500, "delay_rounds": 6}]}],
+        }
+
+        scenario = normalize_scenario(fixture, Path("liquidity.json"))
+
+        self.assertEqual(scenario["wallets"][0]["funds"], [1000, 500])
+        self.assertEqual(scenario["total_initial_funds_sats"], 1500)
+
     def test_load_scenario_fallback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)

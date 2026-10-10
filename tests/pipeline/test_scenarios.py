@@ -64,3 +64,21 @@ class ScenarioValidationTests(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 validate_scenario(path, "wasabi")
+
+    def wasabi_scenario(self, root, wallet):
+        return self.write_scenario(
+            root,
+            {"name": "liquidity", "rounds": 1, "blocks": 0, "default_version": "2.6.0", "wallets": [wallet]},
+        )
+
+    def test_delayed_funds_count_their_value(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = self.wasabi_scenario(temp, {"funds": [1000, {"value": 500, "delay_rounds": 3}]})
+            self.assertEqual(validate_scenario(path, "wasabi")["total_funds_sats"], 1500)
+
+    def test_delayed_fund_needs_a_positive_value(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = self.wasabi_scenario(temp, {"funds": [{"delay_rounds": 3}]})
+            with self.assertRaisesRegex(ValueError, "positive 'value'"):
+                validate_scenario(path, "wasabi")
+

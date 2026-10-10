@@ -35,6 +35,14 @@ def load_scenario(path: Path) -> dict[str, object]:
     return data
 
 
+def fund_value(fund: object) -> int | None:
+    """Satoshis of a fund given as an integer or as an object with a delay."""
+    value = fund.get("value") if isinstance(fund, dict) else fund
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        return None
+    return value
+
+
 def validate_scenario(path: Path, engine: str) -> dict[str, object]:
     data = load_scenario(path)
     for field in ("name", "rounds", "blocks", "default_version", "wallets"):
@@ -55,8 +63,10 @@ def validate_scenario(path: Path, engine: str) -> dict[str, object]:
         if not isinstance(wallet, dict):
             raise ValueError(f"Wallet {index} must be an object")
         funds = wallet.get("funds")
-        if not isinstance(funds, list) or not funds or any(not isinstance(value, int) or value <= 0 for value in funds):
-            raise ValueError(f"Wallet {index} funds must be a non-empty list of positive integers")
+        if not isinstance(funds, list) or not funds or any(fund_value(fund) is None for fund in funds):
+            raise ValueError(
+                f"Wallet {index} funds must be a non-empty list of positive integers or objects with a positive 'value'"
+            )
         joinmarket = wallet.get("joinmarket")
         if engine == "joinmarket":
             if not isinstance(joinmarket, dict) or joinmarket.get("role") not in {
@@ -80,7 +90,7 @@ def validate_scenario(path: Path, engine: str) -> dict[str, object]:
         "rounds": data["rounds"],
         "blocks": data["blocks"],
         "wallet_count": len(wallets),
-        "total_funds_sats": sum(sum(wallet["funds"]) for wallet in wallets),
+        "total_funds_sats": sum(fund_value(fund) or 0 for wallet in wallets for fund in wallet["funds"]),
         "makers": makers,
         "takers": takers,
         "wasabi_wallets": wasabi_wallets,
