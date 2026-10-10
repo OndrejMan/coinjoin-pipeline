@@ -98,3 +98,11 @@ class ScenarioValidationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Wasabi wallets only"):
                 validate_scenario(path, "joinmarket")
 
+    def test_liquidity_scenarios_are_valid_and_packaged(self):
+        scenarios = Path(__file__).resolve().parents[2] / "scenarios"
+        packaged = Path(__file__).resolve().parents[2] / "src" / "coinjoin_pipeline" / "resources" / "scenarios"
+        for name in ("liquidity-large-wallet", "liquidity-small-wallet", "liquidity-two-large-wallets"):
+            with self.subTest(name=name):
+                path = scenarios / f"{name}.json"
+                self.assertEqual(path.read_bytes(), (packaged / f"{name}.json").read_bytes())
+                self.assertEqual(validate_scenario(path, "wasabi")["rounds"], 24)
