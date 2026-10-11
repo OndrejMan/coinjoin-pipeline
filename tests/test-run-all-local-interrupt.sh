@@ -49,6 +49,7 @@ for test_script in \
   test-run-all-local-failure-report.sh \
   test-podman-no-host-docker.sh \
   test-runIt-overactive-local-docker.sh \
+  test-runIt-liquidity-local-docker.sh \
   test-runIt-joinmarket-local-docker.sh \
   test-runIt-parallel-local-docker.sh \
   test-kubernetes-k3d.sh \

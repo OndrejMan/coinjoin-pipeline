@@ -108,3 +108,17 @@ class ScenarioValidationTests(unittest.TestCase):
                 path = scenarios / f"{name}.json"
                 self.assertEqual(path.read_bytes(), (packaged / f"{name}.json").read_bytes())
                 self.assertEqual(validate_scenario(path, "wasabi")["rounds"], 24)
+
+    def test_postmix_smoke_scenario_spends_and_keeps_mixing(self):
+        root = Path(__file__).resolve().parents[2]
+        path = root / "scenarios" / "liquidity-postmix-smoke.json"
+        packaged = root / "src" / "coinjoin_pipeline" / "resources" / "scenarios" / path.name
+        self.assertEqual(path.read_bytes(), packaged.read_bytes())
+        self.assertEqual(validate_scenario(path, "wasabi")["rounds"], 6)
+        spends = [
+            spend
+            for wallet in json.loads(path.read_text())["wallets"]
+            for spend in (wallet.get("wasabi") or {}).get("postmix_spends") or []
+        ]
+        self.assertTrue(spends)
+        self.assertTrue(all("value" in spend and not spend.get("all") for spend in spends))

@@ -461,6 +461,7 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
     "tests/test-wrapper-signal-cleanup.sh"
     "tests/test-podman-no-host-docker.sh"
     "tests/test-runIt-overactive-local-docker.sh"
+    "tests/test-runIt-liquidity-local-docker.sh"
     "tests/test-runIt-joinmarket-local-docker.sh"
     "tests/test-runIt-parallel-local-docker.sh"
     "tests/test-kubernetes-k3d.sh"
@@ -583,7 +584,8 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
         COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD= \
         RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
         bash "${test_script}"
-    elif [[ "${test_script}" == "tests/test-runIt-overactive-local-docker.sh" ]]; then
+    elif [[ "${test_script}" == "tests/test-runIt-overactive-local-docker.sh" ||
+      "${test_script}" == "tests/test-runIt-liquidity-local-docker.sh" ]]; then
       run_in_dir "${SCRIPT_DIR}" env \
         EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
         LOCAL_TAG="${LOCAL_TAG}" \
