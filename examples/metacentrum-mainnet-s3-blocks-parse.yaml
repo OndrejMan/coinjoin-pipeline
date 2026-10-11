@@ -23,7 +23,7 @@ blocksci:
   workflow: reusable
   task: parse
   # Prefix created by bitcoin-core-s3-archive, not the per-run artifact URI.
-  bitcoin_blocks_uri: s3://xman-coinjoin/bitcoin-mainnet/blocks
+  bitcoin_blocks_uri: s3://xman-coinjoin-new/bitcoin-mainnet/blocks
   network: bitcoin
   # Inclusive. Pin its hash from a trusted Core: bitcoin-cli getblockhash 900000.
   max_block: 900000

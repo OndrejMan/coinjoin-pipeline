@@ -14,7 +14,7 @@ kubernetes:
 
 artifacts:
   backend: s3
-  uri: s3://xman-coinjoin/runs
+  uri: s3://xman-coinjoin-new/runs
   endpoint_url: https://s3.cl4.du.cesnet.cz
   secret_name: coinjoin-s3-credentials
   credentials_file: /storage/brno2/home/xman/.aws/credentials
