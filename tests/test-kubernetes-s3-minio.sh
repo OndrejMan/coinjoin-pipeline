@@ -183,7 +183,7 @@ cleanup() {
   fi
   if [[ -n "${RESULT_DIR}" ]]; then
     mkdir -p "${RESULT_DIR}/${ENGINE}"
-    for artifact in unified_report.json coinjoin_tx_info.json; do
+    for artifact in unified_report.json coinjoin_tx_info.json liquidity_dataset.json liquidity_events.csv; do
       [[ -s "${WORK_ROOT}/results/${artifact}" ]] \
         && cp "${WORK_ROOT}/results/${artifact}" "${RESULT_DIR}/${ENGINE}/"
     done
@@ -404,6 +404,9 @@ s5 cp "${ARTIFACT_URI}/${RUN_ID}/coinjoinPipeline_data/unified_report.json" \
   "${WORK_ROOT}/results/unified_report.json" >/dev/null
 s5 cp "${ARTIFACT_URI}/${RUN_ID}/coinjoin-analysis_data/coinjoin_tx_info.json" \
   "${WORK_ROOT}/results/coinjoin_tx_info.json" >/dev/null
+for artifact in liquidity_dataset.json liquidity_events.csv; do
+  s5 cp "${ARTIFACT_URI}/${RUN_ID}/coinjoinPipeline_data/${artifact}" "${WORK_ROOT}/results/${artifact}" >/dev/null
+done
 
 python3 - "${WORK_ROOT}/results" "${EXPECTED_SCENARIO}" "${EXPECTED_COINJOIN_TYPE}" <<'PY'
 import json
@@ -458,3 +461,10 @@ print(
     f"baseline={len(baseline_coinjoins)}, blocksci={summary['blocksci_detected_coinjoins']}"
 )
 PY
+
+# Analyzers exported from local images carry the checked-out liquidity
+# classification; published ones may lag behind.
+LIQUIDITY_CHECKS=()
+[[ -n "${PBS_BLOCKSCI_LOCAL_IMAGE}" ]] && LIQUIDITY_CHECKS+=(--require-blocksci)
+[[ -n "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" ]] && LIQUIDITY_CHECKS+=(--exact-baseline)
+python3 "${SCRIPT_DIR}/support/check_liquidity.py" "${WORK_ROOT}/results" "${LIQUIDITY_CHECKS[@]}"

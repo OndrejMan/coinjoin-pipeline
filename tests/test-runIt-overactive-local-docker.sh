@@ -27,7 +27,12 @@ BLOCKSCI_SOURCE_DIR="${BLOCKSCI_SOURCE_DIR:-${REPO_ROOT}/blocksci}"
 EMULATOR_SOURCE_DIR="${EMULATOR_SOURCE_DIR:-${REPO_ROOT}/coinjoin-emulator}"
 COINJOIN_ANALYSIS_SOURCE_DIR="${COINJOIN_ANALYSIS_SOURCE_DIR:-${REPO_ROOT}/coinjoin-analysis}"
 LOCAL_IMAGES_PREBUILT="${LOCAL_IMAGES_PREBUILT:-0}"
-COMPOSE_PROJECT="cjp-overactive-local-${RANDOM}"
+# Wrappers such as test-runIt-liquidity-local-docker.sh reuse this workflow
+# with another Wasabi scenario and extra liquidity checks.
+E2E_SCENARIO_FILE="${E2E_SCENARIO_FILE:-scenarios/overactive-local.json}"
+E2E_SCENARIO_NAME="${E2E_SCENARIO_NAME:-overactive-local}"
+read -r -a E2E_LIQUIDITY_CHECKS <<<"${E2E_LIQUIDITY_CHECKS:-}"
+COMPOSE_PROJECT="cjp-${E2E_SCENARIO_NAME}-${RANDOM}"
 
 stop_blocksci() {
   docker compose -f "${PROJECT_DIR}/pipeline/compose.yaml" -p "${COMPOSE_PROJECT}" \
@@ -122,7 +127,7 @@ echo "Using BlockSci image ${BLOCKSCI_IMAGE}, emulator image ${COINJOIN_EMULATOR
     COINJOIN_EMULATOR_IMAGE_PREFIX="${COINJOIN_EMULATOR_IMAGE_PREFIX}" \
     COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD}" \
     COINJOIN_COMPOSE_PROJECT="${COMPOSE_PROJECT}" \
-    bash runIt.sh --engine wasabi --scenario scenarios/overactive-local.json \
+    bash runIt.sh --engine wasabi --scenario "${E2E_SCENARIO_FILE}" \
       --min-input-count 15
   ) 2>&1 | tee "${RUN_LOG}"
 ) &
@@ -176,12 +181,12 @@ list_run_dirs >"${AFTER_FILE}"
 
 RUN_DIR="$(LC_ALL=C comm -13 "${BEFORE_FILE}" "${AFTER_FILE}" | tail -n 1)"
 if [[ -z "${RUN_DIR}" ]]; then
-  RUN_DIR="$(find "${LOGS_DIR}" -mindepth 1 -maxdepth 1 -type d -name '*overactive-local*' \
+  RUN_DIR="$(find "${LOGS_DIR}" -mindepth 1 -maxdepth 1 -type d -name "*${E2E_SCENARIO_NAME}*" \
     -exec test -s "{}/coinjoin_emulator_data/scenario.json" \; -print | LC_ALL=C sort | tail -n 1)"
 fi
 
 if [[ -z "${RUN_DIR}" || ! -d "${RUN_DIR}" ]]; then
-  echo "FAIL: no overactive-local run directory was created under ${LOGS_DIR}" >&2
+  echo "FAIL: no ${E2E_SCENARIO_NAME} run directory was created under ${LOGS_DIR}" >&2
   exit 1
 fi
 
@@ -197,21 +202,30 @@ for artifact in \
   fi
 done
 
-python3 - "${RUN_DIR}" <<'PY'
+python3 - "${RUN_DIR}" "${E2E_SCENARIO_NAME}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 run_dir = Path(sys.argv[1])
+expected = sys.argv[2]
 scenario = json.loads((run_dir / "coinjoin_emulator_data" / "scenario.json").read_text(encoding="utf-8"))
 report = json.loads((run_dir / "coinjoinPipeline_data" / "unified_report.json").read_text(encoding="utf-8"))
 
-if scenario.get("name") != "overactive-local":
-    raise SystemExit(f"FAIL: expected scenario name overactive-local, got {scenario.get('name')!r}")
+if scenario.get("name") != expected:
+    raise SystemExit(f"FAIL: expected scenario name {expected}, got {scenario.get('name')!r}")
 
 run = report.get("run") or {}
-if run.get("scenario_name") != "overactive-local":
-    raise SystemExit(f"FAIL: expected report scenario_name overactive-local, got {run.get('scenario_name')!r}")
+if run.get("scenario_name") != expected:
+    raise SystemExit(f"FAIL: expected report scenario_name {expected}, got {run.get('scenario_name')!r}")
 PY
+
+# Local images are built from the checked-out analyzers, which classify every
+# liquidity event as the ground truth does; published images may lag behind.
+LIQUIDITY_CHECKS=("${E2E_LIQUIDITY_CHECKS[@]}")
+if [[ "${IMAGE_MODE}" == "local" ]]; then
+  LIQUIDITY_CHECKS+=(--require-blocksci --exact-baseline)
+fi
+python3 "${SCRIPT_DIR}/support/check_liquidity.py" "${RUN_DIR}/coinjoinPipeline_data" "${LIQUIDITY_CHECKS[@]}"
 
 echo "PASS: real Docker runIt workflow completed and produced artifacts in ${RUN_DIR}."

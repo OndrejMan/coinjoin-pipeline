@@ -300,4 +300,12 @@ if emulator_summary.get("coinjoin_transactions", 0) < 1:
     raise SystemExit("FAIL: expected emulator_data to label at least one JoinMarket transaction")
 PY
 
+# Local images are built from the checked-out analyzers, which classify every
+# liquidity event as the ground truth does; published images may lag behind.
+LIQUIDITY_CHECKS=()
+if [[ "${IMAGE_MODE}" == "local" ]]; then
+  LIQUIDITY_CHECKS=(--require-blocksci --exact-baseline)
+fi
+python3 "${SCRIPT_DIR}/support/check_liquidity.py" "${RUN_DIR}/coinjoinPipeline_data" "${LIQUIDITY_CHECKS[@]}"
+
 echo "PASS: real JoinMarket Docker runIt workflow completed and produced artifacts in ${RUN_DIR}."
