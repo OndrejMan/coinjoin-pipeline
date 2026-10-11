@@ -239,6 +239,12 @@ Extra rules for the S3 chain:
   `coinjoin-analysis_data/coinjoin_tx_info.json` to already exist.
 - `qsub` must be on `PATH` (a MetaCentrum frontend, or the local shims from
   `scripts/pbs-env.sh` in the meta-repo).
+- When `kinit` is on `PATH`, `pbs-from-s3` and the S3 `full-run` first run
+  `kinit -R` and refuse to start if it fails, then renew hourly in the
+  background so `qsub`/`qstat`/`qdel` keep working past the ticket's 10-hour
+  lifetime. This needs a renewable ticket (`kinit -r 7d <login>@META`); the
+  ticket the frontend login script obtains is not renewable. A later renewal
+  failure only warns. Hosts without `kinit` skip this.
 
 ## Cancellation
 
