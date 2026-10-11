@@ -80,6 +80,8 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
             "blocksci.script",
             str(Path(config.blocksci.script).expanduser().resolve()),
         )
+    if config.scenario and Path(config.scenario).expanduser().is_file():
+        config = replace(config, scenario=str(Path(config.scenario).expanduser().resolve()))
     config.validate()
     return config
 

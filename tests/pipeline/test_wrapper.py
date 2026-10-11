@@ -1426,6 +1426,25 @@ class RunDirResolutionTests(unittest.TestCase):
 
 
 class ScenarioPathTests(unittest.TestCase):
+    def test_external_scenario_directory_is_mounted_and_forwarded_to_compose(self):
+        from coinjoin_pipeline.execution.containers import run_script
+        from coinjoin_pipeline.execution import settings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            catalogue = Path(tmp) / "coinjoin-scenarios"
+            catalogue.mkdir()
+            scenario = catalogue / "fin-cliff.json"
+            scenario.write_text("{}", encoding="utf-8")
+            config = Namespace(scenario=str(scenario), dry_run=True)
+            with mock.patch.dict(os.environ, {}, clear=True):
+                env = compose_env(config)
+                self.assertEqual(env["SCENARIOS_DIR"], str(catalogue))
+                self.assertEqual(env["SCENARIO_FALLBACK_PATH"], "/mnt/scenarios/fin-cliff.json")
+                with mock.patch("coinjoin_pipeline.execution.containers.run_command") as run:
+                    run_script(settings.EMULATE_SCRIPT, "--scenario", str(scenario), config=config)
+                self.assertEqual(run.call_args.args[0][-2:], ["--scenario", "/app/scenarios/fin-cliff.json"])
+                self.assertEqual(run.call_args.kwargs["env"]["SCENARIOS_DIR"], str(catalogue))
+
     def test_scenario_outside_scenarios_dir_is_a_hard_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

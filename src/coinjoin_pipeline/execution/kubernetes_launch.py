@@ -61,7 +61,8 @@ def run_kubernetes_emulation(
     if copy_to_host:
         local_btc_data_dir.mkdir(parents=True, exist_ok=True)
     if scenario:
-        container_scenario = scenarios.container_scenario_path(scenario, scenarios_dir, engine)
+        source = scenarios.scenario_source_path(scenario, scenarios_dir, engine)
+        container_scenario = scenarios.container_scenario_path(str(source), scenarios_dir, engine)
     else:
         container_scenario = scenarios.default_container_scenario(engine)
     kubeconfig_path = resolve_kubeconfig(kubernetes.kubeconfig)

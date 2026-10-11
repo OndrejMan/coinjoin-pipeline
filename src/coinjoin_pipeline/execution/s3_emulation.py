@@ -6,11 +6,7 @@ import os
 
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution import settings
-from coinjoin_pipeline.execution.scenarios import (
-    container_scenario_path,
-    default_container_scenario,
-    host_scenario_path,
-)
+from coinjoin_pipeline.execution.scenarios import scenario_source_path
 from coinjoin_pipeline.execution.kubernetes import (
     apply_s3_emulation_resources,
     render_s3_emulation_resources,
@@ -22,12 +18,7 @@ from coinjoin_pipeline.paths import SCENARIOS_ROOT
 
 def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
     """Render and submit a Kubernetes job that uploads its artifacts to S3."""
-    scenario_container = (
-        container_scenario_path(args.scenario, SCENARIOS_ROOT, args.engine)
-        if args.scenario
-        else default_container_scenario(args.engine)
-    )
-    scenario_path = host_scenario_path(scenario_container, SCENARIOS_ROOT)
+    scenario_path = scenario_source_path(args.scenario, SCENARIOS_ROOT, args.engine)
     if not scenario_path.is_file():
         raise RuntimeError(f"Scenario file not found: {scenario_path}")
     kubeconfig_path = resolve_kubeconfig(args.kubernetes.kubeconfig)

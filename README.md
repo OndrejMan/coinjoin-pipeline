@@ -42,6 +42,21 @@ coinjoin-pipeline watch --run-id "$RUN_ID" --pbs-only \
   --pbs-job blocksci=12346.server
 ```
 
+### Experiment scenarios
+
+The private experiment catalogue is maintained in `OndrejMan/coinjoin-scenarios`.
+Clone it beside this checkout and pass its JSON files by path, for example:
+
+```bash
+cjp full-run --engine wasabi --scenario ../coinjoin-scenarios/fin-cliff.json --min-input-count 10
+```
+
+The YAML `scenario` field accepts the same path. Relative paths are resolved from
+the directory where the CLI is invoked. Local Docker/Podman and Kubernetes
+launchers mount the selected file's directory read-only; Kubernetes → S3 embeds
+its contents in the Job's ConfigMap. No copy into the emulator checkout is needed.
+The pipeline's own `scenarios/` remains available for defaults and test fixtures.
+
 ### Update an existing checkout
 
 The `pipx` installation above is editable, so the installed CLI uses the

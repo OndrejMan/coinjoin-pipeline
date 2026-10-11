@@ -13,16 +13,27 @@ from coinjoin_pipeline.paths import SCENARIOS_ROOT as SCENARIO_FILES
 SCENARIOS_ROOT = Path(os.environ.get("SCENARIOS_ROOT", SCENARIO_FILES)).expanduser()
 
 
-def resolve_scenario(value: str) -> Path:
+def scenario_source_path(value: str | None, scenarios_dir: Path, engine: str = settings.DEFAULT_ENGINE) -> Path:
+    """Resolve an explicit host file or a name inside the default catalogue."""
+    if not value:
+        return host_scenario_path(default_container_scenario(engine), scenarios_dir)
     candidate = Path(value).expanduser()
     if candidate.is_file():
         return candidate.resolve()
-    named = SCENARIOS_ROOT / value
+    if candidate.is_absolute():
+        return candidate
+    parts = candidate.parts
+    named = scenarios_dir.joinpath(*(parts[1:] if parts and parts[0] == "scenarios" else parts))
     if named.suffix != ".json":
         named = named.with_suffix(".json")
+    return named.resolve()
+
+
+def resolve_scenario(value: str) -> Path:
+    named = scenario_source_path(value, SCENARIOS_ROOT)
     if not named.is_file():
         raise ValueError(f"Scenario not found: {value}")
-    return named.resolve()
+    return named
 
 
 def load_scenario(path: Path) -> dict[str, object]:

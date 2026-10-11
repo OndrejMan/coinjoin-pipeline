@@ -7,7 +7,22 @@ import pytest
 
 from coinjoin_pipeline.arguments import load_configuration
 from coinjoin_pipeline.cli import main
+from coinjoin_pipeline.context import resolve_configuration
 from coinjoin_pipeline.runs import run_id_for
+
+
+def test_relative_external_scenario_survives_launcher_working_directory(tmp_path: Path, monkeypatch) -> None:
+    catalogue = tmp_path / "coinjoin-scenarios"
+    catalogue.mkdir()
+    scenario = catalogue / "fin-cliff.json"
+    scenario.write_text('{"name": "fin-cliff"}')
+    checkout = tmp_path / "coinjoin-pipeline"
+    checkout.mkdir()
+    monkeypatch.chdir(checkout)
+    config = resolve_configuration(
+        load_configuration(["emulate", "--scenario", "../coinjoin-scenarios/fin-cliff.json"])
+    )
+    assert config.scenario == str(scenario)
 
 
 @pytest.mark.parametrize(

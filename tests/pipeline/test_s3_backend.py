@@ -659,10 +659,10 @@ def test_s3_emulation_forwards_timeout_to_uploader_manifest(
     tmp_path: Path,
 ) -> None:
     scenario = tmp_path / "scenario.json"
-    scenario.write_text("{}", encoding="utf-8")
+    scenario.write_text('{"name": "private-experiment"}', encoding="utf-8")
     args = configuration(
         engine="wasabi",
-        scenario="scenario.json",
+        scenario=str(scenario),
         run_timezone="UTC",
         kubeconfig=None,
         dry_run=True,
@@ -678,14 +678,6 @@ def test_s3_emulation_forwards_timeout_to_uploader_manifest(
     )
     with (
         mock.patch(
-            "coinjoin_pipeline.execution.s3_emulation.container_scenario_path",
-            return_value="/config/scenario.json",
-        ),
-        mock.patch(
-            "coinjoin_pipeline.execution.s3_emulation.host_scenario_path",
-            return_value=scenario,
-        ),
-        mock.patch(
             "coinjoin_pipeline.execution.s3_emulation.resolve_uploader_image",
             return_value="uploader:test",
         ),
@@ -697,6 +689,7 @@ def test_s3_emulation_forwards_timeout_to_uploader_manifest(
         run_s3_kubernetes_emulation(args)
 
     assert render.call_args.kwargs["emulation_timeout_seconds"] == 123
+    assert render.call_args.kwargs["scenario_json"] == scenario.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(

@@ -29,7 +29,7 @@ from coinjoin_pipeline.execution.pbs_settings import unified_report_image_refere
 from coinjoin_pipeline.execution.pipeline_logging import (
     captured_pipeline_stage,
 )
-from coinjoin_pipeline.execution.scenarios import container_scenario_path
+from coinjoin_pipeline.execution.scenarios import container_scenario_path, scenario_source_path
 from coinjoin_pipeline.execution.run_context import (
     detect_active_run as detect_created_run,
 )
@@ -206,6 +206,12 @@ def compose_env(
     env.setdefault("COINJOIN_ANALYSIS_IMAGE", settings.DEFAULT_COINJOIN_ANALYSIS_IMAGE)
     env.setdefault("COINJOIN_EMULATOR_IMAGE", settings.DEFAULT_EMULATOR_IMAGE)
     scenario = config.scenario if include_scenario else None
+    if scenario:
+        source = scenario_source_path(scenario, scenarios_dir, config.engine)
+        if not source.is_relative_to(scenarios_dir):
+            scenarios_dir = source.parent
+            env["SCENARIOS_DIR"] = str(scenarios_dir)
+        scenario = str(source)
     env["SCENARIO_FALLBACK_PATH"] = container_scenario_path(scenario, scenarios_dir, config.engine)
     add_image_provenance_env(env)
     if active_run_id:
@@ -323,6 +329,9 @@ def run_script(
     env = compose_env(config, active_run_id, include_scenario=include_scenario, create_directories=True)
     if blocksci_script:
         env["BLOCKSCI_SCRIPT"] = blocksci_script
+    if script == settings.EMULATE_SCRIPT:
+        relative_scenario = env["SCENARIO_FALLBACK_PATH"].removeprefix(settings.CONTAINER_SCENARIOS_DIR + "/")
+        args = ("--scenario", "/app/scenarios/" + relative_scenario)
     try:
         run_command(["bash", str(script), *args], cwd=settings.ROOT_DIR, env=env)
     except subprocess.CalledProcessError as exc:
