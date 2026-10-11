@@ -146,6 +146,42 @@ VARIANTS = {
     "fin-double": [mixing_wallet(coins(30) + coins(30, 12), 2, [leave_all(9), leave_all(20)], 20)],
 }
 
+# Display-only catalogue metadata. Keep it next to the generated behaviour so a
+# regeneration cannot inherit the background scenario's description.
+DESCRIPTIONS = {
+    "liquidity-large-wallet": "4.95 BTC · one large entry",
+    "liquidity-small-wallet": "0.495 BTC · control scenario",
+    "liquidity-two-large-wallets": "Two overlapping entries",
+    "fin-cliff": "Holds, then leaves at once",
+    "fin-long-tail": "Leaves in eighths over 14 rounds",
+    "fin-ramp": "Slow inflow, leaves at once",
+    "fin-spike": "5 wallets, leave within 3 coinjoins",
+    "fin-split-whale": "4.95 BTC split over 5 wallets",
+    "fin-plateau": "Stop without spending: a step, no descent",
+    "fin-sequential": "Two separate fins",
+    "fin-nested": "A smaller fin inside a large one",
+    "fin-medium-wallet": "2.475 BTC, between small and large",
+    "fin-noisy-background": "Descent disturbed by 4 × 1 BTC",
+    "fin-double": "One wallet, two fins",
+}
+
+CATEGORIES = {
+    "liquidity-large-wallet": "liquidity",
+    "liquidity-small-wallet": "liquidity",
+    "liquidity-two-large-wallets": "liquidity",
+    "fin-cliff": "fins",
+    "fin-long-tail": "fins",
+    "fin-ramp": "fins",
+    "fin-spike": "fins",
+    "fin-split-whale": "fins",
+    "fin-plateau": "fins",
+    "fin-sequential": "fins",
+    "fin-nested": "fins",
+    "fin-medium-wallet": "fins",
+    "fin-noisy-background": "fins",
+    "fin-double": "fins",
+}
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -153,9 +189,19 @@ def main() -> None:
     parser.add_argument("output_dir", type=Path)
     args = parser.parse_args()
     base = json.loads(args.base.read_text(encoding="utf-8"))
+    if not (VARIANTS.keys() == DESCRIPTIONS.keys() == CATEGORIES.keys()):
+        raise RuntimeError("Every generated liquidity scenario needs a description and category")
     for name, extra in VARIANTS.items():
         scenario = {key: value for key, value in base.items() if key != "wallets"}
-        scenario.update({"name": name, "rounds": ROUNDS, "wallets": background(base) + extra})
+        scenario.update(
+            {
+                "name": name,
+                "description": DESCRIPTIONS[name],
+                "category": CATEGORIES[name],
+                "rounds": ROUNDS,
+                "wallets": background(base) + extra,
+            }
+        )
         path = args.output_dir / f"{name}.json"
         path.write_text(json.dumps(scenario, indent=2) + "\n", encoding="utf-8")
         print(f"wrote {path}")

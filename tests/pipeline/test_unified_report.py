@@ -279,6 +279,8 @@ def blocksci_fixture(txid="txA"):
 def scenario_fixture():
     return {
         "name": "default",
+        "description": "Display-only scenario metadata",
+        "category": "liquidity",
         "rounds": 1,
         "blocks": 0,
         "default_version": "2.6.0",
@@ -2561,6 +2563,8 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(scenario["source"], str(scenario_path))
         self.assertEqual(scenario["sha256"], sha256_json(scenario_fixture()))
         self.assertEqual(scenario["name"], "default")
+        self.assertNotIn("description", scenario)
+        self.assertNotIn("category", scenario)
         self.assertEqual(scenario["rounds"], 1)
         self.assertEqual(scenario["blocks"], 0)
         self.assertEqual(scenario["default_version"], "2.6.0")
