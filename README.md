@@ -42,6 +42,29 @@ coinjoin-pipeline watch --run-id "$RUN_ID" --pbs-only \
   --pbs-job blocksci=12346.server
 ```
 
+### Update an existing checkout
+
+The `pipx` installation above is editable, so the installed CLI uses the
+current files from this checkout. To update the pipeline, fetch the new source
+and confirm the installed command:
+
+```bash
+git pull --ff-only
+cjp version
+```
+
+If `pyproject.toml` changes, recreate the `pipx` environment to install the
+updated dependencies:
+
+```bash
+pipx reinstall coinjoin-pipeline
+cjp doctor
+```
+
+If `git pull --ff-only` refuses to run because the checkout has local commits
+or modifications, resolve those changes before updating; do not force the
+pull.
+
 By default the pipeline leaves `--min-input-count` unset, so BlockSci applies
 its height-aware production threshold. Pass `--min-input-count N` for an
 intentional positive override. Values below 1 are rejected. Small Wasabi
