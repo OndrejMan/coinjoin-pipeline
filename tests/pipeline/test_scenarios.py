@@ -101,7 +101,9 @@ class ScenarioValidationTests(unittest.TestCase):
     def test_liquidity_scenarios_are_valid_and_packaged(self):
         scenarios = Path(__file__).resolve().parents[2] / "scenarios"
         packaged = Path(__file__).resolve().parents[2] / "src" / "coinjoin_pipeline" / "resources" / "scenarios"
-        for name in ("liquidity-large-wallet", "liquidity-small-wallet", "liquidity-two-large-wallets"):
+        fins = sorted(path.stem for path in scenarios.glob("fin-*.json"))
+        self.assertEqual(len(fins), 11)
+        for name in ("liquidity-large-wallet", "liquidity-small-wallet", "liquidity-two-large-wallets", *fins):
             with self.subTest(name=name):
                 path = scenarios / f"{name}.json"
                 self.assertEqual(path.read_bytes(), (packaged / f"{name}.json").read_bytes())

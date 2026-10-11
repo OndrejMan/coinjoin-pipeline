@@ -17,6 +17,8 @@ from pathlib import Path
 
 ROUNDS = 24
 # The coordinator's MaxSuggestedAmountBase is 0.1 BTC; smaller coins join regular rounds.
+# A wallet registers at most ten inputs a round, its own remixes included, so 50 coins
+# enter over several rounds; only coins split across wallets enter at once.
 LARGE_COIN_SATS = 9_900_000
 SMALL_COIN_SATS = 990_000
 LARGE_WALLET_COINS = 50
@@ -37,22 +39,58 @@ def background(base: dict[str, object]) -> list[dict[str, object]]:
     return wallets
 
 
-def large_wallet(coin_sats: int, enter: int, spend_rounds: tuple[int, ...], stop: int) -> dict[str, object]:
-    """A wallet entering at round ``enter``, spending a fifth at each round, and the rest at ``stop``."""
-    spends: list[dict[str, object]] = [
-        {"value": LARGE_WALLET_COINS * coin_sats // 5, "delay_rounds": rounds} for rounds in spend_rounds
-    ]
-    spends.append({"all": True, "delay_rounds": stop})
+def mixing_wallet(
+    funds: list[object], enter: int, spends: list[dict[str, object]] | None, stop: int | None
+) -> dict[str, object]:
+    """A wallet mixing from round ``enter`` to ``stop`` that spends its mixed coins as ``spends`` say."""
+    wasabi: dict[str, object] = {"anon_score_target": 10, "redcoin_isolation": None, "skip_rounds": None}
+    if spends:
+        wasabi["postmix_spends"] = spends
     return {
-        "funds": [coin_sats] * LARGE_WALLET_COINS,
+        "funds": funds,
         "delay_blocks": None,
         "delay_rounds": enter,
         "stop_blocks": None,
         "stop_rounds": stop,
         "version": None,
-        "wasabi": {"anon_score_target": 10, "redcoin_isolation": None, "skip_rounds": None, "postmix_spends": spends},
+        "wasabi": wasabi,
         "joinmarket": None,
     }
+
+
+def coins(count: int, arrive: int | None = None, coin_sats: int = LARGE_COIN_SATS) -> list[object]:
+    """``count`` coins funded before the run, or arriving at round ``arrive``."""
+    return [coin_sats if arrive is None else {"value": coin_sats, "delay_rounds": arrive} for _ in range(count)]
+
+
+def parts(total_sats: int, rounds: tuple[int, ...], share: int) -> list[dict[str, object]]:
+    """Spend ``total_sats // share`` at each of ``rounds``; Wasabi pays whole coins, so slightly more leaves."""
+    return [{"value": total_sats // share, "delay_rounds": round_} for round_ in rounds]
+
+
+def leave_all(round_: int) -> dict[str, object]:
+    """Spend every confirmed mixed coin; coins that have not mixed yet stay in the wallet."""
+    return {"all": True, "delay_rounds": round_}
+
+
+def large_wallet(
+    coin_sats: int, enter: int, spend_rounds: tuple[int, ...], stop: int, count: int = LARGE_WALLET_COINS
+) -> dict[str, object]:
+    """A wallet entering at round ``enter``, spending a fifth at each round, and the rest at ``stop``."""
+    spends = parts(count * coin_sats, spend_rounds, 5) + [leave_all(stop)]
+    return mixing_wallet(coins(count, coin_sats=coin_sats), enter, spends, stop)
+
+
+def split_wallets(wallets: int, enter: int, spend_rounds: tuple[int, ...], stop: int) -> list[dict[str, object]]:
+    """The large wallet's 50 coins spread over ``wallets`` wallets that act in concert."""
+    return [
+        large_wallet(LARGE_COIN_SATS, enter, spend_rounds, stop, LARGE_WALLET_COINS // wallets) for _ in range(wallets)
+    ]
+
+
+def churn_wallet(enter: int, leave: int) -> dict[str, object]:
+    """About 1 BTC that enters, mixes briefly and leaves: background noise around a fin."""
+    return mixing_wallet(coins(10), enter, [leave_all(leave)], leave)
 
 
 VARIANTS = {
@@ -65,6 +103,47 @@ VARIANTS = {
         large_wallet(LARGE_COIN_SATS, 4, (10, 12), 14),
         large_wallet(LARGE_COIN_SATS, 9, (16, 18), 20),
     ],
+    # Fin shapes. Each keeps the background above and changes one thing about the large wallet.
+    # Rectangle: climbs over the first rounds, holds, and leaves in a single cliff at round 16.
+    "fin-cliff": [mixing_wallet(coins(50), 4, [leave_all(16)], 16)],
+    # Long tail: an eighth leaves every second round, so the descent spans 14 rounds.
+    "fin-long-tail": [
+        mixing_wallet(coins(50), 2, parts(50 * LARGE_COIN_SATS, (8, 10, 12, 14, 16, 18, 20), 8) + [leave_all(22)], 22)
+    ],
+    # Reverse fin: ten coins arrive every second round, then everything leaves at once.
+    "fin-ramp": [
+        mixing_wallet([coin for arrive in (2, 4, 6, 8, 10) for coin in coins(10, arrive)], 2, [leave_all(16)], 16)
+    ],
+    # Spike: five coordinated wallets enter together and leave within the three-coinjoin window.
+    "fin-spike": split_wallets(5, 6, (), 9),
+    # The large-wallet schedule split over five wallets: the same fin, but no single wallet
+    # reaches the report's 50 % share of the pool.
+    "fin-split-whale": split_wallets(5, 6, (12, 14, 16), 18),
+    # No fin: the wallet stops mixing at round 12 but never spends, so its coins stay in the pool.
+    "fin-plateau": [mixing_wallet(coins(50), 4, None, 12)],
+    # Two separate fins from two 2.97 BTC wallets.
+    "fin-sequential": [
+        mixing_wallet(coins(30), 1, parts(30 * LARGE_COIN_SATS, (6,), 2) + [leave_all(9)], 9),
+        mixing_wallet(coins(30), 12, parts(30 * LARGE_COIN_SATS, (17,), 2) + [leave_all(20)], 20),
+    ],
+    # A 1.98 BTC fin inside the descent-free middle of a 4.95 BTC fin.
+    "fin-nested": [
+        large_wallet(LARGE_COIN_SATS, 2, (14, 16, 18), 20),
+        mixing_wallet(coins(20), 8, [leave_all(13)], 13),
+    ],
+    # Between the small and the large wallet: 2.475 BTC, about half of the background.
+    "fin-medium-wallet": [large_wallet(LARGE_COIN_SATS, 6, (12, 14, 16), 18, 25)],
+    # The large-wallet fin with four ~1 BTC wallets entering and leaving during its descent,
+    # so outputs leaving in the descending window are no longer mostly the large wallet's.
+    "fin-noisy-background": [
+        large_wallet(LARGE_COIN_SATS, 6, (12, 14, 16), 18),
+        churn_wallet(8, 12),
+        churn_wallet(11, 15),
+        churn_wallet(14, 18),
+        churn_wallet(17, 21),
+    ],
+    # One wallet, two fins: it leaves at round 9, is funded again at round 12 and leaves at 20.
+    "fin-double": [mixing_wallet(coins(30) + coins(30, 12), 2, [leave_all(9), leave_all(20)], 20)],
 }
 
 
