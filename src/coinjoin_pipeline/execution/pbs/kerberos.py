@@ -5,11 +5,13 @@ Kerberos ticket, which expires ten hours after ``kinit``. An S3 full run first
 waits for the Kubernetes emulation and then for every PBS stage, so it easily
 outlives the ticket. Renewal needs a renewable ticket (``kinit -r 7d
 <login>@META``); the one the frontend login script obtains is not renewable.
-Hosts without ``kinit`` (local PBS container, CI, k3d) skip all of this.
+Hosts without ``kinit`` (CI, k3d) and the local PBS container, whose client
+shims run ``qsub`` inside the container without Kerberos, skip all of this.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -21,6 +23,11 @@ from .validation import PBSError
 
 KERBEROS_RENEW_INTERVAL_SECONDS = 3600
 KINIT_TIMEOUT_SECONDS = 60
+
+
+def uses_local_pbs_container() -> bool:
+    """Whether qsub/qstat/qdel are the local PBS container shims (``pbs-env.sh`` sets the name)."""
+    return bool(os.environ.get("PBS_CONTAINER_NAME"))
 
 
 def renew_kerberos_ticket() -> str | None:
@@ -63,7 +70,7 @@ def _renew_periodically(stop: threading.Event, interval_seconds: float) -> None:
 @contextmanager
 def kerberos_ticket_renewal(interval_seconds: float = KERBEROS_RENEW_INTERVAL_SECONDS) -> Iterator[None]:
     """Fail fast without a renewable ticket, then keep renewing it in the background."""
-    if shutil.which("kinit") is None:
+    if shutil.which("kinit") is None or uses_local_pbs_container():
         yield
         return
     error = renew_kerberos_ticket()

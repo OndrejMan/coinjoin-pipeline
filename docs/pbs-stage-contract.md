@@ -244,7 +244,9 @@ Extra rules for the S3 chain:
   background so `qsub`/`qstat`/`qdel` keep working past the ticket's 10-hour
   lifetime. This needs a renewable ticket (`kinit -r 7d <login>@META`); the
   ticket the frontend login script obtains is not renewable. A later renewal
-  failure only warns. Hosts without `kinit` skip this.
+  failure only warns. Hosts without `kinit` skip this, and so does the local
+  PBS container: `pbs-env.sh` exports `PBS_CONTAINER_NAME`, and its `qsub`
+  shim never authenticates.
 
 ## Cancellation
 

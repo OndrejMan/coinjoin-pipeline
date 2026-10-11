@@ -1,4 +1,5 @@
 import io
+import os
 import subprocess
 import threading
 import unittest
@@ -39,8 +40,22 @@ class RenewKerberosTicketTest(unittest.TestCase):
 
 
 class KerberosTicketRenewalTest(unittest.TestCase):
+    def setUp(self):
+        environment = mock.patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop("PBS_CONTAINER_NAME", None)
+
     def test_hosts_without_kinit_skip_renewal(self):
         with mock.patch(WHICH, return_value=None), mock.patch(RUN) as run:
+            with kerberos_ticket_renewal():
+                pass
+        run.assert_not_called()
+
+    def test_local_pbs_container_skips_renewal_even_with_kinit(self):
+        """The local container's qsub never authenticates, so a missing MetaCentrum ticket must not stop it."""
+        os.environ["PBS_CONTAINER_NAME"] = "pbs-s3-itest-1"
+        with mock.patch(WHICH, return_value="/usr/bin/kinit"), mock.patch(RUN) as run:
             with kerberos_ticket_renewal():
                 pass
         run.assert_not_called()
