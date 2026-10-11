@@ -32,7 +32,9 @@ LOCAL_IMAGES_PREBUILT="${LOCAL_IMAGES_PREBUILT:-0}"
 E2E_SCENARIO_FILE="${E2E_SCENARIO_FILE:-scenarios/overactive-local.json}"
 E2E_SCENARIO_NAME="${E2E_SCENARIO_NAME:-overactive-local}"
 read -r -a E2E_LIQUIDITY_CHECKS <<<"${E2E_LIQUIDITY_CHECKS:-}"
-COMPOSE_PROJECT="cjp-${E2E_SCENARIO_NAME}-${RANDOM}"
+# delete.sh reaps every cjp-*-<pid> project whose pid is gone, so the suffix
+# must be this script's pid, alive for the whole run.
+COMPOSE_PROJECT="cjp-${E2E_SCENARIO_NAME}-$$"
 
 stop_blocksci() {
   docker compose -f "${PROJECT_DIR}/pipeline/compose.yaml" -p "${COMPOSE_PROJECT}" \

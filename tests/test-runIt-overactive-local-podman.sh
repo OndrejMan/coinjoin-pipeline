@@ -19,7 +19,9 @@ DOCKER_LOG="${TMP_DIR}/docker.called"
 RUN_PID=""
 RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS:-14400}"
 IMAGE_MODE="${1:-upstream}"
-COMPOSE_PROJECT="cjp-overactive-local-podman-${RANDOM}"
+# delete.sh reaps every cjp-*-<pid> project whose pid is gone, so the suffix
+# must be this script's pid, alive for the whole run.
+COMPOSE_PROJECT="cjp-overactive-local-podman-$$"
 
 if [[ $# -gt 1 || ( "${IMAGE_MODE}" != "upstream" && "${IMAGE_MODE}" != "local" ) ]]; then
   echo "Usage: $0 [local]" >&2
