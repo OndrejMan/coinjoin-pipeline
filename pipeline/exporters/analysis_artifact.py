@@ -53,6 +53,9 @@ def load_analysis(
     clusters = artifact.get("predicted_address_clusters")
     if clusters is not None and not isinstance(clusters, dict):
         raise ValueError("BlockSci analysis artifact has invalid predicted_address_clusters")
+    mix_events = artifact.get("mix_events")
+    if mix_events is not None and not isinstance(mix_events, dict):
+        raise ValueError("BlockSci analysis artifact has invalid mix_events")
     provenance = artifact.get("image_provenance")
     if provenance is not None:
         if not isinstance(provenance, dict):

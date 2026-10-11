@@ -201,7 +201,15 @@ def assemble_report(args: argparse.Namespace) -> int:
         "filtered_txids": filtered_txids,
         "filtered_count": len(filtered_txids),
     }
-    report["liquidity_evaluation"], liquidity_dataset = build_liquidity(run_dir, emulator_data, coinjoin_analysis_data)
+    report["liquidity_evaluation"], liquidity_dataset = build_liquidity(
+        run_dir,
+        emulator_data,
+        coinjoin_analysis_data,
+        analysis.get("mix_events"),
+        analysis.get("mix_events_error")
+        if "mix_events" in analysis
+        else "The BlockSci analysis artifact predates liquidity event classification; rerun the analysis.",
+    )
     if liquidity_dataset is not None:
         save_liquidity_dataset(output_dir, liquidity_dataset)
     save_json(output_path, report)

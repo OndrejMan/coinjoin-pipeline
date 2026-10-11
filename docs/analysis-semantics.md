@@ -227,7 +227,7 @@ them with a rebuilt emulator image if ground-truth metrics are needed.
 `liquidity_evaluation` in `unified_report.json` (schema 1.9) follows the
 transaction-centric pool liquidity of Svenda et al., PETS 2026, section 4.3.2.
 `pipeline/exporters/liquidity.py` classifies every coinjoin input and output
-twice:
+three times:
 
 - Ground truth: the producer coinjoin labels mark the mix boundary and the
   exported blocks give each output's spender. An input from a coinjoin is
@@ -237,8 +237,16 @@ twice:
   clustering evaluation.
 - Observed: the `mix_event_type` coinjoin-analysis wrote into
   `coinjoin_tx_info.json`.
+- BlockSci (`liquidity_evaluation.blocksci`): the analysis stage passes the
+  CoinJoins BlockSci detected to `Blockchain.classify_coinjoin_mix_events` and
+  stores the result as `mix_events` in `blocksci_analysis.json`. The detected
+  set is BlockSci's mix, so a missed CoinJoin leaves its inputs and outputs
+  `missing` (`unclassified_coinjoins`) and its remixes look like leaves, while a
+  false positive (`extra_coinjoins`) turns the inputs it funds into remixes. An
+  older BlockSci image or analysis artifact makes the subsection
+  `available: false` with a reason.
 
-Both give the interim pool liquidity (inflow minus outflow, an outflow charged
+Each gives the interim pool liquidity (inflow minus outflow, an outflow charged
 to the coinjoin that created the output), its variant charging only outputs that
 leave within `WINDOW_COINJOINS`, the outputs unmoved for at least that window and
 the actively remixed liquidity. Mainnet analysis uses a one-month window; an

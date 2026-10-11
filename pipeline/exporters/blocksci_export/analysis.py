@@ -20,6 +20,7 @@ from exporters.blocksci_export.detector import (
     BLOCKSCI_IMPORT_ERROR,
     blocksci,
     export_blocksci_cluster_assignments_for_addresses,
+    export_blocksci_mix_events,
     export_blocksci_records,
 )
 from exporters.common import (
@@ -112,6 +113,11 @@ def write_analysis(args: argparse.Namespace) -> Path:
         if not getattr(args, "skip_clustering", False)
         else (None, "Clustering was explicitly skipped during analysis.")
     )
+    mix_events, mix_events_error = (
+        export_blocksci_mix_events(config_path, records)
+        if getattr(args, "mode", "emulator") == "emulator"
+        else (None, "Liquidity events are classified only for emulator runs.")
+    )
     artifact: BlockSciAnalysisArtifact = {
         "schema_version": SCHEMA_VERSION,
         "mode": getattr(args, "mode", "emulator"),
@@ -133,6 +139,8 @@ def write_analysis(args: argparse.Namespace) -> Path:
         "integration_diagnostics": diagnostics,
         "predicted_address_clusters": clusters,
         "cluster_export_error": cluster_error,
+        "mix_events": mix_events,
+        "mix_events_error": mix_events_error,
     }
     output_dir = blocksci_analysis_dir(run_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

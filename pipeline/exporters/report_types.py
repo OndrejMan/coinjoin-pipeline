@@ -179,3 +179,5 @@ class BlockSciAnalysisArtifact(TypedDict):
     image_provenance: JsonObject
     predicted_address_clusters: dict[str, str] | None
     cluster_export_error: str | None
+    mix_events: dict[str, dict[str, list[str]]] | None
+    mix_events_error: str | None

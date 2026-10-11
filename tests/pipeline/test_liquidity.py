@@ -121,8 +121,19 @@ def fixture_run_dir(tmp_path):
     return run_dir
 
 
-def build(run_dir):
-    return build_liquidity(run_dir, emulator_data(), coinjoin_analysis_data())
+def blocksci_mix_events():
+    """BlockSci missed CJ3, so the two CJ2 outputs it remixed look unspent by the mix."""
+    return {
+        CJ1: {
+            "inputs": ["MIX_ENTER"] * 3,
+            "outputs": ["MIX_REMIX", "MIX_LEAVE", "MIX_REMIX", "MIX_STAY", "MIX_STAY", "MIX_STAY"],
+        },
+        CJ2: {"inputs": ["MIX_REMIX", "MIX_REMIX", "MIX_ENTER"], "outputs": ["MIX_LEAVE", "MIX_LEAVE", "MIX_LEAVE"]},
+    }
+
+
+def build(run_dir, mix_events=None, error=None):
+    return build_liquidity(run_dir, emulator_data(), coinjoin_analysis_data(), mix_events, error)
 
 
 def events(dataset, txid, side):
@@ -228,10 +239,35 @@ def test_dataset_is_written_as_json_and_one_csv_row_per_event(run_dir, tmp_path)
         "value_sats": "490",
         "event": "MIX_LEAVE",
         "observed_event": "MIX_STAY",
+        "blocksci_event": "",
         "spent_by": P1,
         "spend_distance_coinjoins": "2",
         "is_standard_denom": "False",
     }
+
+
+def test_blocksci_classification_is_compared_over_its_detected_coinjoins(run_dir):
+    section, dataset = build(run_dir, blocksci_mix_events())
+    blocksci = section["blocksci"]
+
+    assert (blocksci["unclassified_coinjoins"], blocksci["extra_coinjoins"]) == (1, 0)
+    agreement = blocksci["classification_agreement"]
+    assert (agreement["classified"], agreement["agreeing"]) == (19, 13)
+    assert agreement["confusion"]["outputs:MIX_REMIX->MIX_LEAVE"] == 2
+    assert agreement["confusion"]["inputs:MIX_REMIX->missing"] == 2
+    assert blocksci["left_sats"] == 1133
+    assert dataset["pool"]["blocksci"]["interim"] == [910, 367, 367]
+    assert dataset["coinjoins"][1]["outputs"][1]["blocksci_event"] == "MIX_LEAVE"
+    assert dataset["coinjoins"][2]["inputs"][0]["blocksci_event"] is None
+
+
+def test_blocksci_classification_reports_why_it_is_missing(run_dir):
+    section, dataset = build(run_dir, None, "BlockSci detected no CoinJoins to classify.")
+
+    assert section["blocksci"] == {"available": False, "reason": "BlockSci detected no CoinJoins to classify."}
+    assert dataset["pool"]["blocksci"] is None
+    markdown = "\n".join(render_liquidity_evaluation({"liquidity_evaluation": section}))
+    assert "BlockSci liquidity classification unavailable: BlockSci detected no CoinJoins" in markdown
 
 
 @pytest.mark.parametrize(
@@ -259,3 +295,13 @@ def test_markdown_lists_disagreements_and_the_large_wallet(run_dir):
     assert "| outputs:MIX_LEAVE->MIX_STAY | 2 |" in markdown
     assert "| wallet-000 | 0.56044 | 0 | 0 | 1 | [0, 1] | 1 | 1.075127 |" in markdown
     assert "Scheduled postmix spends: 2 (not_due 1, sent 1); 1 confirmed" in markdown
+
+
+def test_markdown_adds_blocksci_next_to_coinjoin_analysis(run_dir):
+    section, _ = build(run_dir, blocksci_mix_events())
+
+    markdown = "\n".join(render_liquidity_evaluation({"liquidity_evaluation": section}))
+
+    assert "| metric | ground truth | coinjoin-analysis | BlockSci |" in markdown
+    assert "### BlockSci Classification Disagreements" in markdown
+    assert "| outputs:MIX_REMIX->MIX_LEAVE | 2 |" in markdown

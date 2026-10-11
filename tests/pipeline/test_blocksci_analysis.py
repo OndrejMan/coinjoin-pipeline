@@ -129,6 +129,10 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
             return_value=({"bcrt1-address": "7"}, None),
         ) as export_cluster_assignments,
         mock.patch(
+            "exporters.blocksci_export.analysis.export_blocksci_mix_events",
+            return_value=({"tx": {"inputs": ["MIX_ENTER"], "outputs": ["MIX_STAY"]}}, None),
+        ) as export_mix_events,
+        mock.patch(
             "exporters.blocksci_export.analysis.load_first_wasabi2_block",
             return_value=850237,
         ),
@@ -140,6 +144,9 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
     assert artifact["predicted_address_clusters"] == {"bcrt1-address": "7"}
     assert artifact["integration_diagnostics"] == {"status": "ok"}
     assert list(export_cluster_assignments.call_args.args[2]) == ["tx"]
+    assert artifact["mix_events"] == {"tx": {"inputs": ["MIX_ENTER"], "outputs": ["MIX_STAY"]}}
+    assert artifact["mix_events_error"] is None
+    assert list(export_mix_events.call_args.args[1]) == ["tx"]
 
 
 def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:

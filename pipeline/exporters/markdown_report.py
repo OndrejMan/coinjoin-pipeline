@@ -367,11 +367,19 @@ def render_liquidity_evaluation(report: JsonObject) -> list[str]:
     ground_truth = liquidity.get("ground_truth") or {}
     observed = liquidity.get("observed") or {}
     agreement = liquidity.get("classification_agreement") or {}
+    blocksci = liquidity.get("blocksci") or {}
+    with_blocksci = blocksci.get("available") is True
+    blocksci_agreement = blocksci.get("classification_agreement") or {}
     lines.extend(
         table(
-            ["metric", "ground truth", "coinjoin-analysis"],
+            ["metric", "ground truth", "coinjoin-analysis", *(["BlockSci"] if with_blocksci else [])],
             [
-                [name, sats(ground_truth.get(field)), sats(observed.get(field))]
+                [
+                    name,
+                    sats(ground_truth.get(field)),
+                    sats(observed.get(field)),
+                    *([sats(blocksci.get(field))] if with_blocksci else []),
+                ]
                 for name, field in (
                     ("entered", "entered_sats"),
                     ("left", "left_sats"),
@@ -382,30 +390,36 @@ def render_liquidity_evaluation(report: JsonObject) -> list[str]:
             ],
         )
     )
-    lines.extend(
-        [
-            "",
-            *table(
-                ["metric", "value"],
-                [
-                    ["coinjoins", liquidity.get("coinjoins")],
-                    ["max interim difference", sats(liquidity.get("interim_max_abs_difference_sats"))],
-                    ["classified inputs and outputs", agreement.get("classified")],
-                    ["classification agreement", metric_value(agreement.get("agreement_rate"))],
-                    ["dominant wallet", liquidity.get("dominant_wallet")],
-                ],
-            ),
-        ]
-    )
-    disagreements = [
-        [key, count]
-        for key, count in (agreement.get("confusion") or {}).items()
-        if key.split("->")[0].split(":")[1] != key.split("->")[1]
+    summary_rows: list[list[object]] = [
+        ["coinjoins", liquidity.get("coinjoins")],
+        ["max interim difference", sats(liquidity.get("interim_max_abs_difference_sats"))],
+        ["classified inputs and outputs", agreement.get("classified")],
+        ["classification agreement", metric_value(agreement.get("agreement_rate"))],
     ]
-    if disagreements:
-        lines.extend(
-            ["", "### Classification Disagreements", "", *table(["ground truth -> observed", "count"], disagreements)]
+    if with_blocksci:
+        summary_rows.extend(
+            [
+                ["BlockSci max interim difference", sats(blocksci.get("interim_max_abs_difference_sats"))],
+                ["BlockSci classification agreement", metric_value(blocksci_agreement.get("agreement_rate"))],
+                ["labelled coinjoins BlockSci did not classify", blocksci.get("unclassified_coinjoins")],
+                ["BlockSci coinjoins without a label", blocksci.get("extra_coinjoins")],
+            ]
         )
+    summary_rows.append(["dominant wallet", liquidity.get("dominant_wallet")])
+    lines.extend(["", *table(["metric", "value"], summary_rows)])
+    if blocksci and not with_blocksci:
+        lines.extend(["", f"BlockSci liquidity classification unavailable: {blocksci.get('reason')}"])
+    for title, analyzer, confusion in (
+        ("Classification Disagreements", "observed", agreement.get("confusion")),
+        ("BlockSci Classification Disagreements", "BlockSci", blocksci_agreement.get("confusion")),
+    ):
+        disagreements = [
+            [key, count]
+            for key, count in (confusion or {}).items()
+            if key.split("->")[0].split(":")[1] != key.split("->")[1]
+        ]
+        if disagreements:
+            lines.extend(["", f"### {title}", "", *table([f"ground truth -> {analyzer}", "count"], disagreements)])
 
     large_wallets = liquidity.get("large_wallets") or []
     if large_wallets:

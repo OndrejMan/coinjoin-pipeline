@@ -1,10 +1,11 @@
 """Transaction-centric pool liquidity of an emulated run (Svenda et al., PETS 2026, section 4.3.2).
 
 Every coinjoin input and output is classified as entering, remixed, leaving or
-staying the mix twice: from the exported blocks and the producer coinjoin labels
-(ground truth) and from coinjoin-analysis (observed). The cumulative liquidity of
-both classifications, its decomposition by wallet ownership, and how well the
-observed curve reveals a large wallet's entry and exit form the report section.
+staying the mix three times: from the exported blocks and the producer coinjoin
+labels (ground truth), from coinjoin-analysis (observed) and from BlockSci over
+the CoinJoins it detected. The cumulative liquidity of each classification, its
+decomposition by wallet ownership, and how well the observed curve reveals a
+large wallet's entry and exit form the report section.
 The per-wallet events are exported as the ground-truth dataset.
 """
 
@@ -47,6 +48,7 @@ CSV_COLUMNS = [
     "value_sats",
     "event",
     "observed_event",
+    "blocksci_event",
     "spent_by",
     "spend_distance_coinjoins",
     "is_standard_denom",
@@ -101,12 +103,23 @@ def standard_denominations(outputs: list[JsonObject]) -> set[int]:
     return {value for value, count in counts.items() if count > 1}
 
 
+def blocksci_event(mix_events: JsonObject | None, txid: str, side: str, index: object) -> str | None:
+    """BlockSci's event for one input or output; its lists are ordered by index."""
+    events = ((mix_events or {}).get(txid) or {}).get(side) or []
+    try:
+        position = int(str(index))
+    except ValueError:
+        return None
+    return events[position] if 0 <= position < len(events) else None
+
+
 def classify_coinjoins(
     order: list[str],
     transactions: JsonObject,
     observed: JsonObject,
+    mix_events: JsonObject | None = None,
 ) -> list[JsonObject]:
-    """Ground-truth and observed event of every coinjoin input and output."""
+    """Ground-truth, observed and BlockSci event of every coinjoin input and output."""
     positions = {txid: index for index, txid in enumerate(order)}
     heights = [float(transactions[txid].get("block_height") or 0) for txid in order]
     spenders = spender_index(transactions)
@@ -127,6 +140,7 @@ def classify_coinjoins(
                     "prev_vout": item.get("prev_vout"),
                     "event": REMIX if item.get("prev_txid") in positions else ENTER,
                     "observed_event": (observed_inputs.get(str(item.get("index"))) or {}).get("mix_event_type"),
+                    "blocksci_event": blocksci_event(mix_events, txid, "inputs", item.get("index")),
                 }
             )
         outputs = []
@@ -146,6 +160,7 @@ def classify_coinjoins(
                     "address": item.get("address"),
                     "event": event,
                     "observed_event": (observed_outputs.get(str(item.get("index"))) or {}).get("mix_event_type"),
+                    "blocksci_event": blocksci_event(mix_events, txid, "outputs", item.get("index")),
                     "spent_by": spender,
                     "spend_distance_coinjoins": distance,
                     "is_standard_denom": item.get("value") in standard,
@@ -214,14 +229,14 @@ def liquidity_series(coinjoins: list[JsonObject], event_field: str, wallet: str 
     }
 
 
-def classification_agreement(coinjoins: list[JsonObject]) -> JsonObject:
-    """How coinjoin-analysis classified each input and output with a ground-truth event."""
+def classification_agreement(coinjoins: list[JsonObject], event_field: str = "observed_event") -> JsonObject:
+    """How an analyzer classified each input and output with a ground-truth event."""
     confusion: dict[str, int] = {}
     agreeing = total = 0
     for coinjoin in coinjoins:
         for side in ("inputs", "outputs"):
             for item in coinjoin[side]:
-                observed = item.get("observed_event") or "missing"
+                observed = item.get(event_field) or "missing"
                 key = f"{side}:{item['event']}->{observed}"
                 confusion[key] = confusion.get(key, 0) + 1
                 total += 1
@@ -359,10 +374,52 @@ def load_postmix_spends(run_dir: Path, transactions: JsonObject, positions: dict
     }
 
 
+def series_totals(series: JsonObject) -> JsonObject:
+    return {
+        "entered_sats": sum(series["enter"]),
+        "left_sats": sum(series["leave"]),
+        "stayed_sats": sum(series["stay"]),
+        "final_interim_sats": series["interim"][-1],
+        "peak_interim_sats": max(series["interim"]),
+    }
+
+
+def max_interim_difference(pool: JsonObject, series: JsonObject) -> int:
+    return max((abs(a - b) for a, b in zip(pool["interim"], series["interim"])), default=0)
+
+
+def blocksci_liquidity(
+    coinjoins: list[JsonObject],
+    pool: JsonObject,
+    mix_events: JsonObject | None,
+    error: str | None,
+) -> tuple[JsonObject, JsonObject | None]:
+    """BlockSci's classification against the ground truth, and its pool series.
+
+    BlockSci's mix is the CoinJoins it detected, so a missed CoinJoin leaves its
+    inputs and outputs unclassified and a false positive turns inputs it funds
+    into remixes.
+    """
+    if mix_events is None:
+        return unavailable(error or "BlockSci did not classify liquidity events."), None
+    series = liquidity_series(coinjoins, "blocksci_event")
+    labelled = {coinjoin["txid"] for coinjoin in coinjoins}
+    return {
+        "available": True,
+        **series_totals(series),
+        "unclassified_coinjoins": len(labelled - set(mix_events)),
+        "extra_coinjoins": len(set(mix_events) - labelled),
+        "interim_max_abs_difference_sats": max_interim_difference(pool, series),
+        "classification_agreement": classification_agreement(coinjoins, "blocksci_event"),
+    }, series
+
+
 def build_liquidity(
     run_dir: Path,
     emulator_data: JsonObject | None,
     coinjoin_analysis_data: JsonObject,
+    blocksci_mix_events: JsonObject | None = None,
+    blocksci_error: str | None = None,
 ) -> tuple[JsonObject, JsonObject | None]:
     """Return the report section and the dataset, or an unavailable section and None."""
     if not emulator_data:
@@ -375,35 +432,24 @@ def build_liquidity(
     if not order:
         return unavailable("The emulator exported no labelled coinjoin."), None
 
-    coinjoins = classify_coinjoins(order, transactions, observed)
+    coinjoins = classify_coinjoins(order, transactions, observed, blocksci_mix_events)
     pool = liquidity_series(coinjoins, "event")
     observed_pool = liquidity_series(coinjoins, "observed_event")
+    blocksci_section, blocksci_pool = blocksci_liquidity(coinjoins, pool, blocksci_mix_events, blocksci_error)
     wallets = wallet_summaries(coinjoins, pool)
     dominant = max(wallets, key=lambda name: wallets[name]["peak_interim_sats"], default=None)
     large = [name for name, summary in wallets.items() if (summary["peak_pool_share"] or 0) >= LARGE_WALLET_SHARE]
     postmix_spends = load_postmix_spends(run_dir, transactions, {txid: index for index, txid in enumerate(order)})
-    differences = [abs(a - b) for a, b in zip(pool["interim"], observed_pool["interim"])]
 
     section = {
         "available": True,
         "parameters": {"window_coinjoins": WINDOW_COINJOINS, "large_wallet_share": LARGE_WALLET_SHARE},
         "coinjoins": len(coinjoins),
-        "ground_truth": {
-            "entered_sats": sum(pool["enter"]),
-            "left_sats": sum(pool["leave"]),
-            "stayed_sats": sum(pool["stay"]),
-            "final_interim_sats": pool["interim"][-1],
-            "peak_interim_sats": max(pool["interim"]),
-        },
-        "observed": {
-            "entered_sats": sum(observed_pool["enter"]),
-            "left_sats": sum(observed_pool["leave"]),
-            "stayed_sats": sum(observed_pool["stay"]),
-            "final_interim_sats": observed_pool["interim"][-1],
-            "peak_interim_sats": max(observed_pool["interim"]),
-        },
-        "interim_max_abs_difference_sats": max(differences, default=0),
+        "ground_truth": series_totals(pool),
+        "observed": series_totals(observed_pool),
+        "interim_max_abs_difference_sats": max_interim_difference(pool, observed_pool),
         "classification_agreement": classification_agreement(coinjoins),
+        "blocksci": blocksci_section,
         "dominant_wallet": dominant,
         "large_wallets": [
             {
@@ -423,7 +469,7 @@ def build_liquidity(
         "run_id": run_dir.name,
         "coinjoin_type": emulator_data.get("coinjoin_type"),
         "parameters": section["parameters"],
-        "pool": {"ground_truth": pool, "observed": observed_pool},
+        "pool": {"ground_truth": pool, "observed": observed_pool, "blocksci": blocksci_pool},
         "wallets": wallets,
         "coinjoins": coinjoins,
         "postmix_spends": postmix_spends["spends"] if postmix_spends else [],
@@ -451,6 +497,7 @@ def save_liquidity_dataset(output_dir: Path, dataset: JsonObject) -> None:
                             "value_sats": item.get("value"),
                             "event": item["event"],
                             "observed_event": item.get("observed_event"),
+                            "blocksci_event": item.get("blocksci_event"),
                             "spent_by": item.get("spent_by"),
                             "spend_distance_coinjoins": item.get("spend_distance_coinjoins"),
                             "is_standard_denom": item.get("is_standard_denom"),
