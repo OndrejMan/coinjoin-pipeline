@@ -56,7 +56,9 @@ class ResearchPreflightTests(unittest.TestCase):
 
     def test_external_command_quotes_run_id(self):
         args = argparse.Namespace(
-            run_id="run with spaces", network="bitcoin", coinjoin_type="wasabi2",
+            run_id="run with spaces",
+            network="bitcoin",
+            coinjoin_type="wasabi2",
             detector_arguments=detector_arguments(PipelineConfiguration()),
         )
         self.assertIn("--run-dir '/runs/run with spaces'", external_command(args))

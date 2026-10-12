@@ -282,11 +282,28 @@ def test_report_never_fills_producer_digest_from_current_host(tmp_path, monkeypa
 @pytest.mark.parametrize("dry_run", [False, True])
 def test_external_detector_overrides_reach_worker(tmp_path, monkeypatch, dry_run):
     argv = [
-        "external", "analyze", "--run-id", "probe", "--runs-root", str(tmp_path),
-        "--bitcoin-datadir", str(tmp_path / "bitcoin"), "--baseline", str(tmp_path / "baseline.json"),
-        "--coinjoin-type", "joinmarket", "--min-input-count", "7", "--joinmarket-detector", "possible",
-        "--joinmarket-min-base-fee", "123", "--joinmarket-percentage-fee", "0.001",
-        "--joinmarket-max-depth", "42",
+        "external",
+        "analyze",
+        "--run-id",
+        "probe",
+        "--runs-root",
+        str(tmp_path),
+        "--bitcoin-datadir",
+        str(tmp_path / "bitcoin"),
+        "--baseline",
+        str(tmp_path / "baseline.json"),
+        "--coinjoin-type",
+        "joinmarket",
+        "--min-input-count",
+        "7",
+        "--joinmarket-detector",
+        "possible",
+        "--joinmarket-min-base-fee",
+        "123",
+        "--joinmarket-percentage-fee",
+        "0.001",
+        "--joinmarket-max-depth",
+        "42",
     ]
     if dry_run:
         argv.append("--dry-run")
@@ -299,8 +316,12 @@ def test_external_detector_overrides_reach_worker(tmp_path, monkeypatch, dry_run
     monkeypatch.setenv("BLOCKSCI_JOINMARKET_DETECTOR", "definite")
     args = worker.parse_args(shlex.split(command)[2:])
     assert detector_parameters(args) == {
-        "coinjoin_type": "joinmarket", "min_input_count": 7, "joinmarket_detector": "possible",
-        "joinmarket_min_base_fee": 123, "joinmarket_percentage_fee": 0.001, "joinmarket_max_depth": 42,
+        "coinjoin_type": "joinmarket",
+        "min_input_count": 7,
+        "joinmarket_detector": "possible",
+        "joinmarket_min_base_fee": 123,
+        "joinmarket_percentage_fee": 0.001,
+        "joinmarket_max_depth": 42,
     }
 
 
