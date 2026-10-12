@@ -32,6 +32,8 @@ KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
 PRE_CLEANUP="${PRE_CLEANUP:-1}"
 PRE_CLEANUP_PREFIX="${PRE_CLEANUP_PREFIX-coinjoin-k3d-}"
 PRE_CLEANUP_CONTAINERS="${PRE_CLEANUP_CONTAINERS:-1}"
+# Long-lived services on the same host, such as Scenario Lab, opt out of the kill.
+PRE_CLEANUP_KEEP_LABEL="${PRE_CLEANUP_KEEP_LABEL:-coinjoin.keep=true}"
 
 export COINJOIN_EMULATOR_IMAGE
 export KUBERNETES_COPY_TO_HOST_DIR="${KUBERNETES_COPY_TO_HOST_DIR:-${TMP_DIR}/btc-data}"
@@ -130,7 +132,14 @@ pre_cleanup_running_containers() {
     return 0
   fi
 
-  mapfile -t container_ids < <("${CONTAINER_RUNTIME}" ps -q)
+  local kept=()
+  mapfile -t kept < <("${CONTAINER_RUNTIME}" ps -q --filter "label=${PRE_CLEANUP_KEEP_LABEL}")
+  mapfile -t container_ids < <(
+    "${CONTAINER_RUNTIME}" ps -q | grep -vxF -f <(printf '%s\n' "${kept[@]}") || true
+  )
+  if [[ "${#kept[@]}" -gt 0 ]]; then
+    echo "Keeping ${#kept[@]} container(s) labelled ${PRE_CLEANUP_KEEP_LABEL}."
+  fi
   if [[ "${#container_ids[@]}" -eq 0 ]]; then
     echo "No running ${CONTAINER_RUNTIME} containers to kill before test."
     return 0
