@@ -18,7 +18,7 @@ side stay compatible.
 | S3 `blocksci-parse` | reusable BlockSci workflow | `blocksci_parse_s3_template.sh` |
 | S3 `blocksci-update` | versioned incremental cache update from a coin directory or the block archive | `blocksci_update_s3_template.sh` |
 | S3 cached work | `detect`, `script`, or `notebook` over a reusable parse | `blocksci_analyze_s3_template.sh` |
-| S3 `unified-report` | BlockSci detect selected, after selected analyzers | `unified_report_s3_template.sh` |
+| S3 `unified-report` | BlockSci detect selected, after selected analyzers; a `full-run` also needs coinjoin-analysis | `unified_report_s3_template.sh` |
 
 ## Marker files
 

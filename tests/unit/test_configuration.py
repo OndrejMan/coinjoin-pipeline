@@ -177,3 +177,49 @@ def test_alias_and_repeated_values_keep_cli_order():
     config = load_configuration(["coinjoin", "--run-dir", "run-a", "--run-id=old", "--run-id", "new"])
     assert config.action == "coinjoin-analysis"
     assert config.run_id == "new"
+
+
+def _s3_full_run(**overrides):
+    mapping = {
+        "action": "full-run",
+        "driver": "kubernetes",
+        "run_id": "run-1",
+        "kubernetes": {"namespace": "coinjoin-ns", "reuse_namespace": True},
+        "artifacts": {
+            "backend": "s3",
+            "uri": "s3://bucket/runs",
+            "endpoint_url": "https://s3.example",
+            "secret_name": "coinjoin-s3",
+            "credentials_file": "/credentials",
+            "profile": "coinjoin",
+        },
+    }
+    mapping.update(overrides)
+    return PipelineConfiguration.from_mapping(mapping)
+
+
+@pytest.mark.parametrize(
+    "stages",
+    [
+        {"analysis": False, "blocksci": False},
+        {"analysis": True, "blocksci": False},
+        {"analysis": False, "blocksci": True},
+        {"analysis": True, "blocksci": True, "mappings": True},
+    ],
+)
+def test_s3_full_run_accepts_any_analyzer_subset(stages):
+    resolve_configuration(_s3_full_run(stages=stages))
+
+
+def test_s3_full_run_mappings_need_the_baseline_it_computes():
+    with pytest.raises(ConfigurationError, match="--mappingsPbs requires --analysisPbs"):
+        resolve_configuration(_s3_full_run(stages={"analysis": False, "blocksci": True, "mappings": True}))
+
+
+def test_s3_full_run_report_resources_need_both_analyzers():
+    config = _s3_full_run(
+        stages={"analysis": False, "blocksci": True},
+        pbs={"unified_report": {"ncpus": 2}},
+    )
+    with pytest.raises(ConfigurationError, match="unified-report PBS resource overrides require a unified-report job"):
+        resolve_configuration(config)

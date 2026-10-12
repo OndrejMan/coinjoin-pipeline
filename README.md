@@ -243,6 +243,10 @@ MetaCentrum frontend and waits for every stage: it submits the Kubernetes
 emulation Job, polls the bucket for `.k8s/upload.done`, submits both PBS
 analyzers in parallel followed by a report job dependent on both, and polls
 all three `.pbs/*.done` markers until the results land in the bucket.
+The analyzers are selectable: drop `--analysisPbs`, `--blocksciPbs` or both to run
+only part of the chain. Without coinjoin-analysis there is no baseline, so BlockSci
+publishes its results without the unified report and `--mappingsPbs` is refused;
+without either analyzer the run ends at the emulation upload and never calls `qsub`.
 Requirements: kubeconfig + `qsub` + `s5cmd` on
 the frontend, and a pre-created namespace with the
 Secret (`--reuse-namespace` is required). Run it inside `screen`/`tmux` —

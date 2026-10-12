@@ -76,16 +76,20 @@ def run_s3_full_run(args: PipelineConfiguration) -> None:
     kubeconfig_path = resolve_kubeconfig(args.kubernetes.kubeconfig)
     job_name = s3_emulation_job_name(target.run_id)
     plan = s3_full_run_plan_from_args(args)
+    # Without analyzers the run ends at the emulation upload and never touches PBS.
+    analyzed = bool(plan.scheduled())
 
     if args.dry_run:
         run_s3_kubernetes_emulation(args)
         print(f"[dry-run] Would wait for {run_prefix}/.k8s/upload.done (timeout {args.emulation_timeout}s)")
-        submit_s3_pbs_graph(args)
+        if analyzed:
+            submit_s3_pbs_graph(args)
         for stage in plan.scheduled():
             print(f"[dry-run] Would wait for {run_prefix}/.pbs/{stage.name}.done")
         return
 
-    require_qsub()
+    if analyzed:
+        require_qsub()
     stage_kubernetes_s3_run(args)
     run_s3_kubernetes_emulation(args)
     print(f"[full-run] Waiting for emulation upload marker {run_prefix}/.k8s/upload.done")
@@ -111,6 +115,9 @@ def run_s3_full_run(args: PipelineConfiguration) -> None:
         )
         raise
 
+    if not analyzed:
+        print(f"[full-run] Completed emulation only; artifacts under {run_prefix}/")
+        return
     jobs = submit_s3_pbs_graph(args)
     submitted: list[tuple[StagePlan, str]] = [
         (stage, job_id) for stage in plan.scheduled() if (job_id := jobs.job_for(stage)) is not None

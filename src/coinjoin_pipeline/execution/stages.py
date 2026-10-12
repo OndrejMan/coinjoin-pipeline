@@ -170,6 +170,16 @@ def _report_stage(runner: RunnerName, *analyzers: StagePlan | None) -> StagePlan
     )
 
 
+def runs_unified_report(*, action: str, analysis_pbs: bool, blocksci_pbs: bool, blocksci_task: str) -> bool:
+    """Whether an S3 invocation has a unified-report stage.
+
+    The report joins BlockSci detection with the coinjoin-analysis baseline. A
+    pbs-from-s3 resume may join a baseline stored by an earlier invocation; a
+    full-run has one only if it computes it.
+    """
+    return blocksci_pbs and blocksci_task == "detect" and (analysis_pbs or action != "full-run")
+
+
 def analysis_plan(*, analysis_pbs: bool, blocksci_pbs: bool, mappings_pbs: bool) -> StageGraph:
     """Declare the experimental local graph: the same analyzer/report dependencies
     as ``s3_full_run_plan``, without an emulation node. Its node order is the
@@ -242,13 +252,15 @@ def s3_full_run_plan(
     analysis_pbs: bool = True,
     blocksci_pbs: bool = True,
     blocksci_task: str = "detect",
+    unified_report: bool = True,
 ) -> StageGraph:
     """Build the canonical Kubernetes → S3 → PBS graph for one invocation.
 
     The two PBS analyzers are intentionally independent.  They publish their
     own artifacts, and only ``unified-report`` depends on both of them.  The
     report is a separate stage for every detect workflow, including resumes
-    that consume a previously stored baseline.
+    that consume a previously stored baseline, unless ``unified_report`` is
+    false: a full-run without coinjoin-analysis has no baseline to compare.
     """
     emulation = StagePlan(
         name="kubernetes-emulation",
@@ -275,6 +287,6 @@ def s3_full_run_plan(
     # Completion order: the analyzers publish independently, and mappings is
     # waited for after BlockSci because it is the shorter of the two tails.
     stages = [stage for stage in (emulation, baseline, parse, work, mappings) if stage is not None]
-    if blocksci_pbs and blocksci_task == "detect":
+    if unified_report and blocksci_pbs and blocksci_task == "detect":
         stages.append(_report_stage("pbs", baseline, work, mappings))
     return StageGraph(tuple(stages))

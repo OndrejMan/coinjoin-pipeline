@@ -57,6 +57,7 @@ from coinjoin_pipeline.execution.stages import (
     StageGraph,
     StageKind,
     StagePlan,
+    runs_unified_report,
     s3_full_run_plan,
 )
 from coinjoin_pipeline.storage.s3 import (
@@ -112,13 +113,22 @@ class S3PBSJobs:
 
 
 def s3_full_run_plan_from_args(args: PipelineConfiguration) -> StageGraph:
-    """Build the stage graph this invocation submits, waits for, and cancels."""
+    """Build the stage graph this invocation submits, waits for, and cancels.
+
+    ``runs_unified_report`` decides whether the graph ends in the report.
+    """
     return s3_full_run_plan(
         analysis_pbs=args.stages.analysis,
         blocksci_pbs=args.stages.blocksci,
         mappings_pbs=args.stages.mappings,
         blocksci_workflow=args.blocksci.workflow,
         blocksci_task=args.blocksci.task,
+        unified_report=runs_unified_report(
+            action=args.action,
+            analysis_pbs=args.stages.analysis,
+            blocksci_pbs=args.stages.blocksci,
+            blocksci_task=args.blocksci.task,
+        ),
     )
 
 
@@ -388,11 +398,8 @@ def _submit_s3_pbs_stages(args: PipelineConfiguration, submitted_jobs: list[tupl
         ):
             raise ArtifactTransportError(f"source BlockSci cache manifest does not exist for run {source_run_id}")
         ensure_empty_run_prefix(access, target.artifact_uri, target.run_id)
-    if (
-        not args.dry_run
-        and not args.stages.analysis
-        and (args.stages.mappings or (args.stages.blocksci and task == "detect"))
-    ):
+    reads_baseline = any(stage.kind in (StageKind.REPORT, StageKind.MAPPINGS) for stage in plan.stages)
+    if not args.dry_run and not args.stages.analysis and reads_baseline:
         s3_access_preflight(access, target.artifact_uri)
         if not s3_object_exists(
             access,

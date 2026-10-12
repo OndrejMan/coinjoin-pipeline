@@ -259,6 +259,43 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         )
         mocks["qdel_pbs_job"].assert_not_called()
 
+    def test_full_run_s3_emulation_only_never_touches_pbs(self):
+        patches = self._patches()
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        self.addCleanup(mock.patch.stopall)
+        calls: list[str] = []
+        mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(f"wait:{stage}")
+
+        run_full_run_s3(_full_run_s3_args(analysisPbs=False, blocksciPbs=False))
+
+        self.assertEqual(calls, ["wait:kubernetes-emulation"])
+        mocks["require_qsub"].assert_not_called()
+        mocks["run_pbs_from_s3"].assert_not_called()
+
+    def test_full_run_s3_blocksci_only_skips_the_unified_report(self):
+        patches = self._patches()
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        self.addCleanup(mock.patch.stopall)
+        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(blocksci_work="blocksci.job")
+        calls: list[str] = []
+        mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(f"wait:{stage}")
+
+        run_full_run_s3(_full_run_s3_args(analysisPbs=False))
+
+        self.assertEqual(calls, ["wait:kubernetes-emulation", "wait:blocksci"])
+
+    def test_full_run_s3_analysis_only_waits_for_the_baseline(self):
+        patches = self._patches()
+        mocks = {name: patcher.start() for name, patcher in patches.items()}
+        self.addCleanup(mock.patch.stopall)
+        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(coinjoin_analysis="analysis.job")
+        calls: list[str] = []
+        mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(f"wait:{stage}")
+
+        run_full_run_s3(_full_run_s3_args(blocksciPbs=False))
+
+        self.assertEqual(calls, ["wait:kubernetes-emulation", "wait:coinjoin-analysis"])
+
     def test_full_run_s3_emulation_failure_skips_pbs_and_collects_diagnostics(self):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}

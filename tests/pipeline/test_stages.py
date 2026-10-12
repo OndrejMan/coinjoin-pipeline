@@ -1,12 +1,15 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2] / "pipeline"
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from coinjoin_pipeline.execution.stages import (
     StageKind,
     analysis_plan,
+    runs_unified_report,
     s3_full_run_plan,
 )
 
@@ -107,6 +110,24 @@ def test_s3_resumed_blocksci_joins_existing_baseline_in_report_stage() -> None:
     assert stages.get("unified-report").dependencies == ("blocksci",)
 
 
+def test_s3_full_run_without_baseline_publishes_blocksci_without_report() -> None:
+    stages = s3_full_run_plan(
+        mappings_pbs=False,
+        analysis_pbs=False,
+        blocksci_pbs=True,
+        unified_report=False,
+    )
+
+    assert [stage.name for stage in stages] == ["kubernetes-emulation", "blocksci"]
+
+
+def test_s3_full_run_without_analyzers_schedules_nothing() -> None:
+    stages = s3_full_run_plan(mappings_pbs=False, analysis_pbs=False, blocksci_pbs=False)
+
+    assert [stage.name for stage in stages] == ["kubernetes-emulation"]
+    assert stages.scheduled() == ()
+
+
 def test_s3_plan_stops_after_the_parser_for_a_parse_task() -> None:
     stages = s3_full_run_plan(
         mappings_pbs=False,
@@ -170,8 +191,6 @@ def test_dependency_ids_follow_the_declared_edges() -> None:
 
 
 def test_graph_orders_dependencies_and_rejects_cycles():
-    import pytest
-
     from coinjoin_pipeline.execution.stages import StageGraph, StagePlan
 
     first = StagePlan("first", StageKind.BASELINE, "local")
@@ -179,3 +198,19 @@ def test_graph_orders_dependencies_and_rejects_cycles():
     assert [stage.name for stage in StageGraph((last, first))] == ["first", "last"]
     with pytest.raises(ValueError, match="cycle"):
         StageGraph((StagePlan("first", StageKind.BASELINE, "local", ("last",)), last))
+
+
+@pytest.mark.parametrize(
+    ("action", "analysis", "blocksci", "task", "expected"),
+    [
+        ("full-run", True, True, "detect", True),
+        ("full-run", False, True, "detect", False),
+        ("pbs-from-s3", False, True, "detect", True),
+        ("pbs-from-s3", True, False, "detect", False),
+        ("pbs-from-s3", False, True, "parse", False),
+    ],
+)
+def test_unified_report_needs_detection_and_a_baseline(action, analysis, blocksci, task, expected) -> None:
+    assert (
+        runs_unified_report(action=action, analysis_pbs=analysis, blocksci_pbs=blocksci, blocksci_task=task) is expected
+    )

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from exporters.verify_chain import is_block_hash
 
+from .execution.stages import runs_unified_report
 from .storage.s3 import RUN_ID_RE
 
 if TYPE_CHECKING:
@@ -190,9 +191,18 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
                 errors.append(f"pbs-from-s3 requires {flag}")
         if not any((analysis_pbs, blocksci_pbs, mappings_pbs)):
             errors.append("pbs-from-s3 requires --analysisPbs, --blocksciPbs, or --mappingsPbs")
-        separate_report = blocksci_pbs and blocksci_task == "detect"
-        if _resources_supplied(config, "unified_report", config.pbs.unified_report) and not separate_report:
-            errors.append("unified-report PBS resource overrides require a separate unified-report job")
+    if (
+        backend == "s3"
+        and action in ("full-run", "pbs-from-s3")
+        and _resources_supplied(config, "unified_report", config.pbs.unified_report)
+        and not runs_unified_report(
+            action=action, analysis_pbs=analysis_pbs, blocksci_pbs=blocksci_pbs, blocksci_task=blocksci_task
+        )
+    ):
+        errors.append(
+            "unified-report PBS resource overrides require a unified-report job: "
+            "BlockSci detection with a coinjoin-analysis baseline"
+        )
     if backend == "s3" and action == "full-run":
         if blocksci_workflow == "cached":
             errors.append("full-run cannot reuse a cache before emulation; use --blocksci-workflow reusable")
@@ -208,8 +218,10 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
         ):
             if not value:
                 errors.append(f"full-run --artifact-backend s3 requires {flag}")
-        if not analysis_pbs or not blocksci_pbs:
-            errors.append("full-run --artifact-backend s3 requires both --analysisPbs and --blocksciPbs")
+        # Any analyzer subset runs, emulation alone included. Mappings read the
+        # coinjoin-analysis baseline, which a fresh run has only if it computes it.
+        if mappings_pbs and not analysis_pbs:
+            errors.append("full-run --artifact-backend s3 --mappingsPbs requires --analysisPbs")
         if not _supplied(config, "kubernetes.reuse_namespace", config.kubernetes.reuse_namespace):
             errors.append(
                 "Kubernetes S3-compatible mode requires --reuse-namespace because "
