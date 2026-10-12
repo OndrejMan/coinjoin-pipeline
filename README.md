@@ -178,7 +178,8 @@ service (Wasabi coordinator or the stable JoinMarket distributor);
 the namespace defaults to the pipeline default `coinjoin` (pass
 `--namespace man5-ns` for the remote examples below). The host-level
 `--runs-root` is also used when discovering `.pbs/*.jobid` files.
-`--frontend-log` adds an existing `tee` transcript, and `--save` preserves the
+`--frontend-log` adds an existing `tee` transcript, replayed from its start
+rather than its last `--tail` lines, and `--save` preserves the
 unified output. `--pbs` adds PBS stdout/stderr to the Kubernetes stream, while
 `--pbs-only` needs no kubeconfig. PBS job IDs are discovered from
 `.pbs/*.jobid`, from `$HOME/<run-id>-full-run.log`, or supplied explicitly with

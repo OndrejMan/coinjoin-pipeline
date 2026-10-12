@@ -97,7 +97,9 @@ def build_parser() -> argparse.ArgumentParser:
         choices=tuple(ENGINE_SELECTORS),
         help="Run engine; inferred from the outer controller pod when omitted.",
     )
-    parser.add_argument("--frontend-log", type=Path, help="Also follow the local full-run tee log.")
+    parser.add_argument(
+        "--frontend-log", type=Path, help="Also follow the local full-run tee log, replayed from its start."
+    )
     parser.add_argument(
         "--pbs",
         action="store_true",
@@ -121,7 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run directory containing .pbs/*.jobid (auto-detected when omitted).",
     )
     parser.add_argument("--save", type=Path, help="Write the unified prefixed stream to this file.")
-    parser.add_argument("--tail", type=int, default=200, help="Initial lines per selected source.")
+    parser.add_argument("--tail", type=int, default=200, help="Initial lines per Kubernetes and PBS source.")
     parser.add_argument("--wait-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
     parser.add_argument("--no-follow", action="store_true", help="Print current logs and exit.")
     return parser
@@ -469,7 +471,9 @@ def main(
         if not frontend_log.is_file():
             print(f"ERROR: frontend log not found: {frontend_log}", file=sys.stderr)
             return 2
-        tail_command = ["tail", "-n", str(args.tail)]
+        # The transcript is replayed whole: it is short, and its start (dry run, Kubernetes
+        # setup) is what --tail would cut off first.
+        tail_command = ["tail", "-n", "+1"]
         if follow:
             tail_command.append("-f")
         tail_command.append(str(frontend_log))

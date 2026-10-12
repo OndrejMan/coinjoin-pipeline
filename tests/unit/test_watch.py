@@ -270,3 +270,18 @@ def test_main_fails_when_no_pbs_job_can_be_inspected(tmp_path: Path, capsys) -> 
     assert code == 2
     stream.assert_not_called()
     assert "none of the discovered PBS jobs could be inspected" in capsys.readouterr().err
+
+
+def test_frontend_log_is_replayed_whole_while_pbs_keeps_the_tail(tmp_path: Path) -> None:
+    log = tmp_path / "frontend.log"
+    log.write_text("[dry-run] action: full-run\n")
+    job = PbsJob(stage="blocksci", job_id="102.server", output_path=Path("/tmp/blocksci.o102"), state="R")
+    with (
+        mock.patch("coinjoin_pipeline.watch._pbs_job_details", return_value=job),
+        mock.patch("coinjoin_pipeline.watch.stream_sources", return_value=0) as stream,
+    ):
+        code = main(["--run-id", "run-1", "--pbs-only", "--frontend-log", str(log), "--pbs-job", "blocksci=102.server"])
+
+    assert code == 0
+    assert stream.call_args.args[0] == {"frontend": ["tail", "-n", "+1", "-f", str(log)]}
+    assert stream.call_args.kwargs["tail"] == 200
