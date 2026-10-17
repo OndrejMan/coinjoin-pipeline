@@ -253,6 +253,8 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     assert ".pbs/blocksci-parse.done" in parse
     assert "blocksci_parser" not in analyze
     assert "sha256sum -c blocksci_data.tar.gz.sha256" in analyze
+    unpacked = analyze.index('-xzf "$CACHE_DIR/blocksci_data.tar.gz"')
+    assert unpacked < analyze.index('rm -f "$CACHE_DIR/blocksci_data.tar.gz"') < analyze.index("singularity exec")
     assert "worker.py analyze" in analyze
     assert "--cleanenv" in analyze
     assert "--env VIRTUAL_ENV=" not in analyze
@@ -441,6 +443,8 @@ def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target(
     assert '"$ARTIFACT_URI/$SOURCE_RUN_ID/blocksci-parse_data/*"' in script
     assert '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/"' in script
     assert "sha256sum -c blocksci_data.tar.gz.sha256" in script
+    unpacked = script.index('-xzf "$SOURCE_CACHE_DIR/blocksci_data.tar.gz"')
+    assert unpacked < script.index('rm -f "$SOURCE_CACHE_DIR/blocksci_data.tar.gz"') < script.index("-czf")
     assert '"source_kind": "external-bitcoin"' in script
     assert '"external-bitcoin" "$NETWORK" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA"' in script
     assert '\\"cache_operation\\": \\"incremental-update\\"' in script

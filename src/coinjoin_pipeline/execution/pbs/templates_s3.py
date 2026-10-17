@@ -223,6 +223,8 @@ def _restore_cache(cache_dir: str, run_id: str, label: str, checks: str = "") ->
     """Check a downloaded cache against its manifest and checksum, then unpack it.
 
     ``checks`` holds extra manifest assertions; the index lands in ``$RUN_WORK/blocksci_data``.
+    The archive is deleted once unpacked so the job does not keep the index twice on scratch;
+    the manifest and the SHA-256 sidecar stay for later checks.
     """
     manifest = f'"{cache_dir}/manifest.json"'
     return "\n".join(
@@ -247,6 +249,7 @@ def _restore_cache(cache_dir: str, run_id: str, label: str, checks: str = "") ->
             "  sha256sum -c blocksci_data.tar.gz.sha256",
             ")",
             f'tar -C "$RUN_WORK" -xzf "{cache_dir}/blocksci_data.tar.gz"',
+            f'rm -f "{cache_dir}/blocksci_data.tar.gz"',
             'test -f "$RUN_WORK/blocksci_data/config.json" || '
             f'{{ echo "{label} did not contain blocksci_data/config.json" >&2; exit 1; }}',
             'test -f "$RUN_WORK/blocksci_data/parsed/chain/block.dat" || '
