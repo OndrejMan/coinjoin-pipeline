@@ -35,7 +35,12 @@ from coinjoin_pipeline.execution.kubernetes_launch import (
     kubernetes_emulator_command,
     run_kubernetes_emulation,
 )
-from coinjoin_pipeline.execution.locks import command_lock_path, ensure_no_active_s3_pbs_submission
+from coinjoin_pipeline.execution.locks import (
+    acquire_lock,
+    close_locks,
+    command_lock_path,
+    ensure_no_active_s3_pbs_submission,
+)
 from coinjoin_pipeline.execution.pbs.validation import PBSError
 from coinjoin_pipeline.execution.pipeline_logging import (
     captured_pipeline_stage,
@@ -162,6 +167,25 @@ def test_pbs_from_s3_uses_a_run_specific_submission_lock(tmp_path: Path) -> None
     args = Namespace(action="pbs-from-s3", run_id="run-1")
 
     assert command_lock_path(args, tmp_path) == (tmp_path / "run-1" / ".pbs-submit.lock")
+
+
+@pytest.mark.parametrize("action", ["full-run", "emulate"])
+def test_s3_runs_lock_only_their_own_run(tmp_path: Path, action: str) -> None:
+    def s3_args(run_id: str) -> Namespace:
+        return Namespace(action=action, run_id=run_id, artifact_backend="s3")
+
+    assert command_lock_path(s3_args("run-1"), tmp_path) == tmp_path / "run-1" / ".pipeline.lock"
+    try:
+        acquire_lock(command_lock_path(s3_args("run-1"), tmp_path))
+        acquire_lock(command_lock_path(s3_args("run-2"), tmp_path))
+    finally:
+        close_locks()
+
+
+def test_local_runs_still_share_the_runs_root_lock(tmp_path: Path) -> None:
+    args = Namespace(action="full-run")
+
+    assert command_lock_path(args, tmp_path) == tmp_path / ".pipeline.lock"
 
 
 def test_pbs_from_s3_refuses_a_recorded_active_graph(tmp_path: Path) -> None:
