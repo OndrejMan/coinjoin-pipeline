@@ -48,11 +48,13 @@ configure_server() {
     if docker exec -u root "${CONTAINER_NAME}" bash -lc '
       set -e
       qmgr -c "create resource scratch_local type=size,flag=h" 2>/dev/null || true
+      qmgr -c "create resource scratch_ssd type=size,flag=h" 2>/dev/null || true
       qmgr -c "create node pbs" 2>/dev/null || true
       qmgr -c "set node pbs queue=workq" 2>/dev/null || true
       qmgr -c "set node pbs resources_available.ncpus=8"
       qmgr -c "set node pbs resources_available.mem=16gb"
       qmgr -c "set node pbs resources_available.scratch_local=20gb"
+      qmgr -c "set node pbs resources_available.scratch_ssd=20gb"
       qmgr -c "create queue workq queue_type=execution" 2>/dev/null || true
       qmgr -c "set queue workq enabled=true"
       qmgr -c "set queue workq started=true"
