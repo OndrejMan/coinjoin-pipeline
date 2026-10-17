@@ -18,6 +18,7 @@ from coinjoin_pipeline.execution.pbs.commands import (
 from coinjoin_pipeline.execution.pbs.defaults import (
     DEFAULT_BLOCKSCI_IMAGE,
     DEFAULT_COINJOIN_ANALYSIS_IMAGE,
+    DEFAULT_PBS_SCRATCH_TYPE,
     DEFAULT_UNIFIED_REPORT_MEM,
     DEFAULT_UNIFIED_REPORT_NCPUS,
     DEFAULT_UNIFIED_REPORT_SCRATCH,
@@ -168,6 +169,7 @@ def run_blocksci_export_stage(
         ncpus=resolve_unified_report_pbs_resource(args, "ncpus", DEFAULT_UNIFIED_REPORT_NCPUS),
         mem=resolve_unified_report_pbs_resource(args, "mem", DEFAULT_UNIFIED_REPORT_MEM),
         scratch=resolve_unified_report_pbs_resource(args, "scratch", DEFAULT_UNIFIED_REPORT_SCRATCH),
+        scratch_type=resolve_unified_report_pbs_resource(args, "scratch_type", DEFAULT_PBS_SCRATCH_TYPE),
         walltime=walltime,
         dry_run=args.dry_run,
         stage="unified-report",

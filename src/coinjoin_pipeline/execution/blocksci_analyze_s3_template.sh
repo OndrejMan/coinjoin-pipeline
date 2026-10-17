@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -N {job_name}
-#PBS -l select=1:ncpus={ncpus}:mem={mem}:scratch_local={scratch}
+#PBS -l select=1:ncpus={ncpus}:mem={mem}:scratch_{scratch_type}={scratch}
 #PBS -l walltime={walltime}
 #PBS -j oe
 set -euo pipefail

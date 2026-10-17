@@ -21,6 +21,7 @@ from .defaults import (
     DEFAULT_COINJOIN_ANALYSIS_NCPUS,
     DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
     DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+    DEFAULT_PBS_SCRATCH_TYPE,
     PBS_ACTIVE_STATES,
     PBS_TERMINAL_STATES,
     POLL_INTERVAL_SECONDS,
@@ -159,6 +160,7 @@ def submit_blocksci_pbs(
     ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
     mem: str = DEFAULT_BLOCKSCI_MEM,
     scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
+    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
     walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
     dry_run: bool = False,
     stage: str = "blocksci",
@@ -181,6 +183,7 @@ def submit_blocksci_pbs(
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
+        scratch_type=scratch_type,
         walltime=walltime,
         stage=stage,
         job_name=job_name,
@@ -209,6 +212,7 @@ def submit_coinjoin_analysis_pbs(
     ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
     mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
     scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
+    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
     walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
     dry_run: bool = False,
 ) -> str | None:
@@ -226,6 +230,7 @@ def submit_coinjoin_analysis_pbs(
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
+        scratch_type=scratch_type,
         walltime=walltime,
     )
     script_path = run_dir / ".pbs" / "coinjoin-analysis.pbs"
@@ -257,6 +262,7 @@ def submit_mappings_pbs(
     ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
     mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
     scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
+    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
     walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
     dry_run: bool = False,
 ) -> str | None:
@@ -279,6 +285,7 @@ def submit_mappings_pbs(
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
+        scratch_type=scratch_type,
         walltime=walltime,
     )
     script_path = run_dir / ".pbs" / "coinjoin-mappings.pbs"

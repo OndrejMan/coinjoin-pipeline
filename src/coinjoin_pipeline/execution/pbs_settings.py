@@ -15,6 +15,7 @@ from coinjoin_pipeline.execution.pbs.defaults import (
     DEFAULT_COINJOIN_ANALYSIS_NCPUS,
     DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
     DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+    DEFAULT_PBS_SCRATCH_TYPE,
     DEFAULT_UNIFIED_REPORT_WALLTIME,
     PBS_QUEUE_MARGIN_SECONDS,
 )
@@ -104,6 +105,7 @@ class PBSResources(TypedDict):
     ncpus: int
     mem: str
     scratch: str
+    scratch_type: str
     walltime: str
 
 
@@ -139,7 +141,7 @@ def resolve_unified_report_pbs_resource(
 
 
 def stage_pbs_resources(args: PipelineConfiguration, stage: str) -> PBSResources:
-    """Resolve the four resource values for one named PBS analysis stage."""
+    """Resolve the resource values for one named PBS analysis stage."""
     if stage == "blocksci":
         defaults = (
             DEFAULT_BLOCKSCI_NCPUS,
@@ -161,6 +163,7 @@ def stage_pbs_resources(args: PipelineConfiguration, stage: str) -> PBSResources
         "ncpus": resolve_stage_pbs_resource(args, stage, "ncpus", ncpus),
         "mem": resolve_stage_pbs_resource(args, stage, "mem", mem),
         "scratch": resolve_stage_pbs_resource(args, stage, "scratch", scratch),
+        "scratch_type": resolve_stage_pbs_resource(args, stage, "scratch_type", DEFAULT_PBS_SCRATCH_TYPE),
         "walltime": resolve_stage_pbs_resource(args, stage, "walltime", walltime),
     }
 

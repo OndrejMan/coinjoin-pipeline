@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #PBS -N coinjoin_mappings
-#PBS -l select=1:ncpus={ncpus}:mem={mem}:scratch_local={scratch}
+#PBS -l select=1:ncpus={ncpus}:mem={mem}:scratch_{scratch_type}={scratch}
 #PBS -l walltime={walltime}
 #PBS -j oe
 #PBS -o {run_dir}/logs/coinjoin-mappings.pbs.log

@@ -51,6 +51,7 @@ JoinMarketDetector = Literal["possible", "definite"]
 MappingMode = Literal["numeric", "all"]
 AnalysisAction = Literal["collect_docker", "analyze_only"]
 ExternalNetwork = Literal["bitcoin"]
+PBSScratchType = Literal["ssd", "local"]
 YAML_ACTION_ALIASES = {"external-analyze": "external analyze"}
 
 
@@ -168,6 +169,7 @@ class PBSResourceConfiguration(ConfigurationModel):
     ncpus: int | None = option(None, name="ncpus", minimum=1)
     mem: str | None = option(None, name="mem")
     scratch: str | None = option(None, name="scratch")
+    scratch_type: PBSScratchType | None = option(None, name="scratch_type")
     walltime: str | None = option(None, name="walltime")
 
     @property
@@ -185,6 +187,7 @@ class PBSConfiguration(ConfigurationModel):
     ncpus: int | None = option(None, name="pbs_ncpus", minimum=1)
     mem: str | None = option(None, name="pbs_mem")
     scratch: str | None = option(None, name="pbs_scratch")
+    scratch_type: PBSScratchType | None = option(None, name="pbs_scratch_type")
     walltime: str | None = option(None, name="pbs_walltime")
     image: str | None = option(None, name="pbs_image")
     blocksci_image: str | None = option(None, name="pbs_blocksci_image")

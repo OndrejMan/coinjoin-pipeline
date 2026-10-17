@@ -29,6 +29,7 @@ def _resources_supplied(config: PipelineConfiguration, stage: str, resources: PB
             ("ncpus", resources.ncpus),
             ("mem", resources.mem),
             ("scratch", resources.scratch),
+            ("scratch_type", resources.scratch_type),
             ("walltime", resources.walltime),
         )
     )

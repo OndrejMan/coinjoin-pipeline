@@ -16,6 +16,7 @@ from .defaults import (
     DEFAULT_COINJOIN_ANALYSIS_NCPUS,
     DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
     DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+    DEFAULT_PBS_SCRATCH_TYPE,
 )
 from .validation import (
     require_safe_image,
@@ -36,6 +37,7 @@ def render_blocksci_pbs(
     ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
     mem: str = DEFAULT_BLOCKSCI_MEM,
     scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
+    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
     walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
     stage: str = "blocksci",
     job_name: str = "blocksci_analysis",
@@ -49,7 +51,7 @@ def render_blocksci_pbs(
     ):
         require_safe_template_path(path, description)
     require_safe_image(image)
-    require_safe_pbs_resources(ncpus, mem, scratch, walltime)
+    require_safe_pbs_resources(ncpus, mem, scratch, walltime, scratch_type)
     require_safe_pbs_token(stage, "PBS stage")
     require_safe_pbs_token(job_name, "PBS job name")
     template = (Path(__file__).parent.parent / "blocksci_template.sh").read_text(encoding="utf-8")
@@ -57,6 +59,7 @@ def render_blocksci_pbs(
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
+        scratch_type=scratch_type,
         walltime=walltime,
         run_dir=run_dir,
         logs_root=logs_root,
@@ -79,6 +82,7 @@ def render_coinjoin_analysis_pbs(
     ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
     mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
     scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
+    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
     walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
 ) -> str:
     """Render a PBS script for the coinjoin-analysis stage."""
@@ -89,12 +93,13 @@ def render_coinjoin_analysis_pbs(
     ):
         require_safe_template_path(path, description)
     require_safe_image(image)
-    require_safe_pbs_resources(ncpus, mem, scratch, walltime)
+    require_safe_pbs_resources(ncpus, mem, scratch, walltime, scratch_type)
     template = (Path(__file__).parent.parent / "coinjoin_analysis_template.sh").read_text(encoding="utf-8")
     return template.format(
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
+        scratch_type=scratch_type,
         walltime=walltime,
         run_dir=run_dir,
         output_dir=output_dir,
@@ -119,12 +124,13 @@ def render_mappings_pbs(
     ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
     mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
     scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
+    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
     walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
 ) -> str:
     require_safe_template_path(run_dir, "run directory")
     require_safe_image(enumerator_image, "enumerator image")
     require_safe_image(sake_image, "Sake image")
-    require_safe_pbs_resources(ncpus, mem, scratch, walltime)
+    require_safe_pbs_resources(ncpus, mem, scratch, walltime, scratch_type)
     template = (Path(__file__).parent.parent / "mappings_template.sh").read_text(encoding="utf-8")
     return template.format(
         run_dir=run_dir,
@@ -140,5 +146,6 @@ def render_mappings_pbs(
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
+        scratch_type=scratch_type,
         walltime=walltime,
     )

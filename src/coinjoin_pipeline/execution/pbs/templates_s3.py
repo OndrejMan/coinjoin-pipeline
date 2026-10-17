@@ -30,6 +30,7 @@ from .defaults import (
     DEFAULT_COINJOIN_ANALYSIS_NCPUS,
     DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
     DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+    DEFAULT_PBS_SCRATCH_TYPE,
     DEFAULT_UNIFIED_REPORT_MEM,
     DEFAULT_UNIFIED_REPORT_NCPUS,
     DEFAULT_UNIFIED_REPORT_SCRATCH,
@@ -94,12 +95,13 @@ def _render_stage(
     ncpus: int,
     mem: str,
     scratch: str,
+    scratch_type: str,
     walltime: str,
     image: str | None = None,
     **values,
 ) -> str:
     """Validate the shared job inputs and render one stage's script template."""
-    require_safe_pbs_resources(ncpus, mem, scratch, walltime)
+    require_safe_pbs_resources(ncpus, mem, scratch, walltime, scratch_type)
     if image is not None:
         require_safe_image(image)
         values["image"] = shell_value(image)
@@ -108,6 +110,7 @@ def _render_stage(
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
+        scratch_type=scratch_type,
         walltime=walltime,
         stage_header=_stage_header(target, stage_name),
         bootstrap=_stage_bootstrap(stage_name),
@@ -300,6 +303,7 @@ def render_coinjoin_analysis_s3_pbs(
     ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
     mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
     scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
+    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
     walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
 ) -> str:
     return _render_stage(
@@ -311,6 +315,7 @@ def render_coinjoin_analysis_s3_pbs(
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
+        scratch_type=scratch_type,
         walltime=walltime,
         download_run=render_s5cmd_sync('"$ARTIFACT_URI/$RUN_ID/*"', '"$RUN_WORK/"'),
         upload_results=render_s5cmd_sync(
@@ -335,6 +340,7 @@ def render_mappings_s3_pbs(
     ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
     mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
     scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
+    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
     walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
 ) -> str:
     """Render the Wasabi mappings/Sake stage over S3-backed inputs."""
@@ -380,6 +386,7 @@ def render_mappings_s3_pbs(
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
+        scratch_type=scratch_type,
         walltime=walltime,
         download_input=render_s5cmd_sync(
             '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/*"',
@@ -397,6 +404,7 @@ def render_blocksci_s3_pbs(
     ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
     mem: str = DEFAULT_BLOCKSCI_MEM,
     scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
+    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
     walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
     include_report: bool = True,
     export_analysis: bool = False,
@@ -410,6 +418,7 @@ def render_blocksci_s3_pbs(
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
+        scratch_type=scratch_type,
         walltime=walltime,
         download_run=render_s5cmd_sync('"$ARTIFACT_URI/$RUN_ID/*"', '"$RUN_WORK/"'),
         coinjoin_analysis_check=(
@@ -469,6 +478,7 @@ def render_blocksci_parse_s3_pbs(
     ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
     mem: str = DEFAULT_BLOCKSCI_MEM,
     scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
+    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
     walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
     external_bitcoin_datadir: Path | None = None,
     bitcoin_blocks_uri: str | None = None,
@@ -579,6 +589,7 @@ def render_blocksci_parse_s3_pbs(
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
+        scratch_type=scratch_type,
         walltime=walltime,
         source_description=source_description,
         prepare_source=prepare_source,
@@ -603,6 +614,7 @@ def render_blocksci_update_s3_pbs(
     ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
     mem: str = DEFAULT_BLOCKSCI_MEM,
     scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
+    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
     walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
 ) -> str:
     """Render a job that incrementally updates one S3 cache into a fresh run.
@@ -653,6 +665,7 @@ def render_blocksci_update_s3_pbs(
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
+        scratch_type=scratch_type,
         walltime=walltime,
         download_source_cache=render_s5cmd_sync(
             '"$ARTIFACT_URI/$SOURCE_RUN_ID/blocksci-parse_data/*"',
@@ -680,6 +693,7 @@ def render_blocksci_analyze_s3_pbs(
     ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
     mem: str = DEFAULT_BLOCKSCI_MEM,
     scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
+    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
     walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
 ) -> str:
     """Render analysis, custom-script, or notebook work over a cached index."""
@@ -822,6 +836,7 @@ def render_blocksci_analyze_s3_pbs(
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
+        scratch_type=scratch_type,
         walltime=walltime,
         download_inputs="\n".join(downloads),
         restore_cache=_restore_cache("$CACHE_DIR", "$RUN_ID", "Reusable BlockSci cache"),
@@ -841,6 +856,7 @@ def render_unified_report_s3_pbs(
     ncpus: int = DEFAULT_UNIFIED_REPORT_NCPUS,
     mem: str = DEFAULT_UNIFIED_REPORT_MEM,
     scratch: str = DEFAULT_UNIFIED_REPORT_SCRATCH,
+    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
     walltime: str = DEFAULT_UNIFIED_REPORT_WALLTIME,
     include_mappings: bool = False,
 ) -> str:
@@ -879,6 +895,7 @@ def render_unified_report_s3_pbs(
         ncpus=ncpus,
         mem=mem,
         scratch=scratch,
+        scratch_type=scratch_type,
         walltime=walltime,
         download_inputs="\n".join(downloads),
         upload_report=render_s5cmd_sync(

@@ -17,6 +17,11 @@ DEFAULT_UNIFIED_REPORT_MEM = "8gb"
 DEFAULT_UNIFIED_REPORT_SCRATCH = "10gb"
 DEFAULT_UNIFIED_REPORT_WALLTIME = "01:00:00"
 
+# MetaCentrum's scratch_local is a spinning disk on most nodes; the SSD scratch keeps
+# downloading, checksumming and unpacking from bounding every stage.
+PBS_SCRATCH_TYPES = ("ssd", "local")
+DEFAULT_PBS_SCRATCH_TYPE = "ssd"
+
 
 DEFAULT_BLOCKSCI_IMAGE = "docker://" + IMAGE_NAMES["blocksci"] + ":" + DEFAULT_VERSION
 DEFAULT_COINJOIN_ANALYSIS_IMAGE = "docker://" + IMAGE_NAMES["coinjoin_analysis"] + ":" + DEFAULT_VERSION

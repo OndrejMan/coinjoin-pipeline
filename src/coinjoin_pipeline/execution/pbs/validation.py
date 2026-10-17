@@ -7,6 +7,8 @@ import re
 import shutil
 from pathlib import Path
 
+from .defaults import DEFAULT_PBS_SCRATCH_TYPE, PBS_SCRATCH_TYPES
+
 
 class PBSError(RuntimeError):
     """Raised when PBS submission or execution fails."""
@@ -59,7 +61,9 @@ def require_safe_image(image: str, description: str = "container image") -> None
         raise PBSError(f"{description} contains characters unsafe for PBS job templates: {image}")
 
 
-def require_safe_pbs_resources(ncpus: int, mem: str, scratch: str, walltime: str) -> None:
+def require_safe_pbs_resources(
+    ncpus: int, mem: str, scratch: str, walltime: str, scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE
+) -> None:
     """Validate values interpolated into ``#PBS -l`` directives."""
     if isinstance(ncpus, bool) or not isinstance(ncpus, int) or ncpus <= 0:
         raise PBSError("PBS ncpus must be a positive integer")
@@ -67,6 +71,8 @@ def require_safe_pbs_resources(ncpus: int, mem: str, scratch: str, walltime: str
         raise PBSError(f"Unsupported PBS memory value: {mem}")
     if not isinstance(scratch, str) or not SAFE_PBS_SIZE_RE.fullmatch(scratch):
         raise PBSError(f"Unsupported PBS scratch value: {scratch}")
+    if scratch_type not in PBS_SCRATCH_TYPES:
+        raise PBSError(f"Unsupported PBS scratch type: {scratch_type}")
     walltime_to_seconds(walltime)
 
 

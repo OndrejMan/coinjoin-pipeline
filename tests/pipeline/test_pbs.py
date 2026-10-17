@@ -321,7 +321,7 @@ class PBSTemplateTest(unittest.TestCase):
             scratch="100gb",
             walltime="24:00:00",
         )
-        self.assertIn("#PBS -l select=1:ncpus=8:mem=64gb:scratch_local=100gb", script)
+        self.assertIn("#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=100gb", script)
         self.assertIn("#PBS -l walltime=24:00:00", script)
         self.assertIn("/storage/run-a", script)
         self.assertIn('BITCOIN_DATADIR="/storage/bitcoin-data"', script)
@@ -346,7 +346,7 @@ class PBSTemplateTest(unittest.TestCase):
             scratch="50gb",
             walltime="04:00:00",
         )
-        self.assertIn("#PBS -l select=1:ncpus=4:mem=16gb:scratch_local=50gb", script)
+        self.assertIn("#PBS -l select=1:ncpus=4:mem=16gb:scratch_ssd=50gb", script)
         self.assertIn("analyze-emul", script)
         self.assertIn('OUTPUT_DIR="/storage/run-a/coinjoin-analysis_data"', script)
         self.assertIn('INPUT_DATA_DIR="/storage/run-a/coinjoin_emulator_data/data"', script)

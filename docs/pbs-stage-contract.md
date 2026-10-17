@@ -133,10 +133,12 @@ independent PBS job; its termination marker describes notebook shutdown, not
 completion of the standard analysis graph.
 
 PBS resources resolve independently for each stage. The
-`--pbs-{blocksci,analysis,mappings}-{ncpus,mem,scratch,walltime}` options take
-precedence for their stage, followed by the backward-compatible shared
-`--pbs-{ncpus,mem,scratch,walltime}` fallback, followed by the existing stage
-default. The S3 report-only job has independent defaults: 2 CPUs, 8 GB RAM,
+`--pbs-{blocksci,analysis,mappings}-{ncpus,mem,scratch,scratch-type,walltime}`
+options take precedence for their stage, followed by the backward-compatible
+shared `--pbs-{ncpus,mem,scratch,scratch-type,walltime}` fallback, followed by
+the existing stage default. `scratch_type` picks the `#PBS -l` scratch resource:
+`ssd` (`scratch_ssd`, the default) or `local` (`scratch_local`, a spinning disk
+on most MetaCentrum nodes); `$SCRATCHDIR` points at whichever PBS granted. The S3 report-only job has independent defaults: 2 CPUs, 8 GB RAM,
 10 GB scratch, and a 1-hour walltime. Report-specific
 `--pbs-unified-report-*` options use the same precedence over the shared
 fallback.

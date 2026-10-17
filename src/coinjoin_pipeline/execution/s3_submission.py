@@ -24,6 +24,7 @@ from coinjoin_pipeline.execution.pbs.defaults import (
     DEFAULT_BLOCKSCI_IMAGE,
     DEFAULT_COINJOIN_ANALYSIS_IMAGE,
     DEFAULT_MAPPINGS_ENUMERATOR_IMAGE,
+    DEFAULT_PBS_SCRATCH_TYPE,
     DEFAULT_SAKE_IMAGE,
     DEFAULT_UNIFIED_REPORT_MEM,
     DEFAULT_UNIFIED_REPORT_NCPUS,
@@ -361,6 +362,7 @@ class S3StageRunner:
             ncpus=resolve_unified_report_pbs_resource(self.args, "ncpus", DEFAULT_UNIFIED_REPORT_NCPUS),
             mem=resolve_unified_report_pbs_resource(self.args, "mem", DEFAULT_UNIFIED_REPORT_MEM),
             scratch=resolve_unified_report_pbs_resource(self.args, "scratch", DEFAULT_UNIFIED_REPORT_SCRATCH),
+            scratch_type=resolve_unified_report_pbs_resource(self.args, "scratch_type", DEFAULT_PBS_SCRATCH_TYPE),
             walltime=resolve_unified_report_pbs_resource(self.args, "walltime", DEFAULT_UNIFIED_REPORT_WALLTIME),
             include_mappings=self.mappings_pbs,
         )

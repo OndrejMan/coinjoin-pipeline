@@ -202,8 +202,8 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
     assert "requires coinjoin-analysis_data/coinjoin_tx_info.json" in blocksci
     assert "Unified S3 report requires blocksci-analysis_data/blocksci_analysis.json" in report
     assert "Unified S3 report requires coinjoin-analysis_data/coinjoin_tx_info.json" in report
-    assert "#PBS -l select=1:ncpus=8:mem=64gb:scratch_local=100gb" in blocksci
-    assert "#PBS -l select=1:ncpus=2:mem=8gb:scratch_local=10gb" in report
+    assert "#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=100gb" in blocksci
+    assert "#PBS -l select=1:ncpus=2:mem=8gb:scratch_ssd=10gb" in report
     for script in (blocksci, report):
         assert 'REPORT_DIR="$RUN_WORK/coinjoinPipeline_data"' in script
         assert 'sync "$REPORT_DIR/" "$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"' in script
@@ -1154,3 +1154,10 @@ def test_only_stages_that_run_the_exporters_require_them() -> None:
         dict(blocksci_task="notebook"),
     ):
         assert pbs_stages_need_exporters(exporter_need_args(**overrides)) is False, overrides
+
+
+def test_s3_pbs_scratch_type_selects_the_scratch_resource() -> None:
+    script = render_coinjoin_analysis_s3_pbs(S3_TARGET, "docker://image", "echo hi", scratch_type="local")
+    assert "#PBS -l select=1:ncpus=4:mem=16gb:scratch_local=50gb" in script
+    with pytest.raises(PBSError, match="scratch type"):
+        render_coinjoin_analysis_s3_pbs(S3_TARGET, "docker://image", "echo hi", scratch_type="shm")

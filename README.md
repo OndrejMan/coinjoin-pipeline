@@ -699,6 +699,11 @@ to size those allocations independently. A stage-specific value takes
 precedence over the general fallback and otherwise retains that stage's
 existing default.
 
+Every PBS job asks for `scratch_ssd` by default. `--pbs-scratch-type local`
+(YAML `pbs.scratch_type: local`, or per stage such as
+`pbs.blocksci.scratch_type`) requests `scratch_local` instead, which is a
+spinning disk on most MetaCentrum nodes but available on every node.
+
 The report-only job defaults to 2 CPUs, 8 GB RAM, 10 GB scratch, and a one-hour
 walltime. Use `--pbs-unified-report-ncpus`,
 `--pbs-unified-report-mem`, `--pbs-unified-report-scratch`, and
