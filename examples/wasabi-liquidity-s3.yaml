@@ -1,7 +1,8 @@
 # Liquidity experiment (assignment point 3): a 4.95 BTC wallet enters a ~4.45 BTC
 # background pool at round 6, spends a fifth of it at rounds 12, 14 and 16 and the
 # rest at round 18. Swap the scenario for liquidity-small-wallet.json (control) or
-# liquidity-two-large-wallets.json; scripts/generate_liquidity_scenarios.py makes all three.
+# liquidity-two-large-wallets.json; the catalogue's
+# scripts/generate_liquidity_scenarios.py makes all three.
 # 24 Wasabi rounds take about three hours.
 action: full-run
 engine: wasabi
