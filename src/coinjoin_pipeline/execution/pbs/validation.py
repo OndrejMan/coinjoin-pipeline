@@ -81,10 +81,15 @@ def require_safe_pbs_token(value: str, description: str) -> None:
         raise PBSError(f"{description} contains characters unsafe for PBS job templates: {value}")
 
 
+# Frontends such as skirit link /storage/<site>/home to the /auto automounter, which
+# every compute node mounts too, so a resolved shared path may start with either.
+SHARED_STORAGE_ROOTS = ("/storage/", "/auto/")
+
+
 def require_storage_path(run_dir: Path) -> None:
     """PBS jobs need the run directory on shared MetaCentrum storage (/storage)."""
     resolved = str(run_dir.resolve())
-    if not resolved.startswith("/storage/"):
+    if not resolved.startswith(SHARED_STORAGE_ROOTS):
         raise PBSError(f"PBS jobs need run-dir on shared MetaCentrum storage (/storage), not: {resolved}")
     require_safe_template_path(run_dir.resolve(), "PBS path")
 

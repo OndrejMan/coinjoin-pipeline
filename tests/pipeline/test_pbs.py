@@ -569,6 +569,10 @@ class PBSValidationTest(unittest.TestCase):
     def test_require_storage_path_accepts_storage_path(self):
         require_storage_path(Path("/storage/brno2/home/user/run-a"))
 
+    def test_require_storage_path_accepts_automounted_storage(self):
+        # skirit resolves /storage/brno2/home/<login> to /auto/brno2/brno2/<login>.
+        require_storage_path(Path("/auto/brno2/brno2/user/run-a"))
+
 
 class PBSSubmissionTest(unittest.TestCase):
     def test_submit_pbs_supports_afterok_dependency(self):
