@@ -39,7 +39,7 @@ docker_ready() {
   return 1
 }
 
-for command in docker python3 timeout; do
+for command in docker python3 timeout zstd; do
   command -v "${command}" >/dev/null 2>&1 || fail_preflight "missing ${command}"
 done
 docker_ready || fail_preflight "Docker is unavailable after 5 probes over ~15s"
@@ -276,9 +276,9 @@ wait_for_stage() {
 fetch_cache() {
   local run_id="$1" name="$2"
   s5 cp "${ARTIFACT_URI}/${run_id}/blocksci-parse_data/manifest.json" "${WORK_ROOT}/${name}-manifest.json" >/dev/null
-  s5 cp "${ARTIFACT_URI}/${run_id}/blocksci-parse_data/blocksci_data.tar.gz" "${WORK_ROOT}/${name}.tar.gz" >/dev/null
+  s5 cp "${ARTIFACT_URI}/${run_id}/blocksci-parse_data/blocksci_data.tar.zst" "${WORK_ROOT}/${name}.tar.zst" >/dev/null
   mkdir -p "${WORK_ROOT}/${name}"
-  tar -C "${WORK_ROOT}/${name}" -xzf "${WORK_ROOT}/${name}.tar.gz"
+  tar -C "${WORK_ROOT}/${name}" -I zstd -xf "${WORK_ROOT}/${name}.tar.zst"
 }
 
 echo "Submitting BlockSci S3 parse for ${RUN_ID}..."

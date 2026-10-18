@@ -222,6 +222,12 @@ CANONICALIZE_INDEX = (
 )
 
 
+# The BlockSci cache archive is zstd-compressed; fail inside the trap before any download.
+REQUIRE_ZSTD = (
+    'command -v zstd >/dev/null 2>&1 || { echo "zstd is required to pack or unpack the BlockSci cache" >&2; exit 1; }'
+)
+
+
 def _restore_cache(cache_dir: str, run_id: str, label: str, checks: str = "") -> str:
     """Check a downloaded cache against its manifest and checksum, then unpack it.
 
@@ -232,27 +238,27 @@ def _restore_cache(cache_dir: str, run_id: str, label: str, checks: str = "") ->
     manifest = f'"{cache_dir}/manifest.json"'
     return "\n".join(
         (
-            f'test -f "{cache_dir}/blocksci_data.tar.gz" || '
-            f'{{ echo "{label} is missing blocksci_data.tar.gz" >&2; exit 1; }}',
-            f'test -f "{cache_dir}/blocksci_data.tar.gz.sha256" || '
+            f'test -f "{cache_dir}/blocksci_data.tar.zst" || '
+            f'{{ echo "{label} is missing blocksci_data.tar.zst" >&2; exit 1; }}',
+            f'test -f "{cache_dir}/blocksci_data.tar.zst.sha256" || '
             f'{{ echo "{label} is missing its SHA-256 sidecar" >&2; exit 1; }}',
             f'test -f {manifest} || {{ echo "{label} is missing manifest.json" >&2; exit 1; }}',
-            f'grep -Fq \'"schema_version": "1.0"\' {manifest} || '
+            f'grep -Fq \'"schema_version": "1.1"\' {manifest} || '
             f'{{ echo "{label} manifest has an unsupported schema" >&2; exit 1; }}',
             f'grep -Fq "\\"run_id\\": \\"{run_id}\\"" {manifest} || '
             f'{{ echo "{label} run ID does not match {run_id}" >&2; exit 1; }}',
             f'grep -Fq "\\"blocksci_image\\": \\"$IMAGE\\"" {manifest} || '
             f'{{ echo "{label} was produced by a different BlockSci image" >&2; exit 1; }}',
             *([checks] if checks else []),
-            f'SIDECAR_SHA="$(cut -d \' \' -f 1 "{cache_dir}/blocksci_data.tar.gz.sha256")"',
+            f'SIDECAR_SHA="$(cut -d \' \' -f 1 "{cache_dir}/blocksci_data.tar.zst.sha256")"',
             f'grep -Fq "\\"archive_sha256\\": \\"$SIDECAR_SHA\\"" {manifest} || '
             f'{{ echo "{label} manifest SHA-256 does not match its sidecar" >&2; exit 1; }}',
             "(",
             f'  cd "{cache_dir}"',
-            "  sha256sum -c blocksci_data.tar.gz.sha256",
+            "  sha256sum -c blocksci_data.tar.zst.sha256",
             ")",
-            f'tar -C "$RUN_WORK" -xzf "{cache_dir}/blocksci_data.tar.gz"',
-            f'rm -f "{cache_dir}/blocksci_data.tar.gz"',
+            f'tar -C "$RUN_WORK" -I zstd -xf "{cache_dir}/blocksci_data.tar.zst"',
+            f'rm -f "{cache_dir}/blocksci_data.tar.zst"',
             'test -f "$RUN_WORK/blocksci_data/config.json" || '
             f'{{ echo "{label} did not contain blocksci_data/config.json" >&2; exit 1; }}',
             'test -f "$RUN_WORK/blocksci_data/parsed/chain/block.dat" || '
@@ -261,34 +267,35 @@ def _restore_cache(cache_dir: str, run_id: str, label: str, checks: str = "") ->
     )
 
 
-def _publish_cache(stage: str, source_kind: str, network: str) -> str:
+def _publish_cache(stage: str, source_kind: str, network: str, ncpus: int) -> str:
     """Archive ``$RUN_WORK/blocksci_data`` with a checksum and manifest, then upload it.
 
-    ``$MANIFEST_EXTRA`` carries the fields that only some sources record.
+    ``$MANIFEST_EXTRA`` carries the fields that only some sources record. zstd gets the job's
+    ``ncpus`` because MetaCentrum sets ``$NCPUS`` and ``$OMP_NUM_THREADS`` (and so ``nproc``) to 1.
     """
     manifest_format = (
         r"'{\n"
-        r'  "schema_version": "1.0",\n'
+        r'  "schema_version": "1.1",\n'
         r'  "run_id": "%s",\n'
         r'  "blocksci_image": "%s",\n'
         r'  "source_kind": "%s",\n'
         r'  "network": "%s",\n'
         r'  "exported_max_block": %s%s,\n'
-        r'  "archive": "blocksci_data.tar.gz",\n'
+        r'  "archive": "blocksci_data.tar.zst",\n'
         r'  "archive_sha256": "%s"\n'
         r"}\n'"
     )
     return "\n".join(
         (
             f'echo "[{stage}] archiving reusable index"',
-            'tar -C "$RUN_WORK" -czf "$CACHE_DIR/blocksci_data.tar.gz" blocksci_data',
+            f'tar -C "$RUN_WORK" -I "zstd -3 -T{ncpus}" -cf "$CACHE_DIR/blocksci_data.tar.zst" blocksci_data',
             "(",
             '  cd "$CACHE_DIR"',
-            "  sha256sum blocksci_data.tar.gz > blocksci_data.tar.gz.sha256",
+            "  sha256sum blocksci_data.tar.zst > blocksci_data.tar.zst.sha256",
             ")",
             f"printf {manifest_format} \\",
             f'  "$RUN_ID" "$IMAGE" "{source_kind}" "{network}" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA" '
-            '"$(cut -d \' \' -f 1 "$CACHE_DIR/blocksci_data.tar.gz.sha256")" \\',
+            '"$(cut -d \' \' -f 1 "$CACHE_DIR/blocksci_data.tar.zst.sha256")" \\',
             '  > "$CACHE_DIR/manifest.json"',
             render_s5cmd_sync('"$CACHE_DIR/"', '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/"'),
         )
@@ -595,7 +602,8 @@ def render_blocksci_parse_s3_pbs(
         prepare_source=prepare_source,
         produce_index=produce_index,
         verify_index=verify_index,
-        publish_cache=_publish_cache("blocksci-parse", source_kind, network),
+        require_zstd=REQUIRE_ZSTD,
+        publish_cache=_publish_cache("blocksci-parse", source_kind, network, ncpus),
         upload_log=render_s5cmd_cp('"$JOB_LOG"', '"$ARTIFACT_URI/$RUN_ID/logs/blocksci-parse.pbs.log"'),
     )
 
@@ -672,11 +680,12 @@ def render_blocksci_update_s3_pbs(
             '"$SOURCE_CACHE_DIR/"',
         ),
         restore_cache=_restore_cache("$SOURCE_CACHE_DIR", "$SOURCE_RUN_ID", "Source cache", source_checks),
+        require_zstd=REQUIRE_ZSTD,
         canonicalize_index=CANONICALIZE_INDEX,
         parse_chain=_parse_chain(
             "parsing blocks $((SOURCE_MAX_BLOCK + 1)) through $EXPORTED_MAX_BLOCK", command, stage="blocksci-update"
         ),
-        publish_cache=_publish_cache("blocksci-update", source_kind, "$NETWORK"),
+        publish_cache=_publish_cache("blocksci-update", source_kind, "$NETWORK", ncpus),
     )
 
 
@@ -839,6 +848,7 @@ def render_blocksci_analyze_s3_pbs(
         scratch_type=scratch_type,
         walltime=walltime,
         download_inputs="\n".join(downloads),
+        require_zstd=REQUIRE_ZSTD,
         restore_cache=_restore_cache("$CACHE_DIR", "$RUN_ID", "Reusable BlockSci cache"),
         prepare_mode=prepare_mode,
         extra_binds=extra_binds,

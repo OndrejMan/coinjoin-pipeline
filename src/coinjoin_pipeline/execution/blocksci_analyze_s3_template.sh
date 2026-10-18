@@ -15,6 +15,7 @@ stage_finalize() {{
 }}
 {bootstrap}
 {stage_setup}
+{require_zstd}
 echo "[$MODE] downloading required reusable BlockSci inputs"
 {download_inputs}
 {restore_cache}

@@ -157,8 +157,9 @@ requested report; a mismatched or stale artifact fails rather than being
 silently combined with a different baseline.
 
 The optional reusable S3 workflow separates that analyzer artifact from the
-parser cache. `blocksci-parse_data/manifest.json` schema 1.0 identifies the
-run, BlockSci image, exported maximum block, archive name, and archive SHA-256.
+parser cache. `blocksci-parse_data/manifest.json` schema 1.1 identifies the
+run, BlockSci image, exported maximum block, archive name (a zstd-compressed
+`blocksci_data.tar.zst`), and archive SHA-256.
 Consumers verify the accompanying checksum before extracting the index and
 never treat a successful S3 download alone as proof that the parsed chain is
 valid. Standard detector output retains the same

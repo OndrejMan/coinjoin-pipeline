@@ -19,6 +19,7 @@ stage_finalize() {{
 exec 3>&1 4>&2
 exec >"$JOB_LOG" 2>&1
 {stage_setup}
+{require_zstd}
 mkdir -p "$RUN_WORK/.pipeline/exporters"
 {download_exporters}
 echo "[blocksci-parse] preparing {source_description}"

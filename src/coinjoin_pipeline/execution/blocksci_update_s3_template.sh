@@ -18,6 +18,7 @@ stage_finalize() {{
 }}
 {bootstrap}
 {stage_setup}
+{require_zstd}
 {prepare_source}
 mkdir -p "$RUN_WORK/.pipeline/exporters"
 {download_exporters}

@@ -65,7 +65,8 @@ not create a report.
 
 With `--blocksci-workflow reusable`, the `blocksci-parse` job downloads raw
 Bitcoin data, parses once, and uploads
-`blocksci-parse_data/{blocksci_data.tar.gz,blocksci_data.tar.gz.sha256,manifest.json}`.
+`blocksci-parse_data/{blocksci_data.tar.zst,blocksci_data.tar.zst.sha256,manifest.json}`,
+packed with `zstd -3` using the job's requested `ncpus` threads.
 The dependent `blocksci-analyze` job verifies and extracts that archive before
 running detector queries; it never invokes `blocksci_parser`. The report job
 depends on `blocksci-analyze`, not on `blocksci-parse` directly. With

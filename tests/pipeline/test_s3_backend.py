@@ -1,6 +1,7 @@
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -248,13 +249,16 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     subprocess.run(["bash", "-n"], input=parse, text=True, check=True)
     subprocess.run(["bash", "-n"], input=analyze, text=True, check=True)
     assert "/mnt/exporters/worker.py parse" in parse
-    assert "blocksci_data.tar.gz" in parse
-    assert "sha256sum blocksci_data.tar.gz" in parse
+    assert "blocksci_data.tar.zst" in parse
+    assert "sha256sum blocksci_data.tar.zst" in parse
+    assert '"schema_version": "1.1"' in parse
     assert ".pbs/blocksci-parse.done" in parse
     assert "blocksci_parser" not in analyze
-    assert "sha256sum -c blocksci_data.tar.gz.sha256" in analyze
-    unpacked = analyze.index('-xzf "$CACHE_DIR/blocksci_data.tar.gz"')
-    assert unpacked < analyze.index('rm -f "$CACHE_DIR/blocksci_data.tar.gz"') < analyze.index("singularity exec")
+    assert "sha256sum -c blocksci_data.tar.zst.sha256" in analyze
+    assert analyze.index("command -v zstd") < analyze.index('"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/*"')
+    assert 'grep -Fq \'"schema_version": "1.1"\'' in analyze
+    unpacked = analyze.index('-I zstd -xf "$CACHE_DIR/blocksci_data.tar.zst"')
+    assert unpacked < analyze.index('rm -f "$CACHE_DIR/blocksci_data.tar.zst"') < analyze.index("singularity exec")
     assert "worker.py analyze" in analyze
     assert "--cleanenv" in analyze
     assert "--env VIRTUAL_ENV=" not in analyze
@@ -274,6 +278,89 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     assert ".pbs/blocksci-notebook.done" in notebook
     assert '"$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/*"' not in notebook
     assert '"$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/*"' not in notebook
+
+
+def test_cache_compression_threads_come_from_rendered_ncpus() -> None:
+    # MetaCentrum sets NCPUS and OMP_NUM_THREADS to 1 inside the job, so nproc reports 1 as well.
+    parse = render_blocksci_parse_s3_pbs(
+        **COMMON,
+        image="docker://blocksci",
+        command=blocksci_parse_pbs_command("run-1"),
+        ncpus=7,
+    )
+    update = render_blocksci_update_s3_pbs(
+        **COMMON,
+        source_run_id="run-0",
+        image="docker://blocksci",
+        command=blocksci_update_pbs_command("run-1"),
+        bitcoin_blocks_uri="s3://bucket/bitcoin-blocks/",
+        expected_block_hash="a" * 64,
+        external_network="bitcoin",
+        external_max_block=850100,
+        ncpus=5,
+    )
+
+    for script, ncpus in ((parse, 7), (update, 5)):
+        assert f"select=1:ncpus={ncpus}:" in script
+        assert (
+            f'tar -C "$RUN_WORK" -I "zstd -3 -T{ncpus}" -cf "$CACHE_DIR/blocksci_data.tar.zst" blocksci_data' in script
+        )
+        for variable in ("$NCPUS", "${NCPUS", "$OMP_NUM_THREADS", "nproc"):
+            assert variable not in script
+
+
+def test_s3_parse_without_zstd_fails_through_the_exit_trap(tmp_path: Path) -> None:
+    upload_order = tmp_path / "upload-order"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    # Only the tools the script needs before the zstd check and inside the trap.
+    for tool in ("mkdir", "env", "find", "python3"):
+        (fake_bin / tool).symlink_to(shutil.which(tool))
+    fake_s5cmd = fake_bin / "s5cmd"
+    fake_s5cmd.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib, shutil, sys\n"
+        "destination = sys.argv[-1]\n"
+        "kind = 'marker' if destination.endswith('blocksci-parse.failed') else 'log'\n"
+        "if kind == 'log':\n"
+        "    shutil.copyfile(sys.argv[-2], os.environ['CAPTURED_LOG'])\n"
+        "with pathlib.Path(os.environ['UPLOAD_ORDER']).open('a') as stream:\n"
+        "    stream.write(kind + '\\n')\n",
+        encoding="utf-8",
+    )
+    fake_s5cmd.chmod(0o755)
+    credentials = tmp_path / "credentials"
+    credentials.write_text("[coinjoin]\n", encoding="utf-8")
+    captured_log = tmp_path / "uploaded.log"
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    script = render_blocksci_parse_s3_pbs(
+        S3Target(
+            artifact_uri="s3://bucket/runs",
+            run_id="run-1",
+            endpoint_url="https://example.com",
+            credentials_file=str(credentials),
+            profile="coinjoin",
+        ),
+        image="docker://blocksci",
+        command="true",
+    )
+    result = subprocess.run(
+        [shutil.which("bash")],
+        input=script,
+        text=True,
+        capture_output=True,
+        env={
+            "SCRATCHDIR": str(scratch),
+            "PATH": str(fake_bin),
+            "CAPTURED_LOG": str(captured_log),
+            "UPLOAD_ORDER": str(upload_order),
+        },
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "zstd is required to pack or unpack the BlockSci cache" in captured_log.read_text(encoding="utf-8")
+    assert upload_order.read_text(encoding="utf-8").splitlines() == ["log", "marker"]
 
 
 def test_external_bitcoin_parse_uses_shared_blocks_without_s3_emulator_inputs() -> None:
@@ -330,7 +417,7 @@ def test_s3_bitcoin_archive_parse_verifies_manifest_checksums_and_height() -> No
     assert "--source-manifest" not in script.split("<<'PY'")[0]
     assert '"bitcoin-blocks-s3" "bitcoin" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA"' in script
     assert script.index("bash -c") < script.index("/mnt/exporters/verify_chain.py")
-    assert script.index("/mnt/exporters/verify_chain.py") < script.index('tar -C "$RUN_WORK" -czf')
+    assert script.index("/mnt/exporters/verify_chain.py") < script.index('tar -C "$RUN_WORK" -I "zstd')
     assert "--expected-block-hash " + "a" * 64 in script
 
 
@@ -445,9 +532,10 @@ def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target(
     assert "SOURCE_RUN_ID=run-0" in script
     assert '"$ARTIFACT_URI/$SOURCE_RUN_ID/blocksci-parse_data/*"' in script
     assert '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/"' in script
-    assert "sha256sum -c blocksci_data.tar.gz.sha256" in script
-    unpacked = script.index('-xzf "$SOURCE_CACHE_DIR/blocksci_data.tar.gz"')
-    assert unpacked < script.index('rm -f "$SOURCE_CACHE_DIR/blocksci_data.tar.gz"') < script.index("-czf")
+    assert "sha256sum -c blocksci_data.tar.zst.sha256" in script
+    assert script.index("command -v zstd") < script.index('"$ARTIFACT_URI/$SOURCE_RUN_ID/blocksci-parse_data/*"')
+    unpacked = script.index('-I zstd -xf "$SOURCE_CACHE_DIR/blocksci_data.tar.zst"')
+    assert unpacked < script.index('rm -f "$SOURCE_CACHE_DIR/blocksci_data.tar.zst"') < script.index("-cf ")
     assert '"source_kind": "external-bitcoin"' in script
     assert '"external-bitcoin" "$NETWORK" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA"' in script
     assert '\\"cache_operation\\": \\"incremental-update\\"' in script
@@ -479,7 +567,7 @@ def test_incremental_blocksci_update_from_the_block_archive_downloads_only_new_f
     assert script.index("SOURCE_MAX_BLOCK=") < script.index('run "$ARCHIVE_WORK/download.s5cmd"')
     assert script.index('run "$ARCHIVE_WORK/download.s5cmd"') < script.index("singularity exec")
     assert script.index("worker.py update") < script.index("/mnt/exporters/verify_chain.py")
-    assert script.index("/mnt/exporters/verify_chain.py") < script.index('tar -C "$RUN_WORK" -czf')
+    assert script.index("/mnt/exporters/verify_chain.py") < script.index('tar -C "$RUN_WORK" -I "zstd')
     assert '--source-manifest "/runs/emulation/logs/$RUN_ID/source-blocksci-parse_data/manifest.json"' in script
 
 
