@@ -50,6 +50,8 @@ The artifact reader accepts schema 1.0 (emulator mode) and 1.1 (explicit mode).
 Parse and update jobs now stage and mount the shared `exporters/worker.py` payload.
 The S3 exit trap is rendered from `pbs_stage.sh`; finalization, failed transfers
 and signals preserve a nonzero exit status, and terminal markers follow outputs.
+After the markers are published the trap empties `$SCRATCHDIR` with MetaCentrum's
+`clean_scratch`, or by deleting its contents where that tool is missing.
 
 For Wasabi 2 with `--mappingsPbs`, the S3 mappings job downloads
 `coinjoin-analysis_data/coinjoin_tx_info.json`, preserves the shared-storage

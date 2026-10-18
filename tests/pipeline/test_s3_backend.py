@@ -358,6 +358,8 @@ def test_s3_bitcoin_archive_parse_uploads_failure_log_before_marker(
         encoding="utf-8",
     )
     fake_s5cmd.chmod(0o755)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
     target = S3Target(
         artifact_uri="s3://bucket/runs",
         run_id="run-1",
@@ -381,7 +383,7 @@ def test_s3_bitcoin_archive_parse_uploads_failure_log_before_marker(
         capture_output=True,
         env={
             **os.environ,
-            "SCRATCHDIR": str(tmp_path),
+            "SCRATCHDIR": str(scratch),
             "PATH": f"{fake_bin}:{os.environ['PATH']}",
             "CAPTURED_LOG": str(captured_log),
             "UPLOAD_ORDER": str(upload_order),
@@ -391,6 +393,7 @@ def test_s3_bitcoin_archive_parse_uploads_failure_log_before_marker(
     assert result.returncode == 1
     assert "S3 credentials file is not readable" in captured_log.read_text(encoding="utf-8")
     assert upload_order.read_text(encoding="utf-8").splitlines() == ["log", "marker"]
+    assert list(scratch.iterdir()) == []
 
 
 def test_cached_external_task_downloads_dumplings_baseline_and_uploads_report() -> None:
