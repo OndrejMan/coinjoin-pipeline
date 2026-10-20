@@ -7,11 +7,13 @@ here those roots point at the test's temporary directory instead.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.pbs import templates_s3
+from coinjoin_pipeline.execution.pbs.defaults import DEFAULT_RESOURCES
 from coinjoin_pipeline.execution.pbs.commands import (
     blocksci_external_report_pbs_command,
     blocksci_parse_pbs_command,
@@ -61,7 +63,8 @@ def main() -> int:
             args.output.write_text(script, encoding="utf-8")
             return 0
         index = templates_s3.PersistentIndex(args.index_dir, args.backup_uri)
-        common = dict(image="docker://blocksci-local", persistent=index, walltime="02:00:00")
+        short = replace(DEFAULT_RESOURCES["blocksci"], walltime="02:00:00")
+        common = dict(image="docker://blocksci-local", persistent=index, resources=short)
         if args.kind == "parse":
             script = templates_s3.render_blocksci_parse_s3_pbs(
                 target,
@@ -87,7 +90,7 @@ def main() -> int:
                 **common,
             )
         elif args.kind == "backup":
-            script = templates_s3.render_blocksci_index_backup_s3_pbs(target, persistent=index, walltime="02:00:00")
+            script = templates_s3.render_blocksci_index_backup_s3_pbs(target, persistent=index, resources=short)
         elif args.kind == "compare":
             config = PipelineConfiguration.from_flat(
                 {"coinjoin_type": "wasabi2", "min_input_count": 15, "blocksci_pin_height": args.pin_height}

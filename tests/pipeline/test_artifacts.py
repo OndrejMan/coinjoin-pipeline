@@ -8,6 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pipeline"))
 
+from coinjoin_pipeline.paths import EXECUTION_ROOT
 from coinjoin_pipeline.storage.s3 import (  # noqa: E402
     PROBE_QUEUED,
     PROBE_RUNNING,
@@ -17,7 +18,7 @@ from coinjoin_pipeline.storage.s3 import (  # noqa: E402
     S3Access,
     clear_s3_stage_markers,
     ensure_empty_run_prefix,
-    render_s5cmd_sync,
+    AWS_SCRUB_VARIABLES,
     run_s5cmd,
     s3_object_exists,
     scrubbed_s3_environment,
@@ -55,13 +56,13 @@ def test_rejects_unsafe_run_ids(run_id: str) -> None:
         validate_run_id(run_id)
 
 
-def test_render_uses_only_s5cmd_and_disables_environment_fallback() -> None:
-    command = render_s5cmd_sync('"$SRC"', '"$DST"')
-    assert "s5cmd --credentials-file" in command
-    assert "--profile" in command and "--endpoint-url" in command
-    assert "env -u AWS_ACCESS_KEY_ID" in command
-    assert "aws s3" not in command
-    assert "s3cmd" not in command
+def test_job_s5_wrapper_uses_only_s5cmd_and_scrubs_every_aws_variable() -> None:
+    header = (EXECUTION_ROOT / "pbs/templates/s3_stage.sh").read_text(encoding="utf-8")
+    wrapper = header[header.index("s5() {") : header.index("}", header.index("s5() {"))]
+    assert 's5cmd --credentials-file "$S3_CREDENTIALS_FILE"' in wrapper
+    assert "--profile" in wrapper and "--endpoint-url" in wrapper
+    for variable in AWS_SCRUB_VARIABLES:
+        assert f"-u {variable}" in wrapper
 
 
 def test_scrubbed_environment_drops_aws_variables_and_keeps_others() -> None:

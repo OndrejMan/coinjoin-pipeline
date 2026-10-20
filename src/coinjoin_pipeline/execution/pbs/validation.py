@@ -7,7 +7,7 @@ import re
 import shutil
 from pathlib import Path
 
-from .defaults import DEFAULT_PBS_SCRATCH_TYPE, PBS_SCRATCH_TYPES
+from .defaults import PBS_MULTIJOB_LOCATIONS, PBS_SCRATCH_TYPES, PBSResources
 
 
 class PBSError(RuntimeError):
@@ -61,19 +61,19 @@ def require_safe_image(image: str, description: str = "container image") -> None
         raise PBSError(f"{description} contains characters unsafe for PBS job templates: {image}")
 
 
-def require_safe_pbs_resources(
-    ncpus: int, mem: str, scratch: str, walltime: str, scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE
-) -> None:
+def require_safe_pbs_resources(resources: PBSResources, multijob: str | None = None) -> None:
     """Validate values interpolated into ``#PBS -l`` directives."""
+    ncpus = resources.ncpus
     if isinstance(ncpus, bool) or not isinstance(ncpus, int) or ncpus <= 0:
         raise PBSError("PBS ncpus must be a positive integer")
-    if not isinstance(mem, str) or not SAFE_PBS_SIZE_RE.fullmatch(mem):
-        raise PBSError(f"Unsupported PBS memory value: {mem}")
-    if not isinstance(scratch, str) or not SAFE_PBS_SIZE_RE.fullmatch(scratch):
-        raise PBSError(f"Unsupported PBS scratch value: {scratch}")
-    if scratch_type not in PBS_SCRATCH_TYPES:
-        raise PBSError(f"Unsupported PBS scratch type: {scratch_type}")
-    walltime_to_seconds(walltime)
+    for value, name in ((resources.mem, "memory"), (resources.scratch, "scratch")):
+        if not isinstance(value, str) or not SAFE_PBS_SIZE_RE.fullmatch(value):
+            raise PBSError(f"Unsupported PBS {name} value: {value}")
+    if resources.scratch_type not in PBS_SCRATCH_TYPES:
+        raise PBSError(f"Unsupported PBS scratch type: {resources.scratch_type}")
+    if multijob is not None and multijob not in PBS_MULTIJOB_LOCATIONS:
+        raise PBSError(f"Unsupported PBS multijob location: {multijob}")
+    walltime_to_seconds(resources.walltime)
 
 
 def require_safe_pbs_token(value: str, description: str) -> None:

@@ -63,6 +63,14 @@ def option(default=None, *, name=None, minimum=None, actions=None):
     )
 
 
+def any_option_set(model) -> bool:
+    """Whether any field holds a value other than null, false or an empty list."""
+    return any(
+        (value := getattr(model, item.name)) is not None and value is not False and value != ()
+        for item in fields(model)
+    )
+
+
 class ConfigurationModel:
     @classmethod
     def from_mapping(cls, value, location=None):
@@ -161,12 +169,7 @@ class ExternalAnalysisConfiguration(ConfigurationModel):
 
     @property
     def configured(self) -> bool:
-        return any(
-            getattr(self, item.name) is not None
-            and getattr(self, item.name) is not False
-            and getattr(self, item.name) != ()
-            for item in fields(self)
-        )
+        return any_option_set(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,12 +191,7 @@ class PBSResourceConfiguration(ConfigurationModel):
 
     @property
     def configured(self) -> bool:
-        return any(
-            getattr(self, item.name) is not None
-            and getattr(self, item.name) is not False
-            and getattr(self, item.name) != ()
-            for item in fields(self)
-        )
+        return any_option_set(self)
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,5 +1,6 @@
 import json
 import os
+from dataclasses import replace
 import shlex
 import shutil
 import subprocess
@@ -44,6 +45,7 @@ from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_mappings_s3_pbs,
     render_unified_report_s3_pbs,
 )
+from coinjoin_pipeline.execution.pbs.defaults import DEFAULT_RESOURCES
 from coinjoin_pipeline.execution.pbs.validation import PBSError
 from coinjoin_pipeline.execution.s3_emulation import run_s3_kubernetes_emulation
 from coinjoin_pipeline.execution.s3_markers import rollback_s3_pbs_submissions
@@ -61,6 +63,7 @@ S3_TARGET = S3Target(
     profile="coinjoin",
 )
 COMMON = dict(target=S3_TARGET)
+ANALYSIS = DEFAULT_RESOURCES["analysis"]
 
 
 _SUBMISSION_DIR: list[Path] = []
@@ -182,13 +185,10 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
         subprocess.run(["bash", "-n"], input=script, text=True, check=True)
     # Stale markers are cleared strictly on the frontend before qsub, never by
     # a PBS job that could race a newer submission.
-    assert ".pbs/coinjoin-analysis.done" in coinjoin
-    assert ".pbs/coinjoin-analysis.failed" in coinjoin
+    assert "STAGE=coinjoin-analysis\n" in coinjoin
     assert " rm " not in coinjoin
-    assert ".pbs/blocksci.done" in blocksci
-    assert ".pbs/blocksci.failed" in blocksci
-    assert ".pbs/unified-report.done" in report
-    assert ".pbs/unified-report.failed" in report
+    assert "STAGE=blocksci\n" in blocksci
+    assert "STAGE=unified-report\n" in report
     assert " rm " not in report
     assert '"$CONTAINER_WORK_ROOT:/runs/emulation/selected:rw"' in coinjoin
     assert '"$RUN_WORK/coinjoin-analysis_data:/runs/emulation/selected/$RUN_ID:rw"' in coinjoin
@@ -221,7 +221,7 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
     assert '"$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/*"' in report
     assert '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/*"' in mappings
     assert '"$ARTIFACT_URI/$RUN_ID/coinjoin-mappings_data/"' in mappings
-    assert ".pbs/coinjoin-mappings.done" in mappings
+    assert "STAGE=coinjoin-mappings\n" in mappings
     assert "coinjoin_mappings.json" in mappings
 
 
@@ -255,7 +255,7 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     assert "blocksci_data.tar.zst" in parse
     assert "sha256sum blocksci_data.tar.zst" in parse
     assert '"schema_version": "1.1"' in parse
-    assert ".pbs/blocksci-parse.done" in parse
+    assert "STAGE=blocksci-parse\n" in parse
     assert "blocksci_parser" not in analyze
     assert "sha256sum -c blocksci_data.tar.zst.sha256" in analyze
     assert analyze.index("command -v zstd") < analyze.index('"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/*"')
@@ -267,7 +267,7 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     assert "--env VIRTUAL_ENV=" not in analyze
     assert "--env PATH=" not in analyze
     assert "--env PYTHONPATH=" not in analyze
-    assert ".pbs/blocksci-analyze.done" in analyze
+    assert "STAGE=blocksci-analyze\n" in analyze
     assert '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"' not in analyze
 
     notebook = render_blocksci_analyze_s3_pbs(
@@ -278,7 +278,7 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     )
     subprocess.run(["bash", "-n"], input=notebook, text=True, check=True)
     assert "ssh -N -J $LOGIN@$FRONTEND" in notebook
-    assert ".pbs/blocksci-notebook.done" in notebook
+    assert "STAGE=blocksci-notebook\n" in notebook
     assert '"$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/*"' not in notebook
     assert '"$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/*"' not in notebook
 
@@ -289,7 +289,7 @@ def test_cache_compression_threads_come_from_rendered_ncpus() -> None:
         **COMMON,
         image="docker://blocksci",
         command=blocksci_parse_pbs_command("run-1"),
-        ncpus=7,
+        resources=replace(DEFAULT_RESOURCES["blocksci"], ncpus=7),
     )
     update = render_blocksci_update_s3_pbs(
         **COMMON,
@@ -300,7 +300,7 @@ def test_cache_compression_threads_come_from_rendered_ncpus() -> None:
         expected_block_hash="a" * 64,
         external_network="bitcoin",
         external_max_block=850100,
-        ncpus=5,
+        resources=replace(DEFAULT_RESOURCES["blocksci"], ncpus=5),
     )
 
     for script, ncpus in ((parse, 7), (update, 5)):
@@ -511,8 +511,9 @@ def test_cached_external_task_downloads_dumplings_baseline_and_uploads_report() 
     subprocess.run(["bash", "-n"], input=script, text=True, check=True)
     assert "--mode external --network bitcoin" in script
     assert "coinjoin_tx_info.json" in script
-    assert '"$RUN_WORK/coinjoinPipeline_data/"' in script
-    assert ".pbs/blocksci-external.done" in script
+    assert 'OUTPUT_DIR="$RUN_WORK/coinjoinPipeline_data"' in script
+    assert 's5 sync "$OUTPUT_DIR/" "$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"' in script
+    assert "STAGE=blocksci-external\n" in script
 
 
 def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target() -> None:
@@ -546,7 +547,7 @@ def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target(
     assert "generate-config" not in script
     assert "worker.py update --run-dir /runs/emulation/logs/run-1" in script
     assert "Target maximum block" in script
-    assert ".pbs/blocksci-update.done" in script
+    assert "STAGE=blocksci-update\n" in script
 
 
 def test_incremental_blocksci_update_from_the_block_archive_downloads_only_new_files() -> None:
@@ -607,7 +608,7 @@ def test_external_blocksci_import_repackages_index_without_parser() -> None:
     assert 'cp -a "$EXTERNAL_BLOCKSCI_DIR" "$RUN_WORK/blocksci_data"' in script
     assert "blocksci_parser" not in script
     assert '"external-blocksci" "from-config" "$EXPORTED_MAX_BLOCK"' in script
-    assert "CANONICAL_PARSED" in script
+    assert "canonicalize_index\n" in script
     assert '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"' not in script
 
 
@@ -806,12 +807,10 @@ def test_s3_emulation_forwards_timeout_to_uploader_manifest(
     ],
 )
 def test_unified_report_image_keeps_existing_uri_schemes(reference: str, expected: str) -> None:
-    from coinjoin_pipeline.execution.pbs_settings import (
-        resolve_unified_report_pbs_image,
-    )
+    from coinjoin_pipeline.execution.pbs_settings import resolve_unified_report_image, with_singularity_scheme
 
     args = configuration(unified_report_image=reference)
-    assert resolve_unified_report_pbs_image(args) == expected
+    assert with_singularity_scheme(resolve_unified_report_image(args)) == expected
 
 
 def test_frontend_rejects_an_s5cmd_without_exclude_support() -> None:
@@ -1251,10 +1250,12 @@ def test_only_stages_that_run_the_exporters_require_them() -> None:
 
 
 def test_s3_pbs_scratch_type_selects_the_scratch_resource() -> None:
-    script = render_coinjoin_analysis_s3_pbs(S3_TARGET, "docker://image", "echo hi", scratch_type="local")
+    script = render_coinjoin_analysis_s3_pbs(
+        S3_TARGET, "docker://image", "echo hi", replace(ANALYSIS, scratch_type="local")
+    )
     assert "#PBS -l select=1:ncpus=4:mem=16gb:scratch_local=50gb" in script
     with pytest.raises(PBSError, match="scratch type"):
-        render_coinjoin_analysis_s3_pbs(S3_TARGET, "docker://image", "echo hi", scratch_type="shm")
+        render_coinjoin_analysis_s3_pbs(S3_TARGET, "docker://image", "echo hi", replace(ANALYSIS, scratch_type="shm"))
 
 
 def test_read_only_source_cache_feeds_an_analysis_of_another_run() -> None:
@@ -1287,7 +1288,7 @@ def test_read_only_source_cache_feeds_an_analysis_of_another_run() -> None:
     assert 'grep -Fq "\\"run_id\\": \\"$CACHE_RUN_ID\\""' in script
     # Outputs, markers and provenance stay with the analysis run.
     assert '"$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"' in script
-    assert ".pbs/blocksci-external.done" in script
+    assert "STAGE=blocksci-external\n" in script
     provenance = script.index('cp "$CACHE_DIR/manifest.json" "$OUTPUT_DIR/blocksci-cache-manifest.json"')
     assert script.index('tar -C "$RUN_WORK" -I zstd -xf') < provenance < script.index("singularity exec")
 
@@ -1411,7 +1412,9 @@ def test_persistent_index_paths_stay_on_shared_storage() -> None:
 
 
 def test_index_backup_job_reads_under_the_shared_lock() -> None:
-    script = render_blocksci_index_backup_s3_pbs(**COMMON, **PERSISTENT, ncpus=16, walltime="12:00:00")
+    script = render_blocksci_index_backup_s3_pbs(
+        **COMMON, **PERSISTENT, resources=replace(DEFAULT_RESOURCES["blocksci"], ncpus=16, walltime="12:00:00")
+    )
 
     subprocess.run(["bash", "-n"], input=script, text=True, check=True)
     assert ":multijob=brno\n" in script
@@ -1420,7 +1423,7 @@ def test_index_backup_job_reads_under_the_shared_lock() -> None:
     assert "\nindex_lock_exclusive\n" not in script
     assert "INDEX_ZSTD_THREADS=16" in script
     assert '"$ARTIFACT_URI/$RUN_ID/blocksci-index-backup.json"' in script
-    assert ".pbs/blocksci-backup.done" in script
+    assert "STAGE=blocksci-backup\n" in script
 
 
 def test_index_backup_job_needs_a_backup_prefix() -> None:
@@ -1473,7 +1476,7 @@ def test_dumplings_baseline_reads_the_latest_snapshot() -> None:
     assert "-name '*.txt.json' -delete" in script
     assert script.index("-name '*.txt.json' -delete") < script.index("cj_process.parse_dumplings")
     assert '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/"' in script
-    assert ".pbs/coinjoin-analysis.done" in script
+    assert "STAGE=coinjoin-analysis\n" in script
 
 
 def test_dumplings_baseline_covers_only_wasabi2_and_joinmarket() -> None:

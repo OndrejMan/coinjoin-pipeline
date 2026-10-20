@@ -1,18 +1,27 @@
-"""S3-backed PBS script renderers."""
+"""S3-backed PBS script renderers.
+
+Every job renders ``directives`` + the stage identity + ``templates/s3_stage.sh`` (the
+``s5``, ``require_file`` and marker helpers) as its preamble and installs the exit
+trap of ``templates/stage_trap.sh`` in ``{start}``. Stage templates add only their
+own work.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
+from exporters.artifact_paths import (
+    BLOCKSCI_ANALYSIS_DIR,
+    BLOCKSCI_CUSTOM_ANALYSIS_DIR,
+    BLOCKSCI_NOTEBOOKS_DIR,
+    REPORT_DIR,
+)
 from exporters.verify_chain import is_block_hash
 
+from coinjoin_pipeline.configuration import MappingsConfiguration
 from coinjoin_pipeline.storage.s3 import (
     S3Target,
-    render_s5cmd_check,
-    render_s5cmd_cp,
-    render_s5cmd_run,
-    render_s5cmd_sync,
     shell_value,
     validate_artifact_uri,
     validate_credentials_file,
@@ -21,114 +30,81 @@ from coinjoin_pipeline.storage.s3 import (
     validate_s3_profile,
 )
 
-from .defaults import (
-    BLOCKSCI_IMAGE_PYTHON_COMMAND,
-    DEFAULT_BLOCKSCI_MEM,
-    DEFAULT_BLOCKSCI_NCPUS,
-    DEFAULT_BLOCKSCI_SCRATCH,
-    DEFAULT_BLOCKSCI_WALLTIME,
-    DEFAULT_COINJOIN_ANALYSIS_MEM,
-    DEFAULT_COINJOIN_ANALYSIS_NCPUS,
-    DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
-    DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
-    DEFAULT_PBS_SCRATCH_TYPE,
-    DEFAULT_UNIFIED_REPORT_MEM,
-    DEFAULT_UNIFIED_REPORT_NCPUS,
-    DEFAULT_UNIFIED_REPORT_SCRATCH,
-    DEFAULT_UNIFIED_REPORT_WALLTIME,
-    PBS_MULTIJOB_LOCATIONS,
-)
+from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND, DEFAULT_RESOURCES, PBS_MULTIJOB_LOCATIONS, PBSResources
+from .scripts import directives, mappings_run, template
 from .validation import (
     PBSError,
-    walltime_to_seconds,
     require_existing_path,
     require_safe_image,
-    require_safe_pbs_resources,
     require_safe_pbs_token,
     require_storage_path,
+    walltime_to_seconds,
 )
-
 
 EXECUTION_DIR = Path(__file__).parent.parent
 EXTERNAL_NETWORKS = {"bitcoin", "bitcoin_testnet", "bitcoin_regtest"}
+BLOCKSCI = DEFAULT_RESOURCES["blocksci"]
 
 
-def _stage_header(target: S3Target, stage_name: str) -> str:
-    """Define the S3 target, the scratch run directory and the stage's status markers."""
-    return "\n".join(
-        (
-            f"ARTIFACT_URI={shell_value(validate_artifact_uri(target.artifact_uri))}",
-            f"RUN_ID={shell_value(validate_run_id(target.run_id))}",
-            f"S3_ENDPOINT_URL={shell_value(validate_s3_endpoint_url(target.endpoint_url))}",
-            f"S3_CREDENTIALS_FILE={shell_value(validate_credentials_file(target.credentials_file))}",
-            f"S3_PROFILE={shell_value(validate_s3_profile(target.profile))}",
-            'test -n "${SCRATCHDIR:-}" || { echo "SCRATCHDIR is not set" >&2; exit 1; }',
-            'RUNS_ROOT="$SCRATCHDIR/coinjoin-run"',
-            'RUN_WORK="$RUNS_ROOT/$RUN_ID"',
-            f'FAILED_MARKER="$RUN_WORK/.pbs/{stage_name}.failed"',
-            f'DONE_MARKER="$RUN_WORK/.pbs/{stage_name}.done"',
-            # Filled only for a persistent index, which the job binds at its own path.
-            "INDEX_BINDS=()",
-        )
-    )
+def _s3_uri(value: str, description: str) -> str:
+    try:
+        return validate_artifact_uri(value)
+    except ValueError as error:
+        raise PBSError(f"Invalid {description}: {error}") from error
 
 
-def _stage_bootstrap(stage_name: str) -> str:
-    """Publish the status markers and install the exit trap that writes them."""
-    done = render_s5cmd_cp('"$DONE_MARKER"', f'"$ARTIFACT_URI/$RUN_ID/.pbs/{stage_name}.done"')
-    failed = render_s5cmd_cp('"$FAILED_MARKER"', f'"$ARTIFACT_URI/$RUN_ID/.pbs/{stage_name}.failed"')
-    trap = (EXECUTION_DIR / "pbs_stage.sh").read_text(encoding="utf-8")
-    return f"publish_done() {{\n  {done}\n}}\npublish_failed() {{\n  {failed}\n}}\n{trap}"
+def _run_id(value: str) -> str:
+    try:
+        return validate_run_id(value)
+    except ValueError as error:
+        raise PBSError(str(error)) from error
 
 
-# Runs inside the trap, so a missing credential or s5cmd still publishes the failure.
-STAGE_SETUP = (
-    'test -r "$S3_CREDENTIALS_FILE" || '
-    '{ echo "S3 credentials file is not readable: $S3_CREDENTIALS_FILE" >&2; exit 1; }\n'
-    f"{render_s5cmd_check()}\n"
-    'export TMPDIR="$SCRATCHDIR" SINGULARITY_CACHEDIR="$SCRATCHDIR" '
-    'SINGULARITY_TMPDIR="$SCRATCHDIR" SINGULARITY_LOCALCACHEDIR="$SCRATCHDIR"'
-)
+def _download(name: str) -> str:
+    """Sync one run directory from the run prefix into the job's run work tree."""
+    return f's5 sync "$ARTIFACT_URI/$RUN_ID/{name}/*" "$RUN_WORK/{name}/"'
+
+
+def _upload(source: str, name: str) -> str:
+    return f's5 sync {source} "$ARTIFACT_URI/$RUN_ID/{name}/"'
 
 
 def _render_stage(
     template_name: str,
-    stage_name: str,
+    stage: str,
     target: S3Target,
+    resources: PBSResources,
     /,
     *,
-    ncpus: int,
-    mem: str,
-    scratch: str,
-    scratch_type: str,
-    walltime: str,
     image: str | None = None,
     multijob: str | None = None,
-    **values,
+    **values: object,
 ) -> str:
     """Validate the shared job inputs and render one stage's script template."""
-    require_safe_pbs_resources(ncpus, mem, scratch, walltime, scratch_type)
-    if multijob is not None and multijob not in PBS_MULTIJOB_LOCATIONS:
-        raise PBSError(f"Unsupported PBS multijob location: {multijob}")
-    values.setdefault("finalize_index", ":")
+    require_safe_pbs_token(stage, "PBS stage")
+    identity = [
+        f"ARTIFACT_URI={shell_value(validate_artifact_uri(target.artifact_uri))}",
+        f"RUN_ID={shell_value(validate_run_id(target.run_id))}",
+        f"S3_ENDPOINT_URL={shell_value(validate_s3_endpoint_url(target.endpoint_url))}",
+        f"S3_CREDENTIALS_FILE={shell_value(validate_credentials_file(target.credentials_file))}",
+        f"S3_PROFILE={shell_value(validate_s3_profile(target.profile))}",
+        f"STAGE={stage}",
+    ]
     if image is not None:
         require_safe_image(image)
-        values["image"] = shell_value(image)
-    template = (EXECUTION_DIR / template_name).read_text(encoding="utf-8")
-    return template.format(
-        ncpus=ncpus,
-        mem=mem,
-        scratch=scratch,
-        scratch_type=scratch_type,
-        multijob=f":multijob={multijob}" if multijob else "",
-        walltime=walltime,
-        stage_header=_stage_header(target, stage_name),
-        bootstrap=_stage_bootstrap(stage_name),
-        stage_setup=STAGE_SETUP,
-        download_exporters=render_s5cmd_sync(
-            '"$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/*"',
-            '"$RUN_WORK/.pipeline/exporters/"',
-        ),
+        identity.append(f"IMAGE={shell_value(image)}")
+    preamble = "\n".join(
+        (
+            directives(stage.replace("-", "_") + "_s3", resources, multijob),
+            "set -euo pipefail\n",
+            *identity,
+            template("s3_stage.sh"),
+        )
+    )
+    values.setdefault("finalize_index", ":")
+    return template(template_name).format(
+        preamble=preamble,
+        start=template("stage_trap.sh") + template("s3_setup.sh"),
         **values,
     )
 
@@ -156,10 +132,7 @@ def _bitcoin_datadir_source(path: Path) -> str:
 
 
 def _block_archive_source(bitcoin_blocks_uri: str) -> str:
-    try:
-        return f"BITCOIN_BLOCKS_URI={shell_value(validate_artifact_uri(bitcoin_blocks_uri))}"
-    except ValueError as error:
-        raise PBSError(f"Invalid Bitcoin block archive URI: {error}") from error
+    return f"BITCOIN_BLOCKS_URI={shell_value(_s3_uri(bitcoin_blocks_uri, 'Bitcoin block archive URI'))}"
 
 
 def _download_block_archive(source_manifest: str | None = None) -> str:
@@ -176,11 +149,11 @@ ARCHIVE_WORK="$RUN_WORK/block-archive"
 mkdir -p "$BITCOIN_DATADIR/blocks" "$ARCHIVE_WORK/sidecars"
 cat >"$ARCHIVE_WORK/block_archive.py" <<'PY'
 {helper}PY
-{render_s5cmd_cp('"$BITCOIN_BLOCKS_URI/blk*.dat.json"', '"$ARCHIVE_WORK/sidecars/"')}
+s5 cp "$BITCOIN_BLOCKS_URI/blk*.dat.json" "$ARCHIVE_WORK/sidecars/"
 python3 "$ARCHIVE_WORK/block_archive.py" select "$ARCHIVE_WORK/sidecars" "$BITCOIN_DATADIR/blocks" \\
   --uri "$BITCOIN_BLOCKS_URI" --max-block "$EXPORTED_MAX_BLOCK"{update} \\
   --commands "$ARCHIVE_WORK/download.s5cmd" --manifest-fields "$ARCHIVE_WORK/manifest-fields.json"
-{render_s5cmd_run('"$ARCHIVE_WORK/download.s5cmd"')}
+s5 run "$ARCHIVE_WORK/download.s5cmd"
 python3 "$ARCHIVE_WORK/block_archive.py" verify "$BITCOIN_DATADIR/blocks" --max-block "$EXPORTED_MAX_BLOCK"{update}
 MANIFEST_EXTRA="$(cat "$ARCHIVE_WORK/manifest-fields.json")\""""
 
@@ -221,21 +194,22 @@ def _parse_chain(message: str, command: str, *, stage: str = "blocksci-parse") -
     )
 
 
-# An index copied from another location still names its old parsed directory.
-CANONICALIZE_INDEX = (
-    'CANONICAL_PARSED="/runs/emulation/logs/$RUN_ID/blocksci_data/parsed"\n'
-    'sed -i -E \'s#("dataDirectory"[[:space:]]*:[[:space:]]*)"[^"]*"#\\1"\''
-    '"$CANONICAL_PARSED"'
-    '\'"#\' "$RUN_WORK/blocksci_data/config.json"\n'
-    'grep -Fq "$CANONICAL_PARSED" "$RUN_WORK/blocksci_data/config.json" || { '
-    'echo "Could not canonicalize BlockSci dataDirectory" >&2; exit 1; }'
-)
-
-
-# The BlockSci cache archive is zstd-compressed; fail inside the trap before any download.
-REQUIRE_ZSTD = (
-    'command -v zstd >/dev/null 2>&1 || { echo "zstd is required to pack or unpack the BlockSci cache" >&2; exit 1; }'
-)
+def _manifest_checks(manifest: str, label: str, run_id: str | None = None) -> list[str]:
+    """Reject a cache or index manifest of another schema, run or BlockSci image."""
+    checks = [
+        f'grep -Fq \'"schema_version": "1.1"\' {manifest} || '
+        f'{{ echo "{label} manifest has an unsupported schema" >&2; exit 1; }}',
+    ]
+    if run_id is not None:
+        checks.append(
+            f'grep -Fq "\\"run_id\\": \\"{run_id}\\"" {manifest} || '
+            f'{{ echo "{label} run ID does not match {run_id}" >&2; exit 1; }}'
+        )
+    checks.append(
+        f'grep -Fq "\\"blocksci_image\\": \\"$IMAGE\\"" {manifest} || '
+        f'{{ echo "{label} was produced by a different BlockSci image" >&2; exit 1; }}'
+    )
+    return checks
 
 
 def _restore_cache(cache_dir: str, run_id: str, label: str, checks: str = "") -> str:
@@ -246,34 +220,39 @@ def _restore_cache(cache_dir: str, run_id: str, label: str, checks: str = "") ->
     the manifest and the SHA-256 sidecar stay for later checks.
     """
     manifest = f'"{cache_dir}/manifest.json"'
+    archive = f"{cache_dir}/blocksci_data.tar.zst"
     return "\n".join(
         (
-            f'test -f "{cache_dir}/blocksci_data.tar.zst" || '
-            f'{{ echo "{label} is missing blocksci_data.tar.zst" >&2; exit 1; }}',
-            f'test -f "{cache_dir}/blocksci_data.tar.zst.sha256" || '
-            f'{{ echo "{label} is missing its SHA-256 sidecar" >&2; exit 1; }}',
-            f'test -f {manifest} || {{ echo "{label} is missing manifest.json" >&2; exit 1; }}',
-            f'grep -Fq \'"schema_version": "1.1"\' {manifest} || '
-            f'{{ echo "{label} manifest has an unsupported schema" >&2; exit 1; }}',
-            f'grep -Fq "\\"run_id\\": \\"{run_id}\\"" {manifest} || '
-            f'{{ echo "{label} run ID does not match {run_id}" >&2; exit 1; }}',
-            f'grep -Fq "\\"blocksci_image\\": \\"$IMAGE\\"" {manifest} || '
-            f'{{ echo "{label} was produced by a different BlockSci image" >&2; exit 1; }}',
+            f'require_file "{archive}" "{label} is missing blocksci_data.tar.zst"',
+            f'require_file "{archive}.sha256" "{label} is missing its SHA-256 sidecar"',
+            f'require_file {manifest} "{label} is missing manifest.json"',
+            *_manifest_checks(manifest, label, run_id),
             *([checks] if checks else []),
-            f'SIDECAR_SHA="$(cut -d \' \' -f 1 "{cache_dir}/blocksci_data.tar.zst.sha256")"',
+            f'SIDECAR_SHA="$(cut -d \' \' -f 1 "{archive}.sha256")"',
             f'grep -Fq "\\"archive_sha256\\": \\"$SIDECAR_SHA\\"" {manifest} || '
             f'{{ echo "{label} manifest SHA-256 does not match its sidecar" >&2; exit 1; }}',
-            "(",
-            f'  cd "{cache_dir}"',
-            "  sha256sum -c blocksci_data.tar.zst.sha256",
-            ")",
-            f'tar -C "$RUN_WORK" -I zstd -xf "{cache_dir}/blocksci_data.tar.zst"',
-            f'rm -f "{cache_dir}/blocksci_data.tar.zst"',
-            'test -f "$RUN_WORK/blocksci_data/config.json" || '
-            f'{{ echo "{label} did not contain blocksci_data/config.json" >&2; exit 1; }}',
-            'test -f "$RUN_WORK/blocksci_data/parsed/chain/block.dat" || '
-            f'{{ echo "{label} did not contain parsed/chain/block.dat" >&2; exit 1; }}',
+            f'(cd "{cache_dir}" && sha256sum -c blocksci_data.tar.zst.sha256)',
+            f'tar -C "$RUN_WORK" -I zstd -xf "{archive}"',
+            f'rm -f "{archive}"',
+            f'require_file "$RUN_WORK/blocksci_data/config.json" "{label} did not contain blocksci_data/config.json"',
+            f'require_file "$RUN_WORK/blocksci_data/parsed/chain/block.dat" '
+            f'"{label} did not contain parsed/chain/block.dat"',
         )
+    )
+
+
+def _manifest_format(last_field: str) -> str:
+    """printf format of a schema-1.1 index manifest; ``$MANIFEST_EXTRA`` follows the height."""
+    return (
+        r"'{\n"
+        r'  "schema_version": "1.1",\n'
+        r'  "run_id": "%s",\n'
+        r'  "blocksci_image": "%s",\n'
+        r'  "source_kind": "%s",\n'
+        r'  "network": "%s",\n'
+        r'  "exported_max_block": %s%s,\n'
+        f"{last_field}\\n"
+        r"}\n'"
     )
 
 
@@ -283,36 +262,25 @@ def _publish_cache(stage: str, source_kind: str, network: str, ncpus: int) -> st
     ``$MANIFEST_EXTRA`` carries the fields that only some sources record. zstd gets the job's
     ``ncpus`` because MetaCentrum sets ``$NCPUS`` and ``$OMP_NUM_THREADS`` (and so ``nproc``) to 1.
     """
-    manifest_format = (
-        r"'{\n"
-        r'  "schema_version": "1.1",\n'
-        r'  "run_id": "%s",\n'
-        r'  "blocksci_image": "%s",\n'
-        r'  "source_kind": "%s",\n'
-        r'  "network": "%s",\n'
-        r'  "exported_max_block": %s%s,\n'
-        r'  "archive": "blocksci_data.tar.zst",\n'
-        r'  "archive_sha256": "%s"\n'
-        r"}\n'"
-    )
+    manifest_format = _manifest_format(r'  "archive": "blocksci_data.tar.zst",\n' + r'  "archive_sha256": "%s"')
     return "\n".join(
         (
             f'echo "[{stage}] archiving reusable index"',
             f'tar -C "$RUN_WORK" -I "zstd -3 -T{ncpus}" -cf "$CACHE_DIR/blocksci_data.tar.zst" blocksci_data',
-            "(",
-            '  cd "$CACHE_DIR"',
-            "  sha256sum blocksci_data.tar.zst > blocksci_data.tar.zst.sha256",
-            ")",
+            '(cd "$CACHE_DIR" && sha256sum blocksci_data.tar.zst > blocksci_data.tar.zst.sha256)',
             f"printf {manifest_format} \\",
             f'  "$RUN_ID" "$IMAGE" "{source_kind}" "{network}" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA" '
             '"$(cut -d \' \' -f 1 "$CACHE_DIR/blocksci_data.tar.zst.sha256")" \\',
             '  > "$CACHE_DIR/manifest.json"',
-            render_s5cmd_sync('"$CACHE_DIR/"', '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/"'),
+            _upload('"$CACHE_DIR/"', "blocksci-parse_data"),
         )
     )
 
 
 INDEX_ROOTS = ("/storage/", "/auto/", *(f"/scratch/multijob-{place}/" for place in PBS_MULTIJOB_LOCATIONS))
+INDEX_UNLOCK = "index_unlock 2>/dev/null || :"
+# Persistent manifests keep the S3 cache fields an update reads, without the archive.
+PERSISTENT_STORAGE_FIELD = r'  "storage": "persistent"'
 
 
 @dataclass(frozen=True)
@@ -333,53 +301,24 @@ class PersistentIndex:
                 f"The index directory must be under /storage/ or /scratch/multijob-<location>/: {self.index_dir}"
             )
         if self.backup_uri is not None:
-            try:
-                validate_artifact_uri(self.backup_uri)
-            except ValueError as error:
-                raise PBSError(f"Invalid index backup URI: {error}") from error
-
-
-# Persistent manifests keep the S3 cache fields an update reads, without the archive.
-PERSISTENT_MANIFEST_FORMAT = (
-    r"'{\n"
-    r'  "schema_version": "1.1",\n'
-    r'  "run_id": "%s",\n'
-    r'  "blocksci_image": "%s",\n'
-    r'  "source_kind": "%s",\n'
-    r'  "network": "%s",\n'
-    r'  "exported_max_block": %s%s,\n'
-    r'  "storage": "persistent"\n'
-    r"}\n'"
-)
+            _s3_uri(self.backup_uri, "index backup URI")
 
 
 def _index_setup(index: PersistentIndex, walltime: str, *, writer: bool) -> str:
     """Define the index variables and helpers, then take the reader or writer lock."""
     seconds = walltime_to_seconds(walltime)
-    store = (EXECUTION_DIR / "index_store.sh").read_text(encoding="utf-8")
     return "\n".join(
         (
-            REQUIRE_ZSTD,
+            "require_zstd",
             f"INDEX_DIR={shell_value(index.index_dir)}",
             f"INDEX_BACKUP={shell_value((index.backup_uri or '').rstrip('/'))}",
             # Past the walltime the job is gone, so its lock entry may be cleared.
             f"INDEX_LOCK_EXPIRES=$(($(date +%s) + {seconds} + 600))",
             f"INDEX_LOCK_WAIT={max(60, seconds // 2)}",
             "INDEX_LOCK_POLL=60",
-            store,
+            template("index_store.sh"),
             'mkdir -p "$INDEX_DIR"',
             "index_lock_exclusive" if writer else "index_lock_shared",
-        )
-    )
-
-
-def _index_manifest_checks(manifest: str, label: str) -> str:
-    return "\n".join(
-        (
-            f'grep -Fq \'"schema_version": "1.1"\' {manifest} || '
-            f'{{ echo "{label} manifest has an unsupported schema" >&2; exit 1; }}',
-            f'grep -Fq "\\"blocksci_image\\": \\"$IMAGE\\"" {manifest} || '
-            f'{{ echo "{label} was produced by a different BlockSci image" >&2; exit 1; }}',
         )
     )
 
@@ -391,14 +330,23 @@ def _index_reader(index: PersistentIndex, walltime: str) -> str:
             _index_setup(index, walltime, writer=False),
             'index_complete "$INDEX_DIR" || { echo "[index] working copy $INDEX_DIR is incomplete; '
             'a persistent update restores it from the S3 backup" >&2; exit 1; }',
-            _index_manifest_checks('"$INDEX_DIR/manifest.json"', "Persistent BlockSci index"),
+            *_manifest_checks('"$INDEX_DIR/manifest.json"', "Persistent BlockSci index"),
             "index_link_into_run",
             'cp "$INDEX_DIR/config.json" "$RUN_WORK/blocksci_data/config.json"',
-            CANONICALIZE_INDEX,
+            "canonicalize_index",
             'INDEX_BINDS=(--bind "$INDEX_DIR:$INDEX_DIR:ro")',
             'echo "[index] reading $INDEX_DIR at height $(index_height "$INDEX_DIR")"',
         )
     )
+
+
+def _index_writer(index: PersistentIndex, walltime: str) -> list[str]:
+    """Take the writer lock and expose the working copy read-write to the parser."""
+    return [
+        _index_setup(index, walltime, writer=True),
+        'touch "$INDEX_DIR/.writing"',
+        "index_link_into_run",
+    ]
 
 
 def _index_publish(stage: str, source_kind: str, network: str) -> str:
@@ -406,12 +354,12 @@ def _index_publish(stage: str, source_kind: str, network: str) -> str:
     return "\n".join(
         (
             f'echo "[{stage}] recording persistent index at height $EXPORTED_MAX_BLOCK"',
-            f"printf {PERSISTENT_MANIFEST_FORMAT} \\",
+            f"printf {_manifest_format(PERSISTENT_STORAGE_FIELD)} \\",
             f'  "$RUN_ID" "$IMAGE" "{source_kind}" "{network}" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA" \\',
             '  > "$RUN_WORK/index-manifest.json"',
             'index_publish "$RUN_WORK/index-manifest.json"',
             # The lab cannot see the multijob scratch; it reads the index height from here.
-            render_s5cmd_cp('"$INDEX_DIR/manifest.json"', '"$ARTIFACT_URI/$RUN_ID/blocksci-index-manifest.json"'),
+            's5 cp "$INDEX_DIR/manifest.json" "$ARTIFACT_URI/$RUN_ID/blocksci-index-manifest.json"',
             "index_unlock",
         )
     )
@@ -422,11 +370,7 @@ def render_blocksci_index_backup_s3_pbs(
     *,
     persistent: PersistentIndex,
     multijob: str | None = None,
-    ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
-    mem: str = DEFAULT_BLOCKSCI_MEM,
-    scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
-    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
-    walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
+    resources: PBSResources = BLOCKSCI,
 ) -> str:
     """Render the weekly job that replaces the index's S3 backup with an archive of the working copy.
 
@@ -437,57 +381,27 @@ def render_blocksci_index_backup_s3_pbs(
     if persistent.backup_uri is None:
         raise PBSError("An index backup needs --blocksci-index-backup-uri")
     return _render_stage(
-        "blocksci_index_backup_s3_template.sh",
+        "s3_blocksci_backup.sh",
         "blocksci-backup",
         target,
-        ncpus=ncpus,
-        mem=mem,
-        scratch=scratch,
-        scratch_type=scratch_type,
-        walltime=walltime,
+        resources,
         multijob=multijob,
+        ncpus=resources.ncpus,
         index_reader="\n".join(
             (
-                _index_setup(persistent, walltime, writer=False),
+                _index_setup(persistent, resources.walltime, writer=False),
                 'index_complete "$INDEX_DIR" || { echo "[index] working copy $INDEX_DIR is incomplete; '
                 'nothing to back up" >&2; exit 1; }',
             )
-        ),
-        finalize_index="index_unlock 2>/dev/null || :",
-        # The lab learns which height the backup holds from the run.
-        record_backup=render_s5cmd_cp(
-            '"$INDEX_DIR/manifest.json"', '"$ARTIFACT_URI/$RUN_ID/blocksci-index-backup.json"'
         ),
     )
 
 
 def render_coinjoin_analysis_s3_pbs(
-    target: S3Target,
-    image: str,
-    command: str,
-    *,
-    ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
-    mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
-    scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
-    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
-    walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+    target: S3Target, image: str, command: str, resources: PBSResources = DEFAULT_RESOURCES["analysis"]
 ) -> str:
     return _render_stage(
-        "coinjoin_analysis_s3_template.sh",
-        "coinjoin-analysis",
-        target,
-        image=image,
-        command=command,
-        ncpus=ncpus,
-        mem=mem,
-        scratch=scratch,
-        scratch_type=scratch_type,
-        walltime=walltime,
-        download_run=render_s5cmd_sync('"$ARTIFACT_URI/$RUN_ID/*"', '"$RUN_WORK/"'),
-        upload_results=render_s5cmd_sync(
-            '"$RUN_WORK/coinjoin-analysis_data/"',
-            '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/"',
-        ),
+        "s3_coinjoin_analysis.sh", "coinjoin-analysis", target, resources, image=image, command=command
     )
 
 
@@ -504,11 +418,7 @@ def render_coinjoin_analysis_dumplings_s3_pbs(
     *,
     dumplings_uri: str,
     coinjoin_type: str,
-    ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
-    mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
-    scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
-    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
-    walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+    resources: PBSResources = DEFAULT_RESOURCES["analysis"],
 ) -> str:
     """Render the mainnet baseline: coinjoin-analysis over the latest published Dumplings snapshot.
 
@@ -516,32 +426,22 @@ def render_coinjoin_analysis_dumplings_s3_pbs(
     service next to the archive node). The run gets ``coinjoin_tx_info.json``, the image's
     curated ``false_cjtxs.json`` and ``dumplings-snapshot.json`` for the external comparison.
     """
-    try:
-        uri = validate_artifact_uri(dumplings_uri)
-    except ValueError as error:
-        raise PBSError(f"Invalid Dumplings snapshot URI: {error}") from error
+    uri = _s3_uri(dumplings_uri, "Dumplings snapshot URI")
     if coinjoin_type not in DUMPLINGS_PROTOCOLS:
         raise PBSError(f"Dumplings baselines cover wasabi2 and joinmarket, not {coinjoin_type}")
     cjtype, mix_id, false_cjtxs = DUMPLINGS_PROTOCOLS[coinjoin_type]
     return _render_stage(
-        "coinjoin_analysis_dumplings_s3_template.sh",
+        "s3_coinjoin_analysis_dumplings.sh",
         "coinjoin-analysis",
         target,
+        resources,
         image=image,
-        ncpus=ncpus,
-        mem=mem,
-        scratch=scratch,
-        scratch_type=scratch_type,
-        walltime=walltime,
         dumplings_uri=shell_value(uri),
         cjtype=cjtype,
         mix_id=mix_id,
         false_cjtxs=false_cjtxs,
         command=f"python -m cj_process.parse_dumplings --cjtype {cjtype} --action process_dumplings "
         "--target-path /work/dumplings",
-        download_latest=render_s5cmd_cp('"$DUMPLINGS_URI/latest.json"', '"$RUN_WORK/dumplings-latest.json"'),
-        download_snapshot=render_s5cmd_cp('"$SNAPSHOT_PREFIX/*"', '"$WORK/dumplings/Scanner/"'),
-        upload_results=render_s5cmd_sync('"$OUTPUT/"', '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/"'),
     )
 
 
@@ -549,70 +449,20 @@ def render_mappings_s3_pbs(
     target: S3Target,
     enumerator_image: str,
     sake_image: str,
-    *,
-    mining_fee_rate: int = 1,
-    coordination_fee_rate: float = 0.003,
-    max_decomposition_fee: int = 6000,
-    mode: str = "numeric",
-    timeout: int = 60,
-    retry_timeout: int = 600,
-    sake_seed: int = 20260704,
-    ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
-    mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
-    scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
-    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
-    walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+    settings: MappingsConfiguration = MappingsConfiguration(),
+    resources: PBSResources = DEFAULT_RESOURCES["mappings"],
 ) -> str:
     """Render the Wasabi mappings/Sake stage over S3-backed inputs."""
     require_safe_image(enumerator_image, "enumerator image")
     require_safe_image(sake_image, "Sake image")
-    if mode not in {"numeric", "all"}:
-        raise PBSError("CoinJoin mappings mode must be numeric or all")
-    for value, description in (
-        (mining_fee_rate, "mapping mining fee rate"),
-        (max_decomposition_fee, "mapping maximum decomposition fee"),
-        (sake_seed, "Sake seed"),
-    ):
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            raise PBSError(f"{description} must be a non-negative integer")
-    for value, description in (
-        (timeout, "mapping timeout"),
-        (retry_timeout, "mapping retry timeout"),
-    ):
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise PBSError(f"{description} must be a positive integer")
-    if (
-        isinstance(coordination_fee_rate, bool)
-        or not isinstance(coordination_fee_rate, (int, float))
-        or coordination_fee_rate < 0
-    ):
-        raise PBSError("mapping coordination fee rate must be non-negative")
-
     return _render_stage(
-        "mappings_s3_template.sh",
+        "s3_mappings.sh",
         "coinjoin-mappings",
         target,
+        resources,
         enumerator_image=shell_value(enumerator_image),
         sake_image=shell_value(sake_image),
-        enumerator_image_value=enumerator_image,
-        sake_image_value=sake_image,
-        mining_fee_rate=mining_fee_rate,
-        coordination_fee_rate=coordination_fee_rate,
-        max_decomposition_fee=max_decomposition_fee,
-        mode=mode,
-        timeout=timeout,
-        retry_timeout=retry_timeout,
-        sake_seed=sake_seed,
-        ncpus=ncpus,
-        mem=mem,
-        scratch=scratch,
-        scratch_type=scratch_type,
-        walltime=walltime,
-        download_input=render_s5cmd_sync(
-            '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/*"',
-            '"$RUN_WORK/coinjoin-analysis_data/"',
-        ),
-        upload_outputs=render_s5cmd_sync('"$OUT/"', '"$ARTIFACT_URI/$RUN_ID/coinjoin-mappings_data/"'),
+        mappings_run=mappings_run(settings),
     )
 
 
@@ -620,73 +470,121 @@ def render_blocksci_s3_pbs(
     target: S3Target,
     image: str,
     command: str,
+    resources: PBSResources = BLOCKSCI,
     *,
-    ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
-    mem: str = DEFAULT_BLOCKSCI_MEM,
-    scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
-    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
-    walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
     include_report: bool = True,
     export_analysis: bool = False,
 ) -> str:
+    """Render the combined job: parse the emulated chain and analyze it, optionally with the report."""
+    report = "coinjoinPipeline_data/unified_report.json"
+    analysis = "blocksci-analysis_data/blocksci_analysis.json"
+    baseline = "coinjoin-analysis_data/coinjoin_tx_info.json"
+    after = []
+    if include_report:
+        after.append('REPORT_DIR="$RUN_WORK/coinjoinPipeline_data"')
+        after.append(f'require_file "$RUN_WORK/{report}" "BlockSci S3-compatible reporting did not produce {report}"')
+    if export_analysis:
+        after.append(f'require_file "$RUN_WORK/{analysis}" "BlockSci analysis did not produce {analysis}"')
+    after.append(_upload('"$RUN_WORK/blocksci_data/"', "blocksci_data"))
+    if export_analysis:
+        after.append(_upload('"$RUN_WORK/blocksci-analysis_data/"', "blocksci-analysis_data"))
+    if include_report:
+        after.append(_upload('"$REPORT_DIR/"', "coinjoinPipeline_data"))
     return _render_stage(
-        "blocksci_s3_template.sh",
+        "s3_blocksci.sh",
         "blocksci",
         target,
+        resources,
         image=image,
         command=command,
-        ncpus=ncpus,
-        mem=mem,
-        scratch=scratch,
-        scratch_type=scratch_type,
-        walltime=walltime,
-        download_run=render_s5cmd_sync('"$ARTIFACT_URI/$RUN_ID/*"', '"$RUN_WORK/"'),
-        coinjoin_analysis_check=(
-            'test -f "$RUN_WORK/coinjoin-analysis_data/coinjoin_tx_info.json" || {\n'
-            '  echo "BlockSci S3-compatible reporting requires '
-            'coinjoin-analysis_data/coinjoin_tx_info.json" >&2\n'
-            "  exit 1\n"
-            "}"
-            if include_report
-            else ""
-        ),
-        report_output_check=(
-            'REPORT_DIR="$RUN_WORK/coinjoinPipeline_data"\n'
-            'test -f "$REPORT_DIR/unified_report.json" || {\n'
-            '  echo "BlockSci S3-compatible reporting did not produce '
-            'coinjoinPipeline_data/unified_report.json" >&2\n'
-            "  exit 1\n"
-            "}"
-            if include_report
-            else ""
-        ),
-        analysis_output_check=(
-            'test -f "$RUN_WORK/blocksci-analysis_data/blocksci_analysis.json" || {\n'
-            '  echo "BlockSci analysis did not produce '
-            'blocksci-analysis_data/blocksci_analysis.json" >&2\n'
-            "  exit 1\n"
-            "}"
-            if export_analysis
-            else ""
-        ),
-        upload_blocksci=render_s5cmd_sync('"$RUN_WORK/blocksci_data/"', '"$ARTIFACT_URI/$RUN_ID/blocksci_data/"'),
-        upload_analysis=(
-            render_s5cmd_sync(
-                '"$RUN_WORK/blocksci-analysis_data/"',
-                '"$ARTIFACT_URI/$RUN_ID/blocksci-analysis_data/"',
+        before=f'require_file "$RUN_WORK/{baseline}" "BlockSci S3-compatible reporting requires {baseline}"'
+        if include_report
+        else "",
+        after="\n".join(after),
+    )
+
+
+def _parse_source(
+    command: str,
+    *,
+    external_bitcoin_datadir: Path | None,
+    bitcoin_blocks_uri: str | None,
+    expected_block_hash: str | None,
+    external_blocksci_dir: Path | None,
+    external_network: str | None,
+    external_max_block: int | None,
+) -> tuple[str, str, str, str, str, str]:
+    """(source kind, network, description, source preparation, index production, chain check) of a parse."""
+    if sum(value is not None for value in (external_bitcoin_datadir, bitcoin_blocks_uri, external_blocksci_dir)) > 1:
+        raise PBSError("Choose only one external Bitcoin or BlockSci source")
+    if external_bitcoin_datadir is not None:
+        network = _require_external_chain(external_network, external_max_block)
+        return (
+            "external-bitcoin",
+            network,
+            "external Bitcoin Core block directory",
+            f"{_bitcoin_datadir_source(external_bitcoin_datadir)}\nEXPORTED_MAX_BLOCK={external_max_block}",
+            _parse_chain("parsing external chain through block $EXPORTED_MAX_BLOCK", command),
+            "",
+        )
+    if bitcoin_blocks_uri is not None:
+        network = _require_external_chain(external_network, external_max_block)
+        return (
+            "bitcoin-blocks-s3",
+            network,
+            "verified Bitcoin block archive from S3",
+            f"{_block_archive_source(bitcoin_blocks_uri)}\nEXPORTED_MAX_BLOCK={external_max_block}\n"
+            f"{_download_block_archive()}",
+            _parse_chain("parsing verified S3 block archive through block $EXPORTED_MAX_BLOCK", command),
+            _verify_block_archive_chain(network, expected_block_hash),
+        )
+    if external_blocksci_dir is not None:
+        blocksci_path = external_blocksci_dir.expanduser().resolve()
+        require_storage_path(blocksci_path)
+        require_existing_path(blocksci_path, "external BlockSci directory")
+        for relative in ("config.json", "parsed/chain/block.dat"):
+            if not (blocksci_path / relative).is_file():
+                raise PBSError(f"External BlockSci directory must contain {relative}: {blocksci_path}")
+        return (
+            "external-blocksci",
+            "from-config",
+            "existing external BlockSci index",
+            f"EXTERNAL_BLOCKSCI_DIR={shell_value(str(blocksci_path))}\n"
+            'test -f "$EXTERNAL_BLOCKSCI_DIR/config.json"\n'
+            'test -f "$EXTERNAL_BLOCKSCI_DIR/parsed/chain/block.dat"',
+            'cp -a "$EXTERNAL_BLOCKSCI_DIR" "$RUN_WORK/blocksci_data"\n'
+            "canonicalize_index\n"
+            'MAX_BLOCK_NUM="$(sed -nE \'s/.*"maxBlockNum"[[:space:]]*:[[:space:]]*([0-9]+).*/\\1/p\' '
+            '"$RUN_WORK/blocksci_data/config.json" | head -n 1)"\n'
+            'test -n "$MAX_BLOCK_NUM" && [ "$MAX_BLOCK_NUM" -gt 0 ] || { '
+            'echo "External BlockSci config has no positive parser.maxBlockNum" >&2; exit 1; }\n'
+            'EXPORTED_MAX_BLOCK="$((MAX_BLOCK_NUM - 1))"\n'
+            'echo "[blocksci-parse] imported external index through block $EXPORTED_MAX_BLOCK"',
+            "",
+        )
+    return (
+        "emulator",
+        "bitcoin_regtest",
+        "emulator Bitcoin and exported-block inputs",
+        "\n".join(
+            (
+                _download("bitcoin_data"),
+                _download("coinjoin_emulator_data/data/btc-node"),
+                'BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"',
+                'if [ ! -d "$BITCOIN_DATADIR/regtest/blocks" ] && [ -d "$BITCOIN_DATADIR/data/regtest/blocks" ]; then',
+                '  BITCOIN_DATADIR="$BITCOIN_DATADIR/data"',
+                "fi",
+                'test -d "$BITCOIN_DATADIR/regtest/blocks" || {',
+                '  echo "BlockSci parsing requires a Bitcoin datadir containing regtest/blocks" >&2',
+                "  exit 1",
+                "}",
+                'EXPORTED_MAX_BLOCK="$(emulator_max_block)"',
+                'test -n "$EXPORTED_MAX_BLOCK" || { '
+                'echo "BlockSci parsing could not determine the exported maximum block" >&2; exit 1; }',
             )
-            if export_analysis
-            else ""
         ),
-        upload_report=(
-            render_s5cmd_sync(
-                '"$REPORT_DIR/"',
-                '"$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"',
-            )
-            if include_report
-            else ""
-        ),
-        upload_logs=render_s5cmd_sync('"$RUN_WORK/logs/"', '"$ARTIFACT_URI/$RUN_ID/logs/"'),
+        _parse_chain("parsing through exported block $EXPORTED_MAX_BLOCK", command),
+        "",
     )
 
 
@@ -694,12 +592,8 @@ def render_blocksci_parse_s3_pbs(
     target: S3Target,
     image: str,
     command: str,
+    resources: PBSResources = BLOCKSCI,
     *,
-    ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
-    mem: str = DEFAULT_BLOCKSCI_MEM,
-    scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
-    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
-    walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
     external_bitcoin_datadir: Path | None = None,
     bitcoin_blocks_uri: str | None = None,
     expected_block_hash: str | None = None,
@@ -714,144 +608,50 @@ def render_blocksci_parse_s3_pbs(
     With ``persistent`` the index is parsed straight into that directory and recorded
     there instead of being archived to S3.
     """
-    if (
-        sum(
-            value is not None
-            for value in (
-                external_bitcoin_datadir,
-                bitcoin_blocks_uri,
-                external_blocksci_dir,
-            )
-        )
-        > 1
-    ):
-        raise PBSError("Choose only one external Bitcoin or BlockSci source")
-
-    download_inputs = ""
-    verify_index = ""
-    source_kind = "emulator"
-    network = "bitcoin_regtest"
-    source_description = "emulator Bitcoin and exported-block inputs"
-    if external_bitcoin_datadir is not None:
-        datadir_source = _bitcoin_datadir_source(external_bitcoin_datadir)
-        network = _require_external_chain(external_network, external_max_block)
-        source_kind = "external-bitcoin"
-        source_description = "external Bitcoin Core block directory"
-        prepare_source = f"{datadir_source}\nEXPORTED_MAX_BLOCK={external_max_block}"
-        produce_index = _parse_chain("parsing external chain through block $EXPORTED_MAX_BLOCK", command)
-    elif bitcoin_blocks_uri is not None:
-        archive_source = _block_archive_source(bitcoin_blocks_uri)
-        network = _require_external_chain(external_network, external_max_block)
-        source_kind = "bitcoin-blocks-s3"
-        verify_index = _verify_block_archive_chain(network, expected_block_hash)
-        source_description = "verified Bitcoin block archive from S3"
-        prepare_source = f"{archive_source}\nEXPORTED_MAX_BLOCK={external_max_block}\n{_download_block_archive()}"
-        produce_index = _parse_chain(
-            "parsing verified S3 block archive through block $EXPORTED_MAX_BLOCK",
-            command,
-        )
-    elif external_blocksci_dir is not None:
-        blocksci_path = external_blocksci_dir.expanduser().resolve()
-        require_storage_path(blocksci_path)
-        require_existing_path(blocksci_path, "external BlockSci directory")
-        if not (blocksci_path / "config.json").is_file():
-            raise PBSError(f"External BlockSci directory must contain config.json: {blocksci_path}")
-        if not (blocksci_path / "parsed" / "chain" / "block.dat").is_file():
-            raise PBSError(f"External BlockSci directory must contain parsed/chain/block.dat: {blocksci_path}")
-        source_kind = "external-blocksci"
-        network = "from-config"
-        source_description = "existing external BlockSci index"
-        prepare_source = (
-            f"EXTERNAL_BLOCKSCI_DIR={shell_value(str(blocksci_path))}\n"
-            'test -f "$EXTERNAL_BLOCKSCI_DIR/config.json"\n'
-            'test -f "$EXTERNAL_BLOCKSCI_DIR/parsed/chain/block.dat"'
-        )
-        produce_index = (
-            'cp -a "$EXTERNAL_BLOCKSCI_DIR" "$RUN_WORK/blocksci_data"\n'
-            f"{CANONICALIZE_INDEX}\n"
-            'MAX_BLOCK_NUM="$(sed -nE \'s/.*"maxBlockNum"[[:space:]]*:[[:space:]]*([0-9]+).*/\\1/p\' '
-            '"$RUN_WORK/blocksci_data/config.json" | head -n 1)"\n'
-            'test -n "$MAX_BLOCK_NUM" && [ "$MAX_BLOCK_NUM" -gt 0 ] || { '
-            'echo "External BlockSci config has no positive parser.maxBlockNum" >&2; exit 1; }\n'
-            'EXPORTED_MAX_BLOCK="$((MAX_BLOCK_NUM - 1))"\n'
-            'echo "[blocksci-parse] imported external index through block $EXPORTED_MAX_BLOCK"'
-        )
-    else:
-        download_inputs = "\n".join(
-            (
-                render_s5cmd_sync(
-                    '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"',
-                    '"$RUN_WORK/bitcoin_data/"',
-                ),
-                render_s5cmd_sync(
-                    '"$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/data/btc-node/*"',
-                    '"$RUN_WORK/coinjoin_emulator_data/data/btc-node/"',
-                ),
-            )
-        )
-        prepare_source = (
-            f"{download_inputs}\n"
-            'BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"\n'
-            'if [ ! -d "$BITCOIN_DATADIR/regtest/blocks" ] && '
-            '[ -d "$BITCOIN_DATADIR/data/regtest/blocks" ]; then\n'
-            '  BITCOIN_DATADIR="$BITCOIN_DATADIR/data"\n'
-            "fi\n"
-            'test -d "$BITCOIN_DATADIR/regtest/blocks" || {\n'
-            '  echo "BlockSci parsing requires a Bitcoin datadir containing regtest/blocks" >&2\n'
-            "  exit 1\n"
-            "}\n"
-            'EXPORTED_MAX_BLOCK="$(find "$RUN_WORK/coinjoin_emulator_data/data/btc-node" '
-            "-maxdepth 1 -type f -name 'block_*.json' -printf '%f\\n' | "
-            "sed -nE 's/^block_([0-9]+)\\.json$/\\1/p' | sort -n | tail -n 1)" + '"\n'
-            'test -n "$EXPORTED_MAX_BLOCK" || { '
-            'echo "BlockSci parsing could not determine the exported maximum block" >&2; exit 1; }'
-        )
-        produce_index = _parse_chain("parsing through exported block $EXPORTED_MAX_BLOCK", command)
-    persistent_values = {}
+    source_kind, network, description, prepare_source, produce_index, verify_index = _parse_source(
+        command,
+        external_bitcoin_datadir=external_bitcoin_datadir,
+        bitcoin_blocks_uri=bitcoin_blocks_uri,
+        expected_block_hash=expected_block_hash,
+        external_blocksci_dir=external_blocksci_dir,
+        external_network=external_network,
+        external_max_block=external_max_block,
+    )
+    publish = _publish_cache("blocksci-parse", source_kind, network, resources.ncpus)
+    finalize = ":"
     if persistent is not None:
         if source_kind not in {"external-bitcoin", "bitcoin-blocks-s3"}:
             raise PBSError("A persistent index is parsed from an external Bitcoin datadir or block archive")
+        writer = _index_writer(persistent, resources.walltime)
         # The lock is taken after the block download, which has no index to protect yet.
         produce_index = "\n".join(
             (
-                _index_setup(persistent, walltime, writer=True),
+                writer[0],
                 'if [ -f "$INDEX_DIR/manifest.json" ] || index_backup_available; then',
                 '  echo "[index] an index already exists for $INDEX_DIR; use --blocksci-task update" >&2',
                 "  exit 1",
                 "fi",
                 'rm -rf "$INDEX_DIR/parsed" "$INDEX_DIR/config.json" "$INDEX_DIR/files.txt"',
-                'touch "$INDEX_DIR/.writing"',
-                "index_link_into_run",
+                *writer[1:],
                 'INDEX_BINDS=(--bind "$INDEX_DIR:$INDEX_DIR:rw")',
                 produce_index,
             )
         )
-        persistent_values = {
-            "require_zstd": REQUIRE_ZSTD,
-            "publish_cache": _index_publish("blocksci-parse", source_kind, network),
-            "finalize_index": "index_unlock 2>/dev/null || :",
-        }
+        publish = _index_publish("blocksci-parse", source_kind, network)
+        finalize = INDEX_UNLOCK
     return _render_stage(
-        "blocksci_parse_s3_template.sh",
+        "s3_blocksci_parse.sh",
         "blocksci-parse",
         target,
+        resources,
         image=image,
-        ncpus=ncpus,
-        mem=mem,
-        scratch=scratch,
-        scratch_type=scratch_type,
-        walltime=walltime,
         multijob=multijob,
-        source_description=source_description,
+        source_description=description,
         prepare_source=prepare_source,
         produce_index=produce_index,
         verify_index=verify_index,
-        upload_log=render_s5cmd_cp('"$JOB_LOG"', '"$ARTIFACT_URI/$RUN_ID/logs/blocksci-parse.pbs.log"'),
-        **{
-            "require_zstd": REQUIRE_ZSTD,
-            "publish_cache": _publish_cache("blocksci-parse", source_kind, network, ncpus),
-            **persistent_values,
-        },
+        publish_cache=publish,
+        finalize_index=finalize,
     )
 
 
@@ -860,17 +660,13 @@ def render_blocksci_update_s3_pbs(
     source_run_id: str | None,
     image: str,
     command: str,
+    resources: PBSResources = BLOCKSCI,
     *,
     external_network: str,
     external_max_block: int,
     external_bitcoin_datadir: Path | None = None,
     bitcoin_blocks_uri: str | None = None,
     expected_block_hash: str | None = None,
-    ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
-    mem: str = DEFAULT_BLOCKSCI_MEM,
-    scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
-    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
-    walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
     persistent: PersistentIndex | None = None,
     multijob: str | None = None,
 ) -> str:
@@ -883,20 +679,17 @@ def render_blocksci_update_s3_pbs(
     when the working copy is incomplete.
     """
     if persistent is None:
-        try:
-            source_run_id = validate_run_id(source_run_id or "")
-        except ValueError as error:
-            raise PBSError(str(error)) from error
+        source_run_id = _run_id(source_run_id or "")
         if source_run_id == target.run_id:
             raise PBSError("Incremental BlockSci update requires different source and target run IDs")
     elif source_run_id is not None:
         raise PBSError("A persistent index update reads its own index, not a source run")
     _require_external_chain(external_network, external_max_block)
     verify_index = ""
+    prepare_blocks = ""
     if external_bitcoin_datadir is not None and bitcoin_blocks_uri is None:
         source_kind = "external-bitcoin"
         prepare_source = _bitcoin_datadir_source(external_bitcoin_datadir)
-        prepare_blocks = ""
     elif bitcoin_blocks_uri is not None and external_bitcoin_datadir is None:
         source_kind = "bitcoin-blocks-s3"
         verify_index = _verify_block_archive_chain(external_network, expected_block_hash, update=True)
@@ -913,35 +706,40 @@ def render_blocksci_update_s3_pbs(
         'grep -Fq "\\"network\\": \\"$NETWORK\\"" "$SOURCE_CACHE_DIR/manifest.json" || '
         '{ echo "Source cache network does not match $NETWORK" >&2; exit 1; }'
     )
-    persistent_values = {}
-    if persistent is not None:
+    if persistent is None:
+        restore_source = "\n".join(
+            (
+                's5 sync "$ARTIFACT_URI/$SOURCE_RUN_ID/blocksci-parse_data/*" "$SOURCE_CACHE_DIR/"',
+                _restore_cache("$SOURCE_CACHE_DIR", "$SOURCE_RUN_ID", "Source cache", source_checks),
+            )
+        )
+        publish = _publish_cache("blocksci-update", source_kind, "$NETWORK", resources.ncpus)
+        finalize = ":"
+    else:
+        writer = _index_writer(persistent, resources.walltime)
         # The template reads the source manifest from $SOURCE_CACHE_DIR, as for an S3 cache.
-        persistent_values = {
-            "download_source_cache": "\n".join(
-                (
-                    _index_setup(persistent, walltime, writer=True),
-                    "index_reconcile",
-                    _index_manifest_checks('"$INDEX_DIR/manifest.json"', "Persistent BlockSci index"),
-                    source_checks.replace("$SOURCE_CACHE_DIR", "$INDEX_DIR"),
-                    'cp "$INDEX_DIR/manifest.json" "$SOURCE_CACHE_DIR/manifest.json"',
-                    'SOURCE_RUN_ID="$(sed -nE \'s/.*"run_id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\\1/p\' '
-                    '"$INDEX_DIR/manifest.json" | head -n 1)"',
-                    'touch "$INDEX_DIR/.writing"',
-                    "index_link_into_run",
-                    'cp "$INDEX_DIR/config.json" "$RUN_WORK/blocksci_data/config.json"',
-                    'INDEX_BINDS=(--bind "$INDEX_DIR:$INDEX_DIR:rw")',
-                    'echo "[index] updating $INDEX_DIR from height $(index_height "$INDEX_DIR")"',
-                )
-            ),
-            "restore_cache": ":",
-            "require_zstd": REQUIRE_ZSTD,
-            "publish_cache": _index_publish("blocksci-update", source_kind, "$NETWORK"),
-            "finalize_index": "index_unlock 2>/dev/null || :",
-        }
+        restore_source = "\n".join(
+            (
+                writer[0],
+                "index_reconcile",
+                *_manifest_checks('"$INDEX_DIR/manifest.json"', "Persistent BlockSci index"),
+                source_checks.replace("$SOURCE_CACHE_DIR", "$INDEX_DIR"),
+                'cp "$INDEX_DIR/manifest.json" "$SOURCE_CACHE_DIR/manifest.json"',
+                'SOURCE_RUN_ID="$(sed -nE \'s/.*"run_id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\\1/p\' '
+                '"$INDEX_DIR/manifest.json" | head -n 1)"',
+                *writer[1:],
+                'cp "$INDEX_DIR/config.json" "$RUN_WORK/blocksci_data/config.json"',
+                'INDEX_BINDS=(--bind "$INDEX_DIR:$INDEX_DIR:rw")',
+                'echo "[index] updating $INDEX_DIR from height $(index_height "$INDEX_DIR")"',
+            )
+        )
+        publish = _index_publish("blocksci-update", source_kind, "$NETWORK")
+        finalize = INDEX_UNLOCK
     return _render_stage(
-        "blocksci_update_s3_template.sh",
+        "s3_blocksci_update.sh",
         "blocksci-update",
         target,
+        resources,
         image=image,
         multijob=multijob,
         source_run_id=shell_value(source_run_id or "persistent-index"),
@@ -950,32 +748,30 @@ def render_blocksci_update_s3_pbs(
         prepare_source=prepare_source,
         prepare_blocks=prepare_blocks,
         verify_index=verify_index,
-        ncpus=ncpus,
-        mem=mem,
-        scratch=scratch,
-        scratch_type=scratch_type,
-        walltime=walltime,
-        canonicalize_index=CANONICALIZE_INDEX,
+        restore_source=restore_source,
         parse_chain=_parse_chain(
             "parsing blocks $((SOURCE_MAX_BLOCK + 1)) through $EXPORTED_MAX_BLOCK", command, stage="blocksci-update"
         ),
-        **{
-            "download_source_cache": render_s5cmd_sync(
-                '"$ARTIFACT_URI/$SOURCE_RUN_ID/blocksci-parse_data/*"',
-                '"$SOURCE_CACHE_DIR/"',
-            ),
-            "restore_cache": _restore_cache("$SOURCE_CACHE_DIR", "$SOURCE_RUN_ID", "Source cache", source_checks),
-            "require_zstd": REQUIRE_ZSTD,
-            "publish_cache": _publish_cache("blocksci-update", source_kind, "$NETWORK", ncpus),
-            **persistent_values,
-        },
+        publish_cache=publish,
+        finalize_index=finalize,
     )
+
+
+ANALYZE_MODES = ("blocksci-analyze", "blocksci-script", "blocksci-notebook", "blocksci-external")
+# Where each mode writes, relative to the run: uploaded after the job, and given the index provenance.
+MODE_OUTPUTS = {
+    "blocksci-analyze": BLOCKSCI_ANALYSIS_DIR,
+    "blocksci-script": BLOCKSCI_CUSTOM_ANALYSIS_DIR,
+    "blocksci-external": REPORT_DIR,
+    "blocksci-notebook": BLOCKSCI_NOTEBOOKS_DIR,
+}
 
 
 def render_blocksci_analyze_s3_pbs(
     target: S3Target,
     image: str,
     command: str,
+    resources: PBSResources = BLOCKSCI,
     *,
     mode: str = "blocksci-analyze",
     source_run_id: str | None = None,
@@ -986,11 +782,6 @@ def render_blocksci_analyze_s3_pbs(
     external_false_cjtxs_uri: str | None = None,
     notebooks_dir: Path | None = None,
     notebook_port: int = 8888,
-    ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
-    mem: str = DEFAULT_BLOCKSCI_MEM,
-    scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
-    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
-    walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
 ) -> str:
     """Render analysis, custom-script, or notebook work over a cached index.
 
@@ -999,55 +790,53 @@ def render_blocksci_analyze_s3_pbs(
     can share one published index without touching it. With ``persistent`` the
     index is read in place under the shared lock instead of being downloaded.
     """
-    if mode not in {
-        "blocksci-analyze",
-        "blocksci-script",
-        "blocksci-notebook",
-        "blocksci-external",
-    }:
+    if mode not in ANALYZE_MODES:
         raise PBSError(f"Unsupported reusable BlockSci mode: {mode}")
-    require_safe_pbs_token(mode, "PBS stage")
     if isinstance(notebook_port, bool) or not isinstance(notebook_port, int) or not 1024 <= notebook_port <= 65535:
         raise PBSError("BlockSci notebook port must be between 1024 and 65535")
+    if source_run_id is not None and persistent is not None:
+        raise PBSError("Choose one index source: a source run's cache or a persistent index")
+    if mode == "blocksci-analyze" and persistent is not None:
+        raise PBSError("BlockSci detect reads emulator data of its own run and cannot use a persistent index")
+    if mode == "blocksci-analyze" and source_run_id is not None:
+        raise PBSError("BlockSci detect reads emulator data of its own run and cannot use a source cache")
+    if external_false_cjtxs_uri is not None and mode != "blocksci-external":
+        raise PBSError("A false-positive list belongs to the external BlockSci report")
 
+    output = f'"$RUN_WORK/{MODE_OUTPUTS[mode]}"'
+    prepare = ['mkdir -p "$OUTPUT_DIR"']
     extra_binds = ""
-    prepare_mode = ""
     connection_help = ""
     output_check = ""
-    upload_sources: list[tuple[str, str]] = []
+    downloads: list[str] = []
     if mode == "blocksci-analyze":
-        prepare_mode = 'mkdir -p "$RUN_WORK/blocksci-analysis_data"'
-        output_check = (
-            'test -f "$RUN_WORK/blocksci-analysis_data/blocksci_analysis.json" || {\n'
-            '  echo "Reusable BlockSci analysis did not produce blocksci-analysis_data/blocksci_analysis.json" >&2\n'
-            "  exit 1\n"
-            "}"
-        )
-        upload_sources.append(
-            (
-                '"$RUN_WORK/blocksci-analysis_data/"',
-                '"$ARTIFACT_URI/$RUN_ID/blocksci-analysis_data/"',
-            )
-        )
+        artifact = "blocksci-analysis_data/blocksci_analysis.json"
+        output_check = f'require_file "$RUN_WORK/{artifact}" "Reusable BlockSci analysis did not produce {artifact}"'
+        downloads += [_download(".pipeline/exporters"), _download("coinjoin_emulator_data")]
     elif mode == "blocksci-external":
         if external_baseline_uri is None:
             raise PBSError("External BlockSci report requires a Dumplings baseline URI")
-        try:
-            baseline_uri = validate_artifact_uri(external_baseline_uri)
-        except ValueError as error:
-            raise PBSError(f"Invalid Dumplings baseline URI: {error}") from error
+        baseline_uri = _s3_uri(external_baseline_uri, "Dumplings baseline URI")
         output_check = (
-            'test -f "$RUN_WORK/coinjoinPipeline_data/unified_report.json" || {\n'
-            '  echo "External BlockSci report did not produce unified_report.json" >&2\n'
-            "  exit 1\n"
-            "}"
+            'require_file "$RUN_WORK/coinjoinPipeline_data/unified_report.json" '
+            '"External BlockSci report did not produce unified_report.json"'
         )
-        upload_sources.append(
-            (
-                '"$RUN_WORK/coinjoinPipeline_data/"',
-                '"$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"',
+        downloads += [
+            _download(".pipeline/exporters"),
+            'mkdir -p "$RUN_WORK/coinjoin-analysis_data"',
+            f's5 cp {shell_value(baseline_uri)} "$RUN_WORK/coinjoin-analysis_data/coinjoin_tx_info.json"',
+        ]
+        if baseline_uri.endswith("/coinjoin_tx_info.json"):
+            # A Dumplings baseline keeps the snapshot it came from next to it; optional.
+            snapshot = shell_value(baseline_uri.rsplit("/", 1)[0] + "/dumplings-snapshot.json")
+            downloads.append(
+                f's5 cp {snapshot} "$RUN_WORK/coinjoin-analysis_data/dumplings-snapshot.json"'
+                ' || echo "[blocksci-external] the baseline has no dumplings-snapshot.json"'
             )
-        )
+        if external_false_cjtxs_uri is not None:
+            false_cjtxs = _s3_uri(external_false_cjtxs_uri, "false-positive list URI")
+            # The report filters the baseline with every false_cjtxs.json* it finds there.
+            downloads.append(f's5 cp {shell_value(false_cjtxs)} "$RUN_WORK/coinjoin-analysis_data/false_cjtxs.json"')
     elif mode == "blocksci-script":
         if user_script is None:
             raise PBSError("Reusable BlockSci script mode requires --blocksci-script")
@@ -1056,19 +845,12 @@ def render_blocksci_analyze_s3_pbs(
         require_existing_path(script_path, "BlockSci user script")
         if not script_path.is_file():
             raise PBSError(f"BlockSci user script is not a file: {script_path}")
-        prepare_mode = (
-            'mkdir -p "$RUN_WORK/blocksci-custom-analysis_data"\n'
-            f"USER_SCRIPT={shell_value(str(script_path))}\n"
-            'cp "$USER_SCRIPT" "$RUN_WORK/blocksci-custom-analysis_data/script.py"\n'
-            'sha256sum "$USER_SCRIPT" > "$RUN_WORK/blocksci-custom-analysis_data/script.py.sha256"'
-        )
+        prepare += [
+            f"USER_SCRIPT={shell_value(str(script_path))}",
+            'cp "$USER_SCRIPT" "$OUTPUT_DIR/script.py"',
+            'sha256sum "$USER_SCRIPT" > "$OUTPUT_DIR/script.py.sha256"',
+        ]
         extra_binds = 'EXTRA_BINDS+=(--bind "$USER_SCRIPT:/mnt/user-analysis.py:ro")'
-        upload_sources.append(
-            (
-                '"$RUN_WORK/blocksci-custom-analysis_data/"',
-                '"$ARTIFACT_URI/$RUN_ID/blocksci-custom-analysis_data/"',
-            )
-        )
     else:
         if notebooks_dir is not None:
             notebook_path = notebooks_dir.expanduser().resolve()
@@ -1076,10 +858,8 @@ def render_blocksci_analyze_s3_pbs(
             require_existing_path(notebook_path, "BlockSci notebooks directory")
             if not notebook_path.is_dir():
                 raise PBSError(f"BlockSci notebooks path is not a directory: {notebook_path}")
-            prepare_mode = f"NOTEBOOK_DIR={shell_value(str(notebook_path))}"
-        else:
-            prepare_mode = 'NOTEBOOK_DIR="$RUN_WORK/blocksci-notebooks_data"\nmkdir -p "$NOTEBOOK_DIR"'
-        extra_binds = 'EXTRA_BINDS+=(--bind "$NOTEBOOK_DIR:/mnt/notebooks:rw")'
+            output = shell_value(str(notebook_path))
+        extra_binds = 'EXTRA_BINDS+=(--bind "$OUTPUT_DIR:/mnt/notebooks:rw")'
         connection_help = (
             f'echo "[blocksci-notebook] Jupyter port: {notebook_port}"\n'
             'LOGIN="${PBS_O_LOGNAME:-${USER:-<login>}}"\n'
@@ -1088,140 +868,41 @@ def render_blocksci_analyze_s3_pbs(
             f'-L {notebook_port}:127.0.0.1:{notebook_port} $LOGIN@$(hostname -f)"\n'
             'echo "[blocksci-notebook] The Jupyter token follows below."'
         )
-        upload_sources.append(('"$NOTEBOOK_DIR/"', '"$ARTIFACT_URI/$RUN_ID/blocksci-notebooks_data/"'))
 
-    if source_run_id is not None and persistent is not None:
-        raise PBSError("Choose one index source: a source run's cache or a persistent index")
-    if persistent is not None and mode == "blocksci-analyze":
-        raise PBSError("BlockSci detect reads emulator data of its own run and cannot use a persistent index")
-    output_dirs = {
-        "blocksci-script": '"$RUN_WORK/blocksci-custom-analysis_data"',
-        "blocksci-external": '"$RUN_WORK/coinjoinPipeline_data"',
-        "blocksci-notebook": '"$NOTEBOOK_DIR"',
-    }
     if persistent is not None:
-        prepare_mode = "\n".join(
-            part
-            for part in (
-                prepare_mode,
-                f"OUTPUT_DIR={output_dirs[mode]}",
-                'mkdir -p "$OUTPUT_DIR"',
-                'cp "$INDEX_DIR/manifest.json" "$OUTPUT_DIR/blocksci-index-manifest.json"',
-            )
-            if part
-        )
-    if source_run_id is not None:
-        if mode == "blocksci-analyze":
-            raise PBSError("BlockSci detect reads emulator data of its own run and cannot use a source cache")
-        try:
-            source_run_id = validate_run_id(source_run_id)
-        except ValueError as error:
-            raise PBSError(str(error)) from error
-        if source_run_id == target.run_id:
-            raise PBSError("A read-only source cache must come from a different run")
-        # Record which published index the outputs were computed from.
-        provenance = 'cp "$CACHE_DIR/manifest.json" "$OUTPUT_DIR/blocksci-cache-manifest.json"'
-        prepare_mode = "\n".join(
-            part
-            for part in (
-                prepare_mode,
-                f"OUTPUT_DIR={output_dirs[mode]}",
-                'mkdir -p "$OUTPUT_DIR"',
-                provenance,
-            )
-            if part
-        )
-    cache_run = "$CACHE_RUN_ID" if source_run_id is not None else "$RUN_ID"
-    upload_outputs = "\n  ".join(
-        f"{render_s5cmd_sync(source, destination)} || upload_status=$?" for source, destination in upload_sources
-    )
-    downloads = (
-        []
-        if persistent is not None
-        else [
-            *([f"CACHE_RUN_ID={shell_value(source_run_id)}"] if source_run_id is not None else []),
-            render_s5cmd_sync(
-                f'"$ARTIFACT_URI/{cache_run}/blocksci-parse_data/*"',
-                '"$CACHE_DIR/"',
-            ),
-        ]
-    )
-    if mode == "blocksci-analyze":
-        downloads.extend(
-            (
-                render_s5cmd_sync(
-                    '"$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/*"',
-                    '"$RUN_WORK/.pipeline/exporters/"',
-                ),
-                render_s5cmd_sync(
-                    '"$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/*"',
-                    '"$RUN_WORK/coinjoin_emulator_data/"',
-                ),
-            )
-        )
-    elif mode == "blocksci-external":
-        downloads.extend(
-            (
-                render_s5cmd_sync(
-                    '"$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/*"',
-                    '"$RUN_WORK/.pipeline/exporters/"',
-                ),
-                'mkdir -p "$RUN_WORK/coinjoin-analysis_data"',
-                render_s5cmd_cp(
-                    shell_value(baseline_uri),
-                    '"$RUN_WORK/coinjoin-analysis_data/coinjoin_tx_info.json"',
-                ),
-            )
-        )
-        if baseline_uri.endswith("/coinjoin_tx_info.json"):
-            # A Dumplings baseline keeps the snapshot it came from next to it; optional.
-            downloads.append(
-                render_s5cmd_cp(
-                    shell_value(baseline_uri.rsplit("/", 1)[0] + "/dumplings-snapshot.json"),
-                    '"$RUN_WORK/coinjoin-analysis_data/dumplings-snapshot.json"',
-                )
-                + ' || echo "[blocksci-external] the baseline has no dumplings-snapshot.json"'
-            )
-        if external_false_cjtxs_uri is not None:
-            try:
-                false_cjtxs_uri = validate_artifact_uri(external_false_cjtxs_uri)
-            except ValueError as error:
-                raise PBSError(f"Invalid false-positive list URI: {error}") from error
-            # The report filters the baseline with every false_cjtxs.json* it finds there.
-            downloads.append(
-                render_s5cmd_cp(
-                    shell_value(false_cjtxs_uri),
-                    '"$RUN_WORK/coinjoin-analysis_data/false_cjtxs.json"',
-                )
-            )
-    elif external_false_cjtxs_uri is not None:
-        raise PBSError("A false-positive list belongs to the external BlockSci report")
+        restore = _index_reader(persistent, resources.walltime)
+        prepare.append('cp "$INDEX_DIR/manifest.json" "$OUTPUT_DIR/blocksci-index-manifest.json"')
+    else:
+        cache_run = "$RUN_ID"
+        cache = []
+        if source_run_id is not None:
+            source_run_id = _run_id(source_run_id)
+            if source_run_id == target.run_id:
+                raise PBSError("A read-only source cache must come from a different run")
+            cache_run = "$CACHE_RUN_ID"
+            cache.append(f"CACHE_RUN_ID={shell_value(source_run_id)}")
+            # Record which published index the outputs were computed from.
+            prepare.append('cp "$CACHE_DIR/manifest.json" "$OUTPUT_DIR/blocksci-cache-manifest.json"')
+        cache.append(f's5 sync "$ARTIFACT_URI/{cache_run}/blocksci-parse_data/*" "$CACHE_DIR/"')
+        downloads = cache + downloads
+        restore = _restore_cache("$CACHE_DIR", cache_run, "Reusable BlockSci cache")
     return _render_stage(
-        "blocksci_analyze_s3_template.sh",
+        "s3_blocksci_analyze.sh",
         mode,
         target,
+        resources,
         image=image,
-        command=command,
-        mode=shell_value(mode),
-        stage=mode,
-        job_name=mode.replace("-", "_") + "_s3",
-        ncpus=ncpus,
-        mem=mem,
-        scratch=scratch,
-        scratch_type=scratch_type,
-        walltime=walltime,
         multijob=multijob,
-        download_inputs="\n".join(downloads) or ":",
-        require_zstd=REQUIRE_ZSTD if persistent is None else ":",
-        restore_cache=_restore_cache("$CACHE_DIR", cache_run, "Reusable BlockSci cache")
-        if persistent is None
-        else _index_reader(persistent, walltime),
-        finalize_index=":" if persistent is None else "index_unlock 2>/dev/null || :",
-        prepare_mode=prepare_mode,
+        command=command,
+        output_dir=output,
+        download_inputs="\n".join(downloads),
+        restore_cache=restore,
+        finalize_index=":" if persistent is None else INDEX_UNLOCK,
+        prepare_mode="\n".join(prepare),
         extra_binds=extra_binds,
         connection_help=connection_help,
         output_check=output_check,
-        upload_outputs=upload_outputs,
+        upload_outputs=f's5 sync "$OUTPUT_DIR/" "$ARTIFACT_URI/$RUN_ID/{MODE_OUTPUTS[mode]}/" || upload_status=$?',
     )
 
 
@@ -1229,54 +910,26 @@ def render_unified_report_s3_pbs(
     target: S3Target,
     image: str,
     command: str,
+    resources: PBSResources = DEFAULT_RESOURCES["unified_report"],
     *,
-    ncpus: int = DEFAULT_UNIFIED_REPORT_NCPUS,
-    mem: str = DEFAULT_UNIFIED_REPORT_MEM,
-    scratch: str = DEFAULT_UNIFIED_REPORT_SCRATCH,
-    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
-    walltime: str = DEFAULT_UNIFIED_REPORT_WALLTIME,
     include_mappings: bool = False,
 ) -> str:
     """Render the S3 report-only job that joins both analyzer outputs."""
-    downloads = [
-        render_s5cmd_sync(
-            '"$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/*"',
-            '"$RUN_WORK/.pipeline/exporters/"',
-        ),
-        render_s5cmd_sync(
-            '"$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/*"',
-            '"$RUN_WORK/coinjoin_emulator_data/"',
-        ),
-        render_s5cmd_sync(
-            '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/*"',
-            '"$RUN_WORK/coinjoin-analysis_data/"',
-        ),
-        render_s5cmd_sync(
-            '"$ARTIFACT_URI/$RUN_ID/blocksci-analysis_data/*"',
-            '"$RUN_WORK/blocksci-analysis_data/"',
-        ),
-    ]
-    if include_mappings:
-        downloads.append(
-            render_s5cmd_sync(
-                '"$ARTIFACT_URI/$RUN_ID/coinjoin-mappings_data/*"',
-                '"$RUN_WORK/coinjoin-mappings_data/"',
-            )
-        )
     return _render_stage(
-        "unified_report_s3_template.sh",
+        "s3_unified_report.sh",
         "unified-report",
         target,
+        resources,
         image=image,
         command=command,
-        ncpus=ncpus,
-        mem=mem,
-        scratch=scratch,
-        scratch_type=scratch_type,
-        walltime=walltime,
-        download_inputs="\n".join(downloads),
-        upload_report=render_s5cmd_sync(
-            '"$REPORT_DIR/"',
-            '"$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"',
+        download_inputs="\n".join(
+            _download(name)
+            for name in (
+                ".pipeline/exporters",
+                "coinjoin_emulator_data",
+                "coinjoin-analysis_data",
+                "blocksci-analysis_data",
+                *(("coinjoin-mappings_data",) if include_mappings else ()),
+            )
         ),
     )

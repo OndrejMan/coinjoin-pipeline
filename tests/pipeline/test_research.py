@@ -12,7 +12,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.pbs.commands import detector_arguments
 from coinjoin_pipeline.execution.research import (  # noqa: E402
-    dry_run_external,
     external_analyze,
     external_command,
     require_baseline,
@@ -80,10 +79,12 @@ class ResearchPreflightTests(unittest.TestCase):
                 coinjoin_type="wasabi2",
                 detector_arguments=detector_arguments(PipelineConfiguration()),
                 runtime="docker",
+                dry_run=True,
+                false_cjtxs=None,
             )
 
             with mock.patch("coinjoin_pipeline.execution.research.runtime_check"):
-                dry_run_external(args)
+                external_analyze(args)
             self.assertFalse(args.runs_root.exists())
 
     def test_validate_existing_run_uses_read_only_container_mount(self):
@@ -133,6 +134,8 @@ class ResearchPreflightTests(unittest.TestCase):
                 min_free_gb=1,
                 runtime="docker",
                 blocksci_image="blocksci:test",
+                dry_run=False,
+                false_cjtxs=None,
             )
             with self.assertRaises(ValueError):
                 external_analyze(args)
@@ -159,6 +162,8 @@ class ResearchPreflightTests(unittest.TestCase):
                 min_free_gb=0,
                 runtime="docker",
                 blocksci_image="blocksci:test",
+                dry_run=False,
+                false_cjtxs=None,
             )
 
             with mock.patch("coinjoin_pipeline.execution.research.subprocess.run") as run_mock:

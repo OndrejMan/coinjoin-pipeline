@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from coinjoin_pipeline.configuration import PipelineConfiguration
+from coinjoin_pipeline.configuration import MappingsConfiguration, PipelineConfiguration
 from unittest import mock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2] / "pipeline"
@@ -17,14 +17,18 @@ from coinjoin_pipeline.execution.pbs.commands import (
     blocksci_script_pbs_command,
     coinjoin_analysis_pbs_command,
 )
-from coinjoin_pipeline.execution.pbs.defaults import PBS_ACTIVE_STATES, PBS_QUEUED_STATES, PBS_TERMINAL_STATES
+from coinjoin_pipeline.execution.pbs.defaults import (
+    PBS_ACTIVE_STATES,
+    PBS_QUEUED_STATES,
+    PBS_TERMINAL_STATES,
+    PBSResources,
+)
 from coinjoin_pipeline.execution.pbs.submission import (
     pbs_job_probe,
     persist_pbs_job_id,
     qdel_pbs_job,
     qstat_job_state,
     submit_pbs,
-    submit_pbs_text,
 )
 from coinjoin_pipeline.execution.pbs.submission_local import (
     report_stage_log,
@@ -202,18 +206,18 @@ class PBSJobIdPersistenceTest(unittest.TestCase):
 
 
 class PBSStdinSubmissionTest(unittest.TestCase):
-    def test_submit_pbs_text_pipes_script_and_dependency(self):
+    def test_submit_pbs_stdin_pipes_script_and_dependency(self):
         with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(returncode=0, stdout="9.server\n", stderr="")
-            job_id = submit_pbs_text("#PBS -N stage\ntrue\n", "8.server")
+            job_id = submit_pbs("#PBS -N stage\ntrue\n", ("8.server",))
         self.assertEqual(job_id, "9.server")
         self.assertEqual(run.call_args.args[0], ["qsub", "-W", "depend=afterok:8.server"])
         self.assertEqual(run.call_args.kwargs["input"], "#PBS -N stage\ntrue\n")
 
-    def test_submit_pbs_text_supports_multiple_dependencies(self):
+    def test_submit_pbs_stdin_supports_multiple_dependencies(self):
         with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(returncode=0, stdout="10.server\n", stderr="")
-            job_id = submit_pbs_text(
+            job_id = submit_pbs(
                 "#PBS -N report\ntrue\n",
                 ("8.server", "9.server"),
             )
@@ -223,13 +227,13 @@ class PBSStdinSubmissionTest(unittest.TestCase):
             ["qsub", "-W", "depend=afterok:8.server:9.server"],
         )
 
-    def test_submit_pbs_text_raises_on_qsub_failure(self):
+    def test_submit_pbs_stdin_raises_on_qsub_failure(self):
         with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(returncode=1, stdout="", stderr="bad queue")
             with self.assertRaises(PBSError):
-                submit_pbs_text("#PBS -N stage\ntrue\n")
+                submit_pbs("#PBS -N stage\ntrue\n")
 
-    def test_submit_pbs_text_rejects_empty_job_id_on_zero_exit(self):
+    def test_submit_pbs_stdin_rejects_empty_job_id_on_zero_exit(self):
         """A zero exit with no job ID may still have queued a job.
 
         Returning "" makes record_job() skip persistence, so the job would be
@@ -241,9 +245,9 @@ class PBSStdinSubmissionTest(unittest.TestCase):
                 with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run:
                     run.return_value = mock.Mock(returncode=0, stdout=stdout, stderr="")
                     with self.assertRaisesRegex(PBSError, "invalid job ID"):
-                        submit_pbs_text("#PBS -N stage\ntrue\n")
+                        submit_pbs("#PBS -N stage\ntrue\n")
 
-    def test_submit_pbs_text_rejects_multiline_job_id(self):
+    def test_submit_pbs_stdin_rejects_multiline_job_id(self):
         with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(
                 returncode=0,
@@ -251,15 +255,15 @@ class PBSStdinSubmissionTest(unittest.TestCase):
                 stderr="",
             )
             with self.assertRaisesRegex(PBSError, "invalid job ID"):
-                submit_pbs_text("#PBS -N stage\ntrue\n")
+                submit_pbs("#PBS -N stage\ntrue\n")
 
-    def test_submit_pbs_text_rejects_unsafe_job_id(self):
+    def test_submit_pbs_stdin_rejects_unsafe_job_id(self):
         with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(returncode=0, stdout="11.server; rm -rf /\n", stderr="")
             with self.assertRaises(PBSError):
-                submit_pbs_text("#PBS -N stage\ntrue\n")
+                submit_pbs("#PBS -N stage\ntrue\n")
 
-    def test_submit_pbs_text_accepts_metacentrum_job_id(self):
+    def test_submit_pbs_stdin_accepts_metacentrum_job_id(self):
         with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(
                 returncode=0,
@@ -267,7 +271,7 @@ class PBSStdinSubmissionTest(unittest.TestCase):
                 stderr="",
             )
             self.assertEqual(
-                submit_pbs_text("#PBS -N stage\ntrue\n"),
+                submit_pbs("#PBS -N stage\ntrue\n"),
                 "12345678.meta-pbs.metacentrum.cz",
             )
 
@@ -284,15 +288,13 @@ class PBSTemplateTest(unittest.TestCase):
             Path("/storage/run-a"),
             "docker://enumerator",
             "docker://sake",
-            timeout=60,
-            retry_timeout=600,
-            sake_seed=42,
+            MappingsConfiguration(timeout=60, retry_timeout=600, sake_seed=42),
         )
-        self.assertIn('case "docker://enumerator" in', script)
-        self.assertIn('case "docker://sake" in', script)
-        self.assertIn('singularity pull --force "$ENUMERATOR_SIF" "docker://enumerator"', script)
-        self.assertIn('cp "docker://enumerator" "$ENUMERATOR_SIF"', script)
-        self.assertIn('"$ENUMERATOR_SIF" python3 /app/run.py', script)
+        self.assertIn("ENUMERATOR_IMAGE=docker://enumerator", script)
+        self.assertIn("SAKE_IMAGE=docker://sake", script)
+        self.assertIn('fetch_sif "$ENUMERATOR_IMAGE" "$ENUMERATOR_SIF"', script)
+        self.assertIn('singularity pull --force "$2" "$1"', script)
+        self.assertIn("in_enumerator python3 /app/run.py", script)
         self.assertIn('"$SAKE_SIF" dotnet /app/Sake.dll', script)
         self.assertIn("--timeout 60 --retry-timeout 600", script)
         self.assertIn("--seed 42", script)
@@ -316,10 +318,6 @@ class PBSTemplateTest(unittest.TestCase):
             Path("/storage/exporters"),
             "docker://image",
             "echo hello",
-            ncpus=8,
-            mem="64gb",
-            scratch="100gb",
-            walltime="24:00:00",
         )
         self.assertIn("#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=100gb", script)
         self.assertIn("#PBS -l walltime=24:00:00", script)
@@ -341,10 +339,6 @@ class PBSTemplateTest(unittest.TestCase):
             run_dir / "coinjoin_emulator_data" / "data",
             "docker://image",
             "analyze-emul",
-            ncpus=4,
-            mem="16gb",
-            scratch="50gb",
-            walltime="04:00:00",
         )
         self.assertIn("#PBS -l select=1:ncpus=4:mem=16gb:scratch_ssd=50gb", script)
         self.assertIn("analyze-emul", script)
@@ -554,7 +548,7 @@ class PBSValidationTest(unittest.TestCase):
                 Path("/storage/exporters"),
                 "docker://image",
                 "echo hello",
-                mem="64gb\n#PBS -q attacker",
+                PBSResources(8, "64gb\n#PBS -q attacker", "100gb", "24:00:00"),
             )
 
     def test_render_rejects_image_shell_injection(self):
@@ -573,7 +567,7 @@ class PBSValidationTest(unittest.TestCase):
                 Path("/storage/run-a"),
                 "docker://enumerator",
                 "docker://sake",
-                walltime="04:99:00",
+                resources=PBSResources(4, "16gb", "50gb", "04:99:00"),
             )
 
     def test_require_qsub_raises_when_missing(self):
@@ -604,7 +598,7 @@ class PBSSubmissionTest(unittest.TestCase):
     def test_submit_pbs_supports_afterok_dependency(self):
         with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run_mock:
             run_mock.return_value = subprocess.CompletedProcess([], 0, stdout="block-job.meta\n", stderr="")
-            job_id = submit_pbs(Path("/tmp/blocksci.pbs"), "analysis-job.meta")
+            job_id = submit_pbs(Path("/tmp/blocksci.pbs"), ("analysis-job.meta",))
         self.assertEqual(job_id, "block-job.meta")
         self.assertEqual(
             run_mock.call_args.args[0],
@@ -661,10 +655,6 @@ class PBSSubmissionTest(unittest.TestCase):
                     exporters_dir=run_dir / "exporters",
                     image="docker://image",
                     command="echo hello",
-                    ncpus=8,
-                    mem="64gb",
-                    scratch="100gb",
-                    walltime="24:00:00",
                     dry_run=False,
                 )
             self.assertEqual(job_id, "12345.meta-pbs")
@@ -696,12 +686,11 @@ class PBSSubmissionTest(unittest.TestCase):
                     image="docker://image",
                     command="echo report",
                     stage="unified-report",
-                    job_name="blocksci_unified_report",
                 )
 
             script_path = run_dir / ".pbs" / "unified-report.pbs"
             script = script_path.read_text(encoding="utf-8")
-            self.assertIn("#PBS -N blocksci_unified_report", script)
+            self.assertIn("#PBS -N unified_report", script)
             self.assertIn("unified-report.done", script)
             self.assertIn("unified-report.failed", script)
 
@@ -725,10 +714,6 @@ class PBSSubmissionTest(unittest.TestCase):
                     input_data_dir=input_data_dir,
                     image="docker://image",
                     command="analyze-emul",
-                    ncpus=4,
-                    mem="16gb",
-                    scratch="50gb",
-                    walltime="04:00:00",
                     dry_run=True,
                 )
             self.assertIsNone(job_id)
@@ -754,10 +739,6 @@ class PBSSubmissionTest(unittest.TestCase):
                     exporters_dir=run_dir / "exporters",
                     image="docker://image",
                     command="echo hello",
-                    ncpus=8,
-                    mem="64gb",
-                    scratch="100gb",
-                    walltime="24:00:00",
                     dry_run=True,
                 )
             self.assertIsNone(job_id)
@@ -792,10 +773,6 @@ class PBSSubmissionTest(unittest.TestCase):
                         exporters_dir=run_dir / "exporters",
                         image="docker://image",
                         command="echo hello",
-                        ncpus=8,
-                        mem="64gb",
-                        scratch="100gb",
-                        walltime="24:00:00",
                         dry_run=False,
                     )
 
@@ -815,10 +792,6 @@ class PBSSubmissionTest(unittest.TestCase):
                         exporters_dir=run_dir / "exporters",
                         image="docker://image",
                         command="echo hello",
-                        ncpus=8,
-                        mem="64gb",
-                        scratch="100gb",
-                        walltime="24:00:00",
                         dry_run=False,
                     )
 

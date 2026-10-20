@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import asdict, dataclass
 
@@ -11,6 +12,21 @@ IMAGE_NAMES = {
     "blocksci": "ghcr.io/ondrejman/blocksci-complete",
     "mappings": "ghcr.io/ondrejman/coinjoin-mappings-enumerator",
     "sake": "ghcr.io/ondrejman/coinjoin-mappings-sake",
+}
+# What ./run-all.sh local tags its images as.
+LOCAL_IMAGES = {
+    "emulator": "coinjoin-emulator:local",
+    "coinjoin_analysis": "coinjoin-analysis:local",
+    "blocksci": "blocksci-complete:local",
+    "mappings": "coinjoin-mappings-enumerator:local",
+    "sake": "coinjoin-mappings-sake:local",
+}
+IMAGE_ENVIRONMENT = {
+    "emulator": "COINJOIN_EMULATOR_IMAGE",
+    "coinjoin_analysis": "COINJOIN_ANALYSIS_IMAGE",
+    "blocksci": "BLOCKSCI_IMAGE",
+    "mappings": "MAPPINGS_ENUMERATOR_IMAGE",
+    "sake": "SAKE_IMAGE",
 }
 DEFAULT_VERSION = "latest"
 
@@ -42,15 +58,16 @@ def validate_image(image: str) -> None:
         raise ValueError(f"invalid container image reference: {image!r}")
 
 
-def resolve_images(version: str | None, overrides: dict[str, str | None]) -> Images:
+def resolve_images(version: str | None, overrides: dict[str, str | None], *, local: bool = False) -> Images:
+    """Each component's configured image, else its environment variable, else the release or local tag."""
     effective_version = version or DEFAULT_VERSION
     validate_version(effective_version)
     resolved: dict[str, str] = {}
     for component, name in IMAGE_NAMES.items():
-        override = overrides.get(component)
+        override = overrides.get(component) or os.environ.get(IMAGE_ENVIRONMENT[component])
         if override:
             validate_image(override)
             resolved[component] = override
         else:
-            resolved[component] = f"{name}:{effective_version}"
+            resolved[component] = LOCAL_IMAGES[component] if local else f"{name}:{effective_version}"
     return Images(**resolved)

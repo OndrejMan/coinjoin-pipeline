@@ -13,7 +13,7 @@ from coinjoin_pipeline.configuration import PipelineConfiguration
 
 from . import containers, shared_storage_pbs
 from .pbs.submission_local import qdel_pbs_stage, wait_for_pbs_marker
-from .pbs_settings import pbs_wait_timeout, stage_pbs_walltime
+from .pbs_settings import pbs_wait_timeout, stage_pbs_resources
 from .stage_executor import StageSubmission
 from .stages import StageKind, StagePlan, analysis_plan, resource_group
 
@@ -41,7 +41,7 @@ class SharedStorageStageRunner:
             submit = submitters[stage.kind]
             options = {"include_report": False} if stage.kind is StageKind.BLOCKSCI_WORK else {}
             submit(self.args, self.run_dir, wait=False, **options)
-            timeout = pbs_wait_timeout(stage_pbs_walltime(self.args, resource_group(stage.kind)))
+            timeout = pbs_wait_timeout(stage_pbs_resources(self.args, resource_group(stage.kind)).walltime)
             return StageSubmission(
                 stage,
                 wait=lambda: wait_for_pbs_marker(self.run_dir, stage.name, timeout_seconds=timeout),

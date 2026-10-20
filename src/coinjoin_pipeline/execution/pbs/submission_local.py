@@ -11,28 +11,19 @@ from pathlib import Path
 
 from exporters.artifact_paths import BASELINE_FILE
 
+from coinjoin_pipeline.configuration import MappingsConfiguration
+
 from . import submission
 from .defaults import (
-    DEFAULT_BLOCKSCI_MEM,
-    DEFAULT_BLOCKSCI_NCPUS,
-    DEFAULT_BLOCKSCI_SCRATCH,
-    DEFAULT_BLOCKSCI_WALLTIME,
-    DEFAULT_COINJOIN_ANALYSIS_MEM,
-    DEFAULT_COINJOIN_ANALYSIS_NCPUS,
-    DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
-    DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
-    DEFAULT_PBS_SCRATCH_TYPE,
     PBS_ACTIVE_STATES,
     PBS_TERMINAL_STATES,
     POLL_INTERVAL_SECONDS,
     STAGE_LOG_SETTLE_SECONDS,
     STAGE_LOG_TAIL_LINES,
+    DEFAULT_RESOURCES,
+    PBSResources,
 )
-from .templates_local import (
-    render_blocksci_pbs,
-    render_coinjoin_analysis_pbs,
-    render_mappings_pbs,
-)
+from .templates_local import render_blocksci_pbs, render_coinjoin_analysis_pbs, render_mappings_pbs
 from .validation import (
     PBSError,
     require_bitcoin_datadir,
@@ -149,51 +140,14 @@ def wait_for_pbs_marker(
         time.sleep(poll_interval)
 
 
-def submit_blocksci_pbs(
-    run_dir: Path,
-    logs_root: Path,
-    bitcoin_datadir: Path,
-    exporters_dir: Path,
-    image: str,
-    command: str,
-    *,
-    ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
-    mem: str = DEFAULT_BLOCKSCI_MEM,
-    scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
-    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
-    walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
-    dry_run: bool = False,
-    stage: str = "blocksci",
-    job_name: str = "blocksci_analysis",
-) -> str | None:
-    """Submit a BlockSci PBS job; returns job ID (or None if dry-run)."""
-    require_storage_path(run_dir)
-    require_storage_path(logs_root)
-    require_storage_path(bitcoin_datadir)
-    require_storage_path(exporters_dir)
-    require_existing_path(exporters_dir, "PBS exporters directory")
-    require_bitcoin_datadir(bitcoin_datadir)
-    script = render_blocksci_pbs(
-        run_dir,
-        logs_root,
-        bitcoin_datadir,
-        exporters_dir,
-        image,
-        command,
-        ncpus=ncpus,
-        mem=mem,
-        scratch=scratch,
-        scratch_type=scratch_type,
-        walltime=walltime,
-        stage=stage,
-        job_name=job_name,
-    )
-    script_path = run_dir / ".pbs" / f"{stage}.pbs"
+def _submit_script(run_dir: Path, stage: str, script: str, dry_run: bool) -> str | None:
+    """Write a stage's script into the run directory and qsub it; return its job ID."""
     if dry_run:
         print(f"[dry-run] PBS script for {stage}:\n{script}")
         return None
     require_qsub()
     (run_dir / "logs").mkdir(parents=True, exist_ok=True)
+    script_path = run_dir / ".pbs" / f"{stage}.pbs"
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(script, encoding="utf-8")
     job_id = submission.submit_pbs(script_path)
@@ -202,101 +156,57 @@ def submit_blocksci_pbs(
     return job_id
 
 
+def submit_blocksci_pbs(
+    run_dir: Path,
+    logs_root: Path,
+    bitcoin_datadir: Path,
+    exporters_dir: Path,
+    image: str,
+    command: str,
+    resources: PBSResources = DEFAULT_RESOURCES["blocksci"],
+    *,
+    dry_run: bool = False,
+    stage: str = "blocksci",
+) -> str | None:
+    """Submit a BlockSci PBS job; returns job ID (or None if dry-run)."""
+    for path in (run_dir, logs_root, bitcoin_datadir, exporters_dir):
+        require_storage_path(path)
+    require_existing_path(exporters_dir, "PBS exporters directory")
+    require_bitcoin_datadir(bitcoin_datadir)
+    script = render_blocksci_pbs(
+        run_dir, logs_root, bitcoin_datadir, exporters_dir, image, command, resources, stage=stage
+    )
+    return _submit_script(run_dir, stage, script, dry_run)
+
+
 def submit_coinjoin_analysis_pbs(
     run_dir: Path,
     output_dir: Path,
     input_data_dir: Path,
     image: str,
     command: str,
+    resources: PBSResources = DEFAULT_RESOURCES["analysis"],
     *,
-    ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
-    mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
-    scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
-    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
-    walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
     dry_run: bool = False,
 ) -> str | None:
     """Submit a coinjoin-analysis PBS job; returns job ID (or None if dry-run)."""
-    require_storage_path(run_dir)
-    require_storage_path(output_dir)
-    require_storage_path(input_data_dir)
+    for path in (run_dir, output_dir, input_data_dir):
+        require_storage_path(path)
     require_existing_path(input_data_dir, "PBS coinjoin-analysis input data directory")
-    script = render_coinjoin_analysis_pbs(
-        run_dir,
-        output_dir,
-        input_data_dir,
-        image,
-        command,
-        ncpus=ncpus,
-        mem=mem,
-        scratch=scratch,
-        scratch_type=scratch_type,
-        walltime=walltime,
-    )
-    script_path = run_dir / ".pbs" / "coinjoin-analysis.pbs"
-    if dry_run:
-        print(f"[dry-run] PBS script for coinjoin-analysis:\n{script}")
-        return None
-    require_qsub()
-    (run_dir / "logs").mkdir(parents=True, exist_ok=True)
-    script_path.parent.mkdir(parents=True, exist_ok=True)
-    script_path.write_text(script, encoding="utf-8")
-    job_id = submission.submit_pbs(script_path)
-    submission.persist_pbs_job_id(run_dir, "coinjoin-analysis", job_id)
-    print(f"[pbs] Submitted coinjoin-analysis PBS job: {job_id}")
-    return job_id
+    script = render_coinjoin_analysis_pbs(run_dir, output_dir, input_data_dir, image, command, resources)
+    return _submit_script(run_dir, "coinjoin-analysis", script, dry_run)
 
 
 def submit_mappings_pbs(
     run_dir: Path,
     enumerator_image: str,
     sake_image: str,
+    settings: MappingsConfiguration,
+    resources: PBSResources,
     *,
-    mining_fee_rate: int = 1,
-    coordination_fee_rate: float = 0.003,
-    max_decomposition_fee: int = 6000,
-    mode: str = "numeric",
-    timeout: int = 60,
-    retry_timeout: int = 600,
-    sake_seed: int = 20260704,
-    ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
-    mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
-    scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
-    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
-    walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
     dry_run: bool = False,
 ) -> str | None:
     require_storage_path(run_dir)
-    require_existing_path(
-        run_dir / BASELINE_FILE,
-        "CoinJoin mappings input",
-    )
-    script = render_mappings_pbs(
-        run_dir,
-        enumerator_image,
-        sake_image,
-        mining_fee_rate=mining_fee_rate,
-        coordination_fee_rate=coordination_fee_rate,
-        max_decomposition_fee=max_decomposition_fee,
-        mode=mode,
-        timeout=timeout,
-        retry_timeout=retry_timeout,
-        sake_seed=sake_seed,
-        ncpus=ncpus,
-        mem=mem,
-        scratch=scratch,
-        scratch_type=scratch_type,
-        walltime=walltime,
-    )
-    script_path = run_dir / ".pbs" / "coinjoin-mappings.pbs"
-    if dry_run:
-        print(f"[dry-run] PBS script for coinjoin-mappings:\n{script}")
-        return None
-    require_qsub()
-    (run_dir / "logs").mkdir(parents=True, exist_ok=True)
-    script_path.parent.mkdir(parents=True, exist_ok=True)
-    script_path.write_text(script, encoding="utf-8")
-    job_id = submission.submit_pbs(script_path)
-    submission.persist_pbs_job_id(run_dir, "coinjoin-mappings", job_id)
-    print(f"[pbs] Submitted coinjoin-mappings PBS job: {job_id}")
-    return job_id
+    require_existing_path(run_dir / BASELINE_FILE, "CoinJoin mappings input")
+    script = render_mappings_pbs(run_dir, enumerator_image, sake_image, settings, resources)
+    return _submit_script(run_dir, "coinjoin-mappings", script, dry_run)

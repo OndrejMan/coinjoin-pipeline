@@ -16,7 +16,7 @@
 #
 # Needs INDEX_DIR, INDEX_BACKUP (may be empty), INDEX_LOCK_EXPIRES (epoch seconds),
 # INDEX_LOCK_WAIT and INDEX_LOCK_POLL (seconds); for the backup also RUN_WORK and the
-# S3_CREDENTIALS_FILE, S3_PROFILE and S3_ENDPOINT_URL of the stage header.
+# s5 function of the stage header.
 
 INDEX_LOCK="$INDEX_DIR/.lock"
 INDEX_LOCK_ID="${PBS_JOBID:-pid-$$}"
@@ -113,14 +113,8 @@ index_height() {
   sed -nE 's/.*"exported_max_block"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p' "$1/manifest.json" | head -n 1
 }
 
-index_s5() {
-  env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN -u AWS_PROFILE \
-    s5cmd --credentials-file "$S3_CREDENTIALS_FILE" --profile "$S3_PROFILE" \
-    --endpoint-url "$S3_ENDPOINT_URL" "$@"
-}
-
 index_backup_available() {
-  [ -n "$INDEX_BACKUP" ] && index_s5 ls "$INDEX_BACKUP/manifest.json" >/dev/null 2>&1
+  [ -n "$INDEX_BACKUP" ] && s5 ls "$INDEX_BACKUP/manifest.json" >/dev/null 2>&1
 }
 
 # Archive the working copy into $INDEX_BACKUP, replacing the old backup. Run under at
@@ -129,27 +123,27 @@ index_backup() {
   local archive="$INDEX_BACKUP/blocksci_index.tar.zst" fifo="$RUN_WORK/index-backup.fifo"
   local sha="$RUN_WORK/index-backup.sha256"
   echo "[index] replacing the S3 backup in $INDEX_BACKUP (height $(index_height "$INDEX_DIR"))"
-  index_s5 rm "$INDEX_BACKUP/manifest.json" >/dev/null 2>&1 || true
-  index_s5 rm "$archive" "$archive.sha256" >/dev/null 2>&1 || true
+  s5 rm "$INDEX_BACKUP/manifest.json" >/dev/null 2>&1 || true
+  s5 rm "$archive" "$archive.sha256" >/dev/null 2>&1 || true
   rm -f "$fifo"
   mkfifo "$fifo"
   sha256sum <"$fifo" | cut -d ' ' -f 1 >"$sha" &
-  if index_s5 pipe --help >/dev/null 2>&1; then
+  if s5 pipe --help >/dev/null 2>&1; then
     tar -C "$INDEX_DIR" -cf - config.json files.txt manifest.json parsed \
-      | zstd -3 -T"${INDEX_ZSTD_THREADS:-0}" | tee "$fifo" | index_s5 pipe "$archive" >/dev/null
+      | zstd -3 -T"${INDEX_ZSTD_THREADS:-0}" | tee "$fifo" | s5 pipe "$archive" >/dev/null
   else
     # s5cmd before 2.2 cannot read standard input; the archive passes through scratch.
     tar -C "$INDEX_DIR" -cf - config.json files.txt manifest.json parsed \
       | zstd -3 -T"${INDEX_ZSTD_THREADS:-0}" | tee "$fifo" >"$RUN_WORK/blocksci_index.tar.zst"
-    index_s5 cp "$RUN_WORK/blocksci_index.tar.zst" "$archive" >/dev/null
+    s5 cp "$RUN_WORK/blocksci_index.tar.zst" "$archive" >/dev/null
     rm -f "$RUN_WORK/blocksci_index.tar.zst"
   fi
   wait
   rm -f "$fifo"
   printf '%s  blocksci_index.tar.zst\n' "$(cat "$sha")" >"$sha.file"
-  index_s5 cp "$sha.file" "$archive.sha256" >/dev/null
+  s5 cp "$sha.file" "$archive.sha256" >/dev/null
   # Written last: until here the prefix is no backup.
-  index_s5 cp "$INDEX_DIR/manifest.json" "$INDEX_BACKUP/manifest.json" >/dev/null
+  s5 cp "$INDEX_DIR/manifest.json" "$INDEX_BACKUP/manifest.json" >/dev/null
   echo "[index] S3 backup complete"
 }
 
@@ -157,7 +151,7 @@ index_backup() {
 index_restore() {
   local archive="$INDEX_BACKUP/blocksci_index.tar.zst" fifo="$RUN_WORK/index-restore.fifo"
   local sha="$RUN_WORK/index-restore.sha256" expected
-  echo "[index] restoring the working copy from $INDEX_BACKUP (height $(index_s5 cat "$INDEX_BACKUP/manifest.json" \
+  echo "[index] restoring the working copy from $INDEX_BACKUP (height $(s5 cat "$INDEX_BACKUP/manifest.json" \
     | sed -nE 's/.*"exported_max_block"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p' | head -n 1))"
   mkdir -p "$INDEX_DIR"
   touch "$INDEX_DIR/.writing"
@@ -165,10 +159,10 @@ index_restore() {
   rm -f "$fifo"
   mkfifo "$fifo"
   sha256sum <"$fifo" | cut -d ' ' -f 1 >"$sha" &
-  index_s5 cat "$archive" | tee "$fifo" | zstd -d | tar -C "$INDEX_DIR" -xf -
+  s5 cat "$archive" | tee "$fifo" | zstd -d | tar -C "$INDEX_DIR" -xf -
   wait
   rm -f "$fifo"
-  expected="$(index_s5 cat "$archive.sha256" | cut -d ' ' -f 1)"
+  expected="$(s5 cat "$archive.sha256" | cut -d ' ' -f 1)"
   [ "$(cat "$sha")" = "$expected" ] || { echo "[index] the S3 backup does not match its SHA-256" >&2; return 1; }
   rm -f "$INDEX_DIR/.writing"
   index_complete "$INDEX_DIR" || { echo "[index] the restored copy does not match its file list" >&2; return 1; }

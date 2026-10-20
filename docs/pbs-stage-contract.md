@@ -1,24 +1,36 @@
 # PBS stage contract
 
 How the pipeline frontend and PBS compute jobs coordinate. The implementation
-lives in `src/coinjoin_pipeline/execution/pbs/` and the `src/coinjoin_pipeline/execution/*_template.sh`
-scripts; this page documents the on-disk protocol so that changes on either
+lives in `src/coinjoin_pipeline/execution/pbs/`, with the job scripts in its
+`templates/`; this page documents the on-disk protocol so that changes on either
 side stay compatible.
+
+Every S3 job is `directives()` (`pbs/scripts.py`), the stage identity
+(`ARTIFACT_URI`, `RUN_ID`, credentials, `STAGE`, `IMAGE`), `templates/s3_stage.sh`
+and then its own template. `s3_stage.sh` defines the helpers every job uses: `s5`
+(s5cmd with the stage credentials and no `AWS_*` variable of the node),
+`require_file`, `emulator_max_block`, `require_zstd`, `canonicalize_index`, the
+marker publishers and a no-op `stage_finalize` that a template redefines when it
+publishes outputs even on failure. `{start}` installs `templates/stage_trap.sh` and
+runs `templates/s3_setup.sh`. Shared-storage jobs use `templates/local_preamble.sh`
+instead; both mappings jobs share `templates/mappings_run.sh`.
 
 ## Stages
 
 | Stage name          | Submitted by                          | Template                          |
 |---------------------|---------------------------------------|-----------------------------------|
-| `blocksci`          | `--blocksciPbs`                       | `blocksci_template.sh`            |
-| `coinjoin-analysis` | `--analysisPbs`                       | `coinjoin_analysis_template.sh`   |
-| `coinjoin-mappings` | `--mappingsPbs`                       | `mappings_template.sh`            |
-| `unified-report`    | serial or parallel, after analyzers    | `blocksci_template.sh` (report-only command) |
-| S3 analyzer variants | `pbs-from-s3`, `full-run --artifact-backend s3` | `coinjoin_analysis_s3_template.sh`, `blocksci_s3_template.sh` |
-| S3 `coinjoin-mappings` | Wasabi `--mappingsPbs` | `mappings_s3_template.sh` |
-| S3 `blocksci-parse` | reusable BlockSci workflow | `blocksci_parse_s3_template.sh` |
-| S3 `blocksci-update` | versioned incremental cache update from a coin directory or the block archive | `blocksci_update_s3_template.sh` |
-| S3 cached work | `detect`, `script`, or `notebook` over a reusable parse | `blocksci_analyze_s3_template.sh` |
-| S3 `unified-report` | BlockSci detect selected, after selected analyzers; a `full-run` also needs coinjoin-analysis | `unified_report_s3_template.sh` |
+| `blocksci`          | `--blocksciPbs`                       | `local_blocksci.sh`               |
+| `coinjoin-analysis` | `--analysisPbs`                       | `local_coinjoin_analysis.sh`      |
+| `coinjoin-mappings` | `--mappingsPbs`                       | `local_mappings.sh`               |
+| `unified-report`    | serial or parallel, after analyzers    | `local_blocksci.sh` (report-only command) |
+| S3 analyzer variants | `pbs-from-s3`, `full-run --artifact-backend s3` | `s3_coinjoin_analysis.sh`, `s3_blocksci.sh` |
+| S3 mainnet baseline | `pbs-from-s3 --analysisPbs --dumplings-uri` | `s3_coinjoin_analysis_dumplings.sh` |
+| S3 `coinjoin-mappings` | Wasabi `--mappingsPbs` | `s3_mappings.sh` |
+| S3 `blocksci-parse` | reusable BlockSci workflow | `s3_blocksci_parse.sh` |
+| S3 `blocksci-update` | versioned incremental cache update from a coin directory or the block archive | `s3_blocksci_update.sh` |
+| S3 cached work | `detect`, `script`, `external` or `notebook` over a reusable parse | `s3_blocksci_analyze.sh` |
+| S3 `blocksci-backup` | `--blocksci-task backup` of a persistent index | `s3_blocksci_backup.sh` |
+| S3 `unified-report` | BlockSci detect selected, after selected analyzers; a `full-run` also needs coinjoin-analysis | `s3_unified_report.sh` |
 
 ## Marker files
 
@@ -48,7 +60,7 @@ its parsed index, or raw Bitcoin data. A blocksci-only S3 submission also submit
 a report job after BlockSci, consuming the baseline already stored in that run.
 The artifact reader accepts schema 1.0 (emulator mode) and 1.1 (explicit mode).
 Parse and update jobs now stage and mount the shared `exporters/worker.py` payload.
-The S3 exit trap is rendered from `pbs_stage.sh`; finalization, failed transfers
+The S3 exit trap is `templates/stage_trap.sh`; finalization, failed transfers
 and signals preserve a nonzero exit status, and terminal markers follow outputs.
 After the markers are published the trap empties `$SCRATCHDIR` with MetaCentrum's
 `clean_scratch`, or by deleting its contents where that tool is missing.
@@ -116,7 +128,7 @@ parses straight into the directory and refuses one that already holds an index;
 `update` needs no `--blocksci-cache-source-run-id` and updates in place; `backup`,
 `script`, `external`, and `notebook` read it. Every job binds the directory at its own
 path, links `parsed/` into the run and keeps `config.json` run-local
-(`execution/index_store.sh`).
+(`execution/pbs/templates/index_store.sh`).
 
 Writers (`parse`, `update`) take an exclusive lock and readers (`backup` and the
 analyses) a shared one,

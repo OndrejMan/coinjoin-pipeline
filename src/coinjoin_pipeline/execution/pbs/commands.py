@@ -8,10 +8,10 @@ from typing import Literal
 from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, BLOCKSCI_CUSTOM_ANALYSIS_DIR
 
 from coinjoin_pipeline.configuration import PipelineConfiguration
-from coinjoin_pipeline.execution.pbs_settings import resolve_pbs_image
+from coinjoin_pipeline.execution.pbs_settings import pbs_image
 from coinjoin_pipeline.storage.s3 import shell_assignment
 
-from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND, DEFAULT_BLOCKSCI_IMAGE, DEFAULT_COINJOIN_ANALYSIS_IMAGE
+from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND
 from .validation import PBSError, require_safe_image
 
 
@@ -165,11 +165,8 @@ def analysis_image_arguments(config: PipelineConfiguration) -> list[str]:
     """
     arguments: list[str] = []
     for flag, image in (
-        ("--blocksci-image", resolve_pbs_image(config, DEFAULT_BLOCKSCI_IMAGE, "pbs_blocksci_image")),
-        (
-            "--coinjoin-analysis-image",
-            resolve_pbs_image(config, DEFAULT_COINJOIN_ANALYSIS_IMAGE, "pbs_coinjoin_analysis_image"),
-        ),
+        ("--blocksci-image", pbs_image(config, "blocksci")),
+        ("--coinjoin-analysis-image", pbs_image(config, "coinjoin_analysis")),
         ("--coinjoin-emulator-image", config.images.emulator),
         ("--uploader-image", config.images.uploader),
     ):

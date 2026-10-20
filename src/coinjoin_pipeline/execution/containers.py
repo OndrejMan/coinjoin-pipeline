@@ -25,23 +25,12 @@ from coinjoin_pipeline.execution.locks import (
     close_locks as close_pipeline_locks,
 )
 from coinjoin_pipeline.execution.pbs.validation import PBSError
-from coinjoin_pipeline.execution.pbs_settings import unified_report_image_reference
+from coinjoin_pipeline.execution.pbs_settings import resolve_unified_report_image
 from coinjoin_pipeline.execution.pipeline_logging import (
     captured_pipeline_stage,
 )
+from coinjoin_pipeline.execution.run_context import resolve_run_id, run_dirs
 from coinjoin_pipeline.execution.scenarios import container_scenario_path, scenario_source_path
-from coinjoin_pipeline.execution.run_context import (
-    detect_active_run as detect_created_run,
-)
-from coinjoin_pipeline.execution.run_context import (
-    is_run_dir as is_pipeline_run_dir,
-)
-from coinjoin_pipeline.execution.run_context import (
-    resolve_run_id as resolve_pipeline_run_id,
-)
-from coinjoin_pipeline.execution.run_context import (
-    run_dirs as pipeline_run_dirs,
-)
 from coinjoin_pipeline.execution.runtime import (
     CONTAINER_RUNTIME_ENV,
     DEFAULT_CONTAINER_RUNTIME,
@@ -295,26 +284,6 @@ def add_image_provenance_env(env: dict[str, str]) -> None:
             env.setdefault(digest_env, repo_digest)
 
 
-def is_run_dir(path: Path) -> bool:
-    return is_pipeline_run_dir(path, settings.RUN_MARKER_FILES)
-
-
-def run_dirs(emulation_logs_dir: Path) -> set[Path]:
-    return pipeline_run_dirs(emulation_logs_dir, settings.RUN_MARKER_FILES)
-
-
-def detect_active_run(emulation_logs_dir: Path, before: set[Path]) -> Path | None:
-    return detect_created_run(emulation_logs_dir, before, settings.RUN_MARKER_FILES)
-
-
-def resolve_run_id(run_dir_arg: str | None, env: dict[str, str]) -> str | None:
-    return resolve_pipeline_run_id(
-        run_dir_arg,
-        Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve(),
-        settings.RUN_MARKER_FILES,
-    )
-
-
 def run_script(
     script: Path,
     *args: str,
@@ -378,7 +347,7 @@ def run_coinjoin_analysis(
     if all_runs:
         active_run_ids = [path.name for path in sorted(run_dirs(emulation_logs_dir))]
     else:
-        active_run_id = resolve_run_id(run_dir_arg, env)
+        active_run_id = resolve_run_id(run_dir_arg, Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve())
         active_run_ids = [active_run_id] if active_run_id else []
     if not active_run_ids:
         print(
@@ -565,7 +534,7 @@ def export_command(active_run_id: str, env: dict[str, str]) -> str:
 
 def run_export_only(args: PipelineConfiguration) -> None:
     env = compose_env(args)
-    active_run_id = resolve_run_id(args.run_dir, env)
+    active_run_id = resolve_run_id(args.run_dir, Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve())
     if not active_run_id:
         print(
             "[ERROR] No emulation run folder found. Run emulate/full-run first, or pass --run-dir explicitly.",
@@ -581,7 +550,7 @@ def run_export_only(args: PipelineConfiguration) -> None:
     if error:
         print(error, file=sys.stderr)
         sys.exit(2)
-    image = unified_report_image_reference(args).removeprefix("docker://")
+    image = resolve_unified_report_image(args).removeprefix("docker://")
     validate_image(image)
     env["COINJOIN_UNIFIED_REPORT_IMAGE"] = image
     command = [

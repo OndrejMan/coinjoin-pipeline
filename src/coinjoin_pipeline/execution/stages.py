@@ -48,7 +48,7 @@ RESOURCE_GROUPS: dict[StageKind, str] = {
     StageKind.BLOCKSCI_PARSE: "blocksci",
     StageKind.BLOCKSCI_UPDATE: "blocksci",
     StageKind.BLOCKSCI_WORK: "blocksci",
-    StageKind.REPORT: "report",
+    StageKind.REPORT: "unified_report",
 }
 
 
@@ -146,13 +146,6 @@ class StageGraph:
         if stage is None:
             return ()
         return tuple(jobs[dependency] for dependency in stage.dependencies if dependency in jobs)
-
-    def dependency_id(self, name: str, jobs: Mapping[str, str]) -> str | None:
-        """Return the single submitted job ID a stage depends on, if any."""
-        job_ids = self.dependency_ids(name, jobs)
-        if len(job_ids) > 1:
-            raise ValueError(f"Stage {name} has {len(job_ids)} scheduler dependencies; use dependency_ids()")
-        return job_ids[0] if job_ids else None
 
 
 def _mappings_stage(after: StagePlan) -> StagePlan:

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import fields
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from exporters.verify_chain import is_block_hash
 
 from .execution.stages import runs_unified_report
-from .storage.s3 import RUN_ID_RE
+from .storage.s3 import RUN_ID_RULE, is_valid_run_id
 
 if TYPE_CHECKING:
     from .configuration import PipelineConfiguration, PBSResourceConfiguration
@@ -26,15 +27,7 @@ def _supplied(config: PipelineConfiguration, path: str, value: object) -> bool:
 
 def _resources_supplied(config: PipelineConfiguration, stage: str, resources: PBSResourceConfiguration) -> bool:
     return any(
-        _supplied(config, f"pbs.{stage}.{name}", value)
-        for name, value in (
-            ("ncpus", resources.ncpus),
-            ("mem", resources.mem),
-            ("scratch", resources.scratch),
-            ("scratch_type", resources.scratch_type),
-            ("walltime", resources.walltime),
-            ("multijob", resources.multijob),
-        )
+        _supplied(config, f"pbs.{stage}.{item.name}", getattr(resources, item.name)) for item in fields(resources)
     )
 
 
@@ -114,12 +107,8 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
         ("--run-id", config.run_id),
         ("--blocksci-cache-source-run-id", config.blocksci.cache_source_run_id),
     ):
-        if run_id is not None and (len(run_id) > 63 or ".." in run_id or not RUN_ID_RE.fullmatch(run_id)):
-            errors.append(
-                f"{flag} must be at most 63 characters, begin and end with an "
-                "alphanumeric character, contain only [A-Za-z0-9._-], and not "
-                "contain '..'"
-            )
+        if run_id is not None and not is_valid_run_id(run_id):
+            errors.append(f"{flag} {RUN_ID_RULE}")
     if config.driver != "kubernetes":
         for flag, path, value in (
             ("--kubeconfig", "kubernetes.kubeconfig", config.kubernetes.kubeconfig),
@@ -292,11 +281,8 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
             "unified-report PBS resource overrides require a unified-report job: "
             "BlockSci detection with a coinjoin-analysis baseline"
         )
-    if backend == "s3" and action == "full-run":
-        if blocksci_workflow == "cached":
-            errors.append("full-run cannot reuse a cache before emulation; use --blocksci-workflow reusable")
-        if config.driver != "kubernetes":
-            errors.append("full-run --artifact-backend s3 requires --driver kubernetes")
+    if backend == "s3" and action in ("full-run", "emulate"):
+        mode = "full-run --artifact-backend s3" if action == "full-run" else "Kubernetes S3-compatible mode"
         for flag, value in (
             ("--run-id", config.run_id),
             ("--artifact-uri", config.artifacts.uri),
@@ -306,52 +292,36 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
             ("--s3-profile", config.artifacts.profile),
         ):
             if not value:
-                errors.append(f"full-run --artifact-backend s3 requires {flag}")
+                errors.append(f"{mode} requires {flag}")
+        if config.driver != "kubernetes":
+            errors.append(
+                f"{'full-run ' if action == 'full-run' else ''}--artifact-backend s3 requires --driver kubernetes"
+            )
+        if not _supplied(config, "kubernetes.reuse_namespace", config.kubernetes.reuse_namespace):
+            errors.append(
+                "Kubernetes S3-compatible mode requires --reuse-namespace because "
+                "the credentials Secret must exist before the Job is created"
+            )
+        for flag, path, value in (
+            ("--kubernetes-btc-datadir", "kubernetes.btc_datadir", config.kubernetes.btc_datadir),
+            ("--pbs-bitcoin-datadir", "pbs.bitcoin_datadir", config.pbs.bitcoin_datadir),
+            ("--copy-to-host", "kubernetes.copy_to_host", config.kubernetes.copy_to_host),
+        ):
+            if _supplied(config, path, value):
+                errors.append(f"Kubernetes S3-compatible mode does not support {flag}")
+    if backend == "s3" and action == "full-run":
+        if blocksci_workflow == "cached":
+            errors.append("full-run cannot reuse a cache before emulation; use --blocksci-workflow reusable")
         # Any analyzer subset runs, emulation alone included. Mappings read the
         # coinjoin-analysis baseline, which a fresh run has only if it computes it.
         if mappings_pbs and not analysis_pbs:
             errors.append("full-run --artifact-backend s3 --mappingsPbs requires --analysisPbs")
-        if not _supplied(config, "kubernetes.reuse_namespace", config.kubernetes.reuse_namespace):
-            errors.append(
-                "Kubernetes S3-compatible mode requires --reuse-namespace because "
-                "the credentials Secret must exist before the Job is created"
-            )
-        if _supplied(config, "parallel", config.parallel):
-            errors.append("full-run --artifact-backend s3 does not support --parallel")
-        if _supplied(config, "blocksci.script", config.blocksci.script):
-            errors.append("full-run --artifact-backend s3 does not support --blocksci-script")
         for flag, path, value in (
-            ("--kubernetes-btc-datadir", "kubernetes.btc_datadir", config.kubernetes.btc_datadir),
-            ("--pbs-bitcoin-datadir", "pbs.bitcoin_datadir", config.pbs.bitcoin_datadir),
-            ("--copy-to-host", "kubernetes.copy_to_host", config.kubernetes.copy_to_host),
+            ("--parallel", "parallel", config.parallel),
+            ("--blocksci-script", "blocksci.script", config.blocksci.script),
         ):
             if _supplied(config, path, value):
-                errors.append(f"Kubernetes S3-compatible mode does not support {flag}")
-    if backend == "s3" and action == "emulate":
-        for flag, value in (
-            ("--run-id", config.run_id),
-            ("--artifact-uri", config.artifacts.uri),
-            ("--s3-endpoint-url", config.artifacts.endpoint_url),
-            ("--s3-secret-name", config.artifacts.secret_name),
-            ("--s3-credentials-file", config.artifacts.credentials_file),
-            ("--s3-profile", config.artifacts.profile),
-        ):
-            if not value:
-                errors.append(f"Kubernetes S3-compatible mode requires {flag}")
-        if config.driver != "kubernetes":
-            errors.append("--artifact-backend s3 requires --driver kubernetes")
-        if not _supplied(config, "kubernetes.reuse_namespace", config.kubernetes.reuse_namespace):
-            errors.append(
-                "Kubernetes S3-compatible mode requires --reuse-namespace because "
-                "the credentials Secret must exist before the Job is created"
-            )
-        for flag, path, value in (
-            ("--kubernetes-btc-datadir", "kubernetes.btc_datadir", config.kubernetes.btc_datadir),
-            ("--pbs-bitcoin-datadir", "pbs.bitcoin_datadir", config.pbs.bitcoin_datadir),
-            ("--copy-to-host", "kubernetes.copy_to_host", config.kubernetes.copy_to_host),
-        ):
-            if _supplied(config, path, value):
-                errors.append(f"Kubernetes S3-compatible mode does not support {flag}")
+                errors.append(f"full-run --artifact-backend s3 does not support {flag}")
     if action == "full-run" and backend != "s3" and (blocksci_workflow != "combined" or blocksci_task != "detect"):
         errors.append("reusable BlockSci workflows are currently supported only with the S3 artifact backend")
     engine = config.engine

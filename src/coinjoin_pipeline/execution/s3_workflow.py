@@ -19,7 +19,7 @@ from coinjoin_pipeline.execution.kubernetes import (
     s3_emulation_job_name,
 )
 from coinjoin_pipeline.execution.pbs.validation import PBSError, require_qsub
-from coinjoin_pipeline.execution.pbs_settings import stage_pbs_walltime
+from coinjoin_pipeline.execution.pbs_settings import stage_pbs_resources
 from coinjoin_pipeline.execution.s3_emulation import run_s3_kubernetes_emulation
 from coinjoin_pipeline.execution.s3_markers import cancel_dependent_pbs_job, wait_for_s3_pbs_stage
 from coinjoin_pipeline.execution.s3_staging import stage_kubernetes_s3_run
@@ -120,7 +120,7 @@ def run_s3_full_run(args: PipelineConfiguration) -> None:
         return
     jobs = submit_s3_pbs_graph(args)
     submitted: list[tuple[StagePlan, str]] = [
-        (stage, job_id) for stage in plan.scheduled() if (job_id := jobs.job_for(stage)) is not None
+        (stage, jobs[stage.name]) for stage in plan.scheduled() if stage.name in jobs
     ]
     for index, (stage, job_id) in enumerate(submitted):
         _wait_for_pbs_stage(
@@ -130,7 +130,7 @@ def run_s3_full_run(args: PipelineConfiguration) -> None:
             pending=tuple(submitted[index + 1 :]),
             run_prefix=run_prefix,
             access=access,
-            walltime=stage_pbs_walltime(args, resource_group(stage.kind)),
+            walltime=stage_pbs_resources(args, resource_group(stage.kind)).walltime,
         )
     print(
         f"[full-run] Completed; results under {run_prefix}/ "

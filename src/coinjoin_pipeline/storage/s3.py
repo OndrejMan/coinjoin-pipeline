@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import shlex
@@ -100,13 +101,19 @@ def validate_artifact_uri(uri: str | None) -> str:
     return uri.rstrip("/")
 
 
+RUN_ID_RULE = (
+    "must be at most 63 characters, begin and end with an alphanumeric character, "
+    "contain only [A-Za-z0-9._-], and not contain '..'"
+)
+
+
+def is_valid_run_id(run_id: str) -> bool:
+    return len(run_id) <= 63 and ".." not in run_id and RUN_ID_RE.fullmatch(run_id) is not None
+
+
 def validate_run_id(run_id: str) -> str:
-    if len(run_id) > 63 or ".." in run_id or not RUN_ID_RE.fullmatch(run_id):
-        raise ValueError(
-            "run ID must be at most 63 characters, begin and end with an "
-            "alphanumeric character, contain only [A-Za-z0-9._-], and must "
-            "not contain '..'"
-        )
+    if not is_valid_run_id(run_id):
+        raise ValueError(f"run ID {RUN_ID_RULE}")
     return run_id
 
 
@@ -156,30 +163,29 @@ def access_from_values(
     )
 
 
-def render_s5cmd_check() -> str:
-    return 'command -v s5cmd >/dev/null || { echo "s5cmd is required" >&2; exit 1; }'
-
-
-def _prefix() -> str:
-    return (
-        "env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN "
-        "-u AWS_PROFILE -u AWS_DEFAULT_PROFILE -u AWS_REGION -u AWS_DEFAULT_REGION "
-        's5cmd --credentials-file "$S3_CREDENTIALS_FILE" '
-        '--profile "$S3_PROFILE" --endpoint-url "$S3_ENDPOINT_URL"'
+def add_s3_arguments(parser: argparse.ArgumentParser, uri_help: str) -> None:
+    """The S3 options of the frontend utilities, defaulting to the environment."""
+    parser.add_argument("--artifact-uri", default=os.environ.get("ARTIFACT_URI"), help=uri_help)
+    parser.add_argument(
+        "--s3-endpoint-url", default=os.environ.get("S3_ENDPOINT_URL"), help="S3-compatible HTTP(S) endpoint URL."
+    )
+    parser.add_argument(
+        "--s3-credentials-file",
+        default=os.environ.get("S3_CREDENTIALS_FILE"),
+        help="Absolute s5cmd credentials-file path.",
+    )
+    parser.add_argument(
+        "--s3-profile", default=os.environ.get("S3_PROFILE"), help="Named profile in the s5cmd credentials file."
     )
 
 
-def render_s5cmd_sync(source_expr: str, destination_expr: str) -> str:
-    return f"{_prefix()} sync {source_expr} {destination_expr}"
-
-
-def render_s5cmd_cp(source_expr: str, destination_expr: str) -> str:
-    return f"{_prefix()} cp {source_expr} {destination_expr}"
-
-
-def render_s5cmd_run(commands_file_expr: str) -> str:
-    """Run the s5cmd commands listed one per line in a file, in parallel."""
-    return f"{_prefix()} run {commands_file_expr}"
+def s3_arguments_access(args: argparse.Namespace) -> tuple[str, S3Access]:
+    """Validated artifact URI and access of ``add_s3_arguments``; ValueError when unusable."""
+    artifact_uri = validate_artifact_uri(args.artifact_uri)
+    access = access_from_values(args.s3_endpoint_url, args.s3_credentials_file, args.s3_profile, check_file=True)
+    if shutil.which("s5cmd") is None:
+        raise ValueError("s5cmd is required on the frontend PATH")
+    return artifact_uri, access
 
 
 def shell_assignment(name: str, value: str) -> str:

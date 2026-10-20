@@ -52,7 +52,6 @@ from coinjoin_pipeline.execution.runtime import (
     compose_command,
     container_runtime,
 )
-from coinjoin_pipeline.execution.s3_submission import S3PBSJobs
 from coinjoin_pipeline.execution.s3_workflow import run_s3_full_run as run_full_run_s3
 from coinjoin_pipeline.execution.settings import (
     COINJOIN_ANALYSIS_INPUT_DATA_PATH_ENV,
@@ -251,20 +250,16 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}
         self.addCleanup(mock.patch.stopall)
-        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
-            coinjoin_analysis="analysis.job",
-            blocksci_work="blocksci.job",
-            unified_report="report.job",
-        )
+        mocks["run_pbs_from_s3"].return_value = {
+            "coinjoin-analysis": "analysis.job",
+            "blocksci": "blocksci.job",
+            "unified-report": "report.job",
+        }
         calls: list[str] = []
         mocks["run_kubernetes_s3_emulation"].side_effect = lambda *a, **k: calls.append("emulate")
         mocks["run_pbs_from_s3"].side_effect = lambda *a, **k: (
             calls.append("submit-pbs"),
-            S3PBSJobs(
-                coinjoin_analysis="analysis.job",
-                blocksci_work="blocksci.job",
-                unified_report="report.job",
-            ),
+            {"coinjoin-analysis": "analysis.job", "blocksci": "blocksci.job", "unified-report": "report.job"},
         )[1]
         mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(f"wait:{stage}")
 
@@ -300,7 +295,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}
         self.addCleanup(mock.patch.stopall)
-        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(blocksci_work="blocksci.job")
+        mocks["run_pbs_from_s3"].return_value = {"blocksci": "blocksci.job"}
         calls: list[str] = []
         mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(f"wait:{stage}")
 
@@ -312,7 +307,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}
         self.addCleanup(mock.patch.stopall)
-        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(coinjoin_analysis="analysis.job")
+        mocks["run_pbs_from_s3"].return_value = {"coinjoin-analysis": "analysis.job"}
         calls: list[str] = []
         mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(f"wait:{stage}")
 
@@ -338,12 +333,12 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}
         self.addCleanup(mock.patch.stopall)
-        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
-            coinjoin_analysis="analysis.job",
-            coinjoin_mappings="mappings.job",
-            blocksci_work="blocksci.job",
-            unified_report="report.job",
-        )
+        mocks["run_pbs_from_s3"].return_value = {
+            "coinjoin-analysis": "analysis.job",
+            "coinjoin-mappings": "mappings.job",
+            "blocksci": "blocksci.job",
+            "unified-report": "report.job",
+        }
         calls: list[str] = []
         mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(stage)
 
@@ -364,11 +359,11 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}
         self.addCleanup(mock.patch.stopall)
-        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
-            coinjoin_analysis="analysis.job",
-            blocksci_work="blocksci.job",
-            unified_report="report.job",
-        )
+        mocks["run_pbs_from_s3"].return_value = {
+            "coinjoin-analysis": "analysis.job",
+            "blocksci": "blocksci.job",
+            "unified-report": "report.job",
+        }
 
         def wait(stage, *arguments, **keywords):
             if stage == "coinjoin-analysis":
@@ -385,12 +380,12 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}
         self.addCleanup(mock.patch.stopall)
-        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
-            coinjoin_analysis="analysis.job",
-            coinjoin_mappings="mappings.job",
-            blocksci_work="blocksci.job",
-            unified_report="report.job",
-        )
+        mocks["run_pbs_from_s3"].return_value = {
+            "coinjoin-analysis": "analysis.job",
+            "coinjoin-mappings": "mappings.job",
+            "blocksci": "blocksci.job",
+            "unified-report": "report.job",
+        }
 
         def wait(stage, *arguments, **keywords):
             if stage == "coinjoin-analysis":
@@ -410,11 +405,11 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}
         self.addCleanup(mock.patch.stopall)
-        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
-            coinjoin_analysis="analysis.job",
-            blocksci_work="blocksci.job",
-            unified_report="report.job",
-        )
+        mocks["run_pbs_from_s3"].return_value = {
+            "coinjoin-analysis": "analysis.job",
+            "blocksci": "blocksci.job",
+            "unified-report": "report.job",
+        }
 
         def wait(stage, *arguments, **keywords):
             if stage == "blocksci":
@@ -434,12 +429,12 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}
         self.addCleanup(mock.patch.stopall)
-        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
-            coinjoin_analysis="analysis.job",
-            blocksci_parse="parse.job",
-            blocksci_work="analyze.job",
-            unified_report="report.job",
-        )
+        mocks["run_pbs_from_s3"].return_value = {
+            "coinjoin-analysis": "analysis.job",
+            "blocksci-parse": "parse.job",
+            "blocksci-analyze": "analyze.job",
+            "unified-report": "report.job",
+        }
 
         def wait(stage, *arguments, **keywords):
             if stage == "blocksci-parse":
@@ -459,12 +454,12 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         patches = self._patches()
         mocks = {name: patcher.start() for name, patcher in patches.items()}
         self.addCleanup(mock.patch.stopall)
-        mocks["run_pbs_from_s3"].return_value = S3PBSJobs(
-            coinjoin_analysis="analysis.job",
-            coinjoin_mappings="mappings.job",
-            blocksci_work="blocksci.job",
-            unified_report="report.job",
-        )
+        mocks["run_pbs_from_s3"].return_value = {
+            "coinjoin-analysis": "analysis.job",
+            "coinjoin-mappings": "mappings.job",
+            "blocksci": "blocksci.job",
+            "unified-report": "report.job",
+        }
 
         def wait(stage, *arguments, **keywords):
             if stage == "coinjoin-mappings":
@@ -831,7 +826,7 @@ class WrapperExportTest(unittest.TestCase):
         self.assertEqual(found, {"grouped-run"})
 
     def test_detect_active_run_requires_pinned_run_dir(self):
-        from coinjoin_pipeline.execution.containers import detect_active_run
+        from coinjoin_pipeline.execution.run_context import detect_active_run
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -851,7 +846,7 @@ class WrapperExportTest(unittest.TestCase):
                 self.assertEqual(detect_active_run(root, set()), pinned.resolve())
 
     def test_detect_active_run_falls_back_without_pinned_id(self):
-        from coinjoin_pipeline.execution.containers import detect_active_run
+        from coinjoin_pipeline.execution.run_context import detect_active_run
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1100,24 +1095,10 @@ class WrapperExportTest(unittest.TestCase):
             calls,
             [
                 _kubectl_cmd("get", "--raw=/version"),
-                _kubectl_cmd("auth", "can-i", "create", "pods", "--namespace", "coinjoin-test"),
-                _kubectl_cmd(
-                    "auth",
-                    "can-i",
-                    "create",
-                    "services",
-                    "--namespace",
-                    "coinjoin-test",
-                ),
-                _kubectl_cmd("auth", "can-i", "delete", "pods", "--namespace", "coinjoin-test"),
-                _kubectl_cmd(
-                    "auth",
-                    "can-i",
-                    "delete",
-                    "services",
-                    "--namespace",
-                    "coinjoin-test",
-                ),
+                _kubectl_cmd("--namespace", "coinjoin-test", "auth", "can-i", "create", "pods"),
+                _kubectl_cmd("--namespace", "coinjoin-test", "auth", "can-i", "create", "services"),
+                _kubectl_cmd("--namespace", "coinjoin-test", "auth", "can-i", "delete", "pods"),
+                _kubectl_cmd("--namespace", "coinjoin-test", "auth", "can-i", "delete", "services"),
                 _kubectl_cmd("auth", "can-i", "create", "namespaces"),
                 _kubectl_cmd("auth", "can-i", "delete", "namespaces"),
             ],
@@ -1140,36 +1121,15 @@ class WrapperExportTest(unittest.TestCase):
             calls,
             [
                 _kubectl_cmd("get", "--raw=/version"),
-                _kubectl_cmd("auth", "can-i", "create", "pods", "--namespace", "coinjoin-test"),
-                _kubectl_cmd(
-                    "auth",
-                    "can-i",
-                    "create",
-                    "services",
-                    "--namespace",
-                    "coinjoin-test",
-                ),
-                _kubectl_cmd("auth", "can-i", "delete", "pods", "--namespace", "coinjoin-test"),
-                _kubectl_cmd(
-                    "auth",
-                    "can-i",
-                    "delete",
-                    "services",
-                    "--namespace",
-                    "coinjoin-test",
-                ),
+                _kubectl_cmd("--namespace", "coinjoin-test", "auth", "can-i", "create", "pods"),
+                _kubectl_cmd("--namespace", "coinjoin-test", "auth", "can-i", "create", "services"),
+                _kubectl_cmd("--namespace", "coinjoin-test", "auth", "can-i", "delete", "pods"),
+                _kubectl_cmd("--namespace", "coinjoin-test", "auth", "can-i", "delete", "services"),
                 _kubectl_cmd("get", "namespace", "coinjoin-test"),
-                _kubectl_cmd("auth", "can-i", "list", "pods", "--namespace", "coinjoin-test"),
-                _kubectl_cmd("auth", "can-i", "list", "services", "--namespace", "coinjoin-test"),
-                _kubectl_cmd("auth", "can-i", "delete", "pods", "--namespace", "coinjoin-test"),
-                _kubectl_cmd(
-                    "auth",
-                    "can-i",
-                    "delete",
-                    "services",
-                    "--namespace",
-                    "coinjoin-test",
-                ),
+                _kubectl_cmd("--namespace", "coinjoin-test", "auth", "can-i", "list", "pods"),
+                _kubectl_cmd("--namespace", "coinjoin-test", "auth", "can-i", "list", "services"),
+                _kubectl_cmd("--namespace", "coinjoin-test", "auth", "can-i", "delete", "pods"),
+                _kubectl_cmd("--namespace", "coinjoin-test", "auth", "can-i", "delete", "services"),
             ],
         )
 
@@ -1178,7 +1138,7 @@ class WrapperExportTest(unittest.TestCase):
 
         def fake_run(command, **_kwargs):
             calls.append(command)
-            output = "no\n" if command[3:7] == ["auth", "can-i", "create", "pods"] else "yes\n"
+            output = "no\n" if command[-4:] == ["auth", "can-i", "create", "pods"] else "yes\n"
             return subprocess.CompletedProcess(command, 0, output)
 
         with mock.patch(
@@ -1191,7 +1151,7 @@ class WrapperExportTest(unittest.TestCase):
         self.assertEqual(context.exception.code, 2)
         self.assertEqual(
             calls[-1],
-            _kubectl_cmd("auth", "can-i", "create", "pods", "--namespace", "coinjoin-test"),
+            _kubectl_cmd("--namespace", "coinjoin-test", "auth", "can-i", "create", "pods"),
         )
 
     def test_kubernetes_auth_preflight_tolerates_kubectl_namespace_warning(self):
@@ -1200,14 +1160,14 @@ class WrapperExportTest(unittest.TestCase):
         The preflight must not mistake this warning for a denied permission."""
 
         def fake_run(command, **_kwargs):
-            if command[3:7] == ["auth", "can-i", "create", "namespaces"]:
+            if command[-4:] == ["auth", "can-i", "create", "namespaces"]:
                 return subprocess.CompletedProcess(
                     command,
                     0,
                     stdout="yes\n",
                     stderr="Warning: resource 'namespaces' is not namespace scoped\n",
                 )
-            if command[3:7] == ["auth", "can-i", "delete", "namespaces"]:
+            if command[-4:] == ["auth", "can-i", "delete", "namespaces"]:
                 return subprocess.CompletedProcess(
                     command,
                     0,

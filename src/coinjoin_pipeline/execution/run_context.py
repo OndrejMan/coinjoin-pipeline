@@ -6,20 +6,22 @@ import os
 import sys
 from pathlib import Path
 
+from exporters.artifact_paths import EMULATION_MARKERS
+
 from coinjoin_pipeline.storage.s3 import validate_run_id
 
 
-def is_run_dir(path: Path, marker_files: tuple[str, ...]) -> bool:
+def is_run_dir(path: Path, marker_files: tuple[str, ...] = EMULATION_MARKERS) -> bool:
     return path.is_dir() and any((path / marker).exists() for marker in marker_files)
 
 
-def run_dirs(emulation_logs_dir: Path, marker_files: tuple[str, ...]) -> set[Path]:
+def run_dirs(emulation_logs_dir: Path, marker_files: tuple[str, ...] = EMULATION_MARKERS) -> set[Path]:
     if not emulation_logs_dir.exists():
         return set()
     return {child.resolve() for child in emulation_logs_dir.iterdir() if is_run_dir(child, marker_files)}
 
 
-def newest_run_dir(emulation_logs_dir: Path, marker_files: tuple[str, ...]) -> Path | None:
+def newest_run_dir(emulation_logs_dir: Path, marker_files: tuple[str, ...] = EMULATION_MARKERS) -> Path | None:
     candidates = run_dirs(emulation_logs_dir, marker_files)
     return max(candidates, key=lambda path: path.stat().st_mtime) if candidates else None
 
@@ -39,7 +41,7 @@ def pipeline_run_id_env() -> str:
 def detect_active_run(
     emulation_logs_dir: Path,
     before: set[Path],
-    marker_files: tuple[str, ...],
+    marker_files: tuple[str, ...] = EMULATION_MARKERS,
 ) -> Path | None:
     """Locate the newly created run, honouring a host-pinned id first."""
     expected_run_id = pipeline_run_id_env()
@@ -72,7 +74,7 @@ def run_dir_under_root(run_dir_arg: str, runs_root: Path) -> Path:
 def resolve_run_id(
     run_dir_arg: str | None,
     emulation_logs_dir: Path,
-    marker_files: tuple[str, ...],
+    marker_files: tuple[str, ...] = EMULATION_MARKERS,
 ) -> str | None:
     if run_dir_arg:
         return run_dir_under_root(run_dir_arg, emulation_logs_dir).name

@@ -175,7 +175,7 @@ def test_analysis_script_is_standalone_without_host_package(tmp_path, entry):
 
 def test_shared_report_budget_matches_wait_budget_and_selected_image(tmp_path):
     from coinjoin_pipeline.execution import shared_storage_pbs
-    from coinjoin_pipeline.execution.pbs_settings import stage_pbs_walltime
+    from coinjoin_pipeline.execution.pbs_settings import stage_pbs_resources
 
     config = RunContext.prepare(
         load_configuration(
@@ -204,8 +204,8 @@ def test_shared_report_budget_matches_wait_budget_and_selected_image(tmp_path):
     ):
         shared_storage_pbs.run_blocksci_export_stage(config, run, wait=False)
     values = submit.call_args.kwargs
-    assert values["walltime"] == stage_pbs_walltime(config, "report") == "03:00:00"
-    assert values["ncpus"] == 3
+    assert values["resources"].walltime == stage_pbs_resources(config, "unified_report").walltime == "03:00:00"
+    assert values["resources"].ncpus == 3
     assert values["image"] == "docker://python:report-test"
     assert not run.exists()
 
@@ -308,8 +308,7 @@ def test_external_detector_overrides_reach_worker(tmp_path, monkeypatch, dry_run
     if dry_run:
         argv.append("--dry-run")
     config = RunContext.prepare(load_configuration(argv), "test").config
-    operation = "dry_run_external" if dry_run else "external_analyze"
-    with mock.patch.object(research, operation) as execute:
+    with mock.patch.object(research, "external_analyze") as execute:
         research.run_external_configuration(config)
     command = research.external_command(execute.call_args.args[0])
     monkeypatch.setenv("BLOCKSCI_MIN_INPUT_COUNT", "99")

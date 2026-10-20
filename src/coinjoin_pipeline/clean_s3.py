@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import argparse
-import os
-import shutil
 import sys
 
 from .storage.s3 import (
     ArtifactTransportError,
     S3Access,
-    access_from_values,
+    add_s3_arguments,
     run_s5cmd,
-    validate_artifact_uri,
+    s3_arguments_access,
     validate_run_id,
 )
 
@@ -26,30 +24,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="coinjoin-pipeline clean-s3",
         description=("Delete every object under an S3 run root (or a single run). This is irreversible."),
     )
-    parser.add_argument(
-        "--artifact-uri",
-        default=os.environ.get("ARTIFACT_URI"),
-        help="S3 run root to clean, for example s3://<bucket>/runs.",
-    )
-    parser.add_argument(
-        "--run-id",
-        help="Restrict deletion to a single run under the artifact URI.",
-    )
-    parser.add_argument(
-        "--s3-endpoint-url",
-        default=os.environ.get("S3_ENDPOINT_URL"),
-        help="S3-compatible HTTP(S) endpoint URL.",
-    )
-    parser.add_argument(
-        "--s3-credentials-file",
-        default=os.environ.get("S3_CREDENTIALS_FILE"),
-        help="Absolute s5cmd credentials-file path.",
-    )
-    parser.add_argument(
-        "--s3-profile",
-        default=os.environ.get("S3_PROFILE"),
-        help="Named profile in the s5cmd credentials file.",
-    )
+    add_s3_arguments(parser, "S3 run root to clean, for example s3://<bucket>/runs.")
+    parser.add_argument("--run-id", help="Restrict deletion to a single run under the artifact URI.")
     parser.add_argument(
         "--yes",
         action="store_true",
@@ -61,12 +37,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="List what would be deleted without removing anything.",
     )
     return parser
-
-
-def _target_prefix(artifact_uri: str, run_id: str | None) -> str:
-    if run_id is None:
-        return artifact_uri
-    return f"{artifact_uri}/{run_id}"
 
 
 def list_objects(access: S3Access, prefix: str) -> list[str]:
@@ -113,26 +83,13 @@ def main(argv: list[str] | None = None, *, runs_root: object = None) -> int:
     del runs_root  # the host dispatch passes it to every utility; S3 cleanup has no local runs
     args = build_parser().parse_args(argv)
     try:
-        artifact_uri = validate_artifact_uri(args.artifact_uri)
+        artifact_uri, access = s3_arguments_access(args)
         run_id = validate_run_id(args.run_id) if args.run_id else None
-        access = access_from_values(
-            args.s3_endpoint_url,
-            args.s3_credentials_file,
-            args.s3_profile,
-            check_file=True,
-        )
     except ValueError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
 
-    if shutil.which("s5cmd") is None:
-        print(
-            "ERROR: s5cmd is required on the frontend PATH to clean S3",
-            file=sys.stderr,
-        )
-        return 2
-
-    prefix = _target_prefix(artifact_uri, run_id)
+    prefix = artifact_uri if run_id is None else f"{artifact_uri}/{run_id}"
     try:
         objects = list_objects(access, prefix)
     except (CleanError, ArtifactTransportError) as error:

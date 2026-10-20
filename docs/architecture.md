@@ -1,6 +1,6 @@
 # Current execution architecture
 
-Updated 2026-10-03. The thesis results come from the Kubernetes → S3 → PBS
+Updated 2026-10-20. The thesis results come from the Kubernetes → S3 → PBS
 path. Every module outside that path carries an `EXPERIMENTAL` header and is
 listed under "Experimental paths" below.
 
@@ -46,7 +46,8 @@ artifact with image digests and exporter hashes.
 | Graph definitions and dependency queries | `execution/stages.py`, `stage_executor.py` |
 | Run-directory layout (every run-relative path, marker sets, report inputs) | `pipeline/exporters/artifact_paths.py` |
 | Command locks and S3 PBS overlap detection | `execution/locks.py` |
-| PBS submit, qdel, state probes; S3 job scripts | `execution/pbs/submission.py`, `templates_s3.py`, `commands.py` |
+| PBS submit, qdel, state probes; S3 job scripts | `execution/pbs/submission.py`, `templates_s3.py`, `scripts.py`, `templates/`, `commands.py` |
+| PBS resources and image references | `execution/pbs/defaults.py` (`DEFAULT_RESOURCES`), `execution/pbs_settings.py` |
 | Scenario lookup and host/container scenario paths | `execution/scenarios.py` |
 | S3 access for run, watch/download/cleanup consumers | `storage/s3.py` |
 | Container workload shared by Docker and Apptainer | `pipeline/exporters/worker.py` |
@@ -102,7 +103,7 @@ Kept for local development and reproduction, not read for the thesis review:
 | Path | Modules |
 |---|---|
 | Dispatch of every non-S3 action | `execution/local.py` |
-| Local Docker/Podman commands and Compose | `execution/containers.py`, `runtime.py`, `cli_defaults.py`, `pipeline/compose.yaml`, `pipeline/*.sh` |
+| Local Docker/Podman commands and Compose | `execution/containers.py`, `runtime.py`, `pipeline/compose.yaml`, `pipeline/*.sh` |
 | Kubernetes emulation without S3 | `execution/kubernetes_launch.py` |
-| Shared-storage PBS stages and graph | `execution/shared_storage_pbs.py`, `workflow.py`, `pbs/submission_local.py`, `pbs/templates_local.py`, `*_template.sh` without `_s3` |
+| Shared-storage PBS stages and graph | `execution/shared_storage_pbs.py`, `workflow.py`, `pbs/submission_local.py`, `pbs/templates_local.py`, `pbs/templates/local_*.sh` |
 | `runs`, `scenarios` and `external analyze` commands | `execution/research.py`, `run_catalog.py` |

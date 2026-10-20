@@ -29,30 +29,14 @@ def md_escape(value: JsonValue) -> str:
     return text.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
 
 
-def format_txid(txid: str | None) -> str:
+def short_txid(txid: str) -> str:
+    return txid if len(txid) <= 16 else f"{txid[:8]}...{txid[-8:]}"
+
+
+def tx_value(txid: str | None, explorer_base_url: str, *, short: bool = False) -> str:
     if not txid:
         return "-"
-    return txid
-
-
-def short_txid(txid: str | None) -> str:
-    if not txid:
-        return "-"
-    if len(txid) <= 16:
-        return txid
-    return f"{txid[:8]}...{txid[-8:]}"
-
-
-def tx_value(txid: str | None, explorer_base_url: str) -> str:
-    if not txid:
-        return "-"
-    return f"[{txid}]({explorer_base_url.rstrip('/')}/tx/{txid})"
-
-
-def tx_ref(value: str | None, explorer_base_url: str) -> str:
-    if not value:
-        return "-"
-    return f"[{short_txid(value)}]({explorer_base_url.rstrip('/')}/tx/{value})"
+    return f"[{short_txid(txid) if short else txid}]({explorer_base_url.rstrip('/')}/tx/{txid})"
 
 
 def sats(value: JsonValue) -> str:
@@ -126,6 +110,15 @@ def table(headers: list[str], rows: list[list[object]]) -> list[str]:
     return lines
 
 
+def section(title: str, *body: str, level: int = 2) -> list[str]:
+    """A blank line, a heading and its body."""
+    return ["", f"{'#' * level} {title}", "", *body]
+
+
+def key_values(rows: list[list[object]], key: str = "metric") -> list[str]:
+    return table([key, "value"], rows)
+
+
 def rule_passed_text(value: bool | None) -> str:
     if value is True:
         return "yes"
@@ -178,7 +171,7 @@ def render_shared_mismatch_details(items: list[JsonObject]) -> list[str]:
     if not items:
         return []
 
-    lines = ["", "## Shared Transaction Mismatch Details", ""]
+    lines = section("Shared Transaction Mismatch Details")
     for item in items:
         lines.append(f"### `{item.get('txid')}`")
         lines.append("")
@@ -223,27 +216,26 @@ def render_emulator_detection(report: JsonObject, explorer_base_url: str) -> lis
         )
 
     lines = [
-        "",
-        "## Emulator Data Coverage",
-        "",
-        *table(
-            ["metric", "value"],
-            [
-                ["chain transactions evaluated", emulator_summary.get("transactions")],
-                ["emulator_data coinjoins", emulator_summary.get("coinjoin_transactions")],
-                ["emulator_data non-coinjoins", emulator_summary.get("non_coinjoin_transactions")],
-                ["unknown transactions", emulator_summary.get("unknown_transactions")],
-                ["wallet addresses", emulator_summary.get("wallet_addresses")],
-                ["labeled IO records", emulator_summary.get("labeled_io_records")],
-                ["total IO records", emulator_summary.get("total_io_records")],
-            ],
+        *section(
+            "Emulator Data Coverage",
+            *key_values(
+                [
+                    ["chain transactions evaluated", emulator_summary.get("transactions")],
+                    ["emulator_data coinjoins", emulator_summary.get("coinjoin_transactions")],
+                    ["emulator_data non-coinjoins", emulator_summary.get("non_coinjoin_transactions")],
+                    ["unknown transactions", emulator_summary.get("unknown_transactions")],
+                    ["wallet addresses", emulator_summary.get("wallet_addresses")],
+                    ["labeled IO records", emulator_summary.get("labeled_io_records")],
+                    ["total IO records", emulator_summary.get("total_io_records")],
+                ]
+            ),
         ),
-        "",
-        "## Emulator Data Detection Confusion Matrix",
-        "",
-        *table(
-            ["detector", "TP", "FP", "TN", "FN", "unknown", "precision", "recall", "F1", "specificity", "FPR"],
-            evaluation_rows,
+        *section(
+            "Emulator Data Detection Confusion Matrix",
+            *table(
+                ["detector", "TP", "FP", "TN", "FN", "unknown", "precision", "recall", "F1", "specificity", "FPR"],
+                evaluation_rows,
+            ),
         ),
     ]
 
@@ -261,31 +253,22 @@ def render_emulator_detection(report: JsonObject, explorer_base_url: str) -> lis
         if not matrix:
             continue
         detector_label = detector_labels.get(detector, detector)
-        false_negative_txids = matrix.get("false_negative_txids") or []
-        false_positive_txids = matrix.get("false_positive_txids") or []
-        out_of_scope_txids = matrix.get("out_of_scope_detected_txids") or []
-        if false_negative_txids:
-            divergence_lines.append(
-                f"- {detector_label}: {len(false_negative_txids)} emulator_data CoinJoin transaction(s) missed."
-            )
-            for txid in false_negative_txids[:10]:
-                divergence_lines.append(f"  - false negative: {tx_value(txid, explorer_base_url)}")
-        if false_positive_txids:
-            divergence_lines.append(
-                f"- {detector_label}: {len(false_positive_txids)} non-CoinJoin transaction(s) detected."
-            )
-            for txid in false_positive_txids[:10]:
-                divergence_lines.append(f"  - false positive: {tx_value(txid, explorer_base_url)}")
-        if out_of_scope_txids:
-            divergence_lines.append(
-                f"- {detector_label}: {len(out_of_scope_txids)} detected transaction(s) were outside the "
-                "exported emulator transaction universe."
-            )
-            for txid in out_of_scope_txids[:10]:
-                divergence_lines.append(f"  - out of scope: {tx_value(txid, explorer_base_url)}")
+        for field, kind, description in (
+            ("false_negative_txids", "false negative", "emulator_data CoinJoin transaction(s) missed."),
+            ("false_positive_txids", "false positive", "non-CoinJoin transaction(s) detected."),
+            (
+                "out_of_scope_detected_txids",
+                "out of scope",
+                "detected transaction(s) were outside the exported emulator transaction universe.",
+            ),
+        ):
+            txids = matrix.get(field) or []
+            if txids:
+                divergence_lines.append(f"- {detector_label}: {len(txids)} {description}")
+                divergence_lines.extend(f"  - {kind}: {tx_value(txid, explorer_base_url)}" for txid in txids[:10])
 
     if divergence_lines:
-        lines.extend(["", "## Emulator Data Detection Divergences", "", *divergence_lines])
+        lines.extend(section("Emulator Data Detection Divergences", *divergence_lines))
 
     return lines
 
@@ -295,12 +278,9 @@ def render_clustering_evaluation(report: JsonObject) -> list[str]:
     if not clustering:
         return []
 
-    lines = [
-        "",
-        "## Clustering Evaluation",
-        "",
-        *table(
-            ["metric", "value"],
+    lines = section(
+        "Clustering Evaluation",
+        *key_values(
             [
                 ["available", clustering.get("available")],
                 ["labeled addresses", clustering.get("labeled_addresses")],
@@ -311,47 +291,21 @@ def render_clustering_evaluation(report: JsonObject) -> list[str]:
                 ["pairwise F1", metric_value(clustering.get("pairwise_f1"))],
                 ["overmerged clusters", clustering.get("overmerged_clusters")],
                 ["undermerged wallets", clustering.get("undermerged_wallets")],
-            ],
+            ]
         ),
-    ]
+    )
     if not clustering.get("available"):
         lines.extend(["", clustering.get("reason") or "BlockSci clustering data is not available for this run."])
         return lines
 
-    overmerged = clustering.get("largest_overmerged_clusters") or []
-    if overmerged:
-        lines.extend(
-            [
-                "",
-                "### Largest Overmerged Clusters",
-                "",
-                *table(
-                    ["cluster", "wallets", "wallet count"],
-                    [
-                        [item.get("cluster"), ", ".join(item.get("wallets") or []), item.get("wallet_count")]
-                        for item in overmerged
-                    ],
-                ),
-            ]
-        )
-
-    undermerged = clustering.get("largest_undermerged_wallets") or []
-    if undermerged:
-        lines.extend(
-            [
-                "",
-                "### Largest Undermerged Wallets",
-                "",
-                *table(
-                    ["wallet", "clusters", "cluster count"],
-                    [
-                        [item.get("wallet"), ", ".join(item.get("clusters") or []), item.get("cluster_count")]
-                        for item in undermerged
-                    ],
-                ),
-            ]
-        )
-
+    for title, field, name, members, count in (
+        ("Largest Overmerged Clusters", "largest_overmerged_clusters", "cluster", "wallets", "wallet_count"),
+        ("Largest Undermerged Wallets", "largest_undermerged_wallets", "wallet", "clusters", "cluster_count"),
+    ):
+        items = clustering.get(field) or []
+        if items:
+            rows = [[item.get(name), ", ".join(item.get(members) or []), item.get(count)] for item in items]
+            lines.extend(section(title, *table([name, members, count.replace("_", " ")], rows), level=3))
     return lines
 
 
@@ -359,7 +313,7 @@ def render_liquidity_evaluation(report: JsonObject) -> list[str]:
     liquidity = report.get("liquidity_evaluation")
     if not liquidity:
         return []
-    lines = ["", "## Liquidity Evaluation", ""]
+    lines = section("Liquidity Evaluation")
     if not liquidity.get("available"):
         lines.append(liquidity.get("reason") or "Liquidity evaluation is not available for this run.")
         return lines
@@ -406,7 +360,7 @@ def render_liquidity_evaluation(report: JsonObject) -> list[str]:
             ]
         )
     summary_rows.append(["dominant wallet", liquidity.get("dominant_wallet")])
-    lines.extend(["", *table(["metric", "value"], summary_rows)])
+    lines.extend(["", *key_values(summary_rows)])
     if blocksci and not with_blocksci:
         lines.extend(["", f"BlockSci liquidity classification unavailable: {blocksci.get('reason')}"])
     for title, analyzer, confusion in (
@@ -419,7 +373,7 @@ def render_liquidity_evaluation(report: JsonObject) -> list[str]:
             if key.split("->")[0].split(":")[1] != key.split("->")[1]
         ]
         if disagreements:
-            lines.extend(["", f"### {title}", "", *table([f"ground truth -> {analyzer}", "count"], disagreements)])
+            lines.extend(section(title, *table([f"ground truth -> {analyzer}", "count"], disagreements), level=3))
 
     large_wallets = liquidity.get("large_wallets") or []
     if large_wallets:
@@ -438,26 +392,17 @@ def render_liquidity_evaluation(report: JsonObject) -> list[str]:
                     metric_value(fin.get("lift")),
                 ]
             )
-        lines.extend(
-            [
-                "",
-                "### Large Wallets",
-                "",
-                *table(
-                    [
-                        "wallet",
-                        "peak pool share",
-                        "first entry",
-                        "observed entry",
-                        "last leave",
-                        "descending window",
-                        "leave precision",
-                        "lift",
-                    ],
-                    rows,
-                ),
-            ]
-        )
+        headers = [
+            "wallet",
+            "peak pool share",
+            "first entry",
+            "observed entry",
+            "last leave",
+            "descending window",
+            "leave precision",
+            "lift",
+        ]
+        lines.extend(section("Large Wallets", *table(headers, rows), level=3))
 
     spends = liquidity.get("postmix_spends")
     if spends:
@@ -478,22 +423,17 @@ def render_skipped_transactions(report: JsonObject, explorer_base_url: str) -> l
     if not skipped_txids:
         return []
 
-    return [
-        "",
-        "## BlockSci Skipped Transactions",
-        "",
+    return section(
+        "BlockSci Skipped Transactions",
         "These transactions hit the JoinMarket detector timeout or max-depth limit and are not counted as "
         "ordinary false negatives.",
         "",
-        *table(
-            ["txid"],
-            [[tx_value(txid, explorer_base_url)] for txid in skipped_txids],
-        ),
-    ]
+        *table(["txid"], [[tx_value(txid, explorer_base_url)] for txid in skipped_txids]),
+    )
 
 
 def render_notable_divergences(divergences: dict[str, list[JsonObject]]) -> list[str]:
-    lines = ["", "## Notable Divergences", ""]
+    lines = section("Notable Divergences")
     added = False
 
     missed = divergences.get("missed_by_blocksci", [])
@@ -502,14 +442,10 @@ def render_notable_divergences(divergences: dict[str, list[JsonObject]]) -> list
         lines.append(f"- {len(missed)} CoinJoin reported by emulator analysis was missed by BlockSci.")
         for item in missed:
             source = item.get("coinjoin_analysis") or {}
-            txid = item.get("txid")
-            block = block_label(source)
-            repeated_denoms = denoms(source)
-            wallets_text = wallets(source)
             lines.append(
-                f"- Missed transaction {format_txid(txid)} is in block {block}, "
+                f"- Missed transaction {item.get('txid') or '-'} is in block {block_label(source)}, "
                 f"with {source.get('input_count', '-')} inputs, {source.get('output_count', '-')} outputs, "
-                f"repeated denominations {repeated_denoms}, wallets {wallets_text}."
+                f"repeated denominations {denoms(source)}, wallets {wallets(source)}."
             )
 
     blocksci_only = divergences.get("blocksci_only", [])
@@ -554,24 +490,8 @@ def render_source_details(
             ]
         )
 
-    return [
-        "",
-        f"## {title}",
-        "",
-        *table(
-            [
-                "txid",
-                "block",
-                "inputs",
-                "outputs",
-                "input sats",
-                "output sats",
-                "repeated denoms",
-                "wallets",
-            ],
-            rows,
-        ),
-    ]
+    headers = ["txid", "block", "inputs", "outputs", "input sats", "output sats", "repeated denoms", "wallets"]
+    return section(title, *table(headers, rows))
 
 
 def render_transaction_details(
@@ -584,13 +504,13 @@ def render_transaction_details(
     if not items:
         return []
 
-    lines = ["", f"## {title} Details", ""]
+    lines = section(f"{title} Details")
     for item in items:
         source = transaction_record(report, item, source_name)
         txid = item.get("txid")
         lines.extend(
             [
-                f"### `{format_txid(txid)}`",
+                f"### `{txid or '-'}`",
                 "",
                 f"- tx: {tx_value(txid, explorer_base_url)}",
                 f"- block: {block_value(source, explorer_base_url)}",
@@ -689,31 +609,24 @@ def render_io_details(title: str, records: list[JsonObject], explorer_base_url: 
                 record.get("script_type"),
                 record.get("address_type"),
                 record.get("wallet_name"),
-                tx_ref(record.get("prev_txid"), explorer_base_url),
+                tx_value(record.get("prev_txid"), explorer_base_url, short=True),
                 record.get("spending_tx"),
                 record.get("spend_by_tx"),
             ]
         )
 
-    return [
-        f"#### {title}",
-        "",
-        *table(
-            [
-                "index",
-                "value sats",
-                "address",
-                "script type",
-                "BlockSci type",
-                "wallet",
-                "prev txid",
-                "spending tx",
-                "spend by tx",
-            ],
-            rows,
-        ),
-        "",
+    headers = [
+        "index",
+        "value sats",
+        "address",
+        "script type",
+        "BlockSci type",
+        "wallet",
+        "prev txid",
+        "spending tx",
+        "spend by tx",
     ]
+    return [f"#### {title}", "", *table(headers, rows), ""]
 
 
 def render_run_manifest(report: JsonObject) -> list[str]:
@@ -729,36 +642,36 @@ def render_run_manifest(report: JsonObject) -> list[str]:
     commits = manifest.get("source_commits") or {}
     comparison = report.get("run_manifest_comparison") or {}
 
-    lines = [
-        "",
-        "## Run Manifest",
-        "",
-        *table(
-            ["field", "value"],
+    image_rows = [
+        row
+        for key, label in (
+            ("blocksci", "BlockSci"),
+            ("coinjoin_analysis", "coinjoin-analysis"),
+            ("coinjoin_emulator", "coinjoin-emulator"),
+            ("uploader", "uploader"),
+            ("unified_report", "unified-report"),
+        )
+        for row in ([f"{label} image", images.get(key)], [f"{label} image digest", image_digests.get(key)])
+    ]
+    lines = section(
+        "Run Manifest",
+        *key_values(
             [
                 ["scenario sha256", scenario.get("sha256")],
                 ["engine", execution.get("engine")],
                 ["coinjoin type", execution.get("coinjoin_type")],
                 ["detector", json.dumps(detector, sort_keys=True)],
-                ["BlockSci image", images.get("blocksci")],
-                ["BlockSci image digest", image_digests.get("blocksci")],
-                ["coinjoin-analysis image", images.get("coinjoin_analysis")],
-                ["coinjoin-analysis image digest", image_digests.get("coinjoin_analysis")],
-                ["coinjoin-emulator image", images.get("coinjoin_emulator")],
-                ["coinjoin-emulator image digest", image_digests.get("coinjoin_emulator")],
-                ["uploader image", images.get("uploader")],
-                ["uploader image digest", image_digests.get("uploader")],
-                ["unified-report image", images.get("unified_report")],
-                ["unified-report image digest", image_digests.get("unified_report")],
+                *image_rows,
                 ["coinjoin-emulator commit", commits.get("coinjoin_emulator")],
                 ["exporters commit", commits.get("exporters")],
             ],
+            key="field",
         ),
-    ]
+    )
 
     if comparison.get("available"):
         differences = comparison.get("differences") or []
-        lines.extend(["", "## Run Manifest Comparison", ""])
+        lines.extend(section("Run Manifest Comparison"))
         if not differences:
             lines.append("No tracked manifest fields changed since the previous report.")
         else:
@@ -792,14 +705,12 @@ def status_text(value: JsonValue) -> str:
 def render_integration_diagnostics(report: JsonObject) -> list[str]:
     diagnostics = report.get("integration_diagnostics") or {}
     if not diagnostics:
-        return [
-            "",
-            "## Inner Report Integration",
-            "",
+        return section(
+            "Inner Report Integration",
             "Inner report integration is NOT OK.",
             "",
             "No integration diagnostics are available in this report.",
-        ]
+        )
 
     images = diagnostics.get("images") or {}
     chain = diagnostics.get("chain") or {}
@@ -812,10 +723,8 @@ def render_integration_diagnostics(report: JsonObject) -> list[str]:
         if diagnostics.get("status") == "ok"
         else "Inner report integration is NOT OK."
     )
-    lines = [
-        "",
-        "## Inner Report Integration",
-        "",
+    lines = section(
+        "Inner Report Integration",
         verdict,
         "",
         *table(
@@ -856,7 +765,7 @@ def render_integration_diagnostics(report: JsonObject) -> list[str]:
                 ],
             ],
         ),
-    ]
+    )
     if problems:
         lines.extend(["", "Blocking problems:"])
         lines.extend(f"- {problem}" for problem in problems)
@@ -871,12 +780,9 @@ def render_coinjoin_mappings(report: JsonObject) -> list[str]:
     enum_summary = enumerator.get("summary") or {}
     sake = mappings.get("sake") or {}
     sake_summary = sake.get("summary") or {}
-    lines = [
-        "",
-        "## CoinJoin Mapping Analysis",
-        "",
-        *table(
-            ["metric", "value"],
+    lines = section(
+        "CoinJoin Mapping Analysis",
+        *key_values(
             [
                 ["stage status", mappings.get("status")],
                 ["enumerated transactions", enum_summary.get("transactions")],
@@ -888,12 +794,10 @@ def render_coinjoin_mappings(report: JsonObject) -> list[str]:
                 ["Sake wallet match rate", metric_value(sake_summary.get("wallet_match_rate"))],
                 ["Sake length match rate", metric_value(sake_summary.get("length_match_rate"))],
                 ["Sake full CoinJoin match rate", metric_value(sake_summary.get("full_coinjoin_match_rate"))],
-            ],
+            ]
         ),
-        "",
-        "### Per-transaction mapping results",
-        "",
-    ]
+    )
+    lines.extend(section("Per-transaction mapping results", level=3))
     rows = []
     sake_transactions = sake.get("transactions") or {}
     for txid, item in sorted((enumerator.get("transactions") or {}).items()):
@@ -937,17 +841,14 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
     ]
     warnings = report.get("warnings") or []
     if warnings:
-        lines.extend(["", "## Warnings", ""])
+        lines.extend(section("Warnings"))
         for warning in warnings:
             lines.append(f"> **{warning.get('code')}:** {warning.get('message')}")
     lines.extend(render_integration_diagnostics(report))
     lines.extend(
-        [
-            "",
-            "## Run",
-            "",
-            *table(
-                ["field", "value"],
+        section(
+            "Run",
+            *key_values(
                 [
                     ["run id", run.get("id")],
                     ["mode", run.get("mode")],
@@ -967,12 +868,14 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
                     ["JoinMarket max depth", run.get("joinmarket_max_depth")],
                     ["scenario sha256", run.get("scenario_sha256")],
                 ],
+                key="field",
             ),
-            "",
-            "## Detection Summary",
-            "",
-            *table(
-                ["metric", "value"],
+        )
+    )
+    lines.extend(
+        section(
+            "Detection Summary",
+            *key_values(
                 [
                     ["coinjoin-analysis coinjoins", summary.get("coinjoin_analysis_coinjoins")],
                     ["BlockSci detected coinjoins", summary.get("blocksci_detected_coinjoins")],
@@ -985,11 +888,13 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
                         "coinjoin-analysis coverage by BlockSci",
                         summary.get("coinjoin_analysis_coverage_by_blocksci"),
                     ],
-                ],
+                ]
             ),
-            "",
-            "## Divergence Counts",
-            "",
+        )
+    )
+    lines.extend(
+        section(
+            "Divergence Counts",
             *table(
                 ["type", "count"],
                 [
@@ -998,7 +903,7 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
                     ["shared transaction mismatches", divergence_counts.get("shared_tx_mismatches", 0)],
                 ],
             ),
-        ]
+        )
     )
 
     if report.get("evaluation_scope") == "baseline_agreement_only":
@@ -1024,14 +929,11 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
     coverage = report.get("coverage")
     if coverage:
         lines.extend(
-            [
-                "",
-                "## Coverage",
-                "",
+            section(
+                "Coverage",
                 "> Only heights BlockSci scanned are compared; baseline transactions elsewhere are not BlockSci misses.",
                 "",
-                *table(
-                    ["field", "value"],
+                *key_values(
                     [
                         ["scan window", f"[{coverage.get('start_height')}, {coverage.get('end_height')})"],
                         ["index blocks", coverage.get("index_blocks")],
@@ -1043,26 +945,25 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
                         ["baseline outside the window", coverage.get("baseline_outside_window")],
                         ["baseline not in the index or above the pin", coverage.get("baseline_not_in_index")],
                     ],
+                    key="field",
                 ),
-            ]
+            )
         )
     baseline_filter = report.get("baseline_filter") or {}
     if baseline_filter.get("enabled"):
         source_names = ", ".join(str(source.get("file")) for source in baseline_filter.get("sources", []))
         lines.extend(
-            [
-                "",
-                "## Baseline False-Positive Filter",
-                "",
-                *table(
-                    ["field", "value"],
+            section(
+                "Baseline False-Positive Filter",
+                *key_values(
                     [
                         ["source files", source_names],
                         ["listed unique TXIDs", baseline_filter.get("listed_txids")],
                         ["filtered baseline TXIDs", baseline_filter.get("filtered_count")],
                     ],
+                    key="field",
                 ),
-            ]
+            )
         )
     lines.extend(render_run_manifest(report))
     lines.extend(render_coinjoin_mappings(report))
@@ -1071,26 +972,25 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
     lines.extend(render_clustering_evaluation(report))
     lines.extend(render_liquidity_evaluation(report))
     lines.extend(
-        [
-            "",
-            "## CoinJoin-Analysis vs BlockSci Diagnostic",
-            "",
+        section(
+            "CoinJoin-Analysis vs BlockSci Diagnostic",
             "This section preserves the analyzer comparison. Emulator reports use `emulator_data` as the "
             "canonical source for chain-wide detection metrics; external reports measure baseline agreement only.",
-        ]
+        )
     )
 
-    overview_rows = []
-    overview_rows.extend(
-        divergence_rows("missed_by_blocksci", divergences.get("missed_by_blocksci", []), explorer_base_url)
-    )
-    overview_rows.extend(divergence_rows("blocksci_only", divergences.get("blocksci_only", []), explorer_base_url))
-    overview_rows.extend(
-        divergence_rows("shared_tx_mismatch", divergences.get("shared_tx_mismatches", []), explorer_base_url)
-    )
+    overview_rows = [
+        row
+        for kind, key in (
+            ("missed_by_blocksci", "missed_by_blocksci"),
+            ("blocksci_only", "blocksci_only"),
+            ("shared_tx_mismatch", "shared_tx_mismatches"),
+        )
+        for row in divergence_rows(kind, divergences.get(key, []), explorer_base_url)
+    ]
 
     lines.extend(render_notable_divergences(divergences))
-    lines.extend(["", "## Divergence Overview", ""])
+    lines.extend(section("Divergence Overview"))
 
     if overview_rows:
         lines.extend(
@@ -1112,40 +1012,13 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
     else:
         lines.append("No divergences found.")
 
-    lines.extend(
-        render_source_details(
-            "Missed By BlockSci",
-            divergences.get("missed_by_blocksci", []),
-            "coinjoin_analysis",
-            explorer_base_url,
-        )
-    )
-    lines.extend(
-        render_transaction_details(
-            "Missed By BlockSci",
-            divergences.get("missed_by_blocksci", []),
-            "coinjoin_analysis",
-            explorer_base_url,
-            report,
-        )
-    )
-    lines.extend(
-        render_source_details(
-            "BlockSci Only",
-            divergences.get("blocksci_only", []),
-            "blocksci",
-            explorer_base_url,
-        )
-    )
-    lines.extend(
-        render_transaction_details(
-            "BlockSci Only",
-            divergences.get("blocksci_only", []),
-            "blocksci",
-            explorer_base_url,
-            report,
-        )
-    )
+    for title, key, source_name in (
+        ("Missed By BlockSci", "missed_by_blocksci", "coinjoin_analysis"),
+        ("BlockSci Only", "blocksci_only", "blocksci"),
+    ):
+        items = divergences.get(key, [])
+        lines.extend(render_source_details(title, items, source_name, explorer_base_url))
+        lines.extend(render_transaction_details(title, items, source_name, explorer_base_url, report))
     lines.extend(render_shared_mismatch_details(divergences.get("shared_tx_mismatches", [])))
 
     return "\n".join(lines).rstrip() + "\n"

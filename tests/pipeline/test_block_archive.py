@@ -302,6 +302,7 @@ def run_download(tmp_path: Path, max_block: int, manifest: Path | None = None) -
     work = tmp_path / f"work-{max_block}"
     script = (
         "set -euo pipefail\n"
+        's5() { s5cmd "$@"; }\n'
         f'RUN_WORK="{work}"\n'
         "BITCOIN_BLOCKS_URI=s3://bucket/blocks\n"
         f"EXPORTED_MAX_BLOCK={max_block}\n"

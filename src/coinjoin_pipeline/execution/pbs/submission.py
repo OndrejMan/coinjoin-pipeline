@@ -54,54 +54,27 @@ def _parse_qsub_job_id(stdout: str) -> str:
     return job_id
 
 
-def qsub_command(
-    dependency_job_id: str | Sequence[str] | None = None,
-) -> list[str]:
+def qsub_command(dependencies: Sequence[str] = ()) -> list[str]:
     """Build qsub's common dependency prefix for file and stdin submissions."""
-    command = ["qsub"]
-    if not dependency_job_id:
-        return command
-    dependency_job_ids = (dependency_job_id,) if isinstance(dependency_job_id, str) else tuple(dependency_job_id)
-    if any(not job_id for job_id in dependency_job_ids):
+    if any(not job_id for job_id in dependencies):
         raise PBSError("PBS dependency job IDs must not be empty")
-    command.extend(["-W", f"depend=afterok:{':'.join(dependency_job_ids)}"])
-    return command
+    return ["qsub", "-W", f"depend=afterok:{':'.join(dependencies)}"] if dependencies else ["qsub"]
 
 
-def submit_pbs(
-    script_path: Path,
-    dependency_job_id: str | Sequence[str] | None = None,
-) -> str:
-    """Submit a PBS script via ``qsub`` and return the job ID."""
-    command = qsub_command(dependency_job_id)
-    command.append(str(script_path))
-    result = subprocess.run(
-        command,
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    if result.returncode != 0:
-        raise PBSError(f"qsub failed (exit {result.returncode}): {result.stderr.strip()}")
-    return _parse_qsub_job_id(result.stdout)
-
-
-def submit_pbs_text(
-    script: str,
-    dependency_job_id: str | Sequence[str] | None = None,
-) -> str:
-    """Submit a PBS script to ``qsub`` via stdin and return the job ID.
+def submit_pbs(script: Path | str, dependencies: Sequence[str] = ()) -> str:
+    """Submit a script file, or script text through stdin, and return the job ID.
 
     Stdin submission avoids needing a script path visible to the PBS server,
     which the S3-compatible stages lack (no shared run directory).
     """
-    command = qsub_command(dependency_job_id)
+    command = qsub_command(dependencies)
+    if isinstance(script, Path):
+        command.append(str(script))
     result = subprocess.run(
         command,
         check=False,
         text=True,
-        input=script,
+        input=None if isinstance(script, Path) else script,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -192,6 +165,6 @@ def submit_pbs_job(job: PBSJobSpec, dry_run: bool = False) -> str | None:
         print(f"[dry-run] PBS script for {job.stage}:\n{job.script}")
         return None
     require_qsub()
-    job_id = submit_pbs_text(job.script, job.dependencies)
+    job_id = submit_pbs(job.script, job.dependencies)
     print(f"[pbs] Submitted {job.stage} PBS job: {job_id}")
     return job_id

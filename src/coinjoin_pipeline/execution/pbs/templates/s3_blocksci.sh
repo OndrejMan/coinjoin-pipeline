@@ -1,19 +1,6 @@
-#!/bin/bash
-#PBS -N blocksci_analysis_s3
-#PBS -l select=1:ncpus={ncpus}:mem={mem}:scratch_{scratch_type}={scratch}
-#PBS -l walltime={walltime}
-#PBS -j oe
-set -euo pipefail
-
-{stage_header}
-IMAGE={image}
-mkdir -p "$RUN_WORK/.pbs" "$RUN_WORK/logs"
-stage_finalize() {{
-  :
-}}
-{bootstrap}
-{stage_setup}
-{download_run}
+{preamble}
+{start}
+s5 sync "$ARTIFACT_URI/$RUN_ID/*" "$RUN_WORK/"
 BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"
 if [ ! -d "$BITCOIN_DATADIR/regtest/blocks" ] && [ -d "$BITCOIN_DATADIR/data/regtest/blocks" ]; then
   BITCOIN_DATADIR="$BITCOIN_DATADIR/data"
@@ -23,8 +10,8 @@ test -d "$BITCOIN_DATADIR/regtest/blocks" || {{
   exit 1
 }}
 test -d "$RUN_WORK/.pipeline/exporters"
-{coinjoin_analysis_check}
-EXPORTED_MAX_BLOCK="$(find "$RUN_WORK/coinjoin_emulator_data/data/btc-node" -maxdepth 1 -type f -name 'block_*.json' -printf '%f\n' | sed -nE 's/^block_([0-9]+)\.json$/\1/p' | sort -n | tail -n 1)"
+{before}
+EXPORTED_MAX_BLOCK="$(emulator_max_block)"
 test -n "$EXPORTED_MAX_BLOCK"
 singularity exec \
   --cleanenv \
@@ -33,9 +20,5 @@ singularity exec \
   --bind "$RUN_WORK/.pipeline/exporters:/mnt/exporters:ro" \
   --env PBS_RUN_ID="$RUN_ID" --env PBS_EXPORTED_MAX_BLOCK="$EXPORTED_MAX_BLOCK" "$IMAGE" \
   bash -c 'cd "/runs/emulation/logs/$PBS_RUN_ID" && EXPORTED_MAX_BLOCK="$PBS_EXPORTED_MAX_BLOCK" && {command}'
-{report_output_check}
-{analysis_output_check}
-{upload_blocksci}
-{upload_analysis}
-{upload_report}
-{upload_logs}
+{after}
+s5 sync "$RUN_WORK/logs/" "$ARTIFACT_URI/$RUN_ID/logs/"

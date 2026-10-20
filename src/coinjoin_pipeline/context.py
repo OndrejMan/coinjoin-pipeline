@@ -17,7 +17,6 @@ from .configuration import (
     config_value,
     replace_path,
 )
-from .host import image_overrides, local_images
 from .images import Images, resolve_images
 from .paths import EXPORTERS_ROOT, SCENARIOS_ROOT
 from .runs import run_id_for
@@ -97,9 +96,10 @@ class RunContext:
     @classmethod
     def prepare(cls, config: PipelineConfiguration, reproduction: str) -> RunContext:
         config = resolve_configuration(config)
-        overrides = image_overrides({item.name: getattr(config.images, item.name) for item in fields(Images)})
-        images = (
-            local_images(overrides) if config.images.local_build else resolve_images(config.images.version, overrides)
+        images = resolve_images(
+            config.images.version,
+            {item.name: getattr(config.images, item.name) for item in fields(Images)},
+            local=config.images.local_build,
         )
         config = replace(
             config,
@@ -123,18 +123,15 @@ class RunContext:
                 sake_image=pbs.sake_image or pbs.image or images.sake,
             ),
         )
-        from .execution.pbs_settings import (
-            resolve_uploader_image,
-            unified_report_image_reference,
-        )
-
         if config.artifacts.backend == "s3":
+            from .execution.pbs_settings import resolve_unified_report_image, resolve_uploader_image
+
             config = replace(
                 config,
                 images=replace(
                     config.images,
                     uploader=resolve_uploader_image(config),
-                    unified_report=unified_report_image_reference(config),
+                    unified_report=resolve_unified_report_image(config),
                 ),
             )
         root = config.runs_path

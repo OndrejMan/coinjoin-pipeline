@@ -41,6 +41,7 @@ coinjoin_pipeline = [
 ]
 
 "coinjoin_pipeline.execution" = ["*.sh"]
+"coinjoin_pipeline.execution.pbs" = ["templates/*.sh"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/pipeline"]

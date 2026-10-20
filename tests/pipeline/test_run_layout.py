@@ -18,6 +18,7 @@ SCRATCH_DIRECTORIES = {"bitcoin_data", "btc_data", "source-blocksci-parse_data"}
 DIRECTORY_TOKEN = re.compile(r"\b[A-Za-z][A-Za-z_-]*_data\b")
 JOB_SOURCES = (
     *sorted(EXECUTION_ROOT.glob("*.sh")),
+    *sorted((EXECUTION_ROOT / "pbs" / "templates").glob("*.sh")),
     EXECUTION_ROOT / "pbs" / "templates_s3.py",
     EXECUTION_ROOT / "pbs" / "templates_local.py",
     EXECUTION_ROOT / "kubernetes.py",

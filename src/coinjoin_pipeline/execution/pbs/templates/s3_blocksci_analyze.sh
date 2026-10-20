@@ -1,29 +1,20 @@
-#!/bin/bash
-#PBS -N {job_name}
-#PBS -l select=1:ncpus={ncpus}:mem={mem}:scratch_{scratch_type}={scratch}{multijob}
-#PBS -l walltime={walltime}
-#PBS -j oe
-set -euo pipefail
-
-{stage_header}
-IMAGE={image}
-MODE={mode}
+{preamble}
 CACHE_DIR="$RUN_WORK/blocksci-parse_data"
-mkdir -p "$RUN_WORK/.pbs" "$RUN_WORK/logs" "$RUN_WORK/.pipeline/exporters" "$CACHE_DIR"
+OUTPUT_DIR={output_dir}
+mkdir -p "$RUN_WORK/.pipeline/exporters" "$CACHE_DIR"
 stage_finalize() {{
   {upload_outputs}
   {finalize_index}
 }}
-{bootstrap}
-{stage_setup}
-{require_zstd}
-echo "[$MODE] downloading required reusable BlockSci inputs"
+{start}
+require_zstd
+echo "[$STAGE] downloading required reusable BlockSci inputs"
 {download_inputs}
 {restore_cache}
 {prepare_mode}
 EXTRA_BINDS=()
 {extra_binds}
-echo "[$MODE] starting on $(hostname -f)"
+echo "[$STAGE] starting on $(hostname -f)"
 {connection_help}
 singularity exec \
   --cleanenv \
@@ -38,4 +29,4 @@ singularity exec \
   "$IMAGE" \
   bash -c 'cd "/runs/emulation/logs/$PBS_RUN_ID" && {command}'
 {output_check}
-echo "[$MODE] completed"
+echo "[$STAGE] completed"

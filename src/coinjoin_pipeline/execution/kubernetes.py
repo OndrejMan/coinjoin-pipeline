@@ -45,95 +45,70 @@ def resolve_kubeconfig(value: str | None) -> Path:
     return Path(value).expanduser().resolve() if value else Path.home() / ".kube" / "config"
 
 
-def run_kubectl_preflight_command(command: list[str]) -> str:
+def kubectl(
+    kubeconfig: Path, *arguments: str, namespace: str | None = None, input_text: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run kubectl against one kubeconfig; FileNotFoundError when kubectl is missing."""
+    command = ["kubectl", "--kubeconfig", str(kubeconfig)]
+    if namespace is not None:
+        command += ["--namespace", namespace]
+    return subprocess.run(
+        [*command, *arguments],
+        input=input_text,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+def _output(result: subprocess.CompletedProcess[str]) -> str:
+    return (result.stderr or result.stdout or "").strip()
+
+
+def _preflight(kubeconfig: Path, *arguments: str, namespace: str | None = None) -> str:
+    """Run one preflight command and exit with the usage code when it fails."""
     try:
-        completed = subprocess.run(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
+        completed = kubectl(kubeconfig, *arguments, namespace=namespace)
     except FileNotFoundError:
-        print(
-            "[ERROR] kubectl is required for Kubernetes auth preflight inside the wrapper container.",
-            file=sys.stderr,
-        )
+        print("[ERROR] kubectl is required for the Kubernetes auth preflight.", file=sys.stderr)
         sys.exit(2)
-    stdout = (completed.stdout or "").strip()
-    stderr = (completed.stderr or "").strip()
+    stdout, stderr = (completed.stdout or "").strip(), (completed.stderr or "").strip()
     if completed.returncode != 0:
-        print(
-            f"[ERROR] Kubernetes preflight command failed: {shlex.join(command)}",
-            file=sys.stderr,
-        )
-        if stdout:
-            print(stdout, file=sys.stderr)
-        if stderr:
-            print(stderr, file=sys.stderr)
+        print(f"[ERROR] Kubernetes preflight command failed: {shlex.join(completed.args)}", file=sys.stderr)
+        for text in (stdout, stderr):
+            if text:
+                print(text, file=sys.stderr)
         sys.exit(2)
     if stderr:
         print(f"[kubectl] {stderr}", file=sys.stderr)
     return stdout
 
 
-def kubectl_auth_can_i(kubeconfig_path: Path, verb: str, resource: str, namespace: str | None = None) -> None:
-    command = [
-        "kubectl",
-        "--kubeconfig",
-        str(kubeconfig_path),
-        "auth",
-        "can-i",
-        verb,
-        resource,
-    ]
-    if namespace is not None:
-        command.extend(["--namespace", namespace])
-    output = run_kubectl_preflight_command(command)
-    answer = next((line for line in reversed(output.splitlines()) if line.strip()), "")
-    if answer.strip().lower() != "yes":
-        print(
-            f"[ERROR] Kubernetes permission denied: {shlex.join(command)} returned {output!r}",
-            file=sys.stderr,
-        )
-        sys.exit(2)
+def _require_permissions(kubeconfig: Path, checks: tuple[tuple[str, str], ...], namespace: str | None) -> None:
+    for verb, resource in checks:
+        output = _preflight(kubeconfig, "auth", "can-i", verb, resource, namespace=namespace)
+        answer = next((line for line in reversed(output.splitlines()) if line.strip()), "")
+        if answer.strip().lower() != "yes":
+            print(f"[ERROR] Kubernetes permission denied: can-i {verb} {resource} returned {output!r}", file=sys.stderr)
+            sys.exit(2)
 
 
 def kubernetes_auth_preflight(kubeconfig_path: Path, namespace: str, reuse_namespace: bool) -> None:
-    """Validate Kubernetes permissions with the mounted kubeconfig."""
+    """Validate the permissions the emulator controller needs with this kubeconfig."""
     print(f"[kubernetes] Auth preflight using kubeconfig: {kubeconfig_path}")
-    run_kubectl_preflight_command(["kubectl", "--kubeconfig", str(kubeconfig_path), "get", "--raw=/version"])
-
-    for verb, resource in (
-        ("create", "pods"),
-        ("create", "services"),
-        ("delete", "pods"),
-        ("delete", "services"),
-    ):
-        kubectl_auth_can_i(kubeconfig_path, verb, resource, namespace)
-
+    _preflight(kubeconfig_path, "get", "--raw=/version")
+    pod_and_service = (("create", "pods"), ("create", "services"), ("delete", "pods"), ("delete", "services"))
+    _require_permissions(kubeconfig_path, pod_and_service, namespace)
     if reuse_namespace:
-        run_kubectl_preflight_command(
-            [
-                "kubectl",
-                "--kubeconfig",
-                str(kubeconfig_path),
-                "get",
-                "namespace",
-                namespace,
-            ]
+        _preflight(kubeconfig_path, "get", "namespace", namespace)
+        _require_permissions(
+            kubeconfig_path,
+            (("list", "pods"), ("list", "services"), ("delete", "pods"), ("delete", "services")),
+            namespace,
         )
-        for verb, resource in (
-            ("list", "pods"),
-            ("list", "services"),
-            ("delete", "pods"),
-            ("delete", "services"),
-        ):
-            kubectl_auth_can_i(kubeconfig_path, verb, resource, namespace)
     else:
-        kubectl_auth_can_i(kubeconfig_path, "create", "namespaces")
-        kubectl_auth_can_i(kubeconfig_path, "delete", "namespaces")
-
+        _require_permissions(kubeconfig_path, (("create", "namespaces"), ("delete", "namespaces")), None)
     print(f"[kubernetes] Auth preflight OK for namespace={namespace}, reuse_namespace={reuse_namespace}")
 
 
@@ -144,55 +119,34 @@ def kubernetes_s3_auth_preflight(
     secret_name: str,
 ) -> None:
     """Validate permissions and prerequisites for the S3-compatible emulation Job."""
-    print(f"[kubernetes] S3-compatible auth preflight using kubeconfig: {kubeconfig_path}")
-    run_kubectl_preflight_command(["kubectl", "--kubeconfig", str(kubeconfig_path), "get", "--raw=/version"])
-    for verb, resource in (
-        ("create", "jobs.batch"),
-        ("create", "configmaps"),
-        ("create", "serviceaccounts"),
-        ("create", "roles.rbac.authorization.k8s.io"),
-        ("create", "rolebindings.rbac.authorization.k8s.io"),
-        ("patch", "serviceaccounts"),
-        ("patch", "configmaps"),
-        ("patch", "roles.rbac.authorization.k8s.io"),
-        ("patch", "rolebindings.rbac.authorization.k8s.io"),
-        ("delete", "serviceaccounts"),
-        ("delete", "configmaps"),
-        ("delete", "roles.rbac.authorization.k8s.io"),
-        ("delete", "rolebindings.rbac.authorization.k8s.io"),
-        ("get", "jobs.batch"),
-        ("delete", "jobs.batch"),
-    ):
-        kubectl_auth_can_i(kubeconfig_path, verb, resource, namespace)
-    if reuse_namespace:
-        run_kubectl_preflight_command(
-            [
-                "kubectl",
-                "--kubeconfig",
-                str(kubeconfig_path),
-                "get",
-                "namespace",
-                namespace,
-            ]
-        )
-        # A missing Secret would leave the Job pod in CreateContainerConfigError
-        # until the emulation timeout, so check it up front.
-        run_kubectl_preflight_command(
-            [
-                "kubectl",
-                "--kubeconfig",
-                str(kubeconfig_path),
-                "get",
-                "secret",
-                secret_name,
-                "--namespace",
-                namespace,
-            ]
-        )
-    else:
+    if not reuse_namespace:
         raise RuntimeError(
             "Kubernetes S3-compatible mode requires an existing namespace and Secret; pass --reuse-namespace"
         )
+    print(f"[kubernetes] S3-compatible auth preflight using kubeconfig: {kubeconfig_path}")
+    _preflight(kubeconfig_path, "get", "--raw=/version")
+    owned = (
+        "serviceaccounts",
+        "configmaps",
+        "roles.rbac.authorization.k8s.io",
+        "rolebindings.rbac.authorization.k8s.io",
+    )
+    _require_permissions(
+        kubeconfig_path,
+        (
+            ("create", "jobs.batch"),
+            *(("create", resource) for resource in owned),
+            *(("patch", resource) for resource in owned),
+            *(("delete", resource) for resource in owned),
+            ("get", "jobs.batch"),
+            ("delete", "jobs.batch"),
+        ),
+        namespace,
+    )
+    _preflight(kubeconfig_path, "get", "namespace", namespace)
+    # A missing Secret would leave the Job pod in CreateContainerConfigError
+    # until the emulation timeout, so check it up front.
+    _preflight(kubeconfig_path, "get", "secret", secret_name, namespace=namespace)
     print(f"[kubernetes] S3-compatible auth preflight OK for namespace={namespace}")
 
 
@@ -234,6 +188,39 @@ def unstartable_pod_reason(pod: dict) -> str | None:
     return None
 
 
+def _get_json(kubeconfig: Path, namespace: str, *arguments: str) -> tuple[dict | None, str]:
+    """``kubectl get ... -o json`` parsed, or None and kubectl's error when it is inconclusive."""
+    try:
+        result = kubectl(kubeconfig, "get", *arguments, "-o", "json", namespace=namespace)
+    except FileNotFoundError:
+        return None, ""
+    if result.returncode != 0:
+        return None, result.stderr or ""
+    try:
+        return json.loads(result.stdout), ""
+    except json.JSONDecodeError:
+        return None, ""
+
+
+def _pod_state(pods: list[dict], job_name: str) -> str:
+    if not pods:
+        return PROBE_QUEUED
+    for pod in pods:
+        reason = unstartable_pod_reason(pod)
+        if reason:
+            print(f"[kubernetes] Job {job_name} cannot start its containers ({reason})", file=sys.stderr)
+            return PROBE_TERMINAL
+    for pod in pods:
+        status = pod.get("status") or {}
+        if status.get("phase") == "Running":
+            return PROBE_RUNNING
+        for key in ("initContainerStatuses", "containerStatuses"):
+            for container in status.get(key) or []:
+                if (container.get("state") or {}).get("running") is not None:
+                    return PROBE_RUNNING
+    return PROBE_QUEUED
+
+
 def kubernetes_job_probe(kubeconfig_path: Path, namespace: str, job_name: str) -> Callable[[], str]:
     """Build a kubectl-backed liveness probe for ``wait_for_s3_marker``.
 
@@ -241,94 +228,19 @@ def kubernetes_job_probe(kubeconfig_path: Path, namespace: str, job_name: str) -
     """
     job_seen = False
 
-    def pod_state() -> str:
-        command = [
-            "kubectl",
-            "--kubeconfig",
-            str(kubeconfig_path),
-            "get",
-            "pods",
-            "--namespace",
-            namespace,
-            "--selector",
-            f"job-name={job_name}",
-            "-o",
-            "json",
-        ]
-        try:
-            result = subprocess.run(
-                command,
-                check=False,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-        except FileNotFoundError:
-            return PROBE_UNKNOWN
-        if result.returncode != 0:
-            return PROBE_UNKNOWN
-        try:
-            pods = json.loads(result.stdout).get("items") or []
-        except json.JSONDecodeError:
-            return PROBE_UNKNOWN
-        if not pods:
-            return PROBE_QUEUED
-        for pod in pods:
-            reason = unstartable_pod_reason(pod)
-            if reason:
-                print(
-                    f"[kubernetes] Job {job_name} cannot start its containers ({reason})",
-                    file=sys.stderr,
-                )
-                return PROBE_TERMINAL
-        for pod in pods:
-            status = pod.get("status") or {}
-            if status.get("phase") == "Running":
-                return PROBE_RUNNING
-            for key in ("initContainerStatuses", "containerStatuses"):
-                for container in status.get(key) or []:
-                    if (container.get("state") or {}).get("running") is not None:
-                        return PROBE_RUNNING
-        return PROBE_QUEUED
-
     def probe() -> str:
         nonlocal job_seen
-        command = [
-            "kubectl",
-            "--kubeconfig",
-            str(kubeconfig_path),
-            "get",
-            "job",
-            job_name,
-            "--namespace",
-            namespace,
-            "-o",
-            "json",
-        ]
-        try:
-            result = subprocess.run(
-                command,
-                check=False,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-        except FileNotFoundError:
-            return PROBE_UNKNOWN
-        if result.returncode != 0:
-            if "notfound" in (result.stderr or "").lower().replace(" ", ""):
-                # Deleted after we saw it running means it terminated without markers.
-                return PROBE_TERMINAL if job_seen else PROBE_UNKNOWN
-            return PROBE_UNKNOWN
+        job, error = _get_json(kubeconfig_path, namespace, "job", job_name)
+        if job is None:
+            # Deleted after we saw it running means it terminated without markers.
+            gone = "notfound" in error.lower().replace(" ", "")
+            return PROBE_TERMINAL if gone and job_seen else PROBE_UNKNOWN
         job_seen = True
-        try:
-            status = json.loads(result.stdout).get("status", {})
-        except json.JSONDecodeError:
-            return PROBE_UNKNOWN
-        for condition in status.get("conditions") or []:
+        for condition in (job.get("status") or {}).get("conditions") or []:
             if condition.get("type") in {"Complete", "Failed"} and condition.get("status") == "True":
                 return PROBE_TERMINAL
-        return pod_state()
+        pods, _ = _get_json(kubeconfig_path, namespace, "pods", "--selector", f"job-name={job_name}")
+        return PROBE_UNKNOWN if pods is None else _pod_state(pods.get("items") or [], job_name)
 
     return probe
 
@@ -337,29 +249,12 @@ def collect_s3_emulation_diagnostics(kubeconfig_path: Path, namespace: str, job_
     """Best-effort kubectl evidence for a failed or vanished emulation Job."""
     sections: list[str] = []
     for description, command in (
-        ("job description", ["describe", "job", job_name]),
-        (
-            "controller logs",
-            ["logs", f"job/{job_name}", "-c", "controller", "--tail=-1"],
-        ),
-        ("uploader logs", ["logs", f"job/{job_name}", "-c", "uploader", "--tail=100"]),
+        ("job description", ("describe", "job", job_name)),
+        ("controller logs", ("logs", f"job/{job_name}", "-c", "controller", "--tail=-1")),
+        ("uploader logs", ("logs", f"job/{job_name}", "-c", "uploader", "--tail=100")),
     ):
-        full = [
-            "kubectl",
-            "--kubeconfig",
-            str(kubeconfig_path),
-            "--namespace",
-            namespace,
-            *command,
-        ]
         try:
-            result = subprocess.run(
-                full,
-                check=False,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
+            result = kubectl(kubeconfig_path, *command, namespace=namespace)
         except FileNotFoundError:
             return "kubectl unavailable; no Kubernetes diagnostics collected"
         output = (result.stdout or "").strip() or (result.stderr or "").strip() or "(no output)"
@@ -376,80 +271,30 @@ def collect_s3_emulation_diagnostics(kubeconfig_path: Path, namespace: str, job_
     return "\n".join(sections)
 
 
-def delete_s3_emulation_job(kubeconfig_path: Path, namespace: str, job_name: str) -> None:
-    """Best-effort frontend cleanup after a failed or timed-out marker wait."""
-    command = [
-        "kubectl",
-        "--kubeconfig",
-        str(kubeconfig_path),
-        "--namespace",
-        namespace,
-        "delete",
-        "job",
-        job_name,
-        "--ignore-not-found",
-        "--wait=false",
-    ]
+def _delete(kubeconfig_path: Path, namespace: str, resource_type: str, name: str) -> bool:
+    """Best-effort deletion; returns False only when kubectl itself is missing."""
     try:
-        result = subprocess.run(
-            command,
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+        result = kubectl(
+            kubeconfig_path, "delete", resource_type, name, "--ignore-not-found", "--wait=false", namespace=namespace
         )
     except FileNotFoundError:
-        print(
-            f"[WARN] kubectl unavailable; could not delete Job {job_name}",
-            file=sys.stderr,
-        )
-        return
+        print(f"[WARN] kubectl unavailable; could not delete {resource_type}/{name}", file=sys.stderr)
+        return False
     if result.returncode != 0:
-        print(
-            f"[WARN] failed to delete Kubernetes Job {job_name}: {(result.stderr or result.stdout or '').strip()}",
-            file=sys.stderr,
-        )
+        print(f"[WARN] failed to delete {resource_type}/{name}: {_output(result)}", file=sys.stderr)
+    return True
 
 
-def delete_s3_emulation_support_resources(
-    kubeconfig_path: Path,
-    namespace: str,
-    resource_name: str,
-) -> None:
+def delete_s3_emulation_job(kubeconfig_path: Path, namespace: str, job_name: str) -> None:
+    """Best-effort frontend cleanup after a failed or timed-out marker wait."""
+    _delete(kubeconfig_path, namespace, "job", job_name)
+
+
+def delete_s3_emulation_support_resources(kubeconfig_path: Path, namespace: str, resource_name: str) -> None:
     """Best-effort rollback when owner references could not be installed."""
     for resource_type in S3_JOB_OWNED_RESOURCE_TYPES:
-        command = [
-            "kubectl",
-            "--kubeconfig",
-            str(kubeconfig_path),
-            "--namespace",
-            namespace,
-            "delete",
-            resource_type,
-            resource_name,
-            "--ignore-not-found",
-            "--wait=false",
-        ]
-        try:
-            result = subprocess.run(
-                command,
-                check=False,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-        except FileNotFoundError:
-            print(
-                f"[WARN] kubectl unavailable; could not delete {resource_type}/{resource_name}",
-                file=sys.stderr,
-            )
+        if not _delete(kubeconfig_path, namespace, resource_type, resource_name):
             return
-        if result.returncode != 0:
-            print(
-                f"[WARN] failed to delete {resource_type}/{resource_name}: "
-                f"{(result.stderr or result.stdout or '').strip()}",
-                file=sys.stderr,
-            )
 
 
 def render_s3_emulation_resources(
@@ -491,55 +336,48 @@ def render_s3_emulation_resources(
         .replace("@REQUIRED_EXPORTERS@", " ".join(REQUIRED_EXPORTERS))
     )
     uploader = (EXECUTION_ROOT / "k8s_s3_uploader.sh").read_text(encoding="utf-8").rstrip("\n")
-    env = [
+
+    def field_ref(variable: str, path: str) -> dict:
+        return {"name": variable, "valueFrom": {"fieldRef": {"fieldPath": path}}}
+
+    def container(title: str, image: str, script: str, environment: list[dict], limits: tuple, mounts: dict) -> dict:
+        requests, maximum = limits
+        return {
+            "name": title,
+            "image": image,
+            "command": ["sh", "-c", script],
+            "env": environment,
+            "securityContext": {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}},
+            "resources": {"requests": requests, "limits": maximum},
+            "volumeMounts": [
+                {"name": volume, "mountPath": path, **({"readOnly": True} if volume == "scenario" else {})}
+                for volume, path in mounts.items()
+            ],
+        }
+
+    # The emulator makes this pod the owner of every pod and service it
+    # creates, so Kubernetes removes them even when the controller is
+    # killed before its own cleanup finishes.
+    env: list[dict] = [
         {"name": "NAMESPACE", "value": namespace},
         {"name": "RUN_ID", "value": run_id},
         {"name": "ENGINE", "value": engine},
         {"name": "IMAGE_PREFIX", "value": image_prefix},
-        # The emulator makes this pod the owner of every pod and service it
-        # creates, so Kubernetes removes them even when the controller is
-        # killed before its own cleanup finishes.
-        {
-            "name": "COINJOIN_OWNER_POD_NAME",
-            "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}},
-        },
-        {
-            "name": "COINJOIN_OWNER_POD_UID",
-            "valueFrom": {"fieldRef": {"fieldPath": "metadata.uid"}},
-        },
-        {
-            "name": "COINJOIN_OWNER_POD_NAMESPACE",
-            "valueFrom": {"fieldRef": {"fieldPath": "metadata.namespace"}},
-        },
+        field_ref("COINJOIN_OWNER_POD_NAME", "metadata.name"),
+        field_ref("COINJOIN_OWNER_POD_UID", "metadata.uid"),
+        field_ref("COINJOIN_OWNER_POD_NAMESPACE", "metadata.namespace"),
     ]
-    # The controller runs in a separate Kubernetes container, so an override
-    # set on the frontend must be included explicitly in its environment.
-    # The emulator validates this optional value and falls back to its default
-    # when it is absent or invalid.
-    if distributor_startup_timeout:
-        env.append(
-            {
-                "name": "COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT",
-                "value": distributor_startup_timeout,
-            }
-        )
-    if btc_node_image:
-        env.append({"name": "BTC_NODE_IMAGE", "value": btc_node_image})
-    if kubernetes_image_pull_policy:
-        env.append(
-            {
-                "name": "KUBERNETES_IMAGE_PULL_POLICY",
-                "value": kubernetes_image_pull_policy,
-            }
-        )
-    if btc_node_initial_block_count:
-        env.append(
-            {
-                "name": "COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT",
-                "value": btc_node_initial_block_count,
-            }
-        )
-    artifact_env = [
+    # The controller runs in a separate container, so overrides set on the
+    # frontend reach it only explicitly; the emulator validates each one.
+    for variable, value in (
+        ("COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT", distributor_startup_timeout),
+        ("BTC_NODE_IMAGE", btc_node_image),
+        ("KUBERNETES_IMAGE_PULL_POLICY", kubernetes_image_pull_policy),
+        ("COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT", btc_node_initial_block_count),
+    ):
+        if value:
+            env.append({"name": variable, "value": value})
+    artifact_env: list[dict] = [
         {"name": "RUN_ID", "value": run_id},
         {"name": "ARTIFACT_URI", "value": artifact_uri},
         {"name": "S3_ENDPOINT_URL", "value": endpoint_url},
@@ -547,40 +385,23 @@ def render_s3_emulation_resources(
             {
                 "name": key,
                 "valueFrom": {
-                    "secretKeyRef": {
-                        "name": secret_name,
-                        "key": key,
-                        "optional": key == "S3_DEFAULT_REGION",
-                    }
+                    "secretKeyRef": {"name": secret_name, "key": key, "optional": key == "S3_DEFAULT_REGION"}
                 },
             }
             for key in ("S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "S3_DEFAULT_REGION")
         ],
     ]
-    uploader_env = [
+    uploader_env: list[dict] = [
         {"name": "NAMESPACE", "value": namespace},
-        {
-            "name": "EMULATION_TIMEOUT_SECONDS",
-            "value": str(emulation_timeout_seconds),
-        },
-        {
-            "name": "POD_NAME",
-            "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}},
-        },
+        {"name": "EMULATION_TIMEOUT_SECONDS", "value": str(emulation_timeout_seconds)},
+        field_ref("POD_NAME", "metadata.name"),
         *artifact_env,
     ]
-    resources = [
-        {
-            "apiVersion": "v1",
-            "kind": "ServiceAccount",
-            "metadata": {"name": name, "namespace": namespace, "labels": labels},
-        },
-        {
-            "apiVersion": "v1",
-            "kind": "ConfigMap",
-            "metadata": {"name": name, "namespace": namespace, "labels": labels},
-            "data": {"scenario.json": scenario_json},
-        },
+    small = (S3_UPLOADER_RESOURCE_REQUESTS, S3_UPLOADER_RESOURCE_LIMITS)
+    metadata = {"name": name, "namespace": namespace, "labels": labels}
+    resources: list[dict] = [
+        {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": metadata},
+        {"apiVersion": "v1", "kind": "ConfigMap", "metadata": metadata, "data": {"scenario.json": scenario_json}},
         {
             "apiVersion": "rbac.authorization.k8s.io/v1",
             "kind": "Role",
@@ -591,21 +412,9 @@ def render_s3_emulation_resources(
                     "resources": ["pods", "services"],
                     "verbs": ["create", "get", "list", "watch", "delete"],
                 },
-                {
-                    "apiGroups": [""],
-                    "resources": ["pods/log", "pods/status"],
-                    "verbs": ["get"],
-                },
-                {
-                    "apiGroups": [""],
-                    "resources": ["pods/exec"],
-                    "verbs": ["create", "get"],
-                },
-                {
-                    "apiGroups": [""],
-                    "resources": ["events"],
-                    "verbs": ["get", "list", "watch"],
-                },
+                {"apiGroups": [""], "resources": ["pods/log", "pods/status"], "verbs": ["get"]},
+                {"apiGroups": [""], "resources": ["pods/exec"], "verbs": ["create", "get"]},
+                {"apiGroups": [""], "resources": ["events"], "verbs": ["get", "list", "watch"]},
             ],
         },
         {
@@ -613,16 +422,12 @@ def render_s3_emulation_resources(
             "kind": "RoleBinding",
             "metadata": {"name": name, "namespace": namespace},
             "subjects": [{"kind": "ServiceAccount", "name": name, "namespace": namespace}],
-            "roleRef": {
-                "apiGroup": "rbac.authorization.k8s.io",
-                "kind": "Role",
-                "name": name,
-            },
+            "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": name},
         },
         {
             "apiVersion": "batch/v1",
             "kind": "Job",
-            "metadata": {"name": name, "namespace": namespace, "labels": labels},
+            "metadata": metadata,
             "spec": {
                 "backoffLimit": 0,
                 "activeDeadlineSeconds": (
@@ -647,71 +452,32 @@ def render_s3_emulation_resources(
                             {"name": "scenario", "configMap": {"name": name}},
                         ],
                         "initContainers": [
-                            {
-                                "name": "prefix-preflight",
-                                "image": uploader_image,
-                                "command": ["sh", "-c", prefix_preflight],
-                                "env": artifact_env,
-                                "securityContext": {
-                                    "allowPrivilegeEscalation": False,
-                                    "capabilities": {"drop": ["ALL"]},
-                                },
-                                "resources": {
-                                    "requests": S3_UPLOADER_RESOURCE_REQUESTS,
-                                    "limits": S3_UPLOADER_RESOURCE_LIMITS,
-                                },
-                                "volumeMounts": [
-                                    {
-                                        "name": "credentials",
-                                        "mountPath": "/credentials",
-                                    },
-                                ],
-                            }
+                            container(
+                                "prefix-preflight",
+                                uploader_image,
+                                prefix_preflight,
+                                artifact_env,
+                                small,
+                                {"credentials": "/credentials"},
+                            )
                         ],
                         "containers": [
-                            {
-                                "name": "controller",
-                                "image": emulator_image,
-                                "command": ["sh", "-c", controller],
-                                "env": env,
-                                "securityContext": {
-                                    "allowPrivilegeEscalation": False,
-                                    "capabilities": {"drop": ["ALL"]},
-                                },
-                                "resources": {
-                                    "requests": S3_CONTROLLER_RESOURCE_REQUESTS,
-                                    "limits": S3_CONTROLLER_RESOURCE_LIMITS,
-                                },
-                                "volumeMounts": [
-                                    {"name": "artifacts", "mountPath": "/app/logs"},
-                                    {
-                                        "name": "scenario",
-                                        "mountPath": "/config",
-                                        "readOnly": True,
-                                    },
-                                ],
-                            },
-                            {
-                                "name": "uploader",
-                                "image": uploader_image,
-                                "command": ["sh", "-c", uploader],
-                                "env": uploader_env,
-                                "securityContext": {
-                                    "allowPrivilegeEscalation": False,
-                                    "capabilities": {"drop": ["ALL"]},
-                                },
-                                "resources": {
-                                    "requests": S3_UPLOADER_RESOURCE_REQUESTS,
-                                    "limits": S3_UPLOADER_RESOURCE_LIMITS,
-                                },
-                                "volumeMounts": [
-                                    {"name": "artifacts", "mountPath": "/artifacts"},
-                                    {
-                                        "name": "credentials",
-                                        "mountPath": "/credentials",
-                                    },
-                                ],
-                            },
+                            container(
+                                "controller",
+                                emulator_image,
+                                controller,
+                                env,
+                                (S3_CONTROLLER_RESOURCE_REQUESTS, S3_CONTROLLER_RESOURCE_LIMITS),
+                                {"artifacts": "/app/logs", "scenario": "/config"},
+                            ),
+                            container(
+                                "uploader",
+                                uploader_image,
+                                uploader,
+                                uploader_env,
+                                small,
+                                {"artifacts": "/artifacts", "credentials": "/credentials"},
+                            ),
                         ],
                     },
                 },
@@ -719,14 +485,16 @@ def render_s3_emulation_resources(
         },
     ]
     if not reuse_namespace:
-        resources.insert(
-            0,
-            {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}},
-        )
+        resources.insert(0, {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}})
     return json.dumps({"apiVersion": "v1", "kind": "List", "items": resources}, indent=2)
 
 
 def apply_s3_emulation_resources(manifest: str, kubeconfig_path: Path) -> None:
+    """Apply the resource list, then make the Job the owner of its support objects.
+
+    Owner references let Kubernetes collect the ServiceAccount, ConfigMap, Role
+    and RoleBinding with the Job; until they are in place a failure removes them here.
+    """
     payload = json.loads(manifest)
     jobs = [item for item in payload.get("items", []) if item.get("kind") == "Job"]
     if len(jobs) != 1:
@@ -737,84 +505,29 @@ def apply_s3_emulation_resources(manifest: str, kubeconfig_path: Path) -> None:
     if not job_name or not namespace:
         raise RuntimeError("S3 Kubernetes Job must declare metadata.name and namespace")
 
-    command = ["kubectl", "--kubeconfig", str(kubeconfig_path), "apply", "-f", "-"]
-    completed = subprocess.run(command, input=manifest, text=True, check=False)
-    if completed.returncode:
-        # The manifest orders the support resources before the Job, so a partial
-        # apply can leave them behind with no Job to own them.
+    def roll_back(message: str) -> RuntimeError:
         delete_s3_emulation_job(kubeconfig_path, namespace, job_name)
         delete_s3_emulation_support_resources(kubeconfig_path, namespace, job_name)
-        raise RuntimeError(f"kubectl apply failed with exit {completed.returncode}")
+        return RuntimeError(message)
 
-    uid_command = [
-        "kubectl",
-        "--kubeconfig",
-        str(kubeconfig_path),
-        "--namespace",
-        namespace,
-        "get",
-        "job",
-        job_name,
-        "-o",
-        "jsonpath={.metadata.uid}",
-    ]
-    uid_result = subprocess.run(
-        uid_command,
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+    # The manifest orders the support resources before the Job, so a partial
+    # apply can leave them behind with no Job to own them.
+    applied = subprocess.run(
+        ["kubectl", "--kubeconfig", str(kubeconfig_path), "apply", "-f", "-"], input=manifest, text=True, check=False
     )
+    if applied.returncode:
+        raise roll_back(f"kubectl apply failed with exit {applied.returncode}")
+    uid_result = kubectl(kubeconfig_path, "get", "job", job_name, "-o", "jsonpath={.metadata.uid}", namespace=namespace)
     job_uid = (uid_result.stdout or "").strip()
     if uid_result.returncode or not job_uid:
-        delete_s3_emulation_job(kubeconfig_path, namespace, job_name)
-        delete_s3_emulation_support_resources(kubeconfig_path, namespace, job_name)
-        raise RuntimeError(
-            f"could not read Kubernetes Job UID for lifecycle ownership: "
-            f"{(uid_result.stderr or uid_result.stdout or '').strip()}"
-        )
-
+        raise roll_back(f"could not read Kubernetes Job UID for lifecycle ownership: {_output(uid_result)}")
+    owner = {"apiVersion": "batch/v1", "kind": "Job", "name": job_name, "uid": job_uid}
     owner_patch = json.dumps(
-        {
-            "metadata": {
-                "ownerReferences": [
-                    {
-                        "apiVersion": "batch/v1",
-                        "kind": "Job",
-                        "name": job_name,
-                        "uid": job_uid,
-                        "controller": True,
-                        "blockOwnerDeletion": False,
-                    }
-                ]
-            }
-        }
+        {"metadata": {"ownerReferences": [{**owner, "controller": True, "blockOwnerDeletion": False}]}}
     )
     for resource_type in S3_JOB_OWNED_RESOURCE_TYPES:
-        patch_command = [
-            "kubectl",
-            "--kubeconfig",
-            str(kubeconfig_path),
-            "--namespace",
-            namespace,
-            "patch",
-            resource_type,
-            job_name,
-            "--type=merge",
-            "-p",
-            owner_patch,
-        ]
-        patch_result = subprocess.run(
-            patch_command,
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+        patched = kubectl(
+            kubeconfig_path, "patch", resource_type, job_name, "--type=merge", "-p", owner_patch, namespace=namespace
         )
-        if patch_result.returncode:
-            delete_s3_emulation_job(kubeconfig_path, namespace, job_name)
-            delete_s3_emulation_support_resources(kubeconfig_path, namespace, job_name)
-            raise RuntimeError(
-                f"could not attach Job ownership to {resource_type}/{job_name}: "
-                f"{(patch_result.stderr or patch_result.stdout or '').strip()}"
-            )
+        if patched.returncode:
+            raise roll_back(f"could not attach Job ownership to {resource_type}/{job_name}: {_output(patched)}")

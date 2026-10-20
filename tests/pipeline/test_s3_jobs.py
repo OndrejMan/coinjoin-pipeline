@@ -144,8 +144,8 @@ def test_mapping_fee_options_reach_the_s3_mappings_job(backend):
         )
     )
     rendered = backend.rendered["render_mappings_s3_pbs"]
-    assert rendered["coordination_fee_rate"] == 0.01
-    assert rendered["max_decomposition_fee"] == 1234
+    assert rendered["settings"].coordination_fee_rate == 0.01
+    assert rendered["settings"].max_decomposition_fee == 1234
 
 
 def test_mappings_wait_for_baseline_and_gate_the_report(backend):
@@ -229,10 +229,10 @@ def test_resource_and_image_overrides_reach_the_actual_job_renderers(backend):
             pbs_blocksci_image="docker://blocksci:chosen",
         )
     )
-    assert backend.rendered["render_coinjoin_analysis_s3_pbs"]["ncpus"] == 6
-    assert backend.rendered["render_blocksci_s3_pbs"]["ncpus"] == 12
+    assert backend.rendered["render_coinjoin_analysis_s3_pbs"]["resources"].ncpus == 6
+    assert backend.rendered["render_blocksci_s3_pbs"]["resources"].ncpus == 12
     assert backend.rendered["render_blocksci_s3_pbs"]["image"] == "docker://blocksci:chosen"
-    assert backend.rendered["render_unified_report_s3_pbs"]["ncpus"] == 2
+    assert backend.rendered["render_unified_report_s3_pbs"]["resources"].ncpus == 2
 
 
 @pytest.mark.parametrize("workflow", ["combined", "reusable", "cached"])

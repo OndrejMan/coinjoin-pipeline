@@ -179,15 +179,15 @@ def test_dependency_ids_follow_the_declared_edges() -> None:
         "coinjoin-mappings": "mappings.job",
     }
 
-    assert stages.dependency_id("blocksci-analyze", jobs) == "parse.job"
-    assert stages.dependency_id("coinjoin-mappings", jobs) == "analysis.job"
+    assert stages.dependency_ids("blocksci-analyze", jobs) == ("parse.job",)
+    assert stages.dependency_ids("coinjoin-mappings", jobs) == ("analysis.job",)
     assert stages.dependency_ids("unified-report", jobs) == (
         "analysis.job",
         "analyze.job",
         "mappings.job",
     )
     # Stages whose upstream was not submitted carry no scheduler dependency.
-    assert stages.dependency_id("coinjoin-analysis", jobs) is None
+    assert stages.dependency_ids("coinjoin-analysis", jobs) == ()
 
 
 def test_graph_orders_dependencies_and_rejects_cycles():

@@ -7,23 +7,25 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .defaults import (
-    DEFAULT_BLOCKSCI_MEM,
-    DEFAULT_BLOCKSCI_NCPUS,
-    DEFAULT_BLOCKSCI_SCRATCH,
-    DEFAULT_BLOCKSCI_WALLTIME,
-    DEFAULT_COINJOIN_ANALYSIS_MEM,
-    DEFAULT_COINJOIN_ANALYSIS_NCPUS,
-    DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
-    DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
-    DEFAULT_PBS_SCRATCH_TYPE,
-)
-from .validation import (
-    require_safe_image,
-    require_safe_pbs_resources,
-    require_safe_pbs_token,
-    require_safe_template_path,
-)
+from coinjoin_pipeline.configuration import MappingsConfiguration
+from coinjoin_pipeline.storage.s3 import shell_value
+
+from .defaults import DEFAULT_RESOURCES, PBSResources
+from .scripts import directives, mappings_run, template
+from .validation import require_safe_image, require_safe_pbs_token, require_safe_template_path
+
+
+def _render(name: str, stage: str, run_dir: Path, resources: PBSResources, **values: object) -> str:
+    """Render one job whose markers and log live in the shared run directory."""
+    require_safe_template_path(run_dir, "run directory")
+    require_safe_pbs_token(stage, "PBS stage")
+    preamble = directives(stage.replace("-", "_"), resources) + "\n" + template("local_preamble.sh")
+    return template(name).format(
+        preamble=preamble.format(run_dir=run_dir, stage=stage),
+        run_dir=run_dir,
+        stage=stage,
+        **values,
+    )
 
 
 def render_blocksci_pbs(
@@ -33,42 +35,28 @@ def render_blocksci_pbs(
     exporters_dir: Path,
     image: str,
     command: str,
+    resources: PBSResources = DEFAULT_RESOURCES["blocksci"],
     *,
-    ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
-    mem: str = DEFAULT_BLOCKSCI_MEM,
-    scratch: str = DEFAULT_BLOCKSCI_SCRATCH,
-    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
-    walltime: str = DEFAULT_BLOCKSCI_WALLTIME,
     stage: str = "blocksci",
-    job_name: str = "blocksci_analysis",
 ) -> str:
-    """Render a PBS script for the BlockSci analysis stage."""
+    """Render a PBS script for the BlockSci analysis or report stage."""
     for path, description in (
-        (run_dir, "run directory"),
         (logs_root, "logs root"),
         (bitcoin_datadir, "Bitcoin datadir"),
         (exporters_dir, "exporters directory"),
     ):
         require_safe_template_path(path, description)
     require_safe_image(image)
-    require_safe_pbs_resources(ncpus, mem, scratch, walltime, scratch_type)
-    require_safe_pbs_token(stage, "PBS stage")
-    require_safe_pbs_token(job_name, "PBS job name")
-    template = (Path(__file__).parent.parent / "blocksci_template.sh").read_text(encoding="utf-8")
-    return template.format(
-        ncpus=ncpus,
-        mem=mem,
-        scratch=scratch,
-        scratch_type=scratch_type,
-        walltime=walltime,
-        run_dir=run_dir,
+    return _render(
+        "local_blocksci.sh",
+        stage,
+        run_dir,
+        resources,
         logs_root=logs_root,
         bitcoin_datadir=bitcoin_datadir,
         exporters_dir=exporters_dir,
         image=image,
-        blocksci_command=command,
-        stage=stage,
-        job_name=job_name,
+        command=command,
     )
 
 
@@ -78,34 +66,21 @@ def render_coinjoin_analysis_pbs(
     input_data_dir: Path,
     image: str,
     command: str,
-    *,
-    ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
-    mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
-    scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
-    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
-    walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+    resources: PBSResources = DEFAULT_RESOURCES["analysis"],
 ) -> str:
     """Render a PBS script for the coinjoin-analysis stage."""
-    for path, description in (
-        (run_dir, "run directory"),
-        (output_dir, "output directory"),
-        (input_data_dir, "input data directory"),
-    ):
-        require_safe_template_path(path, description)
+    require_safe_template_path(output_dir, "output directory")
+    require_safe_template_path(input_data_dir, "input data directory")
     require_safe_image(image)
-    require_safe_pbs_resources(ncpus, mem, scratch, walltime, scratch_type)
-    template = (Path(__file__).parent.parent / "coinjoin_analysis_template.sh").read_text(encoding="utf-8")
-    return template.format(
-        ncpus=ncpus,
-        mem=mem,
-        scratch=scratch,
-        scratch_type=scratch_type,
-        walltime=walltime,
-        run_dir=run_dir,
+    return _render(
+        "local_coinjoin_analysis.sh",
+        "coinjoin-analysis",
+        run_dir,
+        resources,
         output_dir=output_dir,
         input_data_dir=input_data_dir,
         image=image,
-        coinjoin_analysis_command=command,
+        command=command,
     )
 
 
@@ -113,39 +88,17 @@ def render_mappings_pbs(
     run_dir: Path,
     enumerator_image: str,
     sake_image: str,
-    *,
-    mining_fee_rate: int = 1,
-    coordination_fee_rate: float = 0.003,
-    max_decomposition_fee: int = 6000,
-    mode: str = "numeric",
-    timeout: int = 60,
-    retry_timeout: int = 600,
-    sake_seed: int = 20260704,
-    ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
-    mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
-    scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
-    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
-    walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+    settings: MappingsConfiguration = MappingsConfiguration(),
+    resources: PBSResources = DEFAULT_RESOURCES["mappings"],
 ) -> str:
-    require_safe_template_path(run_dir, "run directory")
     require_safe_image(enumerator_image, "enumerator image")
     require_safe_image(sake_image, "Sake image")
-    require_safe_pbs_resources(ncpus, mem, scratch, walltime, scratch_type)
-    template = (Path(__file__).parent.parent / "mappings_template.sh").read_text(encoding="utf-8")
-    return template.format(
-        run_dir=run_dir,
-        enumerator_image=enumerator_image,
-        sake_image=sake_image,
-        mining_fee_rate=mining_fee_rate,
-        coordination_fee_rate=coordination_fee_rate,
-        max_decomposition_fee=max_decomposition_fee,
-        mode=mode,
-        timeout=timeout,
-        retry_timeout=retry_timeout,
-        sake_seed=sake_seed,
-        ncpus=ncpus,
-        mem=mem,
-        scratch=scratch,
-        scratch_type=scratch_type,
-        walltime=walltime,
+    return _render(
+        "local_mappings.sh",
+        "coinjoin-mappings",
+        run_dir,
+        resources,
+        enumerator_image=shell_value(enumerator_image),
+        sake_image=shell_value(sake_image),
+        mappings_run=mappings_run(settings),
     )

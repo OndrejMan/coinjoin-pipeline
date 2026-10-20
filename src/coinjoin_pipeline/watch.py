@@ -18,7 +18,7 @@ from typing import TextIO
 
 from .execution.pbs.defaults import PBS_TERMINAL_STATES
 from .execution.pbs.status import job_details
-from .storage.s3 import RUN_ID_RE
+from .storage.s3 import RUN_ID_RULE, is_valid_run_id
 
 DEFAULT_NAMESPACE = "coinjoin"
 DEFAULT_WAIT_SECONDS = 120
@@ -46,12 +46,8 @@ def _pbs_job_details(stage: str, job_id: str) -> PbsJob:
 
 
 def _run_id(value: str) -> str:
-    if len(value) > 63 or ".." in value or not RUN_ID_RE.fullmatch(value):
-        raise argparse.ArgumentTypeError(
-            "run ID must be at most 63 characters, begin and end with an "
-            "alphanumeric character, contain only [A-Za-z0-9._-], and not "
-            "contain '..'"
-        )
+    if not is_valid_run_id(value):
+        raise argparse.ArgumentTypeError(f"run ID {RUN_ID_RULE}")
     return value
 
 

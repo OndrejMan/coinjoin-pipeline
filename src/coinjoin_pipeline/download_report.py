@@ -14,10 +14,10 @@ from exporters.artifact_paths import REPORT_DIR, REPORT_JSON
 from .storage.s3 import (
     ArtifactTransportError,
     S3Access,
-    access_from_values,
+    add_s3_arguments,
     run_s5cmd,
+    s3_arguments_access,
     s3_object_exists,
-    validate_artifact_uri,
     validate_run_id,
 )
 
@@ -56,26 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Download a completed S3 unified report without a container.",
     )
     parser.add_argument("--run-id", required=True)
-    parser.add_argument(
-        "--artifact-uri",
-        default=os.environ.get("ARTIFACT_URI"),
-        help="S3 run root, for example s3://coinjoin-thesis/runs.",
-    )
-    parser.add_argument(
-        "--s3-endpoint-url",
-        default=os.environ.get("S3_ENDPOINT_URL"),
-        help="S3-compatible HTTP(S) endpoint URL.",
-    )
-    parser.add_argument(
-        "--s3-credentials-file",
-        default=os.environ.get("S3_CREDENTIALS_FILE"),
-        help="Absolute s5cmd credentials-file path.",
-    )
-    parser.add_argument(
-        "--s3-profile",
-        default=os.environ.get("S3_PROFILE"),
-        help="Named profile in the s5cmd credentials file.",
-    )
+    add_s3_arguments(parser, "S3 run root, for example s3://coinjoin-thesis/runs.")
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -147,22 +128,9 @@ def main(argv: list[str] | None = None, *, runs_root: Path | None = None) -> int
     args = build_parser().parse_args(argv)
     try:
         run_id = validate_run_id(args.run_id)
-        artifact_uri = validate_artifact_uri(args.artifact_uri)
-        access = access_from_values(
-            args.s3_endpoint_url,
-            args.s3_credentials_file,
-            args.s3_profile,
-            check_file=True,
-        )
+        artifact_uri, access = s3_arguments_access(args)
     except ValueError as error:
         print(f"ERROR: {error}", file=sys.stderr)
-        return 2
-
-    if shutil.which("s5cmd") is None:
-        print(
-            "ERROR: s5cmd is required on the frontend PATH to download reports",
-            file=sys.stderr,
-        )
         return 2
 
     root = (runs_root or Path.cwd() / "coinjoin-runs").expanduser().resolve()

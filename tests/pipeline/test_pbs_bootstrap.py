@@ -19,7 +19,7 @@ from coinjoin_pipeline.paths import EXECUTION_ROOT
 def test_terminal_marker_follows_outputs_and_preserves_failure(
     tmp_path, payload_status, transfer_status, marker_status, expected
 ):
-    bootstrap = (EXECUTION_ROOT / "pbs_stage.sh").read_text()
+    bootstrap = (EXECUTION_ROOT / "pbs/templates/stage_trap.sh").read_text()
     script = f"""set -euo pipefail
 cd "$1"
 DONE_MARKER=done
@@ -38,7 +38,7 @@ exit {payload_status}
 
 
 def _run_stage(tmp_path, scratch_setup, preamble="", payload_status=0):
-    bootstrap = (EXECUTION_ROOT / "pbs_stage.sh").read_text()
+    bootstrap = (EXECUTION_ROOT / "pbs/templates/stage_trap.sh").read_text()
     script = f"""set -euo pipefail
 cd "$1"
 {scratch_setup}
@@ -83,7 +83,7 @@ def test_scratch_cleanup_prefers_metacentrum_clean_scratch(tmp_path):
 @pytest.mark.parametrize("scratch_setup", ["unset SCRATCHDIR", 'SCRATCHDIR="$1/missing"'])
 def test_missing_scratch_does_not_change_the_exit_status(tmp_path, scratch_setup):
     (tmp_path / "keep").touch()
-    bootstrap = (EXECUTION_ROOT / "pbs_stage.sh").read_text()
+    bootstrap = (EXECUTION_ROOT / "pbs/templates/stage_trap.sh").read_text()
     script = f"""set -euo pipefail
 cd "$1"
 {scratch_setup}
