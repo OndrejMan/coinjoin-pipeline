@@ -153,6 +153,14 @@ VALID = {
         "/storage/brno2/home/user/blocksci-mainnet",
         *PINNED_RANGE,
     ],
+    "mainnet baseline from Dumplings": [
+        *PBS_FROM_S3,
+        "--analysisPbs",
+        "--coinjoin-type",
+        "joinmarket",
+        "--dumplings-uri",
+        "s3://bucket/dumplings",
+    ],
     "S3 emulation": ["emulate", *S3_EMULATION, *S3],
     "S3 full-run": ["full-run", *S3_EMULATION, *S3, "--analysisPbs", "--blocksciPbs"],
 }
@@ -371,6 +379,12 @@ INVALID = {
         "--external-false-cjtxs-uri",
         "s3://bucket/dumplings/false_cjtxs.json",
     ],
+    "Dumplings baseline without its PBS stage": [
+        *PBS_FROM_S3,
+        "--blocksciPbs",
+        "--dumplings-uri",
+        "s3://bucket/dumplings",
+    ],
     "report resources without a report job": [
         *PBS_FROM_S3,
         "--analysisPbs",
@@ -422,6 +436,7 @@ def test_every_input_path_rejects(argv, tmp_path):
         ("backup task without a backup prefix", "--blocksci-task backup requires --blocksci-index-backup-uri"),
         ("persistent index for detect", "--blocksci-index-dir requires --blocksci-task parse"),
         ("false positives outside the external task", "--external-false-cjtxs-uri requires --blocksci-task external"),
+        ("Dumplings baseline without its PBS stage", "--dumplings-uri requires pbs-from-s3 --analysisPbs"),
     ],
 )
 def test_read_only_analysis_rules_name_the_violation(case, message):

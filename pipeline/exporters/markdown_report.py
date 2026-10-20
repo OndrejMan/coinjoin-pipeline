@@ -1036,6 +1036,8 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
                         ["scan window", f"[{coverage.get('start_height')}, {coverage.get('end_height')})"],
                         ["index blocks", coverage.get("index_blocks")],
                         ["pinned at height", coverage.get("pin_height")],
+                        ["Dumplings snapshot height", coverage.get("dumplings_last_processed_height")],
+                        ["Dumplings commit", coverage.get("dumplings_commit")],
                         ["baseline transactions", coverage.get("baseline_total")],
                         ["baseline inside the window", coverage.get("baseline_in_window")],
                         ["baseline outside the window", coverage.get("baseline_outside_window")],

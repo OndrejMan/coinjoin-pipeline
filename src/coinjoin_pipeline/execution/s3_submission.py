@@ -40,6 +40,7 @@ from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_blocksci_parse_s3_pbs,
     render_blocksci_s3_pbs,
     render_blocksci_update_s3_pbs,
+    render_coinjoin_analysis_dumplings_s3_pbs,
     render_coinjoin_analysis_s3_pbs,
     render_mappings_s3_pbs,
     render_unified_report_s3_pbs,
@@ -229,6 +230,17 @@ class S3StageRunner:
 
     def _submit_analysis(self, stage: StagePlan) -> None:
         resources = stage_pbs_resources(self.args, "analysis")
+        if self.args.dumplings_uri:
+            # Mainnet: the baseline comes from the latest Dumplings snapshot, not an emulation.
+            script = render_coinjoin_analysis_dumplings_s3_pbs(
+                target=self.target,
+                image=resolve_pbs_image(self.args, DEFAULT_COINJOIN_ANALYSIS_IMAGE, "pbs_coinjoin_analysis_image"),
+                dumplings_uri=self.args.dumplings_uri,
+                coinjoin_type=self.args.coinjoin_type,
+                **resources,
+            )
+            self._submit(PBSJobSpec(stage.name, script))
+            return
         script = render_coinjoin_analysis_s3_pbs(
             target=self.target,
             image=resolve_pbs_image(self.args, DEFAULT_COINJOIN_ANALYSIS_IMAGE, "pbs_coinjoin_analysis_image"),

@@ -205,6 +205,13 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
     elif source_cache_run_id:
         errors.append("--blocksci-cache-source-run-id requires --blocksci-task update, script, external, or notebook")
     errors.extend(_persistent_index_errors(config))
+    if config.dumplings_uri:
+        if action != "pbs-from-s3" or not analysis_pbs:
+            errors.append("--dumplings-uri requires pbs-from-s3 --analysisPbs")
+        if config.coinjoin_type not in {"wasabi2", "joinmarket"}:
+            errors.append("--dumplings-uri covers --coinjoin-type wasabi2 or joinmarket")
+        if mappings_pbs:
+            errors.append("--dumplings-uri does not support --mappingsPbs")
     pin_height = config.blocksci.pin_height
     scan_start = config.blocksci.scan_start_height
     scan_end = config.blocksci.scan_end_height

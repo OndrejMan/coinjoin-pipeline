@@ -34,6 +34,7 @@ def backend(monkeypatch, tmp_path):
         "render_blocksci_update_s3_pbs",
         "render_blocksci_analyze_s3_pbs",
         "render_unified_report_s3_pbs",
+        "render_coinjoin_analysis_dumplings_s3_pbs",
         "render_blocksci_index_backup_s3_pbs",
     ):
 
@@ -361,3 +362,14 @@ def test_the_backup_task_submits_only_the_backup_job(backend):
     assert values["persistent"].backup_uri == "s3://bucket/blocksci-index"
     assert values["multijob"] == "brno"
     assert backend.staged == []
+
+
+def test_a_dumplings_uri_turns_the_baseline_into_the_mainnet_one(backend):
+    s3_submission.submit_s3_pbs_graph(
+        backend.config(blocksciPbs=False, coinjoin_type="joinmarket", dumplings_uri="s3://bucket/dumplings")
+    )
+    assert [job.stage for job in backend.jobs] == ["coinjoin-analysis"]
+    values = backend.rendered["render_coinjoin_analysis_dumplings_s3_pbs"]
+    assert values["dumplings_uri"] == "s3://bucket/dumplings"
+    assert values["coinjoin_type"] == "joinmarket"
+    assert "render_coinjoin_analysis_s3_pbs" not in backend.rendered

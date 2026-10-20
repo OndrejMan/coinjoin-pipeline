@@ -143,6 +143,22 @@ manifest as `blocksci-index-backup.json` in its run. Neither `parse` nor
 `blocksci-index-manifest.json`. `tests/test-persistent-index-local.sh` runs the
 rendered jobs on one host with Docker in place of Singularity.
 
+For mainnet, `dumplings_uri` (`--dumplings-uri`, with `--analysisPbs`) replaces
+the emulator input of the `coinjoin-analysis` stage. The job reads
+`<dumplings_uri>/latest.json` from the Dumplings service, downloads the snapshot
+it names into scratch and deletes stale `*.txt.json` caches, which
+coinjoin-analysis would otherwise read in place of the Dumplings files. It then
+runs `parse_dumplings --action process_dumplings` (`ww2` → `Scanner/wasabi2`,
+`jm` → `Scanner/joinmarket_all`) and uploads `coinjoin_tx_info.json`, the
+image's curated `false_cjtxs.json` and `dumplings-snapshot.json` to
+`coinjoin-analysis_data/`. The external report consumes them through
+`--external-baseline-uri` and `--external-false-cjtxs-uri`. With
+`blocksci.pin_height` and the scan range, the external report scans only that
+window, looks up every baseline transaction's height in BlockSci (Dumplings
+records hold the position in the block, not the height) and compares only the
+baseline inside the window; `coverage` in the report counts the rest.
+`tests/test-dumplings-baseline-local.sh` runs the rendered baseline job locally.
+
 For parse-only `pbs-from-s3` submissions, the producer may replace emulator
 inputs with exactly one source. An external Bitcoin source is either a coin
 directory under `/storage` containing `blocks/`, or a

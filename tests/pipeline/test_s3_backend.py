@@ -36,6 +36,7 @@ from coinjoin_pipeline.execution.pbs.templates_s3 import (
     PersistentIndex,
     render_blocksci_analyze_s3_pbs,
     render_blocksci_index_backup_s3_pbs,
+    render_coinjoin_analysis_dumplings_s3_pbs,
     render_blocksci_parse_s3_pbs,
     render_blocksci_s3_pbs,
     render_blocksci_update_s3_pbs,
@@ -1453,3 +1454,43 @@ def test_false_positives_belong_to_the_external_report() -> None:
             mode="blocksci-notebook",
             external_false_cjtxs_uri="s3://bucket/dumplings/false_cjtxs.json",
         )
+
+
+def test_dumplings_baseline_reads_the_latest_snapshot() -> None:
+    script = render_coinjoin_analysis_dumplings_s3_pbs(
+        **COMMON,
+        image="docker://coinjoin-analysis",
+        dumplings_uri="s3://bucket/dumplings",
+        coinjoin_type="wasabi2",
+    )
+
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert '"$DUMPLINGS_URI/latest.json"' in script
+    assert '"$SNAPSHOT_PREFIX/*"' in script
+    assert "--cjtype ww2 --action process_dumplings --target-path /work/dumplings" in script
+    assert "MIX_ID=wasabi2" in script
+    # A stale coinjoin-analysis cache next to the Dumplings files would replace them.
+    assert "-name '*.txt.json' -delete" in script
+    assert script.index("-name '*.txt.json' -delete") < script.index("cj_process.parse_dumplings")
+    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/"' in script
+    assert ".pbs/coinjoin-analysis.done" in script
+
+
+def test_dumplings_baseline_covers_only_wasabi2_and_joinmarket() -> None:
+    with pytest.raises(PBSError, match="wasabi2 and joinmarket"):
+        render_coinjoin_analysis_dumplings_s3_pbs(
+            **COMMON, image="docker://coinjoin-analysis", dumplings_uri="s3://bucket/dumplings", coinjoin_type="ww1"
+        )
+
+
+def test_external_report_fetches_the_snapshot_record_next_to_a_dumplings_baseline() -> None:
+    script = render_blocksci_analyze_s3_pbs(
+        **COMMON,
+        image="docker://blocksci",
+        command="true",
+        mode="blocksci-external",
+        external_baseline_uri="s3://bucket/runs/baseline-1/coinjoin-analysis_data/coinjoin_tx_info.json",
+    )
+
+    assert "s3://bucket/runs/baseline-1/coinjoin-analysis_data/dumplings-snapshot.json" in script
+    assert "the baseline has no dumplings-snapshot.json" in script

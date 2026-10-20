@@ -1,0 +1,30 @@
+# Mainnet coinjoin-analysis baseline from the latest Dumplings snapshot.
+# The Dumplings service next to the archive node publishes <dumplings_uri>/latest.json;
+# this job runs parse_dumplings over that snapshot and stores coinjoin_tx_info.json,
+# the image's curated false_cjtxs.json and dumplings-snapshot.json under its own run.
+# The comparison (blocksci.task: external) then points at them:
+#   external_baseline_uri: s3://xman-coinjoin-new/runs/<run_id>/coinjoin-analysis_data/coinjoin_tx_info.json
+#   external_false_cjtxs_uri: s3://xman-coinjoin-new/runs/<run_id>/coinjoin-analysis_data/false_cjtxs.json
+action: pbs-from-s3
+engine: joinmarket
+coinjoin_type: joinmarket
+
+run_id: mainnet-baseline-joinmarket-20261019
+dumplings_uri: s3://xman-coinjoin-new/dumplings
+
+artifacts:
+  backend: s3
+  uri: s3://xman-coinjoin-new/runs
+  endpoint_url: https://s3.cl4.du.cesnet.cz
+  credentials_file: /storage/brno2/home/<login>/.aws/credentials
+  profile: coinjoin
+
+stages:
+  analysis: true
+
+pbs:
+  analysis:
+    ncpus: 4
+    mem: 64gb
+    scratch: 100gb
+    walltime: "12:00:00"

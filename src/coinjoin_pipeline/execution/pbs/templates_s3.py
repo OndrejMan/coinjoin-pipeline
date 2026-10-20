@@ -491,6 +491,60 @@ def render_coinjoin_analysis_s3_pbs(
     )
 
 
+# coinjoin-analysis names per protocol: --cjtype, the Scanner/ output folder, data/<name>/false_cjtxs.json.
+DUMPLINGS_PROTOCOLS = {
+    "wasabi2": ("ww2", "wasabi2", "wasabi2"),
+    "joinmarket": ("jm", "joinmarket_all", "joinmarket"),
+}
+
+
+def render_coinjoin_analysis_dumplings_s3_pbs(
+    target: S3Target,
+    image: str,
+    *,
+    dumplings_uri: str,
+    coinjoin_type: str,
+    ncpus: int = DEFAULT_COINJOIN_ANALYSIS_NCPUS,
+    mem: str = DEFAULT_COINJOIN_ANALYSIS_MEM,
+    scratch: str = DEFAULT_COINJOIN_ANALYSIS_SCRATCH,
+    scratch_type: str = DEFAULT_PBS_SCRATCH_TYPE,
+    walltime: str = DEFAULT_COINJOIN_ANALYSIS_WALLTIME,
+) -> str:
+    """Render the mainnet baseline: coinjoin-analysis over the latest published Dumplings snapshot.
+
+    The snapshot is found through ``<dumplings_uri>/latest.json`` (written by the Dumplings
+    service next to the archive node). The run gets ``coinjoin_tx_info.json``, the image's
+    curated ``false_cjtxs.json`` and ``dumplings-snapshot.json`` for the external comparison.
+    """
+    try:
+        uri = validate_artifact_uri(dumplings_uri)
+    except ValueError as error:
+        raise PBSError(f"Invalid Dumplings snapshot URI: {error}") from error
+    if coinjoin_type not in DUMPLINGS_PROTOCOLS:
+        raise PBSError(f"Dumplings baselines cover wasabi2 and joinmarket, not {coinjoin_type}")
+    cjtype, mix_id, false_cjtxs = DUMPLINGS_PROTOCOLS[coinjoin_type]
+    return _render_stage(
+        "coinjoin_analysis_dumplings_s3_template.sh",
+        "coinjoin-analysis",
+        target,
+        image=image,
+        ncpus=ncpus,
+        mem=mem,
+        scratch=scratch,
+        scratch_type=scratch_type,
+        walltime=walltime,
+        dumplings_uri=shell_value(uri),
+        cjtype=cjtype,
+        mix_id=mix_id,
+        false_cjtxs=false_cjtxs,
+        command=f"python -m cj_process.parse_dumplings --cjtype {cjtype} --action process_dumplings "
+        "--target-path /work/dumplings",
+        download_latest=render_s5cmd_cp('"$DUMPLINGS_URI/latest.json"', '"$RUN_WORK/dumplings-latest.json"'),
+        download_snapshot=render_s5cmd_cp('"$SNAPSHOT_PREFIX/*"', '"$WORK/dumplings/Scanner/"'),
+        upload_results=render_s5cmd_sync('"$OUTPUT/"', '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/"'),
+    )
+
+
 def render_mappings_s3_pbs(
     target: S3Target,
     enumerator_image: str,
@@ -1119,6 +1173,15 @@ def render_blocksci_analyze_s3_pbs(
                 ),
             )
         )
+        if baseline_uri.endswith("/coinjoin_tx_info.json"):
+            # A Dumplings baseline keeps the snapshot it came from next to it; optional.
+            downloads.append(
+                render_s5cmd_cp(
+                    shell_value(baseline_uri.rsplit("/", 1)[0] + "/dumplings-snapshot.json"),
+                    '"$RUN_WORK/coinjoin-analysis_data/dumplings-snapshot.json"',
+                )
+                + ' || echo "[blocksci-external] the baseline has no dumplings-snapshot.json"'
+            )
         if external_false_cjtxs_uri is not None:
             try:
                 false_cjtxs_uri = validate_artifact_uri(external_false_cjtxs_uri)

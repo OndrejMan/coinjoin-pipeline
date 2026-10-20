@@ -200,6 +200,11 @@ def assemble_report(args: argparse.Namespace) -> int:
         coinjoin_mappings=mapping_data,
         image_provenance=provenance,
     )
+    snapshot_path = analysis_dir / "dumplings-snapshot.json"
+    if coverage is not None and snapshot_path.is_file():
+        snapshot = load_json(snapshot_path)
+        coverage["dumplings_last_processed_height"] = snapshot.get("last_processed_height")
+        coverage["dumplings_commit"] = snapshot.get("dumplings_commit")
     report["coverage"] = coverage
     report["baseline_filter"] = {
         "enabled": bool(false_positive_sources),
