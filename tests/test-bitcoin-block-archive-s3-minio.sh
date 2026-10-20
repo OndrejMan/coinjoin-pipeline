@@ -151,17 +151,29 @@ echo "Downloading public Bitcoin blocks 0-3 from ${ESPLORA_API}..."
 # joins the archive only after the first parse, as a growing node's would.
 python3 - "${ESPLORA_API}" "${WORK_ROOT}/blocks/blk00000.dat" "${WORK_ROOT}/later-blocks/blk00001.dat" \
   "${WORK_ROOT}/rpc-heights.json" <<'PY'
-import json, struct, sys
+import json, struct, sys, time
 import urllib.request
 from pathlib import Path
 
 api, first_file, second_file, mapping_path = sys.argv[1:]
+
+def fetch(url, timeout):
+    # One TLS handshake timeout against the public API failed a whole suite,
+    # so retry transient network errors before giving up.
+    for attempt in range(1, 6):
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as response:
+                return response.read()
+        except OSError as error:
+            if attempt == 5:
+                raise
+            print(f"retrying {url} after attempt {attempt}: {error}", file=sys.stderr)
+            time.sleep(5 * attempt)
+
 records = []
 for height in range(4):
-    with urllib.request.urlopen(f"{api}/block-height/{height}", timeout=60) as response:
-        block_hash = response.read().decode("ascii").strip()
-    with urllib.request.urlopen(f"{api}/block/{block_hash}/raw", timeout=120) as response:
-        raw = response.read()
+    block_hash = fetch(f"{api}/block-height/{height}", 60).decode("ascii").strip()
+    raw = fetch(f"{api}/block/{block_hash}/raw", 120)
     if len(raw) < 81:
         raise SystemExit(f"public block {height} is unexpectedly short")
     records.append((block_hash, height, raw))
