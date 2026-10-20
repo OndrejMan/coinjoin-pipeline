@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -N blocksci_update_s3
-#PBS -l select=1:ncpus={ncpus}:mem={mem}:scratch_{scratch_type}={scratch}
+#PBS -l select=1:ncpus={ncpus}:mem={mem}:scratch_{scratch_type}={scratch}{multijob}
 #PBS -l walltime={walltime}
 #PBS -j oe
 set -euo pipefail
@@ -14,7 +14,7 @@ SOURCE_CACHE_DIR="$RUN_WORK/source-blocksci-parse_data"
 CACHE_DIR="$RUN_WORK/blocksci-parse_data"
 mkdir -p "$RUN_WORK/.pbs" "$SOURCE_CACHE_DIR" "$CACHE_DIR"
 stage_finalize() {{
-  :
+  {finalize_index}
 }}
 {bootstrap}
 {stage_setup}

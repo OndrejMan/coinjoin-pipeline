@@ -93,6 +93,56 @@ matches, and downloads only that last file onwards plus older files holding a
 height above the source maximum. The source run is never modified. A failed target
 is not reusable as a target; choose another fresh `--run-id` after diagnosis.
 
+The `script`, `external`, and `notebook` tasks of the `cached` workflow may read
+another run's cache read-only with the same `--blocksci-cache-source-run-id`.
+The frontend applies the same preflight (source manifest present, target
+prefix empty); the job downloads `<source>/blocksci-parse_data`, requires its
+manifest `run_id` to be the source run, and writes outputs, `.pbs` markers,
+logs, and a copy of the source manifest (`blocksci-cache-manifest.json` in the
+output directory) under the target run only. `detect` cannot use a source cache
+because it reads the emulator data of its own run. For the `script` task,
+`blocksci.pin_height` and the half-open `blocksci.scan_start_height` /
+`blocksci.scan_end_height` are exported as `BLOCKSCI_MAX_BLOCK`
+(`pin_height + 1`, the block count `Blockchain(config, n)` opens),
+`SCAN_START_HEIGHT`, and `SCAN_END_HEIGHT`.
+
+A persistent index replaces the S3 cache for mainnet: `blocksci.index_dir`
+(`--blocksci-index-dir`) names a working copy under `/scratch/multijob-<location>/`
+or `/storage/`, optionally with an S3 backup prefix `blocksci.index_backup_uri`
+(`--blocksci-index-backup-uri`). A working copy on multijob scratch requires
+`pbs.blocksci.multijob: <location>`, which adds `:multijob=<location>` to the
+job's `select`. `parse` (from a block archive or an external Bitcoin datadir)
+parses straight into the directory and refuses one that already holds an index;
+`update` needs no `--blocksci-cache-source-run-id` and updates in place; `backup`,
+`script`, `external`, and `notebook` read it. Every job binds the directory at its own
+path, links `parsed/` into the run and keeps `config.json` run-local
+(`execution/index_store.sh`).
+
+Writers (`parse`, `update`) take an exclusive lock and readers (`backup` and the
+analyses) a shared one,
+held as directories under `<index>/.lock` that are renamed into place (atomic on
+NFS and BeeGFS without `flock`). Each entry holds the PBS job ID and an expiry
+600 s past the walltime, after which another job clears it. A job waits up to
+half its walltime for the lock, then fails. A copy is complete when it has no
+`.writing` marker and its files match `files.txt`; writers set `.writing` until
+they record `config.json`, `manifest.json` (the S3 cache fields an update reads,
+with `"storage": "persistent"`) and `files.txt`. `parse` refuses a directory
+with a manifest and a prefix that already holds a backup. An `update` first
+reconciles: a missing or incomplete working copy is replaced by the backup,
+streamed from S3, checked against its SHA-256 and then against `files.txt`.
+Readers never restore; they fail and name the update that does.
+
+The backup is one object set under `index_backup_uri`: `blocksci_index.tar.zst`
+(`config.json`, `files.txt`, `manifest.json`, `parsed/`), its `.sha256`, and
+`manifest.json`, which is written last and makes the prefix a backup. The
+`backup` job deletes the old manifest and archive first, so S3 holds one copy
+and none while the job runs, then streams `tar | zstd` into `s5cmd pipe` (an
+s5cmd older than 2.2 stages the archive in scratch). It records the index
+manifest as `blocksci-index-backup.json` in its run. Neither `parse` nor
+`update` writes a backup. Analyses copy the index manifest next to their outputs as
+`blocksci-index-manifest.json`. `tests/test-persistent-index-local.sh` runs the
+rendered jobs on one host with Docker in place of Singularity.
+
 For parse-only `pbs-from-s3` submissions, the producer may replace emulator
 inputs with exactly one source. An external Bitcoin source is either a coin
 directory under `/storage` containing `blocks/`, or a

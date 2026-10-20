@@ -45,13 +45,14 @@ CoinjoinType = Literal["wasabi2", "joinmarket"]
 ArtifactBackend = Literal["shared-storage", "s3"]
 ContainerRuntime = Literal["docker", "podman"]
 BlockSciWorkflow = Literal["combined", "reusable", "cached"]
-BlockSciTask = Literal["detect", "parse", "update", "script", "notebook", "external"]
+BlockSciTask = Literal["detect", "parse", "update", "script", "notebook", "external", "backup"]
 BlockSciNetwork = Literal["bitcoin", "bitcoin_testnet", "bitcoin_regtest"]
 JoinMarketDetector = Literal["possible", "definite"]
 MappingMode = Literal["numeric", "all"]
 AnalysisAction = Literal["collect_docker", "analyze_only"]
 ExternalNetwork = Literal["bitcoin"]
 PBSScratchType = Literal["ssd", "local"]
+PBSMultijob = Literal["brno", "plzen", "global"]
 YAML_ACTION_ALIASES = {"external-analyze": "external analyze"}
 
 
@@ -124,6 +125,10 @@ class BlockSciConfiguration(ConfigurationModel):
     pin_height: int | None = option(None, name="blocksci_pin_height", minimum=0)
     scan_start_height: int | None = option(None, name="blocksci_scan_start_height", minimum=0)
     scan_end_height: int | None = option(None, name="blocksci_scan_end_height", minimum=1)
+    # A persistent index in place of the S3 cache: the working copy and the S3 prefix of
+    # its one archived backup (written by --blocksci-task backup, read to restore it).
+    index_dir: str | None = option(None, name="blocksci_index_dir")
+    index_backup_uri: str | None = option(None, name="blocksci_index_backup_uri")
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +183,8 @@ class PBSResourceConfiguration(ConfigurationModel):
     scratch: str | None = option(None, name="scratch")
     scratch_type: PBSScratchType | None = option(None, name="scratch_type")
     walltime: str | None = option(None, name="walltime")
+    # MetaCentrum multijob scratch that outlives one job; only the BlockSci stage uses it.
+    multijob: PBSMultijob | None = option(None, name="multijob")
 
     @property
     def configured(self) -> bool:

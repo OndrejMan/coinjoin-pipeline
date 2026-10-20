@@ -589,6 +589,27 @@ command for the same `<id>`. Those tasks need only the cache. The standard
 metadata, so an otherwise empty external-data run is intended for notebook or
 custom-script analysis rather than the unified emulator comparison report.
 
+An analysis can read such a cache without touching it: give the script,
+external, or notebook task a fresh `--run-id`, `--blocksci-workflow cached`
+and `--blocksci-cache-source-run-id` of the cache run. The job checks the
+source manifest, writes outputs and markers under its own run, and stores the
+source manifest next to the outputs as `blocksci-cache-manifest.json`. For the
+script task, `--blocksci-pin-height` and the half-open
+`--blocksci-scan-start-height`/`--blocksci-scan-end-height` reach the script as
+`BLOCKSCI_MAX_BLOCK` (pin + 1), `SCAN_START_HEIGHT` and `SCAN_END_HEIGHT`;
+`examples/metacentrum-mainnet-analyze.yaml` uses all of them.
+
+For a mainnet index updated every day, keep it out of S3:
+`--blocksci-index-dir` points the parse, update and analysis jobs at one
+persistent directory, usually on MetaCentrum multijob scratch
+(`--pbs-blocksci-multijob brno`). A weekly `--blocksci-task backup` job
+archives it into one S3 backup (`--blocksci-index-backup-uri`), replacing the
+previous one. Updates take a writer lock and analyses and the backup a shared
+one; an update restores a missing or incomplete working copy from the backup
+first. See `examples/metacentrum-mainnet-index-update.yaml`,
+`examples/metacentrum-mainnet-index-backup.yaml` and the persistent-index
+section of `docs/pbs-stage-contract.md`.
+
 Run the default detector later without invoking `blocksci_parser`:
 
 ```bash

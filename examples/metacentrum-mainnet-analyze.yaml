@@ -2,8 +2,8 @@ action: pbs-from-s3
 engine: joinmarket
 coinjoin_type: joinmarket
 
-# Must identify a successful run produced by metacentrum-mainnet-parse.yaml.
-run_id: mainnet-850000
+# A fresh ID for this analysis; its outputs and PBS markers go here.
+run_id: mainnet-850000-joinmarket-scan
 
 images:
   # Must match the immutable image tag used to produce the cache.
@@ -26,6 +26,14 @@ blocksci:
   # Relative paths resolve against the directory cjp is invoked from, so run
   # this from the coinjoin-pipeline checkout.
   script: ./scripts/metacentrum_mainnet_coinjoin_scan.py
+  # Read-only: the index of a successful parse or update run (for example from
+  # metacentrum-mainnet-parse.yaml). It is downloaded but never written to.
+  cache_source_run_id: mainnet-850000
+  # The scan opens the index pinned to heights 0..pin_height, so the result
+  # does not move when the index is updated later. The range is half-open.
+  pin_height: 850000
+  scan_start_height: 392300
+  scan_end_height: 850001
 
 joinmarket:
   detector: definite

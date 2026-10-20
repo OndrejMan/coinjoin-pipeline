@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -N blocksci_parse_s3
-#PBS -l select=1:ncpus={ncpus}:mem={mem}:scratch_{scratch_type}={scratch}
+#PBS -l select=1:ncpus={ncpus}:mem={mem}:scratch_{scratch_type}={scratch}{multijob}
 #PBS -l walltime={walltime}
 #PBS -j oe
 set -euo pipefail
@@ -14,6 +14,7 @@ stage_finalize() {{
   exec 1>&3 2>&4
   exec 3>&- 4>&-
   {upload_log} || upload_status=$?
+  {finalize_index}
 }}
 {bootstrap}
 exec 3>&1 4>&2

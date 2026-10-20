@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -N {job_name}
-#PBS -l select=1:ncpus={ncpus}:mem={mem}:scratch_{scratch_type}={scratch}
+#PBS -l select=1:ncpus={ncpus}:mem={mem}:scratch_{scratch_type}={scratch}{multijob}
 #PBS -l walltime={walltime}
 #PBS -j oe
 set -euo pipefail
@@ -12,6 +12,7 @@ CACHE_DIR="$RUN_WORK/blocksci-parse_data"
 mkdir -p "$RUN_WORK/.pbs" "$RUN_WORK/logs" "$RUN_WORK/.pipeline/exporters" "$CACHE_DIR"
 stage_finalize() {{
   {upload_outputs}
+  {finalize_index}
 }}
 {bootstrap}
 {stage_setup}
@@ -29,6 +30,7 @@ singularity exec \
   --bind "$RUNS_ROOT:/runs/emulation/logs:rw" \
   --bind "$RUN_WORK/.pipeline/exporters:/mnt/exporters:ro" \
   "${{EXTRA_BINDS[@]}}" \
+  "${{INDEX_BINDS[@]}}" \
   --env PBS_RUN_ID="$RUN_ID" \
   --env ACTIVE_RUN_ID="$RUN_ID" \
   --env BLOCKSCI_CONFIG="/runs/emulation/logs/$RUN_ID/blocksci_data/config.json" \

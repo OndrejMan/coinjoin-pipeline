@@ -34,6 +34,7 @@ def backend(monkeypatch, tmp_path):
         "render_blocksci_update_s3_pbs",
         "render_blocksci_analyze_s3_pbs",
         "render_unified_report_s3_pbs",
+        "render_blocksci_index_backup_s3_pbs",
     ):
 
         def render(*, _name=name, **values):
@@ -283,3 +284,80 @@ def test_explicit_staging_prepares_workers_for_a_later_invocation(backend):
     s3_submission.submit_s3_pbs_graph(backend.config(blocksciPbs=False, stage_exporters=True))
     assert backend.staged == ["run-1"]
     assert [job.stage for job in backend.jobs] == ["coinjoin-analysis"]
+
+
+def test_read_only_analysis_passes_its_source_cache_to_the_renderer(backend, tmp_path):
+    script = tmp_path / "scan.py"
+    script.write_text("print('scan')\n")
+    s3_submission.submit_s3_pbs_graph(
+        backend.config(
+            analysisPbs=False,
+            blocksci_workflow="cached",
+            blocksci_task="script",
+            blocksci_script=str(script),
+            blocksci_cache_source_run_id="mainnet-index",
+        )
+    )
+    assert [job.stage for job in backend.jobs] == ["blocksci-script"]
+    assert backend.rendered["render_blocksci_analyze_s3_pbs"]["source_run_id"] == "mainnet-index"
+
+
+def test_read_only_analysis_needs_a_published_source_cache(backend, tmp_path):
+    script = tmp_path / "scan.py"
+    script.write_text("print('scan')\n")
+    backend.exists = False
+    with pytest.raises(ArtifactTransportError, match="mainnet-index"):
+        s3_submission.submit_s3_pbs_graph(
+            backend.config(
+                analysisPbs=False,
+                blocksci_workflow="cached",
+                blocksci_task="script",
+                blocksci_script=str(script),
+                blocksci_cache_source_run_id="mainnet-index",
+            )
+        )
+    assert backend.jobs == []
+
+
+def test_persistent_update_needs_no_source_run_and_reaches_the_renderer(backend):
+    backend.exists = False  # no S3 cache anywhere: the index lives on the multijob scratch
+    s3_submission.submit_s3_pbs_graph(
+        backend.config(
+            analysisPbs=False,
+            blocksci_workflow="cached",
+            blocksci_task="update",
+            blocksci_index_dir="/scratch/multijob-brno/user/blocksci-mainnet",
+            blocksci_index_backup_uri="s3://bucket/blocksci-index",
+            pbs_blocksci_multijob="brno",
+            blocksci_bitcoin_blocks_uri="s3://bucket/mainnet",
+            blocksci_network="bitcoin",
+            blocksci_max_block=850100,
+            blocksci_expected_block_hash="a" * 64,
+        )
+    )
+    values = backend.rendered["render_blocksci_update_s3_pbs"]
+    assert values["source_run_id"] is None
+    assert values["multijob"] == "brno"
+    index = values["persistent"]
+    assert (index.index_dir, index.backup_uri) == (
+        "/scratch/multijob-brno/user/blocksci-mainnet",
+        "s3://bucket/blocksci-index",
+    )
+
+
+def test_the_backup_task_submits_only_the_backup_job(backend):
+    s3_submission.submit_s3_pbs_graph(
+        backend.config(
+            analysisPbs=False,
+            blocksci_workflow="cached",
+            blocksci_task="backup",
+            blocksci_index_dir="/scratch/multijob-brno/user/blocksci-mainnet",
+            blocksci_index_backup_uri="s3://bucket/blocksci-index",
+            pbs_blocksci_multijob="brno",
+        )
+    )
+    assert [job.stage for job in backend.jobs] == ["blocksci-backup"]
+    values = backend.rendered["render_blocksci_index_backup_s3_pbs"]
+    assert values["persistent"].backup_uri == "s3://bucket/blocksci-index"
+    assert values["multijob"] == "brno"
+    assert backend.staged == []

@@ -1,0 +1,43 @@
+# Weekly S3 backup of the persistent mainnet BlockSci index.
+# The job archives the working copy into one blocksci_index.tar.zst under
+# index_backup_uri, replacing the previous backup: it deletes the old manifest
+# and archive first and writes the new manifest last, so S3 holds one copy and
+# there is no backup while the job runs. It takes the shared index lock, so
+# analyses go on and only an update waits. Run it after that day's update.
+action: pbs-from-s3
+engine: joinmarket
+coinjoin_type: joinmarket
+
+# A fresh ID per backup; it holds the job's log, PBS markers and
+# blocksci-index-backup.json (the manifest of the backed-up index).
+run_id: mainnet-index-backup-20261025
+
+images:
+  # Must match the image that parsed the index.
+  version: latest
+
+artifacts:
+  backend: s3
+  uri: s3://xman-coinjoin-new/runs
+  endpoint_url: https://s3.cl4.du.cesnet.cz
+  credentials_file: /storage/brno2/home/<login>/.aws/credentials
+  profile: coinjoin
+
+stages:
+  blocksci: true
+
+blocksci:
+  workflow: cached
+  task: backup
+  index_dir: /scratch/multijob-brno/<login>/blocksci-mainnet
+  index_backup_uri: s3://xman-coinjoin-new/blocksci-index
+
+pbs:
+  blocksci:
+    multijob: brno
+    ncpus: 8
+    mem: 16gb
+    # s5cmd 2.2+ streams the archive to S3; an older s5cmd stages it in scratch,
+    # which then needs room for the compressed index.
+    scratch: 10gb
+    walltime: "12:00:00"

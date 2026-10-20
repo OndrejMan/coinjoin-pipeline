@@ -1,0 +1,48 @@
+# Daily update of a persistent mainnet BlockSci index (no S3 cache).
+# The working copy lives on MetaCentrum multijob scratch and is updated in place
+# under the index writer lock; analyses read it under the shared lock. When the
+# working copy is missing or incomplete (multijob may purge unused files) the job
+# restores it from the S3 backup (metacentrum-mainnet-index-backup.yaml) first.
+action: pbs-from-s3
+engine: joinmarket
+coinjoin_type: joinmarket
+
+# A fresh ID per update; it holds only the job's log and PBS markers.
+run_id: mainnet-index-update-20261019
+
+images:
+  # Must match the image that parsed the index (checked against its manifest).
+  version: latest
+
+artifacts:
+  backend: s3
+  uri: s3://xman-coinjoin-new/runs
+  endpoint_url: https://s3.cl4.du.cesnet.cz
+  credentials_file: /storage/brno2/home/<login>/.aws/credentials
+  profile: coinjoin
+
+stages:
+  blocksci: true
+
+blocksci:
+  workflow: cached
+  task: update
+  # Create /scratch/multijob-brno/<login>/ once by hand; PBS does not.
+  index_dir: /scratch/multijob-brno/<login>/blocksci-mainnet
+  # Read only to restore the working copy; the weekly backup job writes it.
+  index_backup_uri: s3://xman-coinjoin-new/blocksci-index
+  bitcoin_blocks_uri: s3://xman-coinjoin-new/bitcoin-mainnet/blocks
+  network: bitcoin
+  # Set both on every run to the new target height and its trusted hash; shown
+  # with the checkpoint of metacentrum-mainnet-s3-blocks-parse.yaml so the file
+  # validates. An update must go past the height already in the index.
+  max_block: 900000
+  expected_block_hash: "000000000000000000010538edbfd2d5b809a33dd83f284aeea41c6d0d96968a"
+
+pbs:
+  blocksci:
+    multijob: brno
+    ncpus: 8
+    mem: 64gb
+    scratch: 200gb
+    walltime: "12:00:00"

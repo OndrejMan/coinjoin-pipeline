@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
 # Alias -> canonical action. Aliases are accepted but never named in error text.
 ACTION_ALIASES = {"coinjoin": "coinjoin-analysis"}
+# Tasks that may read the index of another run (--blocksci-cache-source-run-id) without writing to it.
+READ_ONLY_CACHE_TASKS = frozenset({"script", "external", "notebook"})
 
 
 def _supplied(config: PipelineConfiguration, path: str, value: object) -> bool:
@@ -31,8 +33,63 @@ def _resources_supplied(config: PipelineConfiguration, stage: str, resources: PB
             ("scratch", resources.scratch),
             ("scratch_type", resources.scratch_type),
             ("walltime", resources.walltime),
+            ("multijob", resources.multijob),
         )
     )
+
+
+PERSISTENT_INDEX_TASKS = frozenset({"parse", "update", "backup"}) | READ_ONLY_CACHE_TASKS
+SHARED_ROOTS = ("/storage/", "/auto/")
+MULTIJOB_ROOT = "/scratch/multijob-{}/"
+
+
+def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
+    """Rules for a BlockSci index kept in a directory shared by jobs instead of the S3 cache."""
+    errors: list[str] = []
+    blocksci = config.blocksci
+    index_dir, backup_uri = blocksci.index_dir, blocksci.index_backup_uri
+    multijob = config.pbs.blocksci.multijob
+    for stage, resources in (
+        ("analysis", config.pbs.analysis),
+        ("mappings", config.pbs.mappings),
+        ("unified-report", config.pbs.unified_report),
+    ):
+        if _supplied(config, f"pbs.{stage.replace('-', '_')}.multijob", resources.multijob):
+            errors.append(f"--pbs-{stage}-multijob is supported only for the BlockSci stage")
+    if not index_dir:
+        if backup_uri:
+            errors.append("--blocksci-index-backup-uri requires --blocksci-index-dir")
+        if multijob:
+            errors.append("--pbs-blocksci-multijob requires --blocksci-index-dir on that multijob scratch")
+        if blocksci.task == "backup":
+            errors.append("--blocksci-task backup requires --blocksci-index-dir")
+        return errors
+    if blocksci.task not in PERSISTENT_INDEX_TASKS:
+        errors.append(
+            "--blocksci-index-dir requires --blocksci-task parse, update, backup, script, external, or notebook"
+        )
+    if blocksci.cache_source_run_id:
+        errors.append("choose one index source: --blocksci-index-dir or --blocksci-cache-source-run-id")
+    if blocksci.task == "parse" and not (blocksci.bitcoin_blocks_uri or blocksci.external_bitcoin_datadir):
+        errors.append(
+            "a persistent index is parsed from --blocksci-bitcoin-blocks-uri or --blocksci-external-bitcoin-datadir"
+        )
+    on_multijob = next(
+        (place for place in ("brno", "plzen", "global") if index_dir.startswith(MULTIJOB_ROOT.format(place))), None
+    )
+    if on_multijob is None and not index_dir.startswith(SHARED_ROOTS):
+        errors.append("--blocksci-index-dir must be under /scratch/multijob-<location>/ or /storage/")
+    elif on_multijob is not None and multijob != on_multijob:
+        errors.append(f"--blocksci-index-dir on multijob-{on_multijob} requires --pbs-blocksci-multijob {on_multijob}")
+    elif on_multijob is None and multijob:
+        errors.append(
+            f"--pbs-blocksci-multijob {multijob} requires --blocksci-index-dir under /scratch/multijob-{multijob}/"
+        )
+    if ".." in Path(index_dir).parts:
+        errors.append("--blocksci-index-dir must not contain '..'")
+    if blocksci.task == "backup" and not backup_uri:
+        errors.append("--blocksci-task backup requires --blocksci-index-backup-uri")
+    return errors
 
 
 def cross_option_errors(config: PipelineConfiguration) -> list[str]:
@@ -126,9 +183,10 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
     external_network = _supplied(config, "blocksci.network", config.blocksci.network)
     external_max_block = _supplied(config, "blocksci.max_block", config.blocksci.max_block)
     source_cache_run_id = config.blocksci.cache_source_run_id
+    index_dir = config.blocksci.index_dir
     if blocksci_task == "update":
-        if not source_cache_run_id:
-            errors.append("--blocksci-task update requires --blocksci-cache-source-run-id")
+        if not source_cache_run_id and not index_dir:
+            errors.append("--blocksci-task update requires --blocksci-cache-source-run-id or --blocksci-index-dir")
         if not (external_bitcoin or bitcoin_blocks_uri):
             errors.append(
                 "--blocksci-task update requires --blocksci-external-bitcoin-datadir or --blocksci-bitcoin-blocks-uri"
@@ -138,8 +196,15 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
         target_run_id = config.run_id
         if source_cache_run_id and target_run_id == source_cache_run_id:
             errors.append("--blocksci-cache-source-run-id must differ from target --run-id")
+    elif blocksci_task in READ_ONLY_CACHE_TASKS and source_cache_run_id:
+        # The analysis only reads the source cache; its outputs and markers belong to its own run.
+        if blocksci_workflow != "cached":
+            errors.append("--blocksci-cache-source-run-id with an analysis task requires --blocksci-workflow cached")
+        if config.run_id == source_cache_run_id:
+            errors.append("--blocksci-cache-source-run-id must differ from target --run-id")
     elif source_cache_run_id:
-        errors.append("--blocksci-cache-source-run-id requires --blocksci-task update")
+        errors.append("--blocksci-cache-source-run-id requires --blocksci-task update, script, external, or notebook")
+    errors.extend(_persistent_index_errors(config))
     pin_height = config.blocksci.pin_height
     scan_start = config.blocksci.scan_start_height
     scan_end = config.blocksci.scan_end_height

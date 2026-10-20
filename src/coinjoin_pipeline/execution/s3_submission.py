@@ -34,7 +34,9 @@ from coinjoin_pipeline.execution.pbs.defaults import (
 from coinjoin_pipeline.execution.locks import acquire_lock, ensure_no_active_s3_pbs_submission, pbs_submit_lock_path
 from coinjoin_pipeline.execution.pbs.submission import PBSJobSpec, persist_pbs_job_id, submit_pbs_job
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
+    PersistentIndex,
     render_blocksci_analyze_s3_pbs,
+    render_blocksci_index_backup_s3_pbs,
     render_blocksci_parse_s3_pbs,
     render_blocksci_s3_pbs,
     render_blocksci_update_s3_pbs,
@@ -260,12 +262,28 @@ class S3StageRunner:
             stage_pbs_resources(self.args, "blocksci"),
         )
 
+    def _persistent_index(self) -> dict:
+        """Renderer arguments for a persistent index; empty when the S3 cache is used."""
+        blocksci = self.args.blocksci
+        if not blocksci.index_dir:
+            return {}
+        return {
+            "persistent": PersistentIndex(
+                index_dir=blocksci.index_dir,
+                backup_uri=blocksci.index_backup_uri,
+            ),
+            "multijob": self.args.pbs.blocksci.multijob,
+        }
+
     def _submit_update(self, stage: StagePlan) -> None:
         image, resources = self._blocksci_resources()
         external_bitcoin = self.args.blocksci.external_bitcoin_datadir
+        persistent = self._persistent_index()
         script = render_blocksci_update_s3_pbs(
             target=self.target,
-            source_run_id=required(self.args.blocksci.cache_source_run_id, "--blocksci-cache-source-run-id"),
+            source_run_id=None
+            if persistent
+            else required(self.args.blocksci.cache_source_run_id, "--blocksci-cache-source-run-id"),
             image=image,
             command=blocksci_update_pbs_command(self.target.run_id),
             external_bitcoin_datadir=Path(external_bitcoin) if external_bitcoin else None,
@@ -274,6 +292,7 @@ class S3StageRunner:
             external_network=required(self.args.blocksci.network, "--blocksci-network"),
             external_max_block=required(self.args.blocksci.max_block, "--blocksci-max-block"),
             **resources,
+            **persistent,
         )
         self._submit(PBSJobSpec(stage.name, script))
 
@@ -301,11 +320,16 @@ class S3StageRunner:
             external_network=self.args.blocksci.network,
             external_max_block=self.args.blocksci.max_block,
             **resources,
+            **self._persistent_index(),
         )
         self._submit(PBSJobSpec(stage.name, script))
 
     def _submit_blocksci_work(self, stage: StagePlan) -> None:
         image, resources = self._blocksci_resources()
+        if self.task == "backup":
+            script = render_blocksci_index_backup_s3_pbs(target=self.target, **resources, **self._persistent_index())
+            self._submit(PBSJobSpec(stage.name, script))
+            return
         if stage.name == "blocksci":
             script = render_blocksci_s3_pbs(
                 target=self.target,
@@ -325,6 +349,7 @@ class S3StageRunner:
             image=image,
             command=command,
             mode=stage.name,
+            source_run_id=self.args.blocksci.cache_source_run_id,
             user_script=Path(required(self.args.blocksci.script, "--blocksci-script"))
             if self.task == "script"
             else None,
@@ -335,6 +360,7 @@ class S3StageRunner:
             else None,
             notebook_port=self.args.blocksci.notebook_port or 8888,
             **resources,
+            **self._persistent_index(),
         )
         self._submit(PBSJobSpec(stage.name, script, self.plan.dependency_ids(stage.name, self.tracker.jobs)))
 
@@ -391,9 +417,9 @@ def _submit_s3_pbs_stages(args: PipelineConfiguration, submitted_jobs: list[tupl
     access = target.access
     plan = s3_full_run_plan_from_args(args)
     tracker = S3SubmissionTracker(args, target, access, submitted_jobs)
-    task = args.blocksci.task
-    if task == "update" and not args.dry_run:
-        source_run_id = args.blocksci.cache_source_run_id
+    source_run_id = args.blocksci.cache_source_run_id
+    # Update and read-only analyses both start a fresh run from another run's published cache.
+    if source_run_id and not args.dry_run:
         s3_access_preflight(access, target.artifact_uri)
         if not s3_object_exists(
             access,

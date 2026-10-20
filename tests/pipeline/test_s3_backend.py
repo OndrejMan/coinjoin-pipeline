@@ -33,7 +33,9 @@ from coinjoin_pipeline.execution.pbs.commands import (
     blocksci_update_pbs_command,
 )
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
+    PersistentIndex,
     render_blocksci_analyze_s3_pbs,
+    render_blocksci_index_backup_s3_pbs,
     render_blocksci_parse_s3_pbs,
     render_blocksci_s3_pbs,
     render_blocksci_update_s3_pbs,
@@ -1252,6 +1254,179 @@ def test_s3_pbs_scratch_type_selects_the_scratch_resource() -> None:
     assert "#PBS -l select=1:ncpus=4:mem=16gb:scratch_local=50gb" in script
     with pytest.raises(PBSError, match="scratch type"):
         render_coinjoin_analysis_s3_pbs(S3_TARGET, "docker://image", "echo hi", scratch_type="shm")
+
+
+def test_read_only_source_cache_feeds_an_analysis_of_another_run() -> None:
+    command = blocksci_external_report_pbs_command(
+        "run-1",
+        PipelineConfiguration.from_flat(
+            {
+                "coinjoin_type": "wasabi2",
+                "min_input_count": 15,
+                "joinmarket_detector": "definite",
+                "joinmarket_min_base_fee": 5000,
+                "joinmarket_percentage_fee": 4e-05,
+                "joinmarket_max_depth": 200000,
+            }
+        ),
+    )
+    script = render_blocksci_analyze_s3_pbs(
+        **COMMON,
+        image="docker://blocksci",
+        command=command,
+        mode="blocksci-external",
+        source_run_id="mainnet-index",
+        external_baseline_uri="s3://bucket/dumplings/coinjoin_tx_info.json",
+    )
+
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert "CACHE_RUN_ID=mainnet-index" in script
+    assert '"$ARTIFACT_URI/$CACHE_RUN_ID/blocksci-parse_data/*"' in script
+    assert '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/*"' not in script
+    assert 'grep -Fq "\\"run_id\\": \\"$CACHE_RUN_ID\\""' in script
+    # Outputs, markers and provenance stay with the analysis run.
+    assert '"$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"' in script
+    assert ".pbs/blocksci-external.done" in script
+    provenance = script.index('cp "$CACHE_DIR/manifest.json" "$OUTPUT_DIR/blocksci-cache-manifest.json"')
+    assert script.index('tar -C "$RUN_WORK" -I zstd -xf') < provenance < script.index("singularity exec")
+
+
+@pytest.mark.parametrize(
+    "mode,source,message",
+    [
+        ("blocksci-analyze", "mainnet-index", "cannot use a source cache"),
+        ("blocksci-notebook", "run-1", "different run"),
+    ],
+)
+def test_read_only_source_cache_rejects_detect_and_the_same_run(mode, source, message) -> None:
+    with pytest.raises(PBSError, match=message):
+        render_blocksci_analyze_s3_pbs(
+            **COMMON,
+            image="docker://blocksci",
+            command="true",
+            mode=mode,
+            source_run_id=source,
+        )
+
+
+PERSISTENT = dict(
+    persistent=PersistentIndex("/scratch/multijob-brno/user/blocksci-mainnet", "s3://bucket/blocksci-index"),
+    multijob="brno",
+)
+
+
+def test_persistent_update_works_in_place_under_the_writer_lock() -> None:
+    with mock.patch("coinjoin_pipeline.execution.pbs.templates_s3.require_storage_path"):
+        script = render_blocksci_update_s3_pbs(
+            **COMMON,
+            source_run_id=None,
+            image="docker://blocksci",
+            command=blocksci_update_pbs_command("run-1"),
+            bitcoin_blocks_uri="s3://bucket/mainnet",
+            expected_block_hash="a" * 64,
+            external_network="bitcoin",
+            external_max_block=850100,
+            **PERSISTENT,
+        )
+
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert "scratch_ssd=" in script and ":multijob=brno\n" in script
+    assert "blocksci_data.tar.zst" not in script
+    calls = [script.index(f"\n{call}\n") for call in ("index_lock_exclusive", "index_reconcile")]
+    assert calls[0] < calls[1] < script.index("worker.py update")
+    assert 'INDEX_BINDS=(--bind "$INDEX_DIR:$INDEX_DIR:rw")' in script
+    assert "INDEX_BACKUP=s3://bucket/blocksci-index" in script
+    # The backup is its own weekly job, never part of the update.
+    assert "\nindex_backup\n" not in script
+    assert 'index_publish "$RUN_WORK/index-manifest.json"' in script
+    assert "index_unlock 2>/dev/null || :" in script
+    assert '"$ARTIFACT_URI/$RUN_ID/blocksci-index-manifest.json"' in script
+
+
+def test_persistent_parse_refuses_an_existing_index() -> None:
+    with (
+        mock.patch("coinjoin_pipeline.execution.pbs.templates_s3.require_storage_path"),
+        mock.patch("coinjoin_pipeline.execution.pbs.templates_s3.require_existing_path"),
+        mock.patch.object(Path, "is_dir", return_value=True),
+    ):
+        script = render_blocksci_parse_s3_pbs(
+            **COMMON,
+            image="docker://blocksci",
+            command=blocksci_parse_pbs_command("run-1", coin_type="bitcoin", disk_path="/mnt/data"),
+            external_bitcoin_datadir=Path("/storage/external/bitcoin"),
+            external_network="bitcoin",
+            external_max_block=850000,
+            **PERSISTENT,
+        )
+
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert "use --blocksci-task update" in script
+    lock = script.index("\nindex_lock_exclusive\n")
+    assert (
+        lock
+        < script.index('rm -rf "$INDEX_DIR/parsed" "$INDEX_DIR/config.json" "$INDEX_DIR/files.txt"\n')
+        < script.index("worker.py parse")
+    )
+    # The index stays in place: no S3 cache archive and no backup.
+    assert "blocksci_data.tar.zst" not in script
+    assert "\nindex_backup\n" not in script
+
+
+def test_persistent_analysis_reads_under_the_shared_lock() -> None:
+    script = render_blocksci_analyze_s3_pbs(
+        **COMMON,
+        image="docker://blocksci",
+        command="uv run jupyter notebook",
+        mode="blocksci-notebook",
+        **PERSISTENT,
+    )
+
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert "\nindex_lock_shared\n" in script and "\nindex_lock_exclusive\n" not in script
+    assert 'INDEX_BINDS=(--bind "$INDEX_DIR:$INDEX_DIR:ro")' in script
+    assert '"${INDEX_BINDS[@]}"' in script
+    assert "blocksci-parse_data/*" not in script
+    assert 'cp "$INDEX_DIR/manifest.json" "$OUTPUT_DIR/blocksci-index-manifest.json"' in script
+
+
+@pytest.mark.parametrize(
+    "values,message",
+    [
+        (dict(mode="blocksci-analyze", **PERSISTENT), "cannot use a persistent index"),
+        (dict(mode="blocksci-notebook", source_run_id="other", **PERSISTENT), "Choose one index source"),
+        (dict(mode="blocksci-notebook", multijob="ostrava"), "multijob location"),
+    ],
+)
+def test_persistent_analysis_rejects_invalid_combinations(values, message) -> None:
+    with pytest.raises(PBSError, match=message):
+        render_blocksci_analyze_s3_pbs(**COMMON, image="docker://blocksci", command="true", **values)
+
+
+def test_persistent_index_paths_stay_on_shared_storage() -> None:
+    with pytest.raises(PBSError, match="must be under"):
+        PersistentIndex("/tmp/blocksci-mainnet")
+    with pytest.raises(PBSError, match="Invalid index backup URI"):
+        PersistentIndex("/scratch/multijob-brno/user/index", "/storage/brno2/home/user/copy")
+
+
+def test_index_backup_job_reads_under_the_shared_lock() -> None:
+    script = render_blocksci_index_backup_s3_pbs(**COMMON, **PERSISTENT, ncpus=16, walltime="12:00:00")
+
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert ":multijob=brno\n" in script
+    calls = [script.index(f"\n{call}\n") for call in ("index_lock_shared", "index_backup", "index_unlock")]
+    assert calls == sorted(calls)
+    assert "\nindex_lock_exclusive\n" not in script
+    assert "INDEX_ZSTD_THREADS=16" in script
+    assert '"$ARTIFACT_URI/$RUN_ID/blocksci-index-backup.json"' in script
+    assert ".pbs/blocksci-backup.done" in script
+
+
+def test_index_backup_job_needs_a_backup_prefix() -> None:
+    with pytest.raises(PBSError, match="index-backup-uri"):
+        render_blocksci_index_backup_s3_pbs(
+            **COMMON, persistent=PersistentIndex("/scratch/multijob-brno/user/blocksci-mainnet")
+        )
 
 
 def test_external_report_downloads_the_curated_false_positives() -> None:
