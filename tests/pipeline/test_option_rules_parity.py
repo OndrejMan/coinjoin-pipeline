@@ -1,5 +1,8 @@
 """Equivalent configuration policy for YAML and direct command-line values."""
 
+import re
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -30,6 +33,18 @@ S3_EMULATION = [
     "--s3-secret-name",
     "coinjoin-s3",
     "--reuse-namespace",
+]
+# A mainnet analysis that only reads the published index of another run.
+MAINNET_SCAN = str(Path(__file__).resolve().parents[2] / "scripts" / "metacentrum_mainnet_coinjoin_scan.py")
+READ_ONLY_SCRIPT = [*PBS_FROM_S3, "--blocksciPbs", "--blocksci-task", "script", "--blocksci-script", MAINNET_SCAN]
+SOURCE = ["--blocksci-cache-source-run-id", "mainnet-index"]
+PINNED_RANGE = [
+    "--blocksci-pin-height",
+    "850000",
+    "--blocksci-scan-start-height",
+    "741213",
+    "--blocksci-scan-end-height",
+    "850001",
 ]
 
 VALID = {
@@ -206,6 +221,38 @@ INVALID = {
         "--blocksci-task",
         "external",
     ],
+    "pin height outside a script task": [
+        *PBS_FROM_S3,
+        "--blocksciPbs",
+        "--blocksci-workflow",
+        "cached",
+        "--blocksci-task",
+        "notebook",
+        "--blocksci-pin-height",
+        "850000",
+    ],
+    "empty scan range": [
+        *READ_ONLY_SCRIPT,
+        "--blocksci-workflow",
+        "cached",
+        *PINNED_RANGE[:-1],
+        "741213",
+    ],
+    "scan range past the pin": [
+        *READ_ONLY_SCRIPT,
+        "--blocksci-workflow",
+        "cached",
+        *PINNED_RANGE[:-1],
+        "850002",
+    ],
+    "false positives outside the external task": [
+        *READ_ONLY_SCRIPT,
+        "--blocksci-workflow",
+        "cached",
+        *SOURCE,
+        "--external-false-cjtxs-uri",
+        "s3://bucket/dumplings/false_cjtxs.json",
+    ],
     "report resources without a report job": [
         *PBS_FROM_S3,
         "--analysisPbs",
@@ -237,3 +284,17 @@ def test_every_input_path_rejects(argv, tmp_path):
     for config in (load_configuration(argv), yaml_equivalent(argv, tmp_path)):
         with pytest.raises(ValueError):
             resolve_configuration(config)
+
+
+@pytest.mark.parametrize(
+    "case,message",
+    [
+        ("pin height outside a script task", "--blocksci-pin-height requires --blocksci-task script"),
+        ("empty scan range", "must be below --blocksci-scan-end-height"),
+        ("scan range past the pin", "must not exceed --blocksci-pin-height + 1"),
+        ("false positives outside the external task", "--external-false-cjtxs-uri requires --blocksci-task external"),
+    ],
+)
+def test_read_only_analysis_rules_name_the_violation(case, message):
+    with pytest.raises(ValueError, match=re.escape(message)):
+        resolve_configuration(load_configuration(INVALID[case]))

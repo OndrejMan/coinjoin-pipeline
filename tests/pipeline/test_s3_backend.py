@@ -1252,3 +1252,29 @@ def test_s3_pbs_scratch_type_selects_the_scratch_resource() -> None:
     assert "#PBS -l select=1:ncpus=4:mem=16gb:scratch_local=50gb" in script
     with pytest.raises(PBSError, match="scratch type"):
         render_coinjoin_analysis_s3_pbs(S3_TARGET, "docker://image", "echo hi", scratch_type="shm")
+
+
+def test_external_report_downloads_the_curated_false_positives() -> None:
+    script = render_blocksci_analyze_s3_pbs(
+        **COMMON,
+        image="docker://blocksci",
+        command="true",
+        mode="blocksci-external",
+        external_baseline_uri="s3://bucket/dumplings/coinjoin_tx_info.json",
+        external_false_cjtxs_uri="s3://bucket/dumplings/false_cjtxs.json",
+    )
+
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert '"$RUN_WORK/coinjoin-analysis_data/false_cjtxs.json"' in script
+    assert "s3://bucket/dumplings/false_cjtxs.json" in script
+
+
+def test_false_positives_belong_to_the_external_report() -> None:
+    with pytest.raises(PBSError, match="external BlockSci report"):
+        render_blocksci_analyze_s3_pbs(
+            **COMMON,
+            image="docker://blocksci",
+            command="true",
+            mode="blocksci-notebook",
+            external_false_cjtxs_uri="s3://bucket/dumplings/false_cjtxs.json",
+        )

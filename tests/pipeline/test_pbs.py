@@ -512,6 +512,32 @@ class PBSTemplateTest(unittest.TestCase):
         self.assertNotIn("MIN_INPUT_COUNT=", command)
         self.assertTrue(command.endswith("/usr/bin/python3 /mnt/user-analysis.py"))
 
+    def test_blocksci_script_command_exports_the_pin_and_scan_range(self):
+        command = blocksci_script_pbs_command(
+            "mainnet-scan",
+            PipelineConfiguration.from_flat(
+                {
+                    "coinjoin_type": "wasabi2",
+                    "min_input_count": 15,
+                    "blocksci_pin_height": 850000,
+                    "blocksci_scan_start_height": 741213,
+                    "blocksci_scan_end_height": 850001,
+                }
+            ),
+        )
+
+        # The scan opens Blockchain(config, 850001): heights 0..850000.
+        self.assertIn("BLOCKSCI_MAX_BLOCK=850001", command)
+        self.assertIn("SCAN_START_HEIGHT=741213", command)
+        self.assertIn("SCAN_END_HEIGHT=850001", command)
+        self.assertIn("MIN_INPUT_COUNT=15", command)
+
+    def test_blocksci_script_command_leaves_the_whole_index_by_default(self):
+        command = blocksci_script_pbs_command("mainnet-scan", PipelineConfiguration.from_flat({}))
+
+        for name in ("BLOCKSCI_MAX_BLOCK", "SCAN_START_HEIGHT", "SCAN_END_HEIGHT"):
+            self.assertNotIn(f"{name}=", command)
+
     def test_coinjoin_analysis_pbs_command_supports_analyze_only(self):
         command = coinjoin_analysis_pbs_command("analyze_only")
 

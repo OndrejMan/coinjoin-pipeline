@@ -13,7 +13,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, EXPORTED_BLOCKS_DIR, REPORT_JSON
-from exporters.parameters import add_detector_arguments, add_image_arguments
+from exporters.parameters import add_detector_arguments, add_image_arguments, add_window_arguments
 
 
 def parse_args(argv=None):
@@ -38,6 +38,7 @@ def parse_args(argv=None):
     parser.add_argument("--output-name", default=REPORT_JSON)
     parser.add_argument("--emulator-git-commit", default=os.environ.get("COINJOIN_EMULATOR_GIT_COMMIT"))
     add_detector_arguments(parser)
+    add_window_arguments(parser)
     add_image_arguments(parser)
     args = parser.parse_args(argv)
     if args.run_dir is None:

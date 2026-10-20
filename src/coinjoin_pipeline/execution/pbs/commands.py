@@ -62,7 +62,20 @@ def blocksci_external_report_pbs_command(
     run_id: str,
     config: PipelineConfiguration,
 ) -> str:
-    return worker_command("analyze", run_id, config) + " --mode external --network bitcoin --skip-clustering --report"
+    window = "".join(
+        f" {flag} {value}"
+        for flag, value in (
+            ("--pin-height", config.blocksci.pin_height),
+            ("--scan-start-height", config.blocksci.scan_start_height),
+            ("--scan-end-height", config.blocksci.scan_end_height),
+        )
+        if value is not None
+    )
+    return (
+        worker_command("analyze", run_id, config)
+        + " --mode external --network bitcoin --skip-clustering --report"
+        + window
+    )
 
 
 def blocksci_script_pbs_command(
@@ -86,6 +99,13 @@ def blocksci_script_pbs_command(
     }
     if config.min_input_count is not None:
         environment["MIN_INPUT_COUNT"] = str(config.min_input_count)
+    # Blockchain(config, n) shows blocks [0, n); the pin is the last height the script may see.
+    if config.blocksci.pin_height is not None:
+        environment["BLOCKSCI_MAX_BLOCK"] = str(config.blocksci.pin_height + 1)
+    if config.blocksci.scan_start_height is not None:
+        environment["SCAN_START_HEIGHT"] = str(config.blocksci.scan_start_height)
+    if config.blocksci.scan_end_height is not None:
+        environment["SCAN_END_HEIGHT"] = str(config.blocksci.scan_end_height)
     assignments = " ".join(shell_assignment(name, value) for name, value in environment.items())
     return f"{assignments} {BLOCKSCI_IMAGE_PYTHON_COMMAND} /mnt/user-analysis.py"
 

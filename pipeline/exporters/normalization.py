@@ -140,6 +140,41 @@ def output_address(output: JsonObject) -> str | None:
     return None
 
 
+def restrict_baseline_to_window(
+    records: dict[str, TransactionRecord],
+    window: JsonObject | None,
+    heights: dict[str, int | None] | None,
+) -> tuple[dict[str, TransactionRecord], JsonObject | None]:
+    """Keep the baseline transactions inside the BlockSci scan window, at their BlockSci heights.
+
+    Outside the window BlockSci did not look, so a baseline transaction there is not a
+    BlockSci miss. Returns the kept records and the coverage summary for the report.
+    """
+    if window is None:
+        return records, None
+    if heights is None:
+        return records, {**window, "baseline_total": len(records), "baseline_heights_available": False}
+    start, end = int(window["start_height"]), int(window["end_height"])
+    kept: dict[str, TransactionRecord] = {}
+    outside = missing = 0
+    for txid, record in records.items():
+        height = heights.get(txid)
+        if height is None:
+            missing += 1
+        elif start <= height < end:
+            kept[txid] = {**record, "block_height": height}
+        else:
+            outside += 1
+    return kept, {
+        **window,
+        "baseline_heights_available": True,
+        "baseline_total": len(records),
+        "baseline_in_window": len(kept),
+        "baseline_outside_window": outside,
+        "baseline_not_in_index": missing,
+    }
+
+
 def fill_missing_block_heights(
     records: dict[str, TransactionRecord],
     tx_block_heights: dict[str, int],

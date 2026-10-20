@@ -62,6 +62,33 @@ def add_detector_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _environment_height(name: str) -> int | None:
+    value = os.environ.get(name)
+    return int(value) if value not in (None, "") else None
+
+
+def add_window_arguments(parser: argparse.ArgumentParser) -> None:
+    """Heights an external-chain analysis may see and scan; the whole index by default."""
+    parser.add_argument(
+        "--pin-height",
+        type=int,
+        default=_environment_height("BLOCKSCI_PIN_HEIGHT"),
+        help="Last height the analysis opens the index at (Blockchain(config, pin + 1)).",
+    )
+    parser.add_argument(
+        "--scan-start-height",
+        type=int,
+        default=_environment_height("SCAN_START_HEIGHT"),
+        help="First height scanned.",
+    )
+    parser.add_argument(
+        "--scan-end-height",
+        type=int,
+        default=_environment_height("SCAN_END_HEIGHT"),
+        help="First height not scanned.",
+    )
+
+
 def add_image_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--blocksci-image", default=os.environ.get("BLOCKSCI_IMAGE"))
     parser.add_argument("--coinjoin-analysis-image", default=os.environ.get("COINJOIN_ANALYSIS_IMAGE"))

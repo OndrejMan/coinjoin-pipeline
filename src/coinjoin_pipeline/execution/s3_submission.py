@@ -329,6 +329,7 @@ class S3StageRunner:
             if self.task == "script"
             else None,
             external_baseline_uri=self.args.blocksci.external_baseline_uri if self.task == "external" else None,
+            external_false_cjtxs_uri=self.args.blocksci.external_false_cjtxs_uri if self.task == "external" else None,
             notebooks_dir=Path(self.args.blocksci.notebooks_dir)
             if self.task == "notebook" and self.args.blocksci.notebooks_dir
             else None,

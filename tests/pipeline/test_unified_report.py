@@ -466,6 +466,22 @@ class UnifiedReportTest(unittest.TestCase):
         markdown = render_report(report)
         self.assertIn("precision, recall, and F1 are intentionally unavailable", markdown)
 
+    def test_external_report_shows_the_compared_window(self):
+        report = build_report(
+            Path("/tmp/external-run"),
+            normalize_coinjoin_analysis(coinjoin_analysis_fixture()),
+            blocksci_fixture(),
+            "wasabi2",
+            mode="external",
+            network="bitcoin",
+        )
+        report["coverage"] = {"start_height": 100, "end_height": 200, "baseline_total": 4, "baseline_in_window": 1}
+
+        markdown = render_report(report)
+
+        self.assertIn("## Coverage", markdown)
+        self.assertIn("[100, 200)", markdown)
+
     def test_run_manifest_records_reproduction_command(self):
         with mock.patch.dict(
             os.environ,

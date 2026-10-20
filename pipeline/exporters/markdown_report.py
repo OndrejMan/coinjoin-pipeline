@@ -1021,6 +1021,29 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
         )
         if unavailable_reason:
             lines.append(f"> Reason: {unavailable_reason}")
+    coverage = report.get("coverage")
+    if coverage:
+        lines.extend(
+            [
+                "",
+                "## Coverage",
+                "",
+                "> Only heights BlockSci scanned are compared; baseline transactions elsewhere are not BlockSci misses.",
+                "",
+                *table(
+                    ["field", "value"],
+                    [
+                        ["scan window", f"[{coverage.get('start_height')}, {coverage.get('end_height')})"],
+                        ["index blocks", coverage.get("index_blocks")],
+                        ["pinned at height", coverage.get("pin_height")],
+                        ["baseline transactions", coverage.get("baseline_total")],
+                        ["baseline inside the window", coverage.get("baseline_in_window")],
+                        ["baseline outside the window", coverage.get("baseline_outside_window")],
+                        ["baseline not in the index or above the pin", coverage.get("baseline_not_in_index")],
+                    ],
+                ),
+            ]
+        )
     baseline_filter = report.get("baseline_filter") or {}
     if baseline_filter.get("enabled"):
         source_names = ", ".join(str(source.get("file")) for source in baseline_filter.get("sources", []))

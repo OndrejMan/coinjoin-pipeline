@@ -114,9 +114,16 @@ class BlockSciConfiguration(ConfigurationModel):
     bitcoin_blocks_uri: str | None = option(None, name="blocksci_bitcoin_blocks_uri")
     external_blocksci_dir: str | None = option(None, name="blocksci_external_blocksci_dir")
     external_baseline_uri: str | None = option(None, name="external_baseline_uri")
+    # Curated Dumplings false positives (coinjoin-analysis data/<protocol>/false_cjtxs.json).
+    external_false_cjtxs_uri: str | None = option(None, name="external_false_cjtxs_uri")
     network: BlockSciNetwork | None = option(None, name="blocksci_network")
     max_block: int | None = option(None, name="blocksci_max_block", minimum=0)
     expected_block_hash: str | None = option(None, name="blocksci_expected_block_hash")
+    # Script task only: the last height the analysis may see (Blockchain(config, pin_height + 1))
+    # and the half-open range [scan_start_height, scan_end_height) it scans.
+    pin_height: int | None = option(None, name="blocksci_pin_height", minimum=0)
+    scan_start_height: int | None = option(None, name="blocksci_scan_start_height", minimum=0)
+    scan_end_height: int | None = option(None, name="blocksci_scan_end_height", minimum=1)
 
 
 @dataclass(frozen=True, slots=True)

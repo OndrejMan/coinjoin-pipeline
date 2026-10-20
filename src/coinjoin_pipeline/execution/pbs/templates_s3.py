@@ -697,6 +697,7 @@ def render_blocksci_analyze_s3_pbs(
     mode: str = "blocksci-analyze",
     user_script: Path | None = None,
     external_baseline_uri: str | None = None,
+    external_false_cjtxs_uri: str | None = None,
     notebooks_dir: Path | None = None,
     notebook_port: int = 8888,
     ncpus: int = DEFAULT_BLOCKSCI_NCPUS,
@@ -833,6 +834,20 @@ def render_blocksci_analyze_s3_pbs(
                 ),
             )
         )
+        if external_false_cjtxs_uri is not None:
+            try:
+                false_cjtxs_uri = validate_artifact_uri(external_false_cjtxs_uri)
+            except ValueError as error:
+                raise PBSError(f"Invalid false-positive list URI: {error}") from error
+            # The report filters the baseline with every false_cjtxs.json* it finds there.
+            downloads.append(
+                render_s5cmd_cp(
+                    shell_value(false_cjtxs_uri),
+                    '"$RUN_WORK/coinjoin-analysis_data/false_cjtxs.json"',
+                )
+            )
+    elif external_false_cjtxs_uri is not None:
+        raise PBSError("A false-positive list belongs to the external BlockSci report")
     return _render_stage(
         "blocksci_analyze_s3_template.sh",
         mode,

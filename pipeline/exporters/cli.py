@@ -33,6 +33,7 @@ from exporters.normalization import (
     load_exported_block_tx_index,
     load_false_positive_txids,
     normalize_coinjoin_analysis,
+    restrict_baseline_to_window,
 )
 from exporters.parameters import add_detector_arguments, add_image_arguments
 from exporters.report_builder import build_report
@@ -142,6 +143,11 @@ def assemble_report(args: argparse.Namespace) -> int:
     first_wasabi2_block = analysis["first_wasabi2_block"]
     blocksci_records = analysis["records"]
     blocksci_skipped_txids = analysis["skipped_txids"]
+    coverage = None
+    if args.mode == "external":
+        coinjoin_analysis, coverage = restrict_baseline_to_window(
+            coinjoin_analysis, analysis.get("scan_window"), analysis.get("baseline_heights")
+        )
     integration_diagnostics = analysis["integration_diagnostics"]
     predicted_address_clusters = analysis.get("predicted_address_clusters")
     cluster_export_error = analysis.get("cluster_export_error")
@@ -194,6 +200,7 @@ def assemble_report(args: argparse.Namespace) -> int:
         coinjoin_mappings=mapping_data,
         image_provenance=provenance,
     )
+    report["coverage"] = coverage
     report["baseline_filter"] = {
         "enabled": bool(false_positive_sources),
         "sources": false_positive_sources,

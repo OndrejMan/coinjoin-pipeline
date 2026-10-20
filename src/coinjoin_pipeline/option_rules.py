@@ -140,6 +140,20 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
             errors.append("--blocksci-cache-source-run-id must differ from target --run-id")
     elif source_cache_run_id:
         errors.append("--blocksci-cache-source-run-id requires --blocksci-task update")
+    pin_height = config.blocksci.pin_height
+    scan_start = config.blocksci.scan_start_height
+    scan_end = config.blocksci.scan_end_height
+    for flag, path, height in (
+        ("--blocksci-pin-height", "blocksci.pin_height", pin_height),
+        ("--blocksci-scan-start-height", "blocksci.scan_start_height", scan_start),
+        ("--blocksci-scan-end-height", "blocksci.scan_end_height", scan_end),
+    ):
+        if blocksci_task not in {"script", "external"} and _supplied(config, path, height):
+            errors.append(f"{flag} requires --blocksci-task script or external")
+    if scan_start is not None and scan_end is not None and scan_start >= scan_end:
+        errors.append("--blocksci-scan-start-height must be below --blocksci-scan-end-height")
+    if pin_height is not None and scan_end is not None and scan_end > pin_height + 1:
+        errors.append("--blocksci-scan-end-height must not exceed --blocksci-pin-height + 1")
     if sum((external_bitcoin, bitcoin_blocks_uri, external_index)) > 1:
         errors.append(
             "choose only one BlockSci source: --blocksci-external-bitcoin-datadir, "
@@ -179,6 +193,8 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
             errors.append("--blocksci-task external requires --external-baseline-uri")
     elif external_baseline_uri:
         errors.append("--external-baseline-uri requires --blocksci-task external")
+    if config.blocksci.external_false_cjtxs_uri and blocksci_task != "external":
+        errors.append("--external-false-cjtxs-uri requires --blocksci-task external")
     if action == "pbs-from-s3":
         for flag, value in (
             ("--run-id", config.run_id),

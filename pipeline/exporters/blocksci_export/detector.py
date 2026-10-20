@@ -52,6 +52,15 @@ class BlocksciChain(Blockchain, Protocol):
 
     def classify_coinjoin_mix_events(self, coinjoin_txes: list[object]) -> dict[object, dict[str, list[str]]]: ...
 
+    def __getitem__(self, height: int) -> BlocksciBlock: ...
+
+
+class BlocksciBlock(Protocol):
+    """A block or a transaction: both expose the hash and, for transactions, the height."""
+
+    hash: object
+    block_height: int
+
 
 class ClusteringHeuristic(Protocol):
     """A BlockSci change heuristic; ``&`` composes two into one."""
@@ -88,7 +97,7 @@ class BlocksciBindings(Protocol):
     heuristics: HeuristicsNamespace
     cluster: ClusterNamespace
 
-    def Blockchain(self, config_path: str) -> BlocksciChain: ...
+    def Blockchain(self, config_path: str, max_block: int = ...) -> BlocksciChain: ...
 
 
 def prepare_blocksci_import() -> None:
@@ -261,11 +270,11 @@ def _scan_coinjoins_by_subset_matching(
     joinmarket_min_base_fee: int,
     joinmarket_percentage_fee: float,
     joinmarket_max_depth: int,
+    window: tuple[int, int],
 ) -> tuple[Iterable[object], list[str]]:
     _require_binding(chain, "scan_coinjoins_by_subset_matching", "subset-matching scan binding")
     txes, skipped = chain.scan_coinjoins_by_subset_matching(
-        0,
-        len(chain),
+        *window,
         joinmarket_detector,
         joinmarket_min_base_fee,
         joinmarket_percentage_fee,
@@ -279,11 +288,45 @@ def _filter_raw_coinjoin_txes(
     chain: BlocksciChain,
     coinjoin_type: str,
     min_input_count: int | None,
+    window: tuple[int, int],
 ) -> Iterable[object]:
     _require_binding(chain, "filter_coinjoin_txes_raw", "raw CoinJoin report binding")
     if min_input_count is None:
-        return chain.filter_coinjoin_txes_raw(0, len(chain), coinjoin_type)
-    return chain.filter_coinjoin_txes_raw(0, len(chain), coinjoin_type, min_input_count)
+        return chain.filter_coinjoin_txes_raw(*window, coinjoin_type)
+    return chain.filter_coinjoin_txes_raw(*window, coinjoin_type, min_input_count)
+
+
+def open_chain(config_path: Path, max_block: int | None = None) -> BlocksciChain:
+    """Open the index, pinned to blocks [0, max_block) when given."""
+    if blocksci is None:
+        raise RuntimeError("BlockSci Python module is required to open an index.")
+    if max_block is None:
+        return blocksci.Blockchain(str(config_path))
+    return blocksci.Blockchain(str(config_path), max_block)
+
+
+def scan_window(chain: BlocksciChain, start_height: int | None, end_height: int | None) -> tuple[int, int]:
+    """Half-open [start, end) inside the opened chain; the whole chain by default."""
+    start = 0 if start_height is None else start_height
+    end = len(chain) if end_height is None else end_height
+    if not 0 <= start < end <= len(chain):
+        raise ValueError(f"scan window [{start}, {end}) is outside the opened chain of {len(chain)} blocks")
+    return start, end
+
+
+def baseline_block_heights(chain: BlocksciChain, txids: Iterable[str]) -> dict[str, int | None]:
+    """Height of every baseline transaction in this index; None when the index does not hold it.
+
+    Dumplings records carry the transaction's position in its block, not the height,
+    so the external comparison takes the height from BlockSci.
+    """
+    heights: dict[str, int | None] = {}
+    for txid in txids:
+        try:
+            heights[txid] = int(cast("BlocksciBlock", chain.tx_with_hash(txid)).block_height)
+        except Exception:  # pylint: disable=broad-exception-caught  # the binding raises a bare RuntimeError
+            heights[txid] = None
+    return heights
 
 
 def _records_by_txid(txes: Iterable[object]) -> dict[str, TransactionRecord]:
@@ -299,10 +342,15 @@ def export_blocksci_records(
     joinmarket_min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE,
     joinmarket_percentage_fee: float = DEFAULT_JOINMARKET_PERCENTAGE_FEE,
     joinmarket_max_depth: int = DEFAULT_JOINMARKET_MAX_DEPTH,
+    *,
+    max_block: int | None = None,
+    start_height: int | None = None,
+    end_height: int | None = None,
 ) -> tuple[dict[str, TransactionRecord], list[str]]:
     if blocksci is None:
         raise RuntimeError("BlockSci Python module is required to export BlockSci records.")
-    chain = blocksci.Blockchain(str(config_path))
+    chain = open_chain(config_path, max_block)
+    window = scan_window(chain, start_height, end_height)
 
     if coinjoin_type == "joinmarket":
         txes, skipped_txids = _scan_coinjoins_by_subset_matching(
@@ -311,9 +359,10 @@ def export_blocksci_records(
             joinmarket_min_base_fee,
             joinmarket_percentage_fee,
             joinmarket_max_depth,
+            window,
         )
     else:
-        txes = _filter_raw_coinjoin_txes(chain, coinjoin_type, min_input_count)
+        txes = _filter_raw_coinjoin_txes(chain, coinjoin_type, min_input_count, window)
         skipped_txids = []
 
     return _records_by_txid(txes), skipped_txids

@@ -181,3 +181,7 @@ class BlockSciAnalysisArtifact(TypedDict):
     cluster_export_error: str | None
     mix_events: dict[str, dict[str, list[str]]] | None
     mix_events_error: str | None
+    # External-chain analyses only: the heights scanned and where the baseline's
+    # transactions sit in this index (None when the index does not hold one).
+    scan_window: JsonObject | None
+    baseline_heights: dict[str, int | None] | None
