@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import os
 import re
 import shlex
@@ -44,6 +45,9 @@ PROBE_RUNNING = "running"
 PROBE_QUEUED = "queued"
 PROBE_TERMINAL = "terminal"
 PROBE_UNKNOWN = "unknown"
+# A frontend at its per-user task limit (MetaCentrum caps user cgroups at pids.max)
+# briefly cannot spawn s5cmd or kubectl; that says nothing about the remote stage.
+TRANSIENT_SPAWN_ERRNOS = frozenset({errno.EAGAIN, errno.ENOMEM, errno.EMFILE, errno.ENFILE})
 
 
 class ArtifactTransportError(RuntimeError):
@@ -422,12 +426,21 @@ def wait_for_s3_marker(
     execution_deadline: float | None = None
     terminal_seen = False
     while True:
-        if s3_object_exists(access, failed_uri):
-            raise ArtifactTransportError(f"S3-compatible stage failed: {stage} (marker {failed_uri})")
-        if s3_object_exists(access, done_uri):
-            return
-        # Not probed during the grace cycle: the terminal report already landed.
-        probe_state = probe() if probe is not None and not terminal_seen else None
+        try:
+            if s3_object_exists(access, failed_uri):
+                raise ArtifactTransportError(f"S3-compatible stage failed: {stage} (marker {failed_uri})")
+            if s3_object_exists(access, done_uri):
+                return
+            # Not probed during the grace cycle: the terminal report already landed.
+            probe_state = probe() if probe is not None and not terminal_seen else None
+        except OSError as error:
+            if error.errno not in TRANSIENT_SPAWN_ERRNOS:
+                raise
+            if time.monotonic() >= (execution_deadline if execution_deadline is not None else start_deadline):
+                raise ArtifactTransportError(f"Timed out waiting for S3 stage marker: {stage} ({done_uri})") from error
+            print(f"[WARN] {stage} poll could not run ({error}); retrying in {poll_interval}s", file=sys.stderr)
+            time.sleep(poll_interval)
+            continue
         now = time.monotonic()
         if probe_state == PROBE_RUNNING and execution_deadline is None:
             execution_deadline = now + timeout_seconds

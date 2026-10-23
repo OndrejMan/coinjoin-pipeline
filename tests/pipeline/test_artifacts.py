@@ -1,3 +1,4 @@
+import errno
 import os
 import subprocess
 import sys
@@ -236,3 +237,44 @@ def test_wait_for_s3_marker_keeps_polling_on_unknown_probe() -> None:
         return next(outcomes)
 
     _wait("s3://b/r/.done", "s3://b/r/.failed", exists, probe=lambda: next(reports))
+
+
+def test_wait_for_s3_marker_survives_transient_spawn_failure() -> None:
+    outcomes = iter([BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable"), False, True])
+
+    def exists(access, uri) -> bool:
+        outcome = next(outcomes)
+        if isinstance(outcome, OSError):
+            raise outcome
+        return uri.endswith(".done") and outcome
+
+    _wait("s3://b/r/.done", "s3://b/r/.failed", exists)
+
+
+def test_wait_for_s3_marker_survives_transient_probe_failure() -> None:
+    reports = iter([OSError(errno.ENOMEM, "Cannot allocate memory"), PROBE_RUNNING])
+    outcomes = iter([False, False, False, False, False, True])
+
+    def probe() -> str:
+        report = next(reports)
+        if isinstance(report, OSError):
+            raise report
+        return report
+
+    _wait("s3://b/r/.done", "s3://b/r/.failed", lambda access, uri: next(outcomes), probe=probe)
+
+
+def test_wait_for_s3_marker_times_out_during_transient_spawn_failures() -> None:
+    def exists(access, uri) -> bool:
+        raise BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable")
+
+    with pytest.raises(ArtifactTransportError, match="Timed out"):
+        _wait("s3://b/r/.done", "s3://b/r/.failed", exists, timeout=0)
+
+
+def test_wait_for_s3_marker_propagates_other_os_errors() -> None:
+    def exists(access, uri) -> bool:
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    with pytest.raises(PermissionError):
+        _wait("s3://b/r/.done", "s3://b/r/.failed", exists)
