@@ -32,7 +32,6 @@ S3_JOB_OWNED_RESOURCE_TYPES = (
     "role.rbac.authorization.k8s.io",
     "rolebinding.rbac.authorization.k8s.io",
 )
-CONTROLLER_LOG_TAIL_LINES = 100
 CONTROLLER_FATAL_SUMMARY_MARKERS = (
     "Kubernetes CPU quota exhausted",
     "Terminating exception:",
@@ -266,7 +265,6 @@ def collect_s3_emulation_diagnostics(kubeconfig_path: Path, namespace: str, job_
             ]
             if fatal_lines:
                 sections.append(f"--- controller failure summary ---\n{fatal_lines[-1]}")
-            output = "\n".join(output.splitlines()[-CONTROLLER_LOG_TAIL_LINES:])
         sections.append(f"--- {description} ---\n{output}")
     return "\n".join(sections)
 
