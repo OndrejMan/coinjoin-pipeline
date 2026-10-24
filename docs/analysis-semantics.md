@@ -249,9 +249,18 @@ three times:
 
 Each gives the interim pool liquidity (inflow minus outflow, an outflow charged
 to the coinjoin that created the output), its variant charging only outputs that
-leave within `WINDOW_COINJOINS`, the outputs unmoved for at least that window and
-the actively remixed liquidity. Mainnet analysis uses a one-month window; an
-emulated run lasts hours, so the window counts later coinjoins instead.
+leave within `WINDOW_COINJOINS`, the outstanding unmoved outputs and the actively
+remixed liquidity. `unmoved_window` holds outputs classified as `MIX_STAY` or
+`MIX_REMIX` whose next spend is at least the window away (or unknown). A remix
+input retires its previous outpoint before new outputs are added. `MIX_LEAVE`
+outputs are excluded: interim already subtracts their value at creation.
+`active_remix` is interim minus this outstanding value; like interim it does not
+subtract CoinJoin fees. These retrospective metrics use the recorded future
+spender, not a forecast of which coins will remix. Mainnet analysis uses a
+one-month window; an emulated run lasts hours, so the window counts later
+coinjoins instead. Datasets exported before this correction accumulated all
+slow outputs permanently; re-export into a separate evidence directory to
+recompute those two series without overwriting the original artifacts.
 
 The ground truth is also split by wallet. A wallet whose own interim liquidity
 reaches at least half of the pool's at its peak is a large wallet. For each,

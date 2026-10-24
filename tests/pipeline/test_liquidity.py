@@ -11,7 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2] / "pipeline"
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from exporters.artifact_paths import POSTMIX_SPENDS_FILE  # noqa: E402
-from exporters.liquidity import build_liquidity, save_liquidity_dataset  # noqa: E402
+from exporters.liquidity import build_liquidity, liquidity_series, save_liquidity_dataset  # noqa: E402
 from exporters.markdown_report import render_liquidity_evaluation  # noqa: E402
 
 BIG, SMALL, OTHER = "wallet-000", "wallet-001", "wallet-002"
@@ -178,6 +178,47 @@ def test_pool_series_follow_the_paper_metrics(run_dir):
     assert pool["unmoved_window"] == [350, 350, 423]
     assert pool["active_remix"] == [560, 165, 18]
     assert dataset["pool"]["observed"]["interim"] == [1400, 1005, 1005]
+
+
+def test_slow_remixes_replace_the_previous_unmoved_outpoint():
+    def round_record(txid, inputs=(), outputs=()):
+        return {"txid": txid, "inputs": list(inputs), "outputs": list(outputs)}
+
+    def output(value, event):
+        return {"index": "0", "value": value, "event": event, "spend_distance_coinjoins": 3}
+
+    coinjoins = [
+        round_record("first", [{"value": 1000, "event": "MIX_ENTER"}], [output(990, "MIX_REMIX")]),
+        *[round_record(f"between-{i}") for i in range(3)],
+        round_record(
+            "second", [{"prev_txid": "first", "prev_vout": "0", "value": 990, "event": "MIX_REMIX"}],
+            [output(980, "MIX_REMIX")],
+        ),
+        *[round_record(f"later-{i}") for i in range(3)],
+        round_record(
+            "last", [{"prev_txid": "second", "prev_vout": "0", "value": 980, "event": "MIX_REMIX"}],
+            [output(970, "MIX_STAY")],
+        ),
+    ]
+
+    pool = liquidity_series(coinjoins, "event")
+
+    assert pool["interim"] == [1000] * 9
+    assert pool["unmoved_window"] == [990] * 4 + [980] * 4 + [970]
+    assert pool["active_remix"] == [10] * 4 + [20] * 4 + [30]
+
+
+def test_slow_leaves_are_not_subtracted_again_as_unmoved():
+    coinjoin = {
+        "txid": "leaving", "inputs": [{"value": 1000, "event": "MIX_ENTER"}],
+        "outputs": [{"index": "0", "value": 990, "event": "MIX_LEAVE", "spend_distance_coinjoins": 4}],
+    }
+
+    pool = liquidity_series([coinjoin], "event")
+
+    assert pool["interim"] == [10]
+    assert pool["unmoved_window"] == [0]
+    assert pool["active_remix"] == [10]
 
 
 def test_wallet_decomposition_flags_only_the_large_wallet(run_dir):

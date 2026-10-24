@@ -193,24 +193,32 @@ def liquidity_series(coinjoins: list[JsonObject], event_field: str, wallet: str 
 
     interim: inflow minus outflow, an outflow charged to the coinjoin that created it.
     interim_fast_leave: the same, charging only outputs leaving within the window.
-    unmoved_window: outputs unspent for at least the window (later spent or never).
+    unmoved_window: outstanding stay or slow-remix outputs, retired when spent.
     active_remix: interim liquidity minus the unmoved outputs.
     """
     enter, leave, stay = [], [], []
     interim, interim_fast_leave, unmoved_window, active_remix = [], [], [], []
     current = current_fast = current_unmoved = 0
+    unmoved: dict[tuple[str, str], int] = {}
     inflow_types = OBSERVED_INFLOW if event_field == "observed_event" else {ENTER}
     for coinjoin in coinjoins:
         inputs = [item for item in coinjoin["inputs"] if wallet is None or item.get("wallet") == wallet]
         outputs = [item for item in coinjoin["outputs"] if wallet is None or item.get("wallet") == wallet]
+        for item in inputs:
+            current_unmoved -= unmoved.pop((str(item.get("prev_txid")), str(item.get("prev_vout"))), 0)
         step_enter = sum(value_of(item) for item in inputs if item.get(event_field) in inflow_types)
         leaving = [item for item in outputs if item.get(event_field) == LEAVE]
         step_leave = sum(value_of(item) for item in leaving)
         step_fast_leave = sum(value_of(item) for item in leaving if is_fast(item))
-        step_unmoved = sum(value_of(item) for item in outputs if not is_fast(item))
+        # Leaving outputs are already subtracted from interim at creation. A
+        # slow remix is inactive only until its outpoint is consumed, not forever.
+        for item in outputs:
+            if item.get(event_field) in {STAY, REMIX} and not is_fast(item):
+                value = value_of(item)
+                unmoved[(coinjoin["txid"], str(item["index"]))] = value
+                current_unmoved += value
         current += step_enter - step_leave
         current_fast += step_enter - step_fast_leave
-        current_unmoved += step_unmoved
         enter.append(step_enter)
         leave.append(step_leave)
         stay.append(sum(value_of(item) for item in outputs if item.get(event_field) == STAY))
