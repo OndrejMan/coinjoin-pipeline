@@ -346,3 +346,20 @@ def test_markdown_adds_blocksci_next_to_coinjoin_analysis(run_dir):
     assert "| metric | ground truth | coinjoin-analysis | BlockSci |" in markdown
     assert "### BlockSci Classification Disagreements" in markdown
     assert "| outputs:MIX_REMIX->MIX_LEAVE | 2 |" in markdown
+
+
+def test_joinmarket_spend_is_confirmed_once_every_mixdepth_sweep_is(run_dir):
+    spends = {
+        "schema_version": "1.0",
+        "spends": [
+            {"wallet_index": 0, "status": "sent", "txid": P1, "txids": [P1, P2], "amount_sats": 1059},
+            {"wallet_index": 1, "status": "sent", "txid": P2, "txids": [P2, "unmined"], "amount_sats": 74},
+        ],
+    }
+    (run_dir / POSTMIX_SPENDS_FILE).write_text(json.dumps(spends))
+
+    section, dataset = build(run_dir)
+
+    assert section["postmix_spends"]["confirmed_postmix"] == 1
+    assert [spend["confirmed"] for spend in dataset["postmix_spends"]] == [True, False]
+    assert dataset["postmix_spends"][0]["txids"] == [P1, P2]

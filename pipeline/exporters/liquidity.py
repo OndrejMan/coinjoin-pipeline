@@ -349,25 +349,31 @@ def fin_evaluation(coinjoins: list[JsonObject], observed: JsonObject, wallet: st
 
 
 def load_postmix_spends(run_dir: Path, transactions: JsonObject, positions: dict[str, int]) -> JsonObject | None:
-    """Spends the emulator scheduled, checked against the exported blocks."""
+    """Spends the emulator scheduled, checked against the exported blocks.
+
+    A JoinMarket spend sweeps each mixdepth in its own transaction and lists
+    them all under ``txids``; it is confirmed once every one of them is.
+    """
     path = run_dir / POSTMIX_SPENDS_FILE
     if not path.is_file():
         return None
     spends = []
     for spend in load_json(path).get("spends") or []:
         txid = spend.get("txid")
-        inputs = (transactions.get(txid) or {}).get("inputs") or [] if txid else []
+        txids = spend.get("txids") or ([txid] if txid else [])
+        inputs = [item for spent in txids for item in (transactions.get(spent) or {}).get("inputs") or []]
         spends.append(
             {
                 "wallet": f"wallet-{int(spend['wallet_index']):03}" if spend.get("wallet_index") is not None else None,
                 "status": spend.get("status"),
                 "txid": txid,
+                "txids": txids,
                 "amount_sats": spend.get("amount_sats"),
                 "round": spend.get("round"),
                 "block": spend.get("block"),
                 "delay_rounds": spend.get("delay_rounds"),
                 "delay_blocks": spend.get("delay_blocks"),
-                "confirmed": bool(txid and txid in transactions),
+                "confirmed": bool(txids) and all(spent in transactions for spent in txids),
                 "spends_coinjoin_outputs": any(item.get("prev_txid") in positions for item in inputs),
             }
         )

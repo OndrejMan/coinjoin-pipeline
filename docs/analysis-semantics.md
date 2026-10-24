@@ -272,7 +272,8 @@ to the lowest point after it), compared to its share of all leaving value
 
 `postmix_spends` checks the emulator's spend schedule
 (`coinjoin_emulator_data/data/postmix_spends.json`) against the exported blocks.
+A JoinMarket spend lists one transaction per swept mixdepth under `txids`; it is
+confirmed once all of them are mined.
 The per-event dataset is written next to the report as `liquidity_dataset.json`
 and `liquidity_events.csv`. Without emulator data or independent coinjoin labels
 the section is `available: false` with a reason.
-
