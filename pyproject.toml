@@ -41,7 +41,7 @@ coinjoin_pipeline = [
 ]
 
 "coinjoin_pipeline.execution" = ["*.sh"]
-"coinjoin_pipeline.execution.pbs" = ["templates/*.sh"]
+"coinjoin_pipeline.execution.pbs" = ["templates/*.sh", "templates/blocksci_notebook.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/pipeline"]

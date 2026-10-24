@@ -852,6 +852,7 @@ def render_blocksci_analyze_s3_pbs(
         ]
         extra_binds = 'EXTRA_BINDS+=(--bind "$USER_SCRIPT:/mnt/user-analysis.py:ro")'
     else:
+        output = '"$HOME/coinjoin-notebooks/$RUN_ID"'
         if notebooks_dir is not None:
             notebook_path = notebooks_dir.expanduser().resolve()
             require_storage_path(notebook_path)
@@ -859,14 +860,26 @@ def render_blocksci_analyze_s3_pbs(
             if not notebook_path.is_dir():
                 raise PBSError(f"BlockSci notebooks path is not a directory: {notebook_path}")
             output = shell_value(str(notebook_path))
-        extra_binds = 'EXTRA_BINDS+=(--bind "$OUTPUT_DIR:/mnt/notebooks:rw")'
+        prepare += [
+            'NOTEBOOK_CONTROL="$HOME/.local/share/coinjoin-pipeline/jupyter/$RUN_ID"',
+            'mkdir -p "$NOTEBOOK_CONTROL"',
+            'chmod 700 "$NOTEBOOK_CONTROL"',
+            'rm -f "$NOTEBOOK_CONTROL/connection.json"',
+            "cat > \"$RUN_WORK/blocksci_notebook.py\" <<'SCENARIO_LAB_NOTEBOOK'\n"
+            + template("blocksci_notebook.py")
+            + "\nSCENARIO_LAB_NOTEBOOK",
+        ]
+        extra_binds = (
+            'EXTRA_BINDS+=(--bind "$OUTPUT_DIR:/mnt/notebooks:rw" '
+            '--bind "$NOTEBOOK_CONTROL:/mnt/notebook-control:rw" '
+            '--bind "$RUN_WORK/blocksci_notebook.py:/mnt/blocksci_notebook.py:ro" '
+            '--env "NOTEBOOK_JOB_ID=${PBS_JOBID:?}" '
+            '--env "NOTEBOOK_FRONTEND=${PBS_O_HOST:-}" '
+            '--env "NOTEBOOK_LOGIN=${PBS_O_LOGNAME:-$USER}")'
+        )
         connection_help = (
-            f'echo "[blocksci-notebook] Jupyter port: {notebook_port}"\n'
-            'LOGIN="${PBS_O_LOGNAME:-${USER:-<login>}}"\n'
-            'FRONTEND="${PBS_O_HOST:-<frontend>}"\n'
-            f'echo "[blocksci-notebook] Tunnel: ssh -N -J $LOGIN@$FRONTEND '
-            f'-L {notebook_port}:127.0.0.1:{notebook_port} $LOGIN@$(hostname -f)"\n'
-            'echo "[blocksci-notebook] The Jupyter token follows below."'
+            f'echo "[blocksci-notebook] Preferred Jupyter port: {notebook_port}"\n'
+            'echo "[blocksci-notebook] Open JupyterLab from Scenario Lab; connection details follow after startup."'
         )
 
     if persistent is not None:

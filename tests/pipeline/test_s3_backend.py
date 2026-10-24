@@ -30,6 +30,7 @@ from coinjoin_pipeline.execution.kubernetes import (  # noqa: E402
 from coinjoin_pipeline.execution.pbs.commands import (
     blocksci_analysis_pbs_command,
     blocksci_external_report_pbs_command,
+    blocksci_notebook_pbs_command,
     blocksci_parse_pbs_command,
     blocksci_update_pbs_command,
 )
@@ -277,10 +278,28 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
         mode="blocksci-notebook",
     )
     subprocess.run(["bash", "-n"], input=notebook, text=True, check=True)
-    assert "ssh -N -J $LOGIN@$FRONTEND" in notebook
+    assert "Open JupyterLab from Scenario Lab" in notebook
     assert "STAGE=blocksci-notebook\n" in notebook
     assert '"$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/*"' not in notebook
     assert '"$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/*"' not in notebook
+
+
+def test_notebook_uses_image_python_and_keeps_control_files_outside_saved_notebooks() -> None:
+    command = blocksci_notebook_pbs_command(8890)
+    assert "/usr/bin/python3 /mnt/blocksci_notebook.py 8890" in command
+    assert "uv run" not in command
+    script = render_blocksci_analyze_s3_pbs(
+        **COMMON, image="docker://blocksci", command=command,
+        mode="blocksci-notebook", notebook_port=8890,
+    )
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert 'OUTPUT_DIR="$HOME/coinjoin-notebooks/$RUN_ID"' in script
+    assert 'NOTEBOOK_CONTROL="$HOME/.local/share/coinjoin-pipeline/jupyter/$RUN_ID"' in script
+    assert '--bind "$NOTEBOOK_CONTROL:/mnt/notebook-control:rw"' in script
+    assert '--env "NOTEBOOK_JOB_ID=${PBS_JOBID:?}"' in script
+    assert "--ServerApp.port_retries=0" in script
+    assert "--ip=127.0.0.1" in script
+    assert "blocksci_parser" not in script
 
 
 def test_cache_compression_threads_come_from_rendered_ncpus() -> None:

@@ -115,8 +115,8 @@ def blocksci_notebook_pbs_command(notebook_port: int) -> str:
     if isinstance(notebook_port, bool) or not isinstance(notebook_port, int) or not 1024 <= notebook_port <= 65535:
         raise PBSError("BlockSci notebook port must be between 1024 and 65535")
     return (
-        "cd /mnt/blocksci/Notebooks && uv run jupyter notebook --no-browser --ip=0.0.0.0 "
-        f"--port={notebook_port} --allow-root --notebook-dir=/mnt/notebooks"
+        f"{BLOCKSCI_IMAGE_PYTHON_COMMAND} /mnt/blocksci_notebook.py "
+        f"{notebook_port}"
     )
 
 
