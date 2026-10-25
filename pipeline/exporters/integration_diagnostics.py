@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Callable, Protocol, cast
@@ -17,6 +15,7 @@ from exporters.common import (
     safe_attr,
     to_json_text,
 )
+from exporters.image_provenance import inspect_image
 from exporters.normalization import block_height_from_path, is_coinbase_tx
 
 # Only the images the report can actually inspect. The uploader and the PBS
@@ -49,44 +48,12 @@ def docker_image_provenance(image: str | None, runtime: str | None = None) -> Js
     if not image:
         return {"reference": image, "image_id": None, "repo_digest": None, "inspect_error": "image reference missing"}
     runtime_command = runtime or os.environ.get("CONTAINER_RUNTIME") or "docker"
-    try:
-        result = subprocess.run(
-            [
-                runtime_command,
-                "image",
-                "inspect",
-                image,
-                "--format",
-                "{{.Id}}\n{{json .RepoDigests}}",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as exc:
-        return {
-            "reference": image,
-            "image_id": None,
-            "repo_digest": None,
-            "inspect_error": str(exc),
-        }
-
-    lines = result.stdout.splitlines()
-    image_id = lines[0].strip() if lines else None
-    repo_digest = None
-    if len(lines) > 1:
-        try:
-            repo_digests = json.loads(lines[1])
-        except json.JSONDecodeError:
-            repo_digests = []
-        if repo_digests:
-            repo_digest = str(repo_digests[0])
-
+    provenance = inspect_image(image, runtime_command)
     return {
         "reference": image,
-        "image_id": image_id or None,
-        "repo_digest": repo_digest,
-        "inspect_error": None,
+        "image_id": provenance.image_id,
+        "repo_digest": provenance.repo_digest,
+        "inspect_error": provenance.error,
     }
 
 

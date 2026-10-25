@@ -55,6 +55,7 @@ artifact with image digests and exporter hashes.
 | Parsed block-archive cache height, checkpoint and update continuity verification | `pipeline/exporters/verify_chain.py` |
 | Heavy BlockSci results | `pipeline/exporters/blocksci_export/analysis.py` |
 | Artifact reader independent of BlockSci | `pipeline/exporters/analysis_artifact.py` |
+| Container image inspection shared by the host and standalone exporters | `pipeline/exporters/image_provenance.py` |
 | Report assembly and presentation | `pipeline/exporters/cli.py`, `report_builder.py`, `markdown_report.py` |
 
 ## One analyzer/report flow

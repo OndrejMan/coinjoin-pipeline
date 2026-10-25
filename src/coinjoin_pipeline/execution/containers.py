@@ -6,7 +6,6 @@ Not part of the Kubernetes → S3 → PBS path that the thesis results come from
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import shlex
 import shutil
@@ -16,9 +15,9 @@ import sys
 from pathlib import Path
 from typing import Mapping
 
-from exporters.artifact_paths import BASELINE_FILE, COINJOIN_ANALYSIS_DIR, EMULATOR_DIR
 from exporters.analysis_artifact import ARTIFACT_NAME
-from exporters.artifact_paths import blocksci_analysis_dir
+from exporters.artifact_paths import BASELINE_FILE, COINJOIN_ANALYSIS_DIR, EMULATOR_DIR, blocksci_analysis_dir
+from exporters.image_provenance import inspect_image
 
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.locks import (
@@ -241,34 +240,8 @@ def compose_base_command(env: Mapping[str, str]) -> list[str]:
 
 
 def inspect_image_provenance(image: str, runtime: str) -> tuple[str | None, str | None]:
-    try:
-        result = subprocess.run(
-            [
-                runtime,
-                "image",
-                "inspect",
-                image,
-                "--format",
-                "{{.Id}}\n{{json .RepoDigests}}",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return (None, None)
-    lines = result.stdout.splitlines()
-    image_id = lines[0].strip() if lines else None
-    repo_digest = None
-    if len(lines) > 1:
-        try:
-            repo_digests = json.loads(lines[1])
-        except json.JSONDecodeError:
-            repo_digests = []
-        if repo_digests:
-            repo_digest = str(repo_digests[0])
-    return (image_id or None, repo_digest)
+    provenance = inspect_image(image, runtime, timeout=5)
+    return provenance.image_id, provenance.repo_digest
 
 
 def add_image_provenance_env(env: dict[str, str]) -> None:

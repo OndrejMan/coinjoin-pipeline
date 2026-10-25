@@ -12,6 +12,8 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from exporters.image_provenance import inspect_image
+
 if TYPE_CHECKING:
     from exporters.report_types import IORecord, TransactionMetrics
 
@@ -155,33 +157,8 @@ def digest_from_reference(image: str | None) -> str | None:
 def docker_image_digest(image: str | None) -> str | None:
     if not image:
         return None
-    try:
-        result = subprocess.run(
-            [
-                "docker",
-                "image",
-                "inspect",
-                image,
-                "--format",
-                "{{json .RepoDigests}} {{.Id}}",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    output = result.stdout.strip()
-    if not output:
-        return None
-    repo_digest_text, _sep, image_id = output.partition(" ")
-    try:
-        repo_digests = json.loads(repo_digest_text)
-    except json.JSONDecodeError:
-        repo_digests = []
-    if repo_digests:
-        return str(repo_digests[0])
-    return image_id.strip() or None
+    provenance = inspect_image(image)
+    return provenance.repo_digest or provenance.image_id
 
 
 def nested_get(data: Mapping[str, object] | None, path: tuple[str, ...]) -> JsonValue:
