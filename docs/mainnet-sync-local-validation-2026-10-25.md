@@ -2,7 +2,7 @@
 
 **Výsledek: PASS na vm207.** Jde o celý lokální řetězec s reálnými komponentami
 nad regtestem, nikoliv o full-chain mainnetový experiment. MetaCentrum, jeho
-PBS, Kubernetes ani CESNET S3 nebyly použity. Změny nebyly commitnuty ani pushnuty.
+PBS, Kubernetes ani CESNET S3 nebyly použity. Tento validační běh neprováděl commity ani push.
 
 ## Provedené kontroly
 
@@ -19,6 +19,7 @@ PBS, Kubernetes ani CESNET S3 nebyly použity. Změny nebyly commitnuty ani push
 | Obnova indexu a jeho skutečné načtení v BlockSci | PASS |
 | JupyterLab přes lokální bridge/proxy, skutečný Python kernel | PASS |
 | Graf, widget a uložené výstupy notebooku | PASS |
+| Prohlížeč: Start/Stop, CPU/RAM, průběh, chyba a přechod na notebook | PASS s lokálními odpověďmi API |
 | Původní persistent-index integrační test: parse/update/restore/pinned analysis/backup | PASS |
 | Ruff, mypy a pylint nových modulů; TypeScript, ESLint a formátování dotčeného Lab kódu | PASS |
 
@@ -72,16 +73,22 @@ Hlavní běh má dvě generace `local-sync-20261025T154453Z-242318-{1,2}`.
 - [Uložený notebook s provedenými buňkami](/home/administrator/diplomka/coinjoin-pipeline/coinjoin-runs/notebook-local-20261025-170032-3.MsZqSu/notebooks/BlockSci.ipynb)
 - [Graf z notebooku — syntetický regtest](/home/administrator/diplomka/coinjoin-pipeline/coinjoin-runs/notebook-local-20261025-170032-3.MsZqSu/notebooks/local-regtest-index.png)
 - [Původní persistent-index test včetně ponechaných dat](/tmp/tmp.ALis9oWVsI)
+- [Výsledky ovládání v prohlížeči a zachycené požadavky](/home/administrator/diplomka/coinjoin-pipeline/emulation_logs/_test-results/mainnet-sync-local-20261025/ui/browser-result.json)
 
 Testy zachovaly data i logy. Core a integrační PBS/MinIO kontejnery byly po běhu
-ukončeny; samostatná lokální notebooková relace byla ponechána pro prohlédnutí
-s limitem jedné hodiny od svého startu. Zdroj indexu má v jejím kernelu read-only
-mount; zápis notebooku a obrázku jde do samostatného adresáře.
+ukončeny. Samostatná notebooková relace po interaktivním ověření doběhla na svůj
+hodinový limit PBS; uložený notebook a obrázek zůstávají. Zdroj indexu měl
+v kernelu read-only mount, zápisy šly do samostatného adresáře.
 
 ## Co výsledek nedokládá
 
 Nový dvoujobový test obsahuje coinbase-only regtestové bloky; nedokládá mainnetovou úplnost
 Tx0 kandidátů ani kvalitu CoinJoin heuristik. Neověřuje kapacitu multijob,
 full-chain paměť, propustnost CESNET S3 ani skutečné přihlášení a odeslání z Labu
-na MetaCentrum. API/UI odeslání je lokálně pokryté mock testy. Nasazení vyžaduje
+na MetaCentrum. API odeslání je lokálně pokryté mock testy. Prohlížeč navíc
+ověřil skutečné komponenty MainnetPage nad izolovaným Vite serverem bez backendu:
+předání upravených CPU/RAM, zákaz duplicitního startu a změny prostředků během běhu,
+Stop, odhad průběhu, zálohu bez smyšlených procent, chybu a dokončení i výběr notebooku
+s převzetím prostředků indexu. Všechny požadavky API zachytil Playwright; žádný
+frontendový bridge ani vzdálený launcher se při této kontrole nenačetl. Nasazení vyžaduje
 obrazy obsahující tyto změny; vzdálené `latest` tagy nebyly tímto během aktualizovány.
