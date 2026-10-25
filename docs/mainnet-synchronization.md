@@ -8,6 +8,27 @@ Není tím doložen full-chain mainnetový experiment ani nasazení na MetaCentr
 rozpočty CPU/RAM a průběh aktuální fáze. **Notebook nad indexem** otevře existující
 formulář notebooku; ten index neparsuje a používá jej pouze pro čtení.
 
+## Volitelná cílová výška
+
+V Labu lze vyplnit **Cílová výška synchronizace (volitelné)**, například `200000`.
+Totéž v YAML nastavuje `mainnet.target_height: 200000` (CLI `--mainnet-target-height`).
+Prázdné pole nebo vynechané nastavení znamená současný tip řetězce.
+S limitem se nečeká na dokončení IBD ani na dohnání všech hlaviček: po dosažení
+prahu se vypne síť, Core zůstane dostupný pro Dumplings a pokračuje celý řetězec
+včetně indexace a checkpointu. Procento Core v tomto režimu vyjadřuje výšku vůči
+zadanému cíli; nejde o odhad zbývajícího času.
+
+Limit je práh pro vypnutí sítě, nikoliv přesný řez daty. Kontrola probíhá nejvýše
+po jedné sekundě plus čas RPC a publikování průběhu; již stažené a rozpracované
+bloky mohou výslednou výšku posunout. Všechny další kroky používají skutečnou
+zmrazenou výšku a hash; `ready.json` navíc uchovává `requested_target_height`.
+Existující vyšší řetězec se nezkracuje. Pro menší test použij oddělený Core dataset,
+index a zálohovací prefixy. Dumplings pro cíl před svým výchozím počátkem 336861
+publikuje prázdný checkpoint na skutečné výšce a příště bezpečně naváže.
+U krátkého mainnetového testu pod výškou 100000 se pruning přeskočí, protože jej
+Core ještě nepovoluje; indexace a záloha pokračují se zachováním všech bloků.
+Tato možnost vyžaduje také nově sestavené Dumplings s `--frozen-height`.
+
 ## Dva joby
 
 `mainnet-producer` synchronizuje Core s `prune=1`, `txindex=0`, `blocksxor=0`.

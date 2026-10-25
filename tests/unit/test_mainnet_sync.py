@@ -7,7 +7,7 @@ import shutil
 
 import pytest
 
-from coinjoin_pipeline.configuration import PipelineConfiguration
+from coinjoin_pipeline.configuration import ConfigurationError, PipelineConfiguration
 from coinjoin_pipeline.context import resolve_configuration
 from coinjoin_pipeline.execution import mainnet_sync
 from coinjoin_pipeline.execution.mainnet_runtime import (
@@ -133,6 +133,88 @@ def test_scan_start_override_is_restricted_to_regtest(config):
     assert any("isolated regtest" in message for message in mainnet_sync.configuration_errors(changed))
     regtest = replace(changed, mainnet=replace(changed.mainnet, network="bitcoin_regtest"))
     assert mainnet_sync.configuration_errors(regtest) == []
+
+
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, "200000"])
+def test_invalid_sync_target_is_rejected(value):
+    with pytest.raises(ConfigurationError):
+        PipelineConfiguration.from_mapping({"mainnet": {"target_height": value}})
+
+
+def test_sync_target_is_embedded_in_both_jobs(config):
+    bounded = replace(config, mainnet=replace(config.mainnet, target_height=200000))
+    assert mainnet_sync.configuration_errors(bounded) == []
+    for stage in ("producer", "blocksci"):
+        assert '"target_height": 200000' in mainnet_sync.render_sync(bounded, stage)
+
+
+@pytest.mark.parametrize("target", [100, 90])
+def test_bounded_sync_freezes_actual_tip_during_initial_download(worker, monkeypatch, target):
+    worker.c["target_height"] = target
+    snapshots = iter(
+        [
+            {"blocks": 50, "headers": 900000, "initialblockdownload": True},
+            {"blocks": 100, "headers": 900000, "initialblockdownload": True},
+            {"blocks": 102, "bestblockhash": "b" * 64},
+        ]
+    )
+    calls, progress, sleeps = [], [], []
+
+    def rpc(method, *args):
+        calls.append((method, args))
+        return next(snapshots) if method == "getblockchaininfo" else None
+
+    worker.core = type("Core", (), {"poll": lambda _: None})()
+    monkeypatch.setattr(worker, "rpc", rpc)
+    monkeypatch.setattr(worker, "progress", lambda *args, **kw: progress.append((args, kw)))
+    monkeypatch.setattr("coinjoin_pipeline.execution.mainnet_runtime.time.sleep", sleeps.append)
+    assert worker.synchronize_core() == {"blocks": 102, "bestblockhash": "b" * 64}
+    assert ("setnetworkactive", ("false",)) in calls
+    assert not any(method == "getnetworkinfo" for method, _ in calls)
+    assert progress[0][0] == ("core-sync", 50, target)
+    assert progress[0][1]["target_height"] == target
+    assert sleeps == [1]
+
+
+def test_unbounded_sync_still_waits_for_initial_download_and_headers(worker, monkeypatch):
+    snapshots = iter(
+        [
+            {"blocks": 100, "headers": 100, "initialblockdownload": True},
+            {"blocks": 100, "headers": 101, "initialblockdownload": False},
+            {"blocks": 101, "headers": 101, "initialblockdownload": False},
+            {"blocks": 101, "bestblockhash": "b" * 64},
+        ]
+    )
+    worker.core = type("Core", (), {"poll": lambda _: None})()
+    monkeypatch.setattr(
+        worker, "rpc", lambda method, *args: next(snapshots) if method == "getblockchaininfo" else {"connections": 1}
+    )
+    monkeypatch.setattr(worker, "progress", lambda *args, **kw: None)
+    sleeps = []
+    monkeypatch.setattr("coinjoin_pipeline.execution.mainnet_runtime.time.sleep", sleeps.append)
+    assert worker.synchronize_core()["blocks"] == 101
+    assert len(sleeps) == 2
+
+
+def test_existing_higher_chain_is_frozen_without_rollback(worker, monkeypatch):
+    worker.c["target_height"] = 100
+    calls = []
+
+    def rpc(method, *args):
+        calls.append(method)
+        return {"blocks": 150, "bestblockhash": "b" * 64}
+
+    monkeypatch.setattr(worker, "rpc", rpc)
+    monkeypatch.setattr(worker, "progress", lambda *args, **kw: None)
+    assert worker.synchronize_core()["blocks"] == 150
+    assert calls == ["getblockchaininfo", "setnetworkactive", "getblockchaininfo"]
+
+
+@pytest.mark.parametrize("chain,height", [("main", 99999), ("regtest", 99)])
+def test_short_historical_chain_keeps_all_blocks(worker, monkeypatch, chain, height):
+    worker.chain = chain
+    monkeypatch.setattr(worker, "run_command", lambda *args: pytest.fail("Core cannot prune this short chain"))
+    worker.archive(prune=True, height=height, number=0)
 
 
 @pytest.fixture

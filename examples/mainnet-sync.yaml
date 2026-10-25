@@ -8,6 +8,8 @@ artifacts:
   credentials_file: /storage/brno2/home/xman/.aws/credentials
   profile: coinjoin
 mainnet:
+  # Optional test threshold. Omit for the current tip. Actual frozen height can be higher.
+  # target_height: 200000
   root: /scratch/multijob-brno/xman/bitcoin-mainnet
   backup_uri: s3://xman-coinjoin-new/bitcoin-mainnet/core-checkpoints
   blocks_uri: s3://xman-coinjoin-new/bitcoin-mainnet/blocks

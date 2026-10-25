@@ -370,6 +370,11 @@ class Worker:
         self.core = None
 
     def archive(self, prune=False, height=None, number=None):
+        # Bitcoin Core 29.1 refuses pruning before these network thresholds.
+        # The regtest worker starts Core with -fastprune.
+        if prune and height < (100 if self.chain == "regtest" else 100000):
+            print("Historical test chain is too short for Core pruning; retaining all blocks", flush=True)
+            return
         wrapper = self.work / "archive-bitcoin-cli"
         wrapper.write_text(
             "#!/bin/sh\nexec bitcoin-cli -chain="
@@ -570,6 +575,63 @@ class Worker:
         self.publish_json(self.c["dumplings_uri"].rstrip("/") + "/latest.json", latest)
         return prefix + "/manifest.json"
 
+    def synchronize_core(self):
+        target = self.c.get("target_height")
+        last_report = None
+        while True:
+            try:
+                info = self.rpc("getblockchaininfo")
+                if target is not None:
+                    if info["blocks"] >= target:
+                        break
+                    now = time.monotonic()
+                    if last_report is None or now - last_report >= self.c["poll_seconds"]:
+                        self.progress(
+                            "core-sync",
+                            info["blocks"],
+                            target,
+                            height=info["blocks"],
+                            headers=info.get("headers"),
+                            target_height=target,
+                        )
+                        last_report = now
+                else:
+                    self.progress(
+                        "core-sync",
+                        info.get("verificationprogress", 0),
+                        1,
+                        height=info.get("blocks"),
+                        headers=info.get("headers"),
+                        estimated=True,
+                    )
+                    if (
+                        not info.get("initialblockdownload", True)
+                        and info["blocks"] == info["headers"]
+                        and (self.chain == "regtest" or self.rpc("getnetworkinfo")["connections"] > 0)
+                    ):
+                        break
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                self.progress("core-rpc-wait")
+            if self.core.poll() is not None:
+                raise RuntimeError("Core stopped during synchronization")
+            # Bounded tests must not keep downloading for a full reporting interval.
+            time.sleep(min(self.c["poll_seconds"], 1) if target is not None else self.c["poll_seconds"])
+        self.rpc("setnetworkactive", "false")
+        # In-flight validation can advance beyond the threshold. Every consumer
+        # uses the actual frozen height/hash, never the requested threshold.
+        frozen = self.rpc("getblockchaininfo")
+        if target is not None:
+            if frozen["blocks"] < target:
+                raise ValueError("Core fell below the requested height while freezing the chain")
+            self.progress(
+                "core-sync",
+                frozen["blocks"],
+                target,
+                height=frozen["blocks"],
+                target_height=target,
+            )
+        return frozen
+
     def producer(self):
         self.stage = "producer"
         self.acquire_dataset()
@@ -578,26 +640,7 @@ class Worker:
             raise ValueError("A published generation cannot be reused; choose a fresh run ID")
         self.progress("core-startup")
         self.start_core(False)
-        while True:
-            try:
-                info = self.rpc("getblockchaininfo")
-                estimate = info.get("verificationprogress", 0)
-                self.progress(
-                    "core-sync", estimate, 1, height=info.get("blocks"), headers=info.get("headers"), estimated=True
-                )
-                if (
-                    not info.get("initialblockdownload", True)
-                    and info["blocks"] == info["headers"]
-                    and (self.chain == "regtest" or self.rpc("getnetworkinfo")["connections"] > 0)
-                ):
-                    break
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-                self.progress("core-rpc-wait")
-            if self.core.poll() is not None:
-                raise RuntimeError("Core stopped during synchronization")
-            time.sleep(self.c["poll_seconds"])
-        self.rpc("setnetworkactive", "false")
-        info = self.rpc("getblockchaininfo")
+        info = self.synchronize_core()
         height, block_hash = info["blocks"], info["bestblockhash"]
         self.dumps.mkdir(parents=True, exist_ok=True)
         scan_height = self.dumps / "Scanner/LastProcessedBlockHeight.txt"
@@ -642,6 +685,7 @@ class Worker:
                 "/app/Dumplings.Cli.dll",
                 "sync",
                 "--include-tip",
+                f"--frozen-height={height}",
                 f"--rpccookiefile={self.core_dir / '.cookie'}",
                 f"--rpcurl=http://127.0.0.1:{self.port}/",
                 f"--network={self.chain}",
@@ -667,6 +711,7 @@ class Worker:
             "dumplings_backup": dumps_backup,
             "source_dir": str(self.core_dir),
             "network": self.network,
+            "requested_target_height": self.c.get("target_height"),
         }
         atomic_json(self.run / "ready.json", ready)
         atomic_json(self.root / "current-ready.json", ready)

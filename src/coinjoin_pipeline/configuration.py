@@ -217,6 +217,7 @@ class PBSConfiguration(ConfigurationModel):
 
 @dataclass(frozen=True, slots=True)
 class MainnetSyncConfiguration(ConfigurationModel):
+    target_height: int | None = option(None, name="mainnet_target_height", minimum=1)
     network: Literal["bitcoin", "bitcoin_regtest"] = option("bitcoin", name="mainnet_network")
     scan_start_height: int | None = option(None, name="mainnet_scan_start_height", minimum=1)
     root: str | None = option(None, name="mainnet_root")
