@@ -1,6 +1,7 @@
 """The persistent BlockSci index lock, backup and restore behave as the PBS jobs rely on (index_store.sh)."""
 
 import os
+import json
 import shutil
 import subprocess
 import time
@@ -31,6 +32,7 @@ INDEX_LOCK_EXPIRES=$(($(date +%s) + {expires_in}))
 INDEX_LOCK_WAIT={wait}
 INDEX_LOCK_POLL=0.1
 PBS_JOBID={job}
+RUN_ID={job}
 # The stage header's s5 wrapper (templates/s3_stage.sh).
 s5() {{ s5cmd --credentials-file "$S3_CREDENTIALS_FILE" --profile "$S3_PROFILE" --endpoint-url "$S3_ENDPOINT_URL" "$@"; }}
 . {ARCHIVE}
@@ -67,8 +69,8 @@ index_unlock""",
     )
 
 
-def backup(tmp_path, **settings):
-    return shell(tmp_path, "index_lock_shared\nindex_backup\nindex_unlock", job="backup", **settings)
+def backup(tmp_path, job="backup", **settings):
+    return shell(tmp_path, "index_lock_shared\nindex_backup\nindex_unlock", job=job, **settings)
 
 
 def restore(tmp_path, **settings):
@@ -95,14 +97,18 @@ def test_published_index_is_complete(tmp_path):
 def test_backup_writes_one_archive_with_its_manifest(tmp_path):
     parse_index(tmp_path)
 
-    backup(tmp_path)
+    backup(tmp_path, env={"FAKE_S5CMD_FORBID_ARCHIVE_CAT": "1"})
 
-    assert sorted(path.name for path in s3(tmp_path).iterdir()) == [
+    assert sorted(path.name for path in (s3(tmp_path) / "generations/backup").iterdir()) == [
         "blocksci_index.tar.zst",
         "blocksci_index.tar.zst.sha256",
         "manifest.json",
     ]
-    assert '"exported_max_block": 100' in (s3(tmp_path) / "manifest.json").read_text()
+    assert '"exported_max_block": 100' in (s3(tmp_path) / "generations/backup/manifest.json").read_text()
+    assert json.loads((s3(tmp_path) / "latest.json").read_text())["prefix"].endswith("/generations/backup")
+    pointer = json.loads((s3(tmp_path) / "latest.json").read_text())
+    assert pointer["archive_size"] == (s3(tmp_path) / "generations/backup/blocksci_index.tar.zst").stat().st_size
+    assert pointer["upload_validation"] == "size-only"
     assert not (tmp_path / "index/.lock/readers/backup").exists()
 
 
@@ -124,25 +130,28 @@ def test_a_lost_working_copy_is_restored_from_the_newest_backup(tmp_path):
     parse_index(tmp_path, height=100)
     backup(tmp_path)
     parse_index(tmp_path, height=200)
-    backup(tmp_path)
+    backup(tmp_path, job="backup-2")
     shutil.rmtree(tmp_path / "index")
 
     restore(tmp_path)
 
     assert block(tmp_path) == "blocks-200"
-    assert len(list(s3(tmp_path).iterdir())) == 3
+    assert len(list((s3(tmp_path) / "generations").iterdir())) == 2
 
 
-def test_a_broken_upload_leaves_no_backup_to_restore_from(tmp_path):
+def test_a_broken_upload_preserves_the_previous_verified_backup(tmp_path):
     parse_index(tmp_path)
     backup(tmp_path)
 
-    failed = backup(tmp_path, check=False, env={"FAKE_S5CMD_FAIL_PIPE": "1"})
+    pointer = (s3(tmp_path) / "latest.json").read_text()
+    failed = backup(tmp_path, job="backup-2", check=False, env={"FAKE_S5CMD_FAIL_PIPE": "1"})
 
     assert failed.returncode != 0
-    # The old backup was deleted first and the new manifest never written.
-    assert not (s3(tmp_path) / "manifest.json").exists()
-    assert shell(tmp_path, "index_backup_available || echo none").stdout.strip() == "none"
+    assert (s3(tmp_path) / "latest.json").read_text() == pointer
+    assert (s3(tmp_path) / "generations/backup/manifest.json").exists()
+    shutil.rmtree(tmp_path / "index")
+    restore(tmp_path)
+    assert block(tmp_path) == "blocks-100"
 
 
 def test_without_s5cmd_pipe_the_archive_passes_through_scratch(tmp_path):
@@ -155,10 +164,25 @@ def test_without_s5cmd_pipe_the_archive_passes_through_scratch(tmp_path):
     assert block(tmp_path) == "blocks-100"
 
 
+def test_a_remote_size_mismatch_does_not_replace_the_previous_backup(tmp_path):
+    parse_index(tmp_path)
+    backup(tmp_path)
+    pointer = (s3(tmp_path) / "latest.json").read_bytes()
+    failed = backup(tmp_path, job="backup-2", check=False, env={
+        "FAKE_S5CMD_HEAD_SIZE_DELTA": "1", "FAKE_S5CMD_FORBID_ARCHIVE_CAT": "1",
+    })
+    assert failed.returncode != 0
+    assert "size/key mismatch" in failed.stderr
+    assert (s3(tmp_path) / "latest.json").read_bytes() == pointer
+    assert not (s3(tmp_path) / "generations/backup-2/manifest.json").exists()
+
+
 def test_a_corrupted_backup_is_refused(tmp_path):
     parse_index(tmp_path)
     backup(tmp_path)
-    (s3(tmp_path) / "blocksci_index.tar.zst.sha256").write_text("0" * 64 + "  blocksci_index.tar.zst\n")
+    pointer = json.loads((s3(tmp_path) / "latest.json").read_text())
+    pointer["archive_sha256"] = "0" * 64
+    (s3(tmp_path) / "latest.json").write_text(json.dumps(pointer))
     shutil.rmtree(tmp_path / "index")
 
     result = restore(tmp_path, check=False)

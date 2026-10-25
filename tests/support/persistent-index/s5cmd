@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stand-in for s5cmd backed by a directory: s3://bucket/key is $FAKE_S3/bucket/key.
-# Supports the cp, sync, run, ls, cat, rm and pipe forms the PBS job templates render.
+# Supports cp, sync, run, ls, head, cat, rm and pipe used by the PBS templates.
 set -euo pipefail
 
 local_path() {
@@ -27,6 +27,7 @@ copy() {
 while [ $# -gt 0 ]; do
     case "$1" in
         --credentials-file|--profile|--endpoint-url) shift 2 ;;
+        --json) shift ;;
         *) break ;;
     esac
 done
@@ -39,7 +40,19 @@ case "$command" in
         [ -e "$target" ] || { echo "fake s5cmd: no object found" >&2; exit 1; }
         echo "$1"
         ;;
-    cat) cat "$(local_path "$1")" ;;
+    head)
+        python3 - "$(local_path "$1")" "$1" <<'PY'
+import json, os, sys
+size = os.stat(sys.argv[1]).st_size + int(os.environ.get('FAKE_S5CMD_HEAD_SIZE_DELTA', '0'))
+print(json.dumps(dict(key=sys.argv[2], size=size)))
+PY
+        ;;
+    cat)
+        if [[ "$1" == *.tar.zst && -n "${FAKE_S5CMD_FORBID_ARCHIVE_CAT:-}" ]]; then
+            echo 'archive read-back is forbidden by this test' >&2; exit 1
+        fi
+        cat "$(local_path "$1")"
+        ;;
     rm)
         for uri in "$@"; do
             rm -rf "$(local_path "$uri")"
