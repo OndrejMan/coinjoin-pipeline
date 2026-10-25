@@ -9,6 +9,7 @@ own work.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 
 from exporters.artifact_paths import (
@@ -355,13 +356,16 @@ def _index_writer(index: PersistentIndex, walltime: str) -> list[str]:
     ]
 
 
-def _index_publish(stage: str, source_kind: str, network: str) -> str:
+def _index_publish(stage: str, source_kind: str, network: str, resources: PBSResources, index_dir: str) -> str:
     """Record the parsed index in place (manifest, file list), publish its height, unlock."""
+    last_fields = PERSISTENT_STORAGE_FIELD + r',\n  "index_dir": %s,\n  "pbs_resources": %s,\n  "published_at": "%s"'
+    resource_record = shell_value(json.dumps({"ncpus": resources.ncpus, "mem": resources.mem}))
     return "\n".join(
         (
             f'echo "[{stage}] recording persistent index at height $EXPORTED_MAX_BLOCK"',
-            f"printf {_manifest_format(PERSISTENT_STORAGE_FIELD)} \\",
+            f"printf {_manifest_format(last_fields)} \\",
             f'  "$RUN_ID" "$IMAGE" "{source_kind}" "{network}" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA" \\',
+            f'  {shell_value(json.dumps(index_dir))} {resource_record} "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\',
             '  > "$RUN_WORK/index-manifest.json"',
             'index_publish "$RUN_WORK/index-manifest.json"',
             # The lab cannot see the multijob scratch; it reads the index height from here.
@@ -661,7 +665,7 @@ def render_blocksci_parse_s3_pbs(
                 produce_index,
             )
         )
-        publish = _index_publish("blocksci-parse", source_kind, network)
+        publish = _index_publish("blocksci-parse", source_kind, network, resources, persistent.index_dir)
         finalize = INDEX_UNLOCK
     return _render_stage(
         "s3_blocksci_parse.sh",
@@ -758,7 +762,7 @@ def render_blocksci_update_s3_pbs(
                 'echo "[index] updating $INDEX_DIR from height $(index_height "$INDEX_DIR")"',
             )
         )
-        publish = _index_publish("blocksci-update", source_kind, "$NETWORK")
+        publish = _index_publish("blocksci-update", source_kind, "$NETWORK", resources, persistent.index_dir)
         finalize = INDEX_UNLOCK
     return _render_stage(
         "s3_blocksci_update.sh",

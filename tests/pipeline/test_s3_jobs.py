@@ -220,6 +220,24 @@ def test_cached_notebook_has_no_report_or_worker_staging(backend):
     assert backend.staged == []
 
 
+def test_notebook_refuses_a_source_runs_loose_index_without_an_archive(backend, monkeypatch):
+    monkeypatch.setattr(
+        s3_submission,
+        "s3_object_exists",
+        lambda access, uri: uri.endswith(("/blocksci_data/config.json", "/blocksci_data/parsed/chain/block.dat")),
+    )
+    with pytest.raises(ArtifactTransportError, match="source BlockSci cache manifest"):
+        s3_submission.submit_s3_pbs_graph(
+            backend.config(
+                analysisPbs=False,
+                blocksci_workflow="cached",
+                blocksci_task="notebook",
+                blocksci_cache_source_run_id="source",
+            )
+        )
+    assert backend.jobs == []
+
+
 def test_resource_and_image_overrides_reach_the_actual_job_renderers(backend):
     s3_submission.submit_s3_pbs_graph(
         backend.config(
