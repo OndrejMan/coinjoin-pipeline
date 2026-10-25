@@ -18,6 +18,7 @@ BLOCKSCI_CUSTOM_ANALYSIS_DIR = "blocksci-custom-analysis_data"
 BLOCKSCI_NOTEBOOKS_DIR = "blocksci-notebooks_data"
 REPORT_DIR = "coinjoinPipeline_data"
 COINJOIN_ANALYSIS_DIR = "coinjoin-analysis_data"
+COINJOIN_ANALYSIS_TOOLS_DIR = "coinjoin-analysis-tools_data"
 EMULATOR_DIR = "coinjoin_emulator_data"
 MAPPINGS_DIR = "coinjoin-mappings_data"
 

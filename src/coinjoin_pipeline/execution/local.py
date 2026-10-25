@@ -93,7 +93,11 @@ def run_configuration(args: PipelineConfiguration, logs_root: Path, local_build:
         with captured_pipeline_stage(logs_root, "Unified report export", run_dir):
             containers.run_export_only(args)
     elif action == "coinjoin-analysis":
-        if args.stages.analysis:
+        if args.coinjoin_analysis.program:
+            from .coinjoin_tools import run_local
+
+            run_local(args, _selected_run_dir(args, logs_root))
+        elif args.stages.analysis:
             run_dir = _selected_run_dir(args, logs_root)
             _on_pbs(
                 logs_root,

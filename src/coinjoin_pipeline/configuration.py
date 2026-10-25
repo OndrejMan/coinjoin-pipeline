@@ -214,6 +214,52 @@ class PBSConfiguration(ConfigurationModel):
 
 
 @dataclass(frozen=True, slots=True)
+class ResearchAnalysisConfiguration(ConfigurationModel):
+    txid: str | None = option(None, name="analysis_txid")
+    tx_hex: str | None = option(None, name="analysis_tx_hex")
+    transaction_file: str | None = option(None, name="analysis_transaction_file")
+    input_indices: tuple[int, ...] = option((), name="analysis_input_index")
+    output_indices: tuple[int, ...] = option((), name="analysis_output_index")
+    allow_network: bool = option(False, name="analysis_allow_network")
+    min_wallets: int = option(1, name="analysis_min_wallets", minimum=1)
+    depth: int = option(100, name="analysis_depth", minimum=1)
+    permute_inputs: bool = option(False, name="analysis_permute_inputs")
+    permute_outputs: bool = option(False, name="analysis_permute_outputs")
+    force_limit_anon_score: float = option(100.0, name="analysis_force_limit_anon_score", minimum=0)
+    plot: bool = option(False, name="analysis_plot")
+    coordinator_file: str | None = option(None, name="analysis_coordinator_file")
+
+
+@dataclass(frozen=True, slots=True)
+class CoinjoinAnalysisConfiguration(ConfigurationModel):
+    program: (
+        Literal[
+            "parse_cj_logs",
+            "parse_dumplings",
+            "ww2_analyze_client",
+            "scan_results_plot",
+            "file_check",
+            "visualize_coordinators",
+            "perf_processing",
+            "analyze_tx_size",
+            "generate_llm_inputs",
+            "update_txids_with_wabisator",
+        ]
+        | None
+    ) = option(None, name="analysis_program")
+    actions: tuple[str, ...] = option((), name="analysis_operation")
+    cjtype: Literal["ww1", "ww2", "sw", "jm"] = option("ww2", name="analysis_cjtype")
+    target_paths: tuple[str, ...] = option((), name="analysis_target_path")
+    load_config: str | None = option(None, name="analysis_load_config")
+    env_vars: str | None = option(None, name="analysis_env_vars")
+    input_uri: str | None = option(None, name="analysis_input_uri")
+    input_dir: str | None = option(None, name="analysis_input_dir")
+    filename: str | None = option(None, name="analysis_filename")
+    data_mode: Literal["emulation", "mainnet"] = option("emulation", name="analysis_data_mode")
+    research: ResearchAnalysisConfiguration = field(default_factory=ResearchAnalysisConfiguration)
+
+
+@dataclass(frozen=True, slots=True)
 class PipelineConfiguration(ConfigurationModel):
     action: PipelineAction = option("full-run")
     runtime: ContainerRuntime = option("docker", name="runtime")
@@ -237,6 +283,7 @@ class PipelineConfiguration(ConfigurationModel):
     kubernetes: KubernetesConfiguration = field(default_factory=KubernetesConfiguration)
     artifacts: ArtifactConfiguration = field(default_factory=ArtifactConfiguration)
     images: ImageConfiguration = field(default_factory=ImageConfiguration)
+    coinjoin_analysis: CoinjoinAnalysisConfiguration = field(default_factory=CoinjoinAnalysisConfiguration)
     blocksci: BlockSciConfiguration = field(default_factory=BlockSciConfiguration)
     joinmarket: JoinMarketConfiguration = field(default_factory=JoinMarketConfiguration)
     mappings: MappingsConfiguration = field(default_factory=MappingsConfiguration)
@@ -342,6 +389,10 @@ def decode_value(annotation, value, location):
             raise ConfigurationError(f"{location} must be one of: {', '.join(map(str, arguments))}")
         return value
     if origin is tuple:
+        if arguments[0] is not str:
+            if not isinstance(value, (list, tuple)):
+                raise ConfigurationError(f"{location} must be a list")
+            return tuple(decode_value(arguments[0], item, f"{location}[{index}]") for index, item in enumerate(value))
         values = [value] if isinstance(value, str) else value
         if not isinstance(values, (list, tuple)) or not all(isinstance(item, str) for item in values):
             raise ConfigurationError(f"{location} must be a string or a list of strings")

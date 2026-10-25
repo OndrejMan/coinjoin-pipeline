@@ -16,11 +16,14 @@ from exporters.artifact_paths import (
     BLOCKSCI_ANALYSIS_DIR,
     BLOCKSCI_CUSTOM_ANALYSIS_DIR,
     BLOCKSCI_NOTEBOOKS_DIR,
+    COINJOIN_ANALYSIS_TOOLS_DIR,
     REPORT_DIR,
 )
 from exporters.verify_chain import is_block_hash
 
-from coinjoin_pipeline.configuration import MappingsConfiguration
+from coinjoin_pipeline.configuration import CoinjoinAnalysisConfiguration, MappingsConfiguration
+from coinjoin_pipeline.execution.coinjoin_tools import RESEARCH_PROGRAMS, command, command_argv, uses_run_input
+from coinjoin_pipeline.paths import EXPORTERS_ROOT
 from coinjoin_pipeline.storage.s3 import (
     S3Target,
     shell_value,
@@ -412,6 +415,64 @@ def render_coinjoin_analysis_s3_pbs(
 ) -> str:
     return _render_stage(
         "s3_coinjoin_analysis.sh", "coinjoin-analysis", target, resources, image=image, command=command
+    )
+
+
+def render_coinjoin_tools_s3_pbs(
+    target: S3Target,
+    image: str,
+    options: CoinjoinAnalysisConfiguration,
+    resources: PBSResources = DEFAULT_RESOURCES["analysis"],
+) -> str:
+    """Run a shipped analyzer CLI on a copy; publish all files apart from the baseline."""
+    if options.input_uri:
+        source = _s3_uri(options.input_uri, "analysis input URI").rstrip("/")
+        download = f's5 sync {shell_value(source + "/*")} "$OUTPUT/input/"'
+    elif not uses_run_input(options):
+        download = ":"
+    else:
+        download = "\n".join(
+            (
+                'EXPERIMENT="$OUTPUT/input/$RUN_ID"',
+                'mkdir -p "$EXPERIMENT"',
+                'if s5 ls "$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/*" >/dev/null 2>&1; then',
+                '  s5 sync "$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/*" "$EXPERIMENT/"',
+                'fi',
+                'if s5 ls "$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/data/*" >/dev/null 2>&1; then',
+                '  mkdir -p "$EXPERIMENT/data"',
+                '  s5 sync "$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/data/*" "$EXPERIMENT/data/"',
+                'fi',
+                'test -n "$(find "$EXPERIMENT" -type f -print -quit)" || {',
+                '  echo "The run has no baseline or emulator data; provide analysis_input_uri" >&2; exit 1;',
+                '}',
+            )
+        )
+    adapter = ""
+    if options.program in RESEARCH_PROGRAMS:
+        adapter = (
+            "cat > \"$OUTPUT/coinjoin_research.py\" <<'COINJOIN_RESEARCH_ADAPTER'\n"
+            + (EXPORTERS_ROOT / "coinjoin_research.py").read_text(encoding="utf-8")
+            + "\nCOINJOIN_RESEARCH_ADAPTER\n"
+        )
+        if options.program == "update_txids_with_wabisator":
+            adapter += (
+                "cat > \"$OUTPUT/wabisator_source.py\" <<'COINJOIN_WABISATOR_SOURCE'\n"
+                + template("wabisator_source.txt") + "\nCOINJOIN_WABISATOR_SOURCE\n"
+            )
+    return _render_stage(
+        "s3_coinjoin_tools.sh",
+        "coinjoin-analysis",
+        target,
+        resources,
+        image=image,
+        program=options.program,
+        output_directory=COINJOIN_ANALYSIS_TOOLS_DIR,
+        adapter=adapter,
+        download=download,
+        command=shell_value("cd /work && " + command(options, target.run_id)),
+        invocation=json.dumps(
+            {"argv": command_argv(options, target.run_id), "image": image, "input_uri": options.input_uri}, indent=2
+        ),
     )
 
 

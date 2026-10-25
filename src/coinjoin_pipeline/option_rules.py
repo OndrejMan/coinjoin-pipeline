@@ -87,11 +87,13 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
 
 def cross_option_errors(config: PipelineConfiguration) -> list[str]:
     """Return violated rules in order, retaining CLI spellings in diagnostics."""
+    from .execution.coinjoin_tools import option_errors
+
     action = config.action
     analysis_pbs = _supplied(config, "stages.analysis", config.stages.analysis)
     blocksci_pbs = _supplied(config, "stages.blocksci", config.stages.blocksci)
     mappings_pbs = _supplied(config, "stages.mappings", config.stages.mappings)
-    errors: list[str] = []
+    errors: list[str] = option_errors(config)
     if config.run_dir is not None and config.all_runs:
         errors.append("--run-dir and --all-runs are mutually exclusive")
     if action in {"analyze", "export", "coinjoin-analysis", "coinjoin", "mappings"}:

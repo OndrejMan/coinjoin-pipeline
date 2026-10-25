@@ -74,7 +74,7 @@ def build_parser(paths: set[str] | None = None, *, add_help: bool = True) -> arg
         if annotation is bool:
             options["action"] = "store_true"
         elif get_origin(annotation) is tuple:
-            options.update(action="append", type=str)
+            options.update(action="append", type=get_args(annotation)[0])
         elif get_origin(annotation) is Literal:
             options.update(choices=get_args(annotation))
         else:

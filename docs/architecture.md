@@ -94,6 +94,19 @@ The host requires Python 3.10+. Exporter code retains Python 3.8 syntax for the
 BlockSci image. Their input options share `exporters/parameters.py`; exporters
 are staged as a standalone tree and do not import the host package.
 
+Standalone [coinjoin-analysis operations](coinjoin-analysis-operations.md) select
+the analyzer's existing public commands through `coinjoin_analysis.*`.
+`execution/coinjoin_tools.py` owns their CLI arguments and input rules; the S3
+runner uses the ordinary analysis job lifecycle. These jobs retain separate
+invocation outputs in `coinjoin-analysis-tools_data/` and do not replace the
+comparison baseline or run the report. Local Docker/Podman uses the same CLI
+arguments on a copy of its input dataset.
+The optional research adapters invoke existing functions for transaction size,
+labeled emulation sequences and mainnet coordinator refresh. They are delivered
+with each invocation rather than rebuilt into the analyzer image. Data-origin
+validation keeps wallet-ground-truth operations in emulation and public-chain
+lookups/coordinator refresh in mainnet.
+
 ## Verification boundary
 
 Focused tests use fake scheduler, process and storage boundaries. They verify
