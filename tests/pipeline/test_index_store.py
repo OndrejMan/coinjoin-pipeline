@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+ARCHIVE = Path(__file__).resolve().parents[2] / "src/coinjoin_pipeline/execution/pbs/templates/index_archive.sh"
 STORE = Path(__file__).resolve().parents[2] / "src/coinjoin_pipeline/execution/pbs/templates/index_store.sh"
 FAKE_S5CMD = Path(__file__).resolve().parents[1] / "support/persistent-index"
 BACKUP = "s3://bucket/blocksci-index"
@@ -32,6 +33,7 @@ INDEX_LOCK_POLL=0.1
 PBS_JOBID={job}
 # The stage header's s5 wrapper (templates/s3_stage.sh).
 s5() {{ s5cmd --credentials-file "$S3_CREDENTIALS_FILE" --profile "$S3_PROFILE" --endpoint-url "$S3_ENDPOINT_URL" "$@"; }}
+. {ARCHIVE}
 . {STORE}
 mkdir -p "$INDEX_DIR"
 {body}

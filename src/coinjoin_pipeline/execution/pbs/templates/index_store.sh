@@ -120,28 +120,11 @@ index_backup_available() {
 # Archive the working copy into $INDEX_BACKUP, replacing the old backup. Run under at
 # least the shared lock, so no writer changes the index meanwhile.
 index_backup() {
-  local archive="$INDEX_BACKUP/blocksci_index.tar.zst" fifo="$RUN_WORK/index-backup.fifo"
-  local sha="$RUN_WORK/index-backup.sha256"
+  local archive="$INDEX_BACKUP/blocksci_index.tar.zst"
   echo "[index] replacing the S3 backup in $INDEX_BACKUP (height $(index_height "$INDEX_DIR"))"
   s5 rm "$INDEX_BACKUP/manifest.json" >/dev/null 2>&1 || true
   s5 rm "$archive" "$archive.sha256" >/dev/null 2>&1 || true
-  rm -f "$fifo"
-  mkfifo "$fifo"
-  sha256sum <"$fifo" | cut -d ' ' -f 1 >"$sha" &
-  if s5 pipe --help >/dev/null 2>&1; then
-    tar -C "$INDEX_DIR" -cf - config.json files.txt manifest.json parsed \
-      | zstd -3 -T"${INDEX_ZSTD_THREADS:-0}" | tee "$fifo" | s5 pipe "$archive" >/dev/null
-  else
-    # s5cmd before 2.2 cannot read standard input; the archive passes through scratch.
-    tar -C "$INDEX_DIR" -cf - config.json files.txt manifest.json parsed \
-      | zstd -3 -T"${INDEX_ZSTD_THREADS:-0}" | tee "$fifo" >"$RUN_WORK/blocksci_index.tar.zst"
-    s5 cp "$RUN_WORK/blocksci_index.tar.zst" "$archive" >/dev/null
-    rm -f "$RUN_WORK/blocksci_index.tar.zst"
-  fi
-  wait
-  rm -f "$fifo"
-  printf '%s  blocksci_index.tar.zst\n' "$(cat "$sha")" >"$sha.file"
-  s5 cp "$sha.file" "$archive.sha256" >/dev/null
+  index_archive_upload "$INDEX_DIR" "$archive" "${INDEX_ZSTD_THREADS:-0}" config.json files.txt manifest.json parsed
   # Written last: until here the prefix is no backup.
   s5 cp "$INDEX_DIR/manifest.json" "$INDEX_BACKUP/manifest.json" >/dev/null
   echo "[index] S3 backup complete"
@@ -149,21 +132,14 @@ index_backup() {
 
 # Under the writer lock: replace an incomplete working copy with the S3 backup.
 index_restore() {
-  local archive="$INDEX_BACKUP/blocksci_index.tar.zst" fifo="$RUN_WORK/index-restore.fifo"
-  local sha="$RUN_WORK/index-restore.sha256" expected
+  local archive="$INDEX_BACKUP/blocksci_index.tar.zst" expected
   echo "[index] restoring the working copy from $INDEX_BACKUP (height $(s5 cat "$INDEX_BACKUP/manifest.json" \
     | sed -nE 's/.*"exported_max_block"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p' | head -n 1))"
   mkdir -p "$INDEX_DIR"
   touch "$INDEX_DIR/.writing"
   rm -rf "$INDEX_DIR/parsed" "$INDEX_DIR/config.json" "$INDEX_DIR/files.txt" "$INDEX_DIR/manifest.json"
-  rm -f "$fifo"
-  mkfifo "$fifo"
-  sha256sum <"$fifo" | cut -d ' ' -f 1 >"$sha" &
-  s5 cat "$archive" | tee "$fifo" | zstd -d | tar -C "$INDEX_DIR" -xf -
-  wait
-  rm -f "$fifo"
   expected="$(s5 cat "$archive.sha256" | cut -d ' ' -f 1)"
-  [ "$(cat "$sha")" = "$expected" ] || { echo "[index] the S3 backup does not match its SHA-256" >&2; return 1; }
+  index_archive_restore "$archive" "$INDEX_DIR" "$expected"
   rm -f "$INDEX_DIR/.writing"
   index_complete "$INDEX_DIR" || { echo "[index] the restored copy does not match its file list" >&2; return 1; }
 }

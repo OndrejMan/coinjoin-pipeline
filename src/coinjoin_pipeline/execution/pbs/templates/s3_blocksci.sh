@@ -1,6 +1,9 @@
 {preamble}
 {start}
-s5 sync "$ARTIFACT_URI/$RUN_ID/*" "$RUN_WORK/"
+require_zstd
+s5 sync "$ARTIFACT_URI/$RUN_ID/bitcoin_data/*" "$RUN_WORK/bitcoin_data/"
+s5 sync "$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/*" "$RUN_WORK/coinjoin_emulator_data/"
+s5 sync "$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/*" "$RUN_WORK/.pipeline/exporters/"
 BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"
 if [ ! -d "$BITCOIN_DATADIR/regtest/blocks" ] && [ -d "$BITCOIN_DATADIR/data/regtest/blocks" ]; then
   BITCOIN_DATADIR="$BITCOIN_DATADIR/data"

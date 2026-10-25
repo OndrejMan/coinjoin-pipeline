@@ -75,15 +75,26 @@ BlockSci, and mappings so `coinjoin_mappings.json` is included in the report.
 A mappings-only `pbs-from-s3` submission consumes an existing baseline and does
 not create a report.
 
-With `--blocksci-workflow reusable`, the `blocksci-parse` job downloads raw
-Bitcoin data, parses once, and uploads
-`blocksci-parse_data/{blocksci_data.tar.zst,blocksci_data.tar.zst.sha256,manifest.json}`,
-packed with `zstd -3` using the job's requested `ncpus` threads.
-The dependent `blocksci-analyze` job verifies and extracts that archive before
-running detector queries; it never invokes `blocksci_parser`. The report job
-depends on `blocksci-analyze`, not on `blocksci-parse` directly. With
-`--blocksci-workflow cached`, the parse job is omitted and the work job fails
-closed if the archive or checksum is absent or invalid.
+Every S3 parser publishes
+`blocksci-parse_data/{blocksci_data.tar.zst,blocksci_data.tar.zst.sha256,manifest.json}`;
+there is no loose `blocksci_data/` upload. `combined` parses and analyzes in one
+job, while `reusable` publishes the index from a separate `blocksci-parse` job
+before dependent analysis. Both use the same schema-1.1 manifest and archive,
+compressed with `zstd -3` using the job's requested `ncpus` threads.
+The dependent `blocksci-analyze` job never invokes `blocksci_parser`.
+The report job depends on `blocksci-analyze`, not on `blocksci-parse` directly.
+With `cached`, parsing is omitted and the saved index is restored.
+
+`index_archive.sh` is the shared transport used by both run-local indexes and
+the persistent mainnet backup. Upload hashes the compressed stream and uses
+`s5 pipe` when available, with a temporary scratch archive as the existing
+fallback. The checksum uploads after the archive and the manifest uploads last.
+Before replacing an index, the old completion manifest is removed. Restore
+fetches only metadata first, then streams the archive into scratch while hashing
+and extracting it. An incomplete marker remains until the complete stream and
+required index files are verified. No analysis or notebook starts on failure.
+No emulation index is retained on multijob storage; persistent mainnet index
+locations, locking, update and backup lifecycle remain unchanged.
 
 `--blocksci-workflow cached --blocksci-task update` is the only S3 parser
 resume path. It requires a source cache run, a different fresh target run,
@@ -96,7 +107,7 @@ target run prefix is empty. The `blocksci-update` job then verifies the source
 manifest and archive checksum, requires matching BlockSci image and network,
 extracts the index, rewrites its run-local parsed-data path and inclusive
 maximum height, and invokes only `blocksci_parser ... update`—never
-`generate-config`. On success it publishes a new schema-1.0 cache whose
+`generate-config`. On success it publishes a new schema-1.1 cache whose
 manifest records `cache_operation`, `source_run_id`, and
 `source_exported_max_block`. From the block archive the job downloads every
 sidecar, refuses the update unless the digest of the files the source cache
@@ -108,7 +119,7 @@ is not reusable as a target; choose another fresh `--run-id` after diagnosis.
 The `script`, `external`, and `notebook` tasks of the `cached` workflow may read
 another run's cache read-only with the same `--blocksci-cache-source-run-id`.
 The frontend applies the same preflight (source manifest present, target
-prefix empty); the job downloads `<source>/blocksci-parse_data`, requires its
+prefix empty); the job streams the source archive, requires its
 manifest `run_id` to be the source run, and writes outputs, `.pbs` markers,
 logs, and a copy of the source manifest (`blocksci-cache-manifest.json` in the
 output directory) under the target run only. `detect` cannot use a source cache

@@ -99,6 +99,7 @@ def _render_stage(
             "set -euo pipefail\n",
             *identity,
             template("s3_stage.sh"),
+            template("index_archive.sh") if template_name.startswith("s3_blocksci") else "",
         )
     )
     values.setdefault("finalize_index", ":")
@@ -212,31 +213,34 @@ def _manifest_checks(manifest: str, label: str, run_id: str | None = None) -> li
     return checks
 
 
-def _restore_cache(cache_dir: str, run_id: str, label: str, checks: str = "") -> str:
-    """Check a downloaded cache against its manifest and checksum, then unpack it.
+def _restore_cache(cache_dir: str, cache_uri: str, run_id: str, label: str, checks: str = "") -> str:
+    """Verify metadata and stream the archive into the run's working index.
 
-    ``checks`` holds extra manifest assertions; the index lands in ``$RUN_WORK/blocksci_data``.
-    The archive is deleted once unpacked so the job does not keep the index twice on scratch;
-    the manifest and the SHA-256 sidecar stay for later checks.
+    Only small metadata lands in cache_dir. The incomplete marker stays on any failure;
+    no consumer runs until extraction and verification of the entire stream succeed.
     """
     manifest = f'"{cache_dir}/manifest.json"'
-    archive = f"{cache_dir}/blocksci_data.tar.zst"
+    sidecar = f'"{cache_dir}/blocksci_data.tar.zst.sha256"'
     return "\n".join(
         (
-            f'require_file "{archive}" "{label} is missing blocksci_data.tar.zst"',
-            f'require_file "{archive}.sha256" "{label} is missing its SHA-256 sidecar"',
+            f's5 cp "{cache_uri}/manifest.json" {manifest}',
+            f's5 cp "{cache_uri}/blocksci_data.tar.zst.sha256" {sidecar}',
             f'require_file {manifest} "{label} is missing manifest.json"',
             *_manifest_checks(manifest, label, run_id),
+            f'grep -Fq \'"archive": "blocksci_data.tar.zst"\' {manifest} || '
+            f'{{ echo "{label} has an unsupported archive" >&2; exit 1; }}',
             *([checks] if checks else []),
-            f'SIDECAR_SHA="$(cut -d \' \' -f 1 "{archive}.sha256")"',
+            f"SIDECAR_SHA=\"$(cut -d ' ' -f 1 {sidecar})\"",
             f'grep -Fq "\\"archive_sha256\\": \\"$SIDECAR_SHA\\"" {manifest} || '
             f'{{ echo "{label} manifest SHA-256 does not match its sidecar" >&2; exit 1; }}',
-            f'(cd "{cache_dir}" && sha256sum -c blocksci_data.tar.zst.sha256)',
-            f'tar -C "$RUN_WORK" -I zstd -xf "{archive}"',
-            f'rm -f "{archive}"',
+            'mkdir -p "$RUN_WORK/blocksci_data"',
+            'touch "$RUN_WORK/blocksci_data/.writing"',
+            f'index_archive_restore "{cache_uri}/blocksci_data.tar.zst" "$RUN_WORK" "$SIDECAR_SHA"',
             f'require_file "$RUN_WORK/blocksci_data/config.json" "{label} did not contain blocksci_data/config.json"',
             f'require_file "$RUN_WORK/blocksci_data/parsed/chain/block.dat" '
             f'"{label} did not contain parsed/chain/block.dat"',
+            "canonicalize_index",
+            'rm -f "$RUN_WORK/blocksci_data/.writing"',
         )
     )
 
@@ -257,22 +261,24 @@ def _manifest_format(last_field: str) -> str:
 
 
 def _publish_cache(stage: str, source_kind: str, network: str, ncpus: int) -> str:
-    """Archive ``$RUN_WORK/blocksci_data`` with a checksum and manifest, then upload it.
+    """Stream the run's index to S3 and publish its checksum and manifest last.
 
-    ``$MANIFEST_EXTRA`` carries the fields that only some sources record. zstd gets the job's
-    ``ncpus`` because MetaCentrum sets ``$NCPUS`` and ``$OMP_NUM_THREADS`` (and so ``nproc``) to 1.
+    zstd gets the requested ncpus because MetaCentrum's process environment may expose
+    only one CPU. MANIFEST_EXTRA carries additional source-specific provenance.
     """
     manifest_format = _manifest_format(r'  "archive": "blocksci_data.tar.zst",\n' + r'  "archive_sha256": "%s"')
     return "\n".join(
         (
             f'echo "[{stage}] archiving reusable index"',
-            f'tar -C "$RUN_WORK" -I "zstd -3 -T{ncpus}" -cf "$CACHE_DIR/blocksci_data.tar.zst" blocksci_data',
-            '(cd "$CACHE_DIR" && sha256sum blocksci_data.tar.zst > blocksci_data.tar.zst.sha256)',
+            'mkdir -p "$CACHE_DIR"',
+            's5 rm "$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/manifest.json" >/dev/null 2>&1 || true',
+            f'index_archive_upload "$RUN_WORK" "$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/blocksci_data.tar.zst" '
+            f'"{ncpus}" blocksci_data',
             f"printf {manifest_format} \\",
             f'  "$RUN_ID" "$IMAGE" "{source_kind}" "{network}" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA" '
-            '"$(cut -d \' \' -f 1 "$CACHE_DIR/blocksci_data.tar.zst.sha256")" \\',
+            '"$ARCHIVE_SHA256" \\',
             '  > "$CACHE_DIR/manifest.json"',
-            _upload('"$CACHE_DIR/"', "blocksci-parse_data"),
+            's5 cp "$CACHE_DIR/manifest.json" "$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/manifest.json"',
         )
     )
 
@@ -475,7 +481,7 @@ def render_blocksci_s3_pbs(
     include_report: bool = True,
     export_analysis: bool = False,
 ) -> str:
-    """Render the combined job: parse the emulated chain and analyze it, optionally with the report."""
+    """Parse and analyze in one job, publishing the same index archive as the split workflow."""
     report = "coinjoinPipeline_data/unified_report.json"
     analysis = "blocksci-analysis_data/blocksci_analysis.json"
     baseline = "coinjoin-analysis_data/coinjoin_tx_info.json"
@@ -485,11 +491,31 @@ def render_blocksci_s3_pbs(
         after.append(f'require_file "$RUN_WORK/{report}" "BlockSci S3-compatible reporting did not produce {report}"')
     if export_analysis:
         after.append(f'require_file "$RUN_WORK/{analysis}" "BlockSci analysis did not produce {analysis}"')
-    after.append(_upload('"$RUN_WORK/blocksci_data/"', "blocksci_data"))
+    after.extend(
+        (
+            'CACHE_DIR="$RUN_WORK/blocksci-parse_data"',
+            'MANIFEST_EXTRA=""',
+            _publish_cache("blocksci", "emulator", "bitcoin_regtest", resources.ncpus),
+        )
+    )
     if export_analysis:
         after.append(_upload('"$RUN_WORK/blocksci-analysis_data/"', "blocksci-analysis_data"))
     if include_report:
         after.append(_upload('"$REPORT_DIR/"', "coinjoinPipeline_data"))
+    before = []
+    if include_report:
+        before.extend(
+            (
+                _download("coinjoin-analysis_data"),
+                # Retain optional mappings and prior-report provenance without fetching an index.
+                "for directory in coinjoin-mappings_data coinjoinPipeline_data; do",
+                '  if s5 ls "$ARTIFACT_URI/$RUN_ID/$directory/" >/dev/null 2>&1; then',
+                '    s5 sync "$ARTIFACT_URI/$RUN_ID/$directory/*" "$RUN_WORK/$directory/"',
+                "  fi",
+                "done",
+                f'require_file "$RUN_WORK/{baseline}" "BlockSci S3-compatible reporting requires {baseline}"',
+            )
+        )
     return _render_stage(
         "s3_blocksci.sh",
         "blocksci",
@@ -497,9 +523,7 @@ def render_blocksci_s3_pbs(
         resources,
         image=image,
         command=command,
-        before=f'require_file "$RUN_WORK/{baseline}" "BlockSci S3-compatible reporting requires {baseline}"'
-        if include_report
-        else "",
+        before="\n".join(before),
         after="\n".join(after),
     )
 
@@ -707,11 +731,12 @@ def render_blocksci_update_s3_pbs(
         '{ echo "Source cache network does not match $NETWORK" >&2; exit 1; }'
     )
     if persistent is None:
-        restore_source = "\n".join(
-            (
-                's5 sync "$ARTIFACT_URI/$SOURCE_RUN_ID/blocksci-parse_data/*" "$SOURCE_CACHE_DIR/"',
-                _restore_cache("$SOURCE_CACHE_DIR", "$SOURCE_RUN_ID", "Source cache", source_checks),
-            )
+        restore_source = _restore_cache(
+            "$SOURCE_CACHE_DIR",
+            "$ARTIFACT_URI/$SOURCE_RUN_ID/blocksci-parse_data",
+            "$SOURCE_RUN_ID",
+            "Source cache",
+            source_checks,
         )
         publish = _publish_cache("blocksci-update", source_kind, "$NETWORK", resources.ncpus)
         finalize = ":"
@@ -896,9 +921,16 @@ def render_blocksci_analyze_s3_pbs(
             cache.append(f"CACHE_RUN_ID={shell_value(source_run_id)}")
             # Record which published index the outputs were computed from.
             prepare.append('cp "$CACHE_DIR/manifest.json" "$OUTPUT_DIR/blocksci-cache-manifest.json"')
-        cache.append(f's5 sync "$ARTIFACT_URI/{cache_run}/blocksci-parse_data/*" "$CACHE_DIR/"')
         downloads = cache + downloads
-        restore = _restore_cache("$CACHE_DIR", cache_run, "Reusable BlockSci cache")
+        restore = _restore_cache(
+            "$CACHE_DIR", f"$ARTIFACT_URI/{cache_run}/blocksci-parse_data", cache_run, "BlockSci index"
+        )
+        if source_run_id is not None:
+            prepare.append('printf \'{"source_run_id":"%s"}\\n\' "$CACHE_RUN_ID" > "$OUTPUT_DIR/blocksci-source.json"')
+            extra_binds += (
+                '\nINDEX_BINDS+=(--bind "$RUN_WORK/blocksci_data/parsed:'
+                '/runs/emulation/logs/$RUN_ID/blocksci_data/parsed:ro")'
+            )
     return _render_stage(
         "s3_blocksci_analyze.sh",
         mode,

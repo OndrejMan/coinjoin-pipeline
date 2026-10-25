@@ -44,6 +44,7 @@ artifact with image digests and exporter hashes.
 | In-cluster prefix preflight and artifact uploader | `execution/k8s_s3_prefix_preflight.sh`, `k8s_s3_uploader.sh` |
 | Kubernetes resource generation and diagnosis | `execution/kubernetes.py` |
 | Graph definitions and dependency queries | `execution/stages.py`, `stage_executor.py` |
+| S3 index archive transport shared by emulation caches and persistent backups | `execution/pbs/templates/index_archive.sh` |
 | Run-directory layout (every run-relative path, marker sets, report inputs) | `pipeline/exporters/artifact_paths.py` |
 | Command locks and S3 PBS overlap detection | `execution/locks.py` |
 | PBS submit, qdel, state probes; S3 job scripts | `execution/pbs/submission.py`, `templates_s3.py`, `scripts.py`, `templates/`, `commands.py` |
@@ -80,6 +81,14 @@ It never performs an implicit detector scan. Old runs with only a parsed index
 need one analytical export before report assembly. The reader accepts artifact
 schema 1.0 for emulator runs; newly written schema 1.1 includes the mode and
 preserves detector parameters, skipped transactions, diagnostics and clustering.
+
+All S3 parsers publish `blocksci-parse_data/` as a zstd archive, manifest and
+SHA-256; `combined` and `reusable` differ only in job arrangement. The working
+`blocksci_data/` stays on job scratch. `index_archive.sh` shares streaming
+upload/restore with the persistent mainnet backup, retaining the scratch-file
+upload fallback when `s5 pipe` is absent. Consumers run only after verification.
+Persistent mainnet indexes still stay in shared storage and are read/updated in
+place; emulations do not introduce a persistent working copy.
 
 The host requires Python 3.10+. Exporter code retains Python 3.8 syntax for the
 BlockSci image. Their input options share `exporters/parameters.py`; exporters

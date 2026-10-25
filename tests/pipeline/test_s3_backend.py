@@ -35,6 +35,7 @@ from coinjoin_pipeline.execution.pbs.commands import (
     blocksci_update_pbs_command,
 )
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
+    _index_publish,
     PersistentIndex,
     render_blocksci_analyze_s3_pbs,
     render_blocksci_index_backup_s3_pbs,
@@ -254,15 +255,17 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     subprocess.run(["bash", "-n"], input=analyze, text=True, check=True)
     assert "/mnt/exporters/worker.py parse" in parse
     assert "blocksci_data.tar.zst" in parse
-    assert "sha256sum blocksci_data.tar.zst" in parse
+    assert 'sha256sum <"$fifo"' in parse
     assert '"schema_version": "1.1"' in parse
     assert "STAGE=blocksci-parse\n" in parse
     assert "blocksci_parser" not in analyze
-    assert "sha256sum -c blocksci_data.tar.zst.sha256" in analyze
-    assert analyze.index("command -v zstd") < analyze.index('"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/*"')
+    assert 'index_archive_restore "$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/blocksci_data.tar.zst"' in analyze
+    assert analyze.index("command -v zstd") < analyze.index(
+        's5 cp "$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/manifest.json"'
+    )
     assert 'grep -Fq \'"schema_version": "1.1"\'' in analyze
-    unpacked = analyze.index('-I zstd -xf "$CACHE_DIR/blocksci_data.tar.zst"')
-    assert unpacked < analyze.index('rm -f "$CACHE_DIR/blocksci_data.tar.zst"') < analyze.index("singularity exec")
+    unpacked = analyze.index('index_archive_restore "$ARTIFACT_URI/$RUN_ID/')
+    assert unpacked < analyze.index('rm -f "$RUN_WORK/blocksci_data/.writing"') < analyze.index("singularity exec")
     assert "worker.py analyze" in analyze
     assert "--cleanenv" in analyze
     assert "--env VIRTUAL_ENV=" not in analyze
@@ -289,8 +292,11 @@ def test_notebook_uses_image_python_and_keeps_control_files_outside_saved_notebo
     assert "/usr/bin/python3 /mnt/blocksci_notebook.py 8890" in command
     assert "uv run" not in command
     script = render_blocksci_analyze_s3_pbs(
-        **COMMON, image="docker://blocksci", command=command,
-        mode="blocksci-notebook", notebook_port=8890,
+        **COMMON,
+        image="docker://blocksci",
+        command=command,
+        mode="blocksci-notebook",
+        notebook_port=8890,
     )
     subprocess.run(["bash", "-n"], input=script, text=True, check=True)
     assert 'OUTPUT_DIR="$HOME/coinjoin-notebooks/$RUN_ID"' in script
@@ -325,7 +331,8 @@ def test_cache_compression_threads_come_from_rendered_ncpus() -> None:
     for script, ncpus in ((parse, 7), (update, 5)):
         assert f"select=1:ncpus={ncpus}:" in script
         assert (
-            f'tar -C "$RUN_WORK" -I "zstd -3 -T{ncpus}" -cf "$CACHE_DIR/blocksci_data.tar.zst" blocksci_data' in script
+            f'index_archive_upload "$RUN_WORK" "$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/blocksci_data.tar.zst" '
+            f'"{ncpus}" blocksci_data' in script
         )
         for variable in ("$NCPUS", "${NCPUS", "$OMP_NUM_THREADS", "nproc"):
             assert variable not in script
@@ -439,7 +446,7 @@ def test_s3_bitcoin_archive_parse_verifies_manifest_checksums_and_height() -> No
     assert "--source-manifest" not in script.split("<<'PY'")[0]
     assert '"bitcoin-blocks-s3" "bitcoin" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA"' in script
     assert script.index("bash -c") < script.index("/mnt/exporters/verify_chain.py")
-    assert script.index("/mnt/exporters/verify_chain.py") < script.index('tar -C "$RUN_WORK" -I "zstd')
+    assert script.index("/mnt/exporters/verify_chain.py") < script.index('index_archive_upload "$RUN_WORK"')
     assert "--expected-block-hash " + "a" * 64 in script
 
 
@@ -553,12 +560,12 @@ def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target(
 
     subprocess.run(["bash", "-n"], input=script, text=True, check=True)
     assert "SOURCE_RUN_ID=run-0" in script
-    assert '"$ARTIFACT_URI/$SOURCE_RUN_ID/blocksci-parse_data/*"' in script
-    assert '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/"' in script
-    assert "sha256sum -c blocksci_data.tar.zst.sha256" in script
-    assert script.index("command -v zstd") < script.index('"$ARTIFACT_URI/$SOURCE_RUN_ID/blocksci-parse_data/*"')
-    unpacked = script.index('-I zstd -xf "$SOURCE_CACHE_DIR/blocksci_data.tar.zst"')
-    assert unpacked < script.index('rm -f "$SOURCE_CACHE_DIR/blocksci_data.tar.zst"') < script.index("-cf ")
+    assert 's5 cp "$ARTIFACT_URI/$SOURCE_RUN_ID/blocksci-parse_data/manifest.json"' in script
+    assert '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/manifest.json"' in script
+    unpacked = script.index('index_archive_restore "$ARTIFACT_URI/$SOURCE_RUN_ID/')
+    assert script.index("command -v zstd") < unpacked
+    assert unpacked < script.index('rm -f "$RUN_WORK/blocksci_data/.writing"')
+    assert unpacked < script.index('index_archive_upload "$RUN_WORK"')
     assert '"source_kind": "external-bitcoin"' in script
     assert '"external-bitcoin" "$NETWORK" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA"' in script
     assert '\\"cache_operation\\": \\"incremental-update\\"' in script
@@ -590,7 +597,7 @@ def test_incremental_blocksci_update_from_the_block_archive_downloads_only_new_f
     assert script.index("SOURCE_MAX_BLOCK=") < script.index('run "$ARCHIVE_WORK/download.s5cmd"')
     assert script.index('run "$ARCHIVE_WORK/download.s5cmd"') < script.index("singularity exec")
     assert script.index("worker.py update") < script.index("/mnt/exporters/verify_chain.py")
-    assert script.index("/mnt/exporters/verify_chain.py") < script.index('tar -C "$RUN_WORK" -I "zstd')
+    assert script.index("/mnt/exporters/verify_chain.py") < script.index('index_archive_upload "$RUN_WORK"')
     assert '--source-manifest "/runs/emulation/logs/$RUN_ID/source-blocksci-parse_data/manifest.json"' in script
 
 
@@ -1302,14 +1309,18 @@ def test_read_only_source_cache_feeds_an_analysis_of_another_run() -> None:
 
     subprocess.run(["bash", "-n"], input=script, text=True, check=True)
     assert "CACHE_RUN_ID=mainnet-index" in script
-    assert '"$ARTIFACT_URI/$CACHE_RUN_ID/blocksci-parse_data/*"' in script
+    assert 's5 cp "$ARTIFACT_URI/$CACHE_RUN_ID/blocksci-parse_data/manifest.json"' in script
     assert '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/*"' not in script
     assert 'grep -Fq "\\"run_id\\": \\"$CACHE_RUN_ID\\""' in script
     # Outputs, markers and provenance stay with the analysis run.
     assert '"$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"' in script
     assert "STAGE=blocksci-external\n" in script
     provenance = script.index('cp "$CACHE_DIR/manifest.json" "$OUTPUT_DIR/blocksci-cache-manifest.json"')
-    assert script.index('tar -C "$RUN_WORK" -I zstd -xf') < provenance < script.index("singularity exec")
+    assert (
+        script.index('index_archive_restore "$ARTIFACT_URI/$CACHE_RUN_ID/')
+        < provenance
+        < script.index("singularity exec")
+    )
 
 
 @pytest.mark.parametrize(
@@ -1334,6 +1345,34 @@ PERSISTENT = dict(
     persistent=PersistentIndex("/scratch/multijob-brno/user/blocksci-mainnet", "s3://bucket/blocksci-index"),
     multijob="brno",
 )
+
+
+def test_persistent_manifest_records_requested_cpu_and_memory(tmp_path) -> None:
+    index = tmp_path / "index 'with quotes"
+    index.mkdir()
+    resources = replace(DEFAULT_RESOURCES["blocksci"], ncpus=3, mem="1536mb")
+    script = "\n".join(
+        (
+            "set -euo pipefail",
+            f"RUN_WORK={shlex.quote(str(tmp_path))}",
+            f"INDEX_DIR={shlex.quote(str(index))}",
+            "RUN_ID=parse-example",
+            "IMAGE=docker://blocksci",
+            "ARTIFACT_URI=s3://bucket/runs",
+            "EXPORTED_MAX_BLOCK=42",
+            "MANIFEST_EXTRA=''",
+            'index_publish() { cp "$1" "$INDEX_DIR/manifest.json"; }',
+            "index_unlock() { :; }",
+            "s5() { :; }",
+            _index_publish("blocksci-parse", "bitcoin-blocks-s3", "bitcoin", resources, str(index)),
+        )
+    )
+    subprocess.run(["bash", "-c", script], check=True, capture_output=True, text=True)
+    manifest = json.loads((index / "manifest.json").read_text())
+    assert manifest["index_dir"] == str(index)
+    assert manifest["pbs_resources"] == {"ncpus": 3, "mem": "1536mb"}
+    assert manifest["published_at"].endswith("Z")
+    assert manifest["exported_max_block"] == 42
 
 
 def test_persistent_update_works_in_place_under_the_writer_lock() -> None:

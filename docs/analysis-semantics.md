@@ -156,13 +156,14 @@ and never scans BlockSci itself. It requires the artifact's run ID and detector 
 requested report; a mismatched or stale artifact fails rather than being
 silently combined with a different baseline.
 
-The optional reusable S3 workflow separates that analyzer artifact from the
-parser cache. `blocksci-parse_data/manifest.json` schema 1.1 identifies the
+Every S3 parsing workflow, including `combined`, separates that analyzer artifact
+from the archived index. `blocksci-parse_data/manifest.json` schema 1.1 identifies the
 run, BlockSci image, exported maximum block, archive name (a zstd-compressed
 `blocksci_data.tar.zst`), and archive SHA-256.
-Consumers verify the accompanying checksum before extracting the index and
-never treat a successful S3 download alone as proof that the parsed chain is
-valid. Standard detector output retains the same
+Consumers check the manifest and stream the archive through decompression and
+extraction while computing SHA-256. They may use the extracted index only after
+the entire transfer, extraction and checksum verification succeed. A successful
+S3 download alone does not prove that the parsed chain is valid. Standard detector output retains the same
 `blocksci-analysis_data/blocksci_analysis.json` contract regardless of whether
 it came from the combined or reusable workflow, so report semantics do not
 change.

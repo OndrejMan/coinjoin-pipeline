@@ -474,14 +474,24 @@ This mappings-only form expects
 `coinjoin-analysis_data/coinjoin_tx_info.json` to already exist in the run
 prefix and does not regenerate the unified report by itself.
 
-### Reusable BlockSci parse cache
+### Saved BlockSci index
 
-S3 PBS runs can separate immutable parsing from repeatable analysis. The
-default `--blocksci-workflow combined` keeps the original one-job behavior.
-`reusable` submits `blocksci-parse` and then a dependent BlockSci task;
-`cached` skips parsing and consumes an existing `blocksci-parse_data` cache.
-The cache is a gzip-compressed tar archive with a SHA-256 sidecar and a schema
-1.0 manifest recording the run, image, and exported maximum block.
+All S3 PBS parsing workflows publish the same
+`blocksci-parse_data/{blocksci_data.tar.zst,blocksci_data.tar.zst.sha256,manifest.json}`.
+The zstd archive contains the working `blocksci_data/` directory; the schema 1.1
+manifest records its run, image, source, exported maximum block and SHA-256.
+The default `--blocksci-workflow combined` parses and analyzes in one job.
+`reusable` splits parsing and analysis into dependent jobs; `cached` skips
+parsing and reads a saved index. The job arrangement does not change the S3 format.
+S3 never receives the loose working index.
+
+Archive transfer shares the persistent mainnet backup's implementation. Uploads
+stream through tar, zstd and SHA-256 into S3 when `s5 pipe` is supported, otherwise
+through a temporary archive on job scratch. Restores stream directly into job
+scratch and verify the checksum before analysis or Jupyter can use the index.
+The manifest is uploaded last; a failed publication is not a reusable index.
+Emulation indexes do not use persistent or multijob storage. The persistent
+mainnet index retains its existing location, direct reads, updates and backup lifecycle.
 
 Use the split graph in a complete run:
 
