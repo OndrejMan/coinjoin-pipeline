@@ -1,45 +1,85 @@
 #!/usr/bin/env bash
 # Real Core + Dumplings + archive -> local OpenPBS/Apptainer -> BlockSci,
 # verified MinIO backups, pruning, incremental update and checkpoint recovery.
-# Existing freshly built images only. Never contacts MetaCentrum or CESNET S3.
+# regtest mines a fixture; mainnet downloads public Bitcoin P2P data near target_height.
+# Existing images only. Never contacts MetaCentrum or CESNET S3.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
+[[ $# -le 1 ]] || { echo 'Expected at most one test network argument.' >&2; exit 2; }
+mode=${1:-regtest}
+case "$mode" in
+  regtest) target=1200 ;;
+  mainnet) target=${MAINNET_TEST_TARGET_HEIGHT:-100000} ;;
+  -h|--help)
+    echo 'Usage: test-mainnet-sync-local.sh [regtest|mainnet]'
+    echo 'mainnet: MAINNET_TEST_TARGET_HEIGHT=100000 (1..150000), then another 1000 blocks.'
+    exit 0 ;;
+  *) echo "Unknown test network: $mode" >&2; exit 2 ;;
+esac
+if [[ ! "$target" =~ ^[1-9][0-9]{0,5}$ ]] || (( target > 150000 )); then
+  echo 'MAINNET_TEST_TARGET_HEIGHT must be an integer from 1 to 150000' >&2
+  exit 2
+fi
+# Independently bound a broken target-height implementation before it fills the runner.
+max_data_mb=${MAINNET_TEST_MAX_DATA_MB:-8192}
+generation_timeout=${MAINNET_TEST_GENERATION_TIMEOUT:-1800}
+for value in "$max_data_mb" "$generation_timeout"; do
+  [[ "$value" =~ ^[1-9][0-9]{0,5}$ ]] || { echo 'Invalid positive test limit' >&2; exit 2; }
+done
+# Transport auth is always the isolated MinIO credentials below.
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE AWS_DEFAULT_PROFILE AWS_REGION AWS_DEFAULT_REGION
 token="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-work=$(mktemp -d "${PBS_TEST_STORAGE_ROOT:-/storage/github-runner}/mainnet-sync-$token.XXXXXX")
+work=$(mktemp -d "${PBS_TEST_STORAGE_ROOT:-/storage/github-runner}/mainnet-sync-$mode-$token.XXXXXX")
 pbs="pbs-mainnet-sync-$$"
 minio="minio-mainnet-sync-$$"
 seed="core-mainnet-sync-$$"
+tool_container=""
 core_image=${MAINNET_CORE_LOCAL_IMAGE:-bitcoin-block-archive:sync-local}
 dump_image=${MAINNET_DUMPLINGS_LOCAL_IMAGE:-dumplings:sync-local}
 block_image=${MAINNET_BLOCKSCI_LOCAL_IMAGE:-blocksci-complete:sync-local}
 helper="$repo/tests/support/pbs/local-pbs.sh"
 export PBS_CONTAINER_NAME="$pbs" PBS_WORKDIR_HOST="$work" PBS_WORKDIR_CONTAINER="$work"
-export PBS_CLIENT_WORKDIR="$work" PBS_IMAGE=bitcoin-analysis/pbs-apptainer:23.06.06-1.5.1-r2
+export PBS_CLIENT_WORKDIR="$work" PBS_IMAGE="${PBS_IMAGE:-bitcoin-analysis/pbs-apptainer:23.06.06-1.5.1-r2}"
+result="${TEST_RESULT_DIR:-$repo/emulation_logs/_test-results}/mainnet-sync-$mode"
+mkdir -p "$result"
+export PYTHONPATH="$repo/src:$repo/pipeline${PYTHONPATH:+:$PYTHONPATH}"
+python=${MAINNET_TEST_PYTHON:-$repo/.venv/bin/python}
+[[ -x "$python" ]] || { echo "Python environment missing: $python" >&2; exit 2; }
 mkdir -p "$work/bin" "$work/images" "$work/data/bitcoin" "$work/runs" "$work/minio"
 chmod 0755 "$work"
 cp "$0" "$work/test-mainnet-sync-local.sh"
-printf '%s\n' "$work" >"${MAINNET_LOCAL_RESULT_FILE:-/tmp/mainnet-sync-local-result}"
+pointer=/tmp/mainnet-sync-local-result
+[[ "$mode" != mainnet ]] || pointer=/tmp/mainnet-sync-mainnet-result
+printf '%s\n' "$work" >"${MAINNET_LOCAL_RESULT_FILE:-$pointer}"
+printf '%s\n' "$work" >"$result/working-directory.txt"
 echo "Local integration evidence: $work"
 cleanup() {
   status=$?
-  trap - EXIT
+  trap - EXIT TERM INT
+  set +e
   docker logs "$pbs" >"$work/pbs-container.log" 2>&1 || true
   docker exec -u pbsuser "$pbs" qstat -xf >"$work/pbs-history.txt" 2>&1 || true
   docker logs "$minio" >"$work/minio.log" 2>&1 || true
   docker logs "$seed" >"$work/seed.log" 2>&1 || true
   docker rm -f "$seed" "$pbs" "$minio" >/dev/null 2>&1 || true
+  [[ -z "$tool_container" ]] || docker rm -f "$tool_container" >/dev/null 2>&1 || true
   printf '%s\n' "$status" >"$work/exit-status"
+  # Upload only diagnostics in CI; raw blocks, indexes, SIFs and backups stay in work.
+  "$python" "$repo/tests/support/mainnet_sync_e2e.py" diagnostics "$work" "$result" "$mode" "$status"
   echo "Kept data, index, backups and logs: $work"
   exit "$status"
 }
 trap cleanup EXIT
-for image in "$core_image" "$dump_image" "$PBS_IMAGE" pgsty/minio:RELEASE.2026-08-04T00-00-00Z; do
+trap 'exit 143' TERM
+trap 'exit 130' INT
+for image in "$core_image" "$dump_image" "$block_image" "$PBS_IMAGE" pgsty/minio:RELEASE.2026-08-04T00-00-00Z; do
   docker image inspect "$image" >/dev/null
 done
 # s5cmd is a static binary; no local or remote user credentials are copied.
 tool_container=$(docker create --entrypoint true "$core_image")
 docker cp "$tool_container:/usr/local/bin/s5cmd" "$work/bin/s5cmd"
 docker rm "$tool_container" >/dev/null
+tool_container=""
 chmod 0755 "$work/bin/s5cmd"
 export PATH="$work/bin:$PATH"
 docker run -d --name "$minio" -p 9000 -e MINIO_ROOT_USER=local-sync-user \
@@ -79,94 +119,89 @@ for name in core dumplings blocksci; do
     _ "$work/images/$name.sif" "$work/images/$name.tar" >"$work/convert-$name.log" 2>&1
 done
 seed_start() {
+  local chain_args=()
+  if [[ "$mode" == regtest ]]; then
+    chain_args=(-regtest -fastprune=1 -fallbackfee=0.0001)
+  fi
   docker run -d --name "$seed" --network none --user "$(id -u):$(id -g)" \
     -v "$work/data/bitcoin:/bitcoin" --entrypoint bitcoind "$core_image" \
-    -datadir=/bitcoin -regtest -server -listen=0 -networkactive=0 -fastprune=1 \
-    -blocksxor=0 -prune=1 -txindex=0 -fallbackfee=0.0001 >"$work/seed-container-id"
+    -datadir=/bitcoin "${chain_args[@]}" -server -listen=0 -networkactive=0 \
+    -blocksxor=0 -prune=1 -txindex=0 >"$work/seed-container-id"
   for _ in {1..60}; do core getblockcount >/dev/null 2>&1 && return; sleep 1; done
   echo 'Fixture Core did not start' >&2; return 1
 }
-core() { docker exec --user "$(id -u):$(id -g)" "$seed" bitcoin-cli -datadir=/bitcoin -regtest "$@"; }
+core() {
+  local chain=main
+  [[ "$mode" != regtest ]] || chain=regtest
+  docker exec --user "$(id -u):$(id -g)" "$seed" bitcoin-cli -datadir=/bitcoin -chain="$chain" "$@"
+}
 seed_stop() {
   core stop >/dev/null
   docker wait "$seed" >/dev/null
   docker logs "$seed" >"$work/seed-$1.log" 2>&1
   docker rm "$seed" >/dev/null
 }
-seed_start
-core createwallet fixture >/dev/null
-address=$(core getnewaddress)
-core generatetoaddress 1200 "$address" >"$work/initial-mined-blocks.json"
-seed_stop initial
+if [[ "$mode" == regtest ]]; then
+  seed_start
+  core createwallet fixture >/dev/null
+  address=$(core getnewaddress)
+  core generatetoaddress 1200 "$address" >"$work/initial-mined-blocks.json"
+  seed_stop initial
+fi
 source "$repo/tests/support/pbs/pbs-env.sh"
 make_config() {
-  python3 - "$work" "$endpoint" "$1" <<'LOCAL_CONFIG'
-import sys, yaml
-from pathlib import Path
-work, endpoint, run = sys.argv[1:]
-value = dict(action='mainnet-sync', run_id=run, runs_root=work+'/runs',
-    artifacts=dict(backend='s3', uri='s3://local-mainnet-sync/runs', endpoint_url=endpoint,
-                   credentials_file=work+'/credentials', profile='local'),
-    mainnet=dict(root=work+'/data', network='bitcoin_regtest', scan_start_height=1,
-                 core_image=work+'/images/core.sif', dumplings_image=work+'/images/dumplings.sif',
-                 dbcache_mb=128, reorg_reserve=288, poll_seconds=1,
-                 blocks_uri='s3://local-mainnet-sync/blocks', dumplings_uri='s3://local-mainnet-sync/dumplings',
-                 backup_uri='s3://local-mainnet-sync/core'),
-    blocksci=dict(index_dir=work+'/index', index_backup_uri='s3://local-mainnet-sync/index'),
-    pbs=dict(blocksci_image=work+'/images/blocksci.sif',
-             producer=dict(ncpus=2, mem='4gb', scratch='2gb', scratch_type='local', walltime='00:20:00'),
-             blocksci=dict(ncpus=4, mem='8gb', scratch='2gb', scratch_type='local', walltime='00:20:00')))
-Path(work, run+'.yaml').write_text(yaml.safe_dump(value, sort_keys=False))
-LOCAL_CONFIG
+  "$python" "$repo/tests/support/mainnet_sync_e2e.py" config "$work" "$endpoint" "$1" "$mode" "$2"
 }
 run_generation() {
   run=$1
-  make_config "$run"
+  make_config "$run" "$2"
   echo "Submitting local generation $run"
-  (cd "$work" && "$repo/.venv/bin/python" -m coinjoin_pipeline.cli run "$work/$run.yaml") >"$work/$run-launch.log" 2>&1
-  deadline=$((SECONDS + 1200))
+  (cd "$work" && "$python" -m coinjoin_pipeline.cli run "$work/$run.yaml") >"$work/$run-launch.log" 2>&1
+  deadline=$((SECONDS + generation_timeout))
   while (( SECONDS < deadline )); do
-    if [[ -f "$work/data/runs/$run/done.json" ]]; then
-      echo "Completed $run"
-      return
-    fi
+    "$python" "$repo/tests/support/mainnet_sync_e2e.py" guard "$work" "$mode" "$max_data_mb"
+    pending=0
     for marker in "$work/runs/$run/.pbs/"*.jobid; do
       job=$(cat "$marker")
       info=$(qstat -xf "$job" 2>/dev/null || true)
-      if [[ "$info" =~ Exit_status[[:space:]]*=[[:space:]]*(-?[0-9]+) ]] && [[ "${BASH_REMATCH[1]}" != 0 ]]; then
-        printf '%s\n' "$info" >"$work/$run-failed-job.txt"
-        echo "PBS stage failed: $(basename "$marker")" >&2
-        tail -n 25 "$work/data/runs/$run/"*.log >&2 || true
-        return 1
+      if [[ "$info" =~ Exit_status[[:space:]]*=[[:space:]]*(-?[0-9]+) ]]; then
+        if [[ "${BASH_REMATCH[1]}" != 0 ]]; then
+          printf '%s\n' "$info" >"$work/$run-failed-job.txt"
+          echo "PBS stage failed: $(basename "$marker")" >&2
+          tail -n 25 "$work/data/runs/$run/"*.log >&2 || true
+          return 1
+        fi
+      else
+        pending=1
       fi
     done
+    if [[ -f "$work/data/runs/$run/done.json" && "$pending" == 0 ]]; then
+      echo "Completed $run (both PBS jobs exited successfully)"
+      return
+    fi
     sleep 2
   done
   echo "Timed out: $run" >&2; return 1
 }
-run_generation "local-sync-$token-1"
+run_generation "local-sync-$token-1" "$target"
 first_done="$work/data/runs/local-sync-$token-1/done.json"
-python3 - "$work" "$first_done" <<'FIRST_CHECK'
-import json, sys
-from pathlib import Path
-work, done_path = Path(sys.argv[1]), Path(sys.argv[2])
-done = json.loads(done_path.read_text())
-assert done['height'] == 1200 and done['state'] == 'done'
-files = sorted((work/'data/bitcoin/regtest/blocks').glob('blk*.dat'))
-assert files and files[0].name != 'blk00000.dat', 'pruning must really remove old files'
-assert not (work/'data/.sync-active').exists()
-print('Verified initial height/hash, real pruning and completed checkpoint')
-FIRST_CHECK
-seed_start
-core loadwallet fixture >/dev/null
-core generatetoaddress 200 "$address" >"$work/incremental-mined-blocks.json"
-seed_stop update
-run_generation "local-sync-$token-2"
+"$python" "$repo/tests/support/mainnet_sync_e2e.py" first "$work" "$first_done" "$mode" "$target"
+if [[ "$mode" == regtest ]]; then
+  seed_start
+  core loadwallet fixture >/dev/null
+  core generatetoaddress 200 "$address" >"$work/incremental-mined-blocks.json"
+  seed_stop update
+  next_target=1400
+else
+  # Use the actual frozen height, since already received blocks can overshoot the request.
+  next_target=$("$python" -c 'import json,sys; print(json.load(open(sys.argv[1]))["height"]+1000)' "$first_done")
+fi
+run_generation "local-sync-$token-2" "$next_target"
 s5 cp s3://local-mainnet-sync/core/latest.json "$work/core-latest.json" >/dev/null
 s5 cp s3://local-mainnet-sync/index/latest.json "$work/index-latest.json" >/dev/null
 s5 --json head s3://local-mainnet-sync/blocks/blk00000.dat >"$work/archived-oldest-block.json"
 s5 ls 's3://local-mainnet-sync/*' >"$work/s3-objects.txt"
-python3 - "$work" <<'RECOVERY_SETTINGS'
+"$python" - "$work" <<'RECOVERY_SETTINGS'
 import json, sys
 from pathlib import Path
 work = Path(sys.argv[1])
@@ -176,11 +211,11 @@ settings = dict(root=str(work/'data'), index_dir=str(work/'index'), run_id='expl
     credentials=str(work/'credentials'), profile='local')
 (work/'recovery.json').write_text(json.dumps(settings))
 RECOVERY_SETTINGS
-manifest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["prefix"]+"/manifest.json")' "$work/core-latest.json")
-"$repo/.venv/bin/python" -m coinjoin_pipeline.execution.mainnet_runtime "$work/recovery.json" restore "$manifest" "$work/recovered"
-index_manifest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["prefix"]+"/manifest.json")' "$work/index-latest.json")
-"$repo/.venv/bin/python" -m coinjoin_pipeline.execution.mainnet_runtime "$work/recovery.json" restore "$index_manifest" "$work/recovered-index"
-python3 - "$work" <<'INDEX_READER'
+manifest=$("$python" -c 'import json,sys; print(json.load(open(sys.argv[1]))["prefix"]+"/manifest.json")' "$work/core-latest.json")
+"$python" -m coinjoin_pipeline.execution.mainnet_runtime "$work/recovery.json" restore "$manifest" "$work/recovered"
+index_manifest=$("$python" -c 'import json,sys; print(json.load(open(sys.argv[1]))["prefix"]+"/manifest.json")' "$work/index-latest.json")
+"$python" -m coinjoin_pipeline.execution.mainnet_runtime "$work/recovery.json" restore "$index_manifest" "$work/recovered-index"
+"$python" - "$work" <<'INDEX_READER'
 import json, sys
 from pathlib import Path
 work = Path(sys.argv[1])
@@ -191,33 +226,18 @@ INDEX_READER
 docker run --rm --network none --user "$(id -u):$(id -g)" \
   -e PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy \
   -v "$work:$work:ro" --entrypoint /usr/bin/python3 "$block_image" -c \
-  'import blocksci,json,sys; chain=blocksci.Blockchain(sys.argv[1],0); print(json.dumps(dict(blocks=len(chain),height=chain[-1].height,hash=str(chain[-1].hash))))' \
+  'import blocksci,json,sys; chain=blocksci.Blockchain(sys.argv[1],0); print(json.dumps(dict(blocks=len(chain),height=chain[-1].height,hash=str(chain[-1].hash),genesis=str(chain[0].hash))))' \
   "$work/recovered-index-read.json" >"$work/recovered-index-info.json"
+recovery_args=()
+[[ "$mode" != regtest ]] || recovery_args=(-regtest -fastprune=1)
 docker run -d --name "$seed" --network none --user "$(id -u):$(id -g)" \
   -v "$work/recovered/bitcoin:/bitcoin" --entrypoint bitcoind "$core_image" \
-  -datadir=/bitcoin -regtest -server -listen=0 -networkactive=0 -fastprune=1 \
+  -datadir=/bitcoin "${recovery_args[@]}" -server -listen=0 -networkactive=0 \
   -blocksxor=0 -prune=1 -txindex=0 -disablewallet=1 >"$work/recovered-core-container-id"
 for _ in {1..60}; do core getblockcount >/dev/null 2>&1 && break; sleep 1; done
 core getblockchaininfo >"$work/recovered-core-info.json"
 core getindexinfo >"$work/recovered-core-indexes.json"
+core getblockhash 0 >"$work/recovered-genesis.txt"
 seed_stop recovery
-python3 - "$work" "$token" <<'FINAL_CHECK'
-import json, sys
-from pathlib import Path
-work, token = Path(sys.argv[1]), sys.argv[2]
-first = json.loads((work/'core-latest.json').read_text())
-done = json.loads((work/f'data/runs/local-sync-{token}-2/done.json').read_text())
-assert done['height'] == 1400 and done['state'] == 'done'
-assert (work/'recovered/bitcoin/regtest/chainstate').is_dir()
-assert (work/'recovered/dumplings/Scanner/Tx0Candidates.txt').is_file()
-assert int((work/'recovered/dumplings/Scanner/LastProcessedBlockHeight.txt').read_text()) == 1400
-assert not (work/'recovered/bitcoin/regtest/blocks/blk00000.dat').exists()
-index = json.loads((work/'recovered-index-info.json').read_text())
-core = json.loads((work/'recovered-core-info.json').read_text())
-assert index['blocks'] == 1401 and index['height'] == 1400 and index['hash'] == done['hash']
-assert core['blocks'] == 1400 and core['bestblockhash'] == done['hash']
-assert core['pruned'] and not core['automatic_pruning']
-assert json.loads((work/'recovered-core-indexes.json').read_text()) == {}
-assert json.loads((work/'archived-oldest-block.json').read_text())['size'] > 0
-print('PASS: two real local PBS generations, incremental BlockSci, verified MinIO backups, pruning, Core recovery')
-FINAL_CHECK
+"$python" "$repo/tests/support/mainnet_sync_e2e.py" guard "$work" "$mode" "$max_data_mb"
+"$python" "$repo/tests/support/mainnet_sync_e2e.py" final "$work" "$token" "$mode" "$next_target"

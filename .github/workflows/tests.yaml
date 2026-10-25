@@ -281,6 +281,83 @@ jobs:
         if: always()
         run: ./tests/support/pbs/local-pbs.sh stop || true
 
+  mainnet-sync-bounded:
+    runs-on: [self-hosted, x64]
+    needs: pbs-apptainer-image
+    timeout-minutes: 120
+    env:
+      MAINNET_TEST_TARGET_HEIGHT: '100000'
+      MAINNET_TEST_MAX_DATA_MB: '8192'
+      MAINNET_TEST_GENERATION_TIMEOUT: '1800'
+      MAINNET_CORE_LOCAL_IMAGE: coinjoin-pipeline-mainnet-core:${{ github.run_id }}-${{ github.run_attempt }}
+      MAINNET_DUMPLINGS_LOCAL_IMAGE: coinjoin-pipeline-mainnet-dumplings:${{ github.run_id }}-${{ github.run_attempt }}
+      MAINNET_BLOCKSCI_LOCAL_IMAGE: coinjoin-pipeline-mainnet-blocksci:${{ github.run_id }}-${{ github.run_attempt }}
+      PBS_IMAGE: bitcoin-analysis/pbs-apptainer:23.06.06-1.5.1-r2
+      PBS_TEST_STORAGE_ROOT: /storage/github-runner
+      TEST_RESULT_DIR: ${{ github.workspace }}/github-test-results
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Checkout Bitcoin archive and Core image sources
+        uses: actions/checkout@v4
+        with:
+          repository: OndrejMan/bitcoin-block-archive
+          path: bitcoin-block-archive
+
+      - name: Checkout Dumplings sources
+        uses: actions/checkout@v4
+        with:
+          repository: OndrejMan/Dumplings
+          path: Dumplings
+
+      - name: Checkout BlockSci sources
+        uses: actions/checkout@v4
+        with:
+          repository: OndrejMan/blocksci
+          path: blocksci
+          submodules: recursive
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare pipeline and local test services
+        run: |
+          uv sync --frozen --extra test
+          test -d "$PBS_TEST_STORAGE_ROOT"
+          test -w "$PBS_TEST_STORAGE_ROOT"
+          if ! docker image inspect "$PBS_IMAGE" >/dev/null 2>&1; then
+            ./tests/support/pbs/local-pbs.sh build
+          fi
+          docker pull pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+
+      - name: Build the mainnet test components from their checked out sources
+        run: |
+          docker build -t "$MAINNET_CORE_LOCAL_IMAGE" bitcoin-block-archive
+          docker build --build-arg "DUMPLINGS_COMMIT=$(git -C Dumplings rev-parse HEAD)" -t "$MAINNET_DUMPLINGS_LOCAL_IMAGE" Dumplings
+          docker build --target complete --build-arg NTHREADS=4 -t "$MAINNET_BLOCKSCI_LOCAL_IMAGE" blocksci
+
+      - name: Run bounded real-mainnet synchronization and recovery
+        run: timeout --signal=TERM --kill-after=120s 60m bash tests/test-mainnet-sync-mainnet.sh
+
+      - name: Upload mainnet synchronization diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mainnet-sync-bounded-results
+          path: github-test-results/mainnet-sync-mainnet/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Remove the mainnet test image tags
+        if: always()
+        run: docker image rm "$MAINNET_CORE_LOCAL_IMAGE" "$MAINNET_DUMPLINGS_LOCAL_IMAGE" "$MAINNET_BLOCKSCI_LOCAL_IMAGE" || true
+
   pbs-fixture-analysis:
     runs-on: [self-hosted, x64]
     needs: pbs-apptainer-image

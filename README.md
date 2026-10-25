@@ -293,6 +293,13 @@ it downloads only public mainnet heights 0 and 1, builds and runs the
 `bitcoin-block-archive` Docker image to archive them into MinIO using S3
 environment secrets, and verifies the PBS BlockSci S3 restore and parse.
 
+`tests/test-mainnet-sync-mainnet.sh` exercises real Bitcoin Core P2P synchronization
+near height 100000, Dumplings, archive publication, two PBS/BlockSci generations,
+and recovery of both Core and the index against local MinIO. The automatic
+`mainnet-sync-bounded` CI job builds its components and retains diagnostics on
+failure. See [the bounded mainnet E2E runbook](docs/mainnet-synchronization.md#omezený-mainnet-e2e-v-ci)
+for limits, retained evidence and the standalone command.
+
 The same run can be described in YAML. `--fromConfiguration` is retained as a
 compatibility spelling; new scripts may use `--from-configuration`. YAML and
 CLI options decode into the same typed configuration (explicit CLI options

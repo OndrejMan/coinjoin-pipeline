@@ -184,6 +184,54 @@ povolena pouze pro regtest. Vygenerovaná data, MinIO úložiště i logy zůst�
 pod `/storage/github-runner/mainnet-sync-*`. Test nepoužívá MetaCentrum ani
 vzdálené S3. Potvrzené výsledky a jejich omezení jsou v odkazovaném protokolu.
 
+### Omezený mainnet E2E v CI
+
+`tests/test-mainnet-sync-mainnet.sh` používá stejný testovací řetězec jako
+regtestová varianta, ale začíná s prázdným datovým adresářem a skutečný Bitcoin
+Core stahuje mainnet přes veřejnou P2P síť. Výchozí první cíl je **100000**.
+Druhý průchod navazuje na skutečnou zmrazenou výšku a požaduje dalších 1000
+bloků. Nejde o přesný řez na výšce 100000: platí výše popsaný přesah o již
+rozpracované bloky. Samostatná kontrola odmítne výšku nad 200000 a překročení
+8 GiB součtu pracovních dat, indexu, MinIO a obnovených kopií. Image tar/SIF
+soubory do tohoto datového limitu nepatří. Na každou generaci se čeká nejvýše
+1800 sekund; CI omezuje celý test včetně přípravy obrazů pro Apptainer na 60 minut.
+
+Test vyžaduje úspěch obou produkčních PBS jobů v obou generacích. Ověřuje
+inkrementální postup, archiv v lokálním MinIO, obnovu obou záloh se SHA-256,
+skutečné spuštění obnoveného Core a načtení obnoveného indexu v BlockSci.
+Po obnově musejí oba vracet stejnou výšku, hash tipu a mainnetový genesis;
+checkpoint Core musí odkazovat na odpovídající zálohu indexu. Pod výškou 200000
+se žádné CoinJoiny neočekávají: jde o test infrastruktury a historických dat,
+nikoliv měření kvality detekce. Skutečné mazání starých blk souborů zůstává
+povinnou kontrolou regtestové varianty, kde ho malý dataset spolehlivě vyvolá.
+
+Job **`mainnet-sync-bounded`** ve workflow `Tests` běží automaticky při pushi
+a pull requestu podle společného CI gate. Checkoutuje a sestaví Core/archiver,
+Dumplings a BlockSci z jejich repozitářů, používá lokální OpenPBS/Apptainer a
+MinIO a nevyžaduje MetaCentrum ani CESNET credentials. Artefakt
+`mainnet-sync-bounded-results` uchovává 14 dní konfigurace, `result.json`,
+návratový stav, PBS historii a konce logů, i při selhání. Velká data a zálohy
+zůstávají v pracovním adresáři pod `/storage/github-runner/`; cestu uvádí
+`working-directory.txt`. Test ani CI nemažou zachované datové důkazy.
+
+Se sestavenými obrazy z předchozí sekce, dostupným PBS a MinIO image:
+
+```bash
+cd /home/administrator/diplomka/coinjoin-pipeline
+timeout --signal=TERM --kill-after=120s 60m bash tests/test-mainnet-sync-mainnet.sh
+# Volitelně menší první cíl (kladné celé číslo nejvýše 150000):
+MAINNET_TEST_TARGET_HEIGHT=10000 timeout --signal=TERM --kill-after=120s 60m \
+  bash tests/test-mainnet-sync-mainnet.sh
+```
+
+Obrazy lze vybrat přes `MAINNET_CORE_LOCAL_IMAGE`,
+`MAINNET_DUMPLINGS_LOCAL_IMAGE`, `MAINNET_BLOCKSCI_LOCAL_IMAGE` a `PBS_IMAGE`.
+Limity mění `MAINNET_TEST_MAX_DATA_MB` a `MAINNET_TEST_GENERATION_TIMEOUT`.
+Krátké testy `tests/unit/test_mainnet_sync_e2e.py` ověřují konfigurace, hlídače,
+záporné případy obnovy a automatické CI zapojení bez stahování a bez kontejnerů.
+Přidání testu samo o sobě nedokládá úspěšný mainnetový průchod; ten musí doložit
+výstup nového CI jobu.
+
 Pro kontrolu konfigurace a vygenerovaných skriptů bez přístupu ke službám:
 
 ```bash
