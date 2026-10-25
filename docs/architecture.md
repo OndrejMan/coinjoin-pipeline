@@ -47,7 +47,7 @@ artifact with image digests and exporter hashes.
 | S3 index archive transport shared by emulation caches and persistent backups | `execution/pbs/templates/index_archive.sh` |
 | Run-directory layout (every run-relative path, marker sets, report inputs) | `pipeline/exporters/artifact_paths.py` |
 | Command locks and S3 PBS overlap detection | `execution/locks.py` |
-| PBS submit, qdel, state probes; S3 job scripts | `execution/pbs/submission.py`, `templates_s3.py`, `scripts.py`, `templates/`, `commands.py` |
+| PBS submit, qdel, state probes; S3 job scripts | `execution/pbs/submission.py`, `templates_s3.py`, `analysis_modes.py`, `scripts.py`, `templates/`, `commands.py` |
 | PBS resources and image references | `execution/pbs/defaults.py` (`DEFAULT_RESOURCES`), `execution/pbs_settings.py` |
 | Scenario lookup and host/container scenario paths | `execution/scenarios.py` |
 | S3 access for run, watch/download/cleanup consumers | `storage/s3.py` |
@@ -74,6 +74,8 @@ explicit and distinct.
 Stage adapters call their script renderers directly and pass a completed
 `PBSJobSpec` to submission. PBS worker commands consume the typed configuration;
 `pbs/commands.py` renders detector arguments for both analysis and report phases.
+`pbs/analysis_modes.py` prepares each cached-index consumer's inputs, mounts and
+output checks; `templates_s3.py` adds the shared cache/index access and job lifecycle.
 
 `worker.py` supports parse, update, analyze, report, or parse+analyze (`run`).
 Docker and PBS choose mounts and interpreter, then invoke this same payload.

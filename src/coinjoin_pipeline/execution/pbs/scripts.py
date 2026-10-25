@@ -6,9 +6,10 @@ from dataclasses import asdict
 from pathlib import Path
 
 from coinjoin_pipeline.configuration import MappingsConfiguration
+from coinjoin_pipeline.storage.s3 import validate_artifact_uri
 
 from .defaults import PBSResources
-from .validation import require_safe_pbs_resources
+from .validation import PBSError, require_safe_pbs_resources
 
 TEMPLATES = Path(__file__).parent / "templates"
 
@@ -37,3 +38,15 @@ def directives(job_name: str, resources: PBSResources, multijob: str | None = No
 def mappings_run(settings: MappingsConfiguration) -> str:
     """The enumerator and Sake run shared by the S3 and the shared-storage mappings jobs."""
     return template("mappings_run.sh").format(**asdict(settings))
+
+
+def validated_s3_uri(value: str, description: str) -> str:
+    try:
+        return validate_artifact_uri(value)
+    except ValueError as error:
+        raise PBSError(f"Invalid {description}: {error}") from error
+
+
+def download_run_directory(name: str) -> str:
+    """Sync one run directory from the run prefix into the job's run work tree."""
+    return f's5 sync "$ARTIFACT_URI/$RUN_ID/{name}/*" "$RUN_WORK/{name}/"'

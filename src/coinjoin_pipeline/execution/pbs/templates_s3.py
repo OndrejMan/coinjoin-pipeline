@@ -12,17 +12,16 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
-from exporters.artifact_paths import (
-    BLOCKSCI_ANALYSIS_DIR,
-    BLOCKSCI_CUSTOM_ANALYSIS_DIR,
-    BLOCKSCI_NOTEBOOKS_DIR,
-    COINJOIN_ANALYSIS_TOOLS_DIR,
-    REPORT_DIR,
-)
+from exporters.artifact_paths import COINJOIN_ANALYSIS_TOOLS_DIR
 from exporters.verify_chain import is_block_hash
 
 from coinjoin_pipeline.configuration import CoinjoinAnalysisConfiguration, MappingsConfiguration
-from coinjoin_pipeline.execution.coinjoin_tools import RESEARCH_PROGRAMS, command, command_argv, uses_run_input
+from coinjoin_pipeline.execution.coinjoin_tools import (
+    RESEARCH_PROGRAMS,
+    command as coinjoin_tools_command,
+    command_argv,
+    uses_run_input,
+)
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
 from coinjoin_pipeline.storage.s3 import (
     S3Target,
@@ -34,8 +33,9 @@ from coinjoin_pipeline.storage.s3 import (
     validate_s3_profile,
 )
 
+from .analysis_modes import MODE_OUTPUTS, prepare_analysis_mode
 from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND, DEFAULT_RESOURCES, PBS_MULTIJOB_LOCATIONS, PBSResources
-from .scripts import directives, mappings_run, template
+from .scripts import directives, download_run_directory, mappings_run, template, validated_s3_uri
 from .validation import (
     PBSError,
     require_existing_path,
@@ -50,23 +50,11 @@ EXTERNAL_NETWORKS = {"bitcoin", "bitcoin_testnet", "bitcoin_regtest"}
 BLOCKSCI = DEFAULT_RESOURCES["blocksci"]
 
 
-def _s3_uri(value: str, description: str) -> str:
-    try:
-        return validate_artifact_uri(value)
-    except ValueError as error:
-        raise PBSError(f"Invalid {description}: {error}") from error
-
-
 def _run_id(value: str) -> str:
     try:
         return validate_run_id(value)
     except ValueError as error:
         raise PBSError(str(error)) from error
-
-
-def _download(name: str) -> str:
-    """Sync one run directory from the run prefix into the job's run work tree."""
-    return f's5 sync "$ARTIFACT_URI/$RUN_ID/{name}/*" "$RUN_WORK/{name}/"'
 
 
 def _upload(source: str, name: str) -> str:
@@ -137,7 +125,7 @@ def _bitcoin_datadir_source(path: Path) -> str:
 
 
 def _block_archive_source(bitcoin_blocks_uri: str) -> str:
-    return f"BITCOIN_BLOCKS_URI={shell_value(_s3_uri(bitcoin_blocks_uri, 'Bitcoin block archive URI'))}"
+    return f"BITCOIN_BLOCKS_URI={shell_value(validated_s3_uri(bitcoin_blocks_uri, 'Bitcoin block archive URI'))}"
 
 
 def _download_block_archive(source_manifest: str | None = None) -> str:
@@ -311,7 +299,7 @@ class PersistentIndex:
                 f"The index directory must be under /storage/ or /scratch/multijob-<location>/: {self.index_dir}"
             )
         if self.backup_uri is not None:
-            _s3_uri(self.backup_uri, "index backup URI")
+            validated_s3_uri(self.backup_uri, "index backup URI")
 
 
 def _index_setup(index: PersistentIndex, walltime: str, *, writer: bool) -> str:
@@ -426,7 +414,7 @@ def render_coinjoin_tools_s3_pbs(
 ) -> str:
     """Run a shipped analyzer CLI on a copy; publish all files apart from the baseline."""
     if options.input_uri:
-        source = _s3_uri(options.input_uri, "analysis input URI").rstrip("/")
+        source = validated_s3_uri(options.input_uri, "analysis input URI").rstrip("/")
         download = f's5 sync {shell_value(source + "/*")} "$OUTPUT/input/"'
     elif not uses_run_input(options):
         download = ":"
@@ -437,14 +425,14 @@ def render_coinjoin_tools_s3_pbs(
                 'mkdir -p "$EXPERIMENT"',
                 'if s5 ls "$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/*" >/dev/null 2>&1; then',
                 '  s5 sync "$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/*" "$EXPERIMENT/"',
-                'fi',
+                "fi",
                 'if s5 ls "$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/data/*" >/dev/null 2>&1; then',
                 '  mkdir -p "$EXPERIMENT/data"',
                 '  s5 sync "$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/data/*" "$EXPERIMENT/data/"',
-                'fi',
+                "fi",
                 'test -n "$(find "$EXPERIMENT" -type f -print -quit)" || {',
                 '  echo "The run has no baseline or emulator data; provide analysis_input_uri" >&2; exit 1;',
-                '}',
+                "}",
             )
         )
     adapter = ""
@@ -457,7 +445,8 @@ def render_coinjoin_tools_s3_pbs(
         if options.program == "update_txids_with_wabisator":
             adapter += (
                 "cat > \"$OUTPUT/wabisator_source.py\" <<'COINJOIN_WABISATOR_SOURCE'\n"
-                + template("wabisator_source.txt") + "\nCOINJOIN_WABISATOR_SOURCE\n"
+                + template("wabisator_source.txt")
+                + "\nCOINJOIN_WABISATOR_SOURCE\n"
             )
     return _render_stage(
         "s3_coinjoin_tools.sh",
@@ -469,7 +458,7 @@ def render_coinjoin_tools_s3_pbs(
         output_directory=COINJOIN_ANALYSIS_TOOLS_DIR,
         adapter=adapter,
         download=download,
-        command=shell_value("cd /work && " + command(options, target.run_id)),
+        command=shell_value("cd /work && " + coinjoin_tools_command(options, target.run_id)),
         invocation=json.dumps(
             {"argv": command_argv(options, target.run_id), "image": image, "input_uri": options.input_uri}, indent=2
         ),
@@ -497,7 +486,7 @@ def render_coinjoin_analysis_dumplings_s3_pbs(
     service next to the archive node). The run gets ``coinjoin_tx_info.json``, the image's
     curated ``false_cjtxs.json`` and ``dumplings-snapshot.json`` for the external comparison.
     """
-    uri = _s3_uri(dumplings_uri, "Dumplings snapshot URI")
+    uri = validated_s3_uri(dumplings_uri, "Dumplings snapshot URI")
     if coinjoin_type not in DUMPLINGS_PROTOCOLS:
         raise PBSError(f"Dumplings baselines cover wasabi2 and joinmarket, not {coinjoin_type}")
     cjtype, mix_id, false_cjtxs = DUMPLINGS_PROTOCOLS[coinjoin_type]
@@ -567,11 +556,11 @@ def render_blocksci_s3_pbs(
         after.append(_upload('"$RUN_WORK/blocksci-analysis_data/"', "blocksci-analysis_data"))
     if include_report:
         after.append(_upload('"$REPORT_DIR/"', "coinjoinPipeline_data"))
-    before = []
+    before: list[str] = []
     if include_report:
         before.extend(
             (
-                _download("coinjoin-analysis_data"),
+                download_run_directory("coinjoin-analysis_data"),
                 # Retain optional mappings and prior-report provenance without fetching an index.
                 "for directory in coinjoin-mappings_data coinjoinPipeline_data; do",
                 '  if s5 ls "$ARTIFACT_URI/$RUN_ID/$directory/" >/dev/null 2>&1; then',
@@ -657,8 +646,8 @@ def _parse_source(
         "emulator Bitcoin and exported-block inputs",
         "\n".join(
             (
-                _download("bitcoin_data"),
-                _download("coinjoin_emulator_data/data/btc-node"),
+                download_run_directory("bitcoin_data"),
+                download_run_directory("coinjoin_emulator_data/data/btc-node"),
                 'BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"',
                 'if [ ! -d "$BITCOIN_DATADIR/regtest/blocks" ] && [ -d "$BITCOIN_DATADIR/data/regtest/blocks" ]; then',
                 '  BITCOIN_DATADIR="$BITCOIN_DATADIR/data"',
@@ -847,16 +836,6 @@ def render_blocksci_update_s3_pbs(
     )
 
 
-ANALYZE_MODES = ("blocksci-analyze", "blocksci-script", "blocksci-notebook", "blocksci-external")
-# Where each mode writes, relative to the run: uploaded after the job, and given the index provenance.
-MODE_OUTPUTS = {
-    "blocksci-analyze": BLOCKSCI_ANALYSIS_DIR,
-    "blocksci-script": BLOCKSCI_CUSTOM_ANALYSIS_DIR,
-    "blocksci-external": REPORT_DIR,
-    "blocksci-notebook": BLOCKSCI_NOTEBOOKS_DIR,
-}
-
-
 def render_blocksci_analyze_s3_pbs(
     target: S3Target,
     image: str,
@@ -880,7 +859,7 @@ def render_blocksci_analyze_s3_pbs(
     can share one published index without touching it. With ``persistent`` the
     index is read in place under the shared lock instead of being downloaded.
     """
-    if mode not in ANALYZE_MODES:
+    if mode not in MODE_OUTPUTS:
         raise PBSError(f"Unsupported reusable BlockSci mode: {mode}")
     if isinstance(notebook_port, bool) or not isinstance(notebook_port, int) or not 1024 <= notebook_port <= 65535:
         raise PBSError("BlockSci notebook port must be between 1024 and 65535")
@@ -893,88 +872,18 @@ def render_blocksci_analyze_s3_pbs(
     if external_false_cjtxs_uri is not None and mode != "blocksci-external":
         raise PBSError("A false-positive list belongs to the external BlockSci report")
 
-    output = f'"$RUN_WORK/{MODE_OUTPUTS[mode]}"'
-    prepare = ['mkdir -p "$OUTPUT_DIR"']
-    extra_binds = ""
-    connection_help = ""
-    output_check = ""
-    downloads: list[str] = []
-    if mode == "blocksci-analyze":
-        artifact = "blocksci-analysis_data/blocksci_analysis.json"
-        output_check = f'require_file "$RUN_WORK/{artifact}" "Reusable BlockSci analysis did not produce {artifact}"'
-        downloads += [_download(".pipeline/exporters"), _download("coinjoin_emulator_data")]
-    elif mode == "blocksci-external":
-        if external_baseline_uri is None:
-            raise PBSError("External BlockSci report requires a Dumplings baseline URI")
-        baseline_uri = _s3_uri(external_baseline_uri, "Dumplings baseline URI")
-        output_check = (
-            'require_file "$RUN_WORK/coinjoinPipeline_data/unified_report.json" '
-            '"External BlockSci report did not produce unified_report.json"'
-        )
-        downloads += [
-            _download(".pipeline/exporters"),
-            'mkdir -p "$RUN_WORK/coinjoin-analysis_data"',
-            f's5 cp {shell_value(baseline_uri)} "$RUN_WORK/coinjoin-analysis_data/coinjoin_tx_info.json"',
-        ]
-        if baseline_uri.endswith("/coinjoin_tx_info.json"):
-            # A Dumplings baseline keeps the snapshot it came from next to it; optional.
-            snapshot = shell_value(baseline_uri.rsplit("/", 1)[0] + "/dumplings-snapshot.json")
-            downloads.append(
-                f's5 cp {snapshot} "$RUN_WORK/coinjoin-analysis_data/dumplings-snapshot.json"'
-                ' || echo "[blocksci-external] the baseline has no dumplings-snapshot.json"'
-            )
-        if external_false_cjtxs_uri is not None:
-            false_cjtxs = _s3_uri(external_false_cjtxs_uri, "false-positive list URI")
-            # The report filters the baseline with every false_cjtxs.json* it finds there.
-            downloads.append(f's5 cp {shell_value(false_cjtxs)} "$RUN_WORK/coinjoin-analysis_data/false_cjtxs.json"')
-    elif mode == "blocksci-script":
-        if user_script is None:
-            raise PBSError("Reusable BlockSci script mode requires --blocksci-script")
-        script_path = user_script.expanduser().resolve()
-        require_storage_path(script_path)
-        require_existing_path(script_path, "BlockSci user script")
-        if not script_path.is_file():
-            raise PBSError(f"BlockSci user script is not a file: {script_path}")
-        prepare += [
-            f"USER_SCRIPT={shell_value(str(script_path))}",
-            'cp "$USER_SCRIPT" "$OUTPUT_DIR/script.py"',
-            'sha256sum "$USER_SCRIPT" > "$OUTPUT_DIR/script.py.sha256"',
-        ]
-        extra_binds = 'EXTRA_BINDS+=(--bind "$USER_SCRIPT:/mnt/user-analysis.py:ro")'
-    else:
-        output = '"$HOME/coinjoin-notebooks/$RUN_ID"'
-        if notebooks_dir is not None:
-            notebook_path = notebooks_dir.expanduser().resolve()
-            require_storage_path(notebook_path)
-            require_existing_path(notebook_path, "BlockSci notebooks directory")
-            if not notebook_path.is_dir():
-                raise PBSError(f"BlockSci notebooks path is not a directory: {notebook_path}")
-            output = shell_value(str(notebook_path))
-        prepare += [
-            'NOTEBOOK_CONTROL="$HOME/.local/share/coinjoin-pipeline/jupyter/$RUN_ID"',
-            'mkdir -p "$NOTEBOOK_CONTROL"',
-            'chmod 700 "$NOTEBOOK_CONTROL"',
-            'rm -f "$NOTEBOOK_CONTROL/connection.json"',
-            "cat > \"$RUN_WORK/blocksci_notebook.py\" <<'SCENARIO_LAB_NOTEBOOK'\n"
-            + template("blocksci_notebook.py")
-            + "\nSCENARIO_LAB_NOTEBOOK",
-        ]
-        extra_binds = (
-            'EXTRA_BINDS+=(--bind "$OUTPUT_DIR:/mnt/notebooks:rw" '
-            '--bind "$NOTEBOOK_CONTROL:/mnt/notebook-control:rw" '
-            '--bind "$RUN_WORK/blocksci_notebook.py:/mnt/blocksci_notebook.py:ro" '
-            '--env "NOTEBOOK_JOB_ID=${PBS_JOBID:?}" '
-            '--env "NOTEBOOK_FRONTEND=${PBS_O_HOST:-}" '
-            '--env "NOTEBOOK_LOGIN=${PBS_O_LOGNAME:-$USER}")'
-        )
-        connection_help = (
-            f'echo "[blocksci-notebook] Preferred Jupyter port: {notebook_port}"\n'
-            'echo "[blocksci-notebook] Open JupyterLab from Scenario Lab; connection details follow after startup."'
-        )
+    setup = prepare_analysis_mode(
+        mode,
+        user_script=user_script,
+        external_baseline_uri=external_baseline_uri,
+        external_false_cjtxs_uri=external_false_cjtxs_uri,
+        notebooks_dir=notebooks_dir,
+        notebook_port=notebook_port,
+    )
 
     if persistent is not None:
         restore = _index_reader(persistent, resources.walltime)
-        prepare.append('cp "$INDEX_DIR/manifest.json" "$OUTPUT_DIR/blocksci-index-manifest.json"')
+        setup.prepare.append('cp "$INDEX_DIR/manifest.json" "$OUTPUT_DIR/blocksci-index-manifest.json"')
     else:
         cache_run = "$RUN_ID"
         cache = []
@@ -985,14 +894,16 @@ def render_blocksci_analyze_s3_pbs(
             cache_run = "$CACHE_RUN_ID"
             cache.append(f"CACHE_RUN_ID={shell_value(source_run_id)}")
             # Record which published index the outputs were computed from.
-            prepare.append('cp "$CACHE_DIR/manifest.json" "$OUTPUT_DIR/blocksci-cache-manifest.json"')
-        downloads = cache + downloads
+            setup.prepare.append('cp "$CACHE_DIR/manifest.json" "$OUTPUT_DIR/blocksci-cache-manifest.json"')
+        setup.downloads = cache + setup.downloads
         restore = _restore_cache(
             "$CACHE_DIR", f"$ARTIFACT_URI/{cache_run}/blocksci-parse_data", cache_run, "BlockSci index"
         )
         if source_run_id is not None:
-            prepare.append('printf \'{"source_run_id":"%s"}\\n\' "$CACHE_RUN_ID" > "$OUTPUT_DIR/blocksci-source.json"')
-            extra_binds += (
+            setup.prepare.append(
+                'printf \'{"source_run_id":"%s"}\\n\' "$CACHE_RUN_ID" > "$OUTPUT_DIR/blocksci-source.json"'
+            )
+            setup.extra_binds += (
                 '\nINDEX_BINDS+=(--bind "$RUN_WORK/blocksci_data/parsed:'
                 '/runs/emulation/logs/$RUN_ID/blocksci_data/parsed:ro")'
             )
@@ -1004,14 +915,14 @@ def render_blocksci_analyze_s3_pbs(
         image=image,
         multijob=multijob,
         command=command,
-        output_dir=output,
-        download_inputs="\n".join(downloads),
+        output_dir=setup.output,
+        download_inputs="\n".join(setup.downloads),
         restore_cache=restore,
         finalize_index=":" if persistent is None else INDEX_UNLOCK,
-        prepare_mode="\n".join(prepare),
-        extra_binds=extra_binds,
-        connection_help=connection_help,
-        output_check=output_check,
+        prepare_mode="\n".join(setup.prepare),
+        extra_binds=setup.extra_binds,
+        connection_help=setup.connection_help,
+        output_check=setup.output_check,
         upload_outputs=f's5 sync "$OUTPUT_DIR/" "$ARTIFACT_URI/$RUN_ID/{MODE_OUTPUTS[mode]}/" || upload_status=$?',
     )
 
@@ -1033,7 +944,7 @@ def render_unified_report_s3_pbs(
         image=image,
         command=command,
         download_inputs="\n".join(
-            _download(name)
+            download_run_directory(name)
             for name in (
                 ".pipeline/exporters",
                 "coinjoin_emulator_data",
