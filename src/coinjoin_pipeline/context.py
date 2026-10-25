@@ -43,7 +43,7 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
     provided = set(config.provided)
     for stage in ("analysis", "blocksci", "mappings"):
         path = f"stages.{stage}"
-        if getattr(config.pbs, stage).configured and path not in provided:
+        if config.action != "mainnet-sync" and getattr(config.pbs, stage).configured and path not in provided:
             config = replace_path(config, path, True)
             provided.add(path)
     for path, variable in (
@@ -51,10 +51,12 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
         ("images.uploader", "COINJOIN_UPLOADER_IMAGE"),
         ("images.unified_report", "COINJOIN_UNIFIED_REPORT_IMAGE"),
     ):
+        if config.action == "mainnet-sync":
+            continue
         if config_value(config, path) is None and os.environ.get(variable):
             config = replace_path(config, path, os.environ[variable])
             provided.add(path)
-    if config.action == "pbs-from-s3":
+    if config.action in {"pbs-from-s3", "mainnet-sync"}:
         config = replace_path(config, "artifacts.backend", "s3")
     if config.engine == "joinmarket" and "coinjoin_type" not in provided:
         config = replace(config, coinjoin_type="joinmarket")

@@ -90,6 +90,12 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
     from .execution.coinjoin_tools import option_errors
 
     action = config.action
+    if action == "mainnet-sync":
+        from .execution.mainnet_sync import configuration_errors
+
+        return configuration_errors(config)
+    if any(path.startswith("mainnet.") or path.startswith("pbs.producer.") for path in config.provided):
+        return ["mainnet and pbs.producer settings require action: mainnet-sync"]
     analysis_pbs = _supplied(config, "stages.analysis", config.stages.analysis)
     blocksci_pbs = _supplied(config, "stages.blocksci", config.stages.blocksci)
     mappings_pbs = _supplied(config, "stages.mappings", config.stages.mappings)

@@ -6,6 +6,10 @@ is thin; heavy work runs in explicitly versioned container images.
 
 This is a local prototype and is not published to PyPI.
 
+Manual mainnet Core/Dumplings → BlockSci synchronization is described in
+[the synchronization runbook](docs/mainnet-synchronization.md). It uses two
+dependent PBS jobs and keeps the working data in place between runs.
+
 ## Install and run
 
 Run these from the repository checkout:

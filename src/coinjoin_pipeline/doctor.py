@@ -28,9 +28,10 @@ class Capability(Enum):
 def required_capabilities(config: PipelineConfiguration) -> set[Capability]:
     capabilities: set[Capability] = set()
     uses_s3 = config.artifacts.backend == "s3"
-    uses_pbs = (
-        any((config.stages.analysis, config.stages.blocksci, config.stages.mappings)) or config.action == "pbs-from-s3"
-    )
+    uses_pbs = any((config.stages.analysis, config.stages.blocksci, config.stages.mappings)) or config.action in {
+        "pbs-from-s3",
+        "mainnet-sync",
+    }
     if not config.dry_run:
         if config.driver == "kubernetes":
             capabilities.add(Capability.KUBECTL)

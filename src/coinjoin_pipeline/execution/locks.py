@@ -69,7 +69,7 @@ def pbs_submit_lock_path(logs_root: Path, run_id: str) -> Path:
 
 def command_lock_path(args: PipelineConfiguration, logs_root: Path) -> Path:
     """Return the local/shared advisory lock that protects this command."""
-    if args.action == "pbs-from-s3":
+    if args.action in {"pbs-from-s3", "mainnet-sync"}:
         return pbs_submit_lock_path(logs_root, required(args.run_id, "--run-id"))
     if args.action in {"full-run", "emulate"} and args.artifacts.backend == "s3":
         # The bucket prefix, Kubernetes Job and emulator pods are all keyed by the
