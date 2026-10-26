@@ -294,7 +294,8 @@ it downloads only public mainnet heights 0 and 1, builds and runs the
 environment secrets, and verifies the PBS BlockSci S3 restore and parse.
 
 `tests/test-mainnet-sync-mainnet.sh` exercises real Bitcoin Core P2P synchronization
-near height 100000, Dumplings, completed-file archival, two PBS/BlockSci generations,
+near height 400000, Dumplings scanning beyond its mainnet start height 336861,
+completed-file archival, two PBS/BlockSci generations,
 and recovery of both Core and the index against local MinIO. Histories that fit
 in the two active block files recover those files from the Core checkpoint.
 The automatic

@@ -9,20 +9,25 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 mode=${1:-regtest}
 case "$mode" in
   regtest) target=1200 ;;
-  mainnet) target=${MAINNET_TEST_TARGET_HEIGHT:-100000} ;;
+  mainnet) target=${MAINNET_TEST_TARGET_HEIGHT:-400000} ;;
   -h|--help)
     echo 'Usage: test-mainnet-sync-local.sh [regtest|mainnet]'
-    echo 'mainnet: MAINNET_TEST_TARGET_HEIGHT=100000 (1..150000), then another 1000 blocks.'
+    echo 'mainnet: MAINNET_TEST_TARGET_HEIGHT=400000 (1..400000), then another 1000 blocks.'
     exit 0 ;;
   *) echo "Unknown test network: $mode" >&2; exit 2 ;;
 esac
-if [[ ! "$target" =~ ^[1-9][0-9]{0,5}$ ]] || (( target > 150000 )); then
-  echo 'MAINNET_TEST_TARGET_HEIGHT must be an integer from 1 to 150000' >&2
+if [[ ! "$target" =~ ^[1-9][0-9]{0,5}$ ]] || (( target > 400000 )); then
+  echo 'MAINNET_TEST_TARGET_HEIGHT must be an integer from 1 to 400000' >&2
   exit 2
 fi
 # Independently bound a broken target-height implementation before it fills the runner.
-max_data_mb=${MAINNET_TEST_MAX_DATA_MB:-8192}
-generation_timeout=${MAINNET_TEST_GENERATION_TIMEOUT:-1800}
+if [[ "$mode" == mainnet ]]; then
+  max_data_mb=${MAINNET_TEST_MAX_DATA_MB:-262144}
+  generation_timeout=${MAINNET_TEST_GENERATION_TIMEOUT:-10800}
+else
+  max_data_mb=${MAINNET_TEST_MAX_DATA_MB:-8192}
+  generation_timeout=${MAINNET_TEST_GENERATION_TIMEOUT:-1800}
+fi
 for value in "$max_data_mb" "$generation_timeout"; do
   [[ "$value" =~ ^[1-9][0-9]{0,5}$ ]] || { echo 'Invalid positive test limit' >&2; exit 2; }
 done

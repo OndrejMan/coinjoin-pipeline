@@ -23,7 +23,16 @@ def save(path, value):
     path.write_text(json.dumps(value))
 
 
-@pytest.mark.parametrize("mode,target,network", [("mainnet", 100000, "bitcoin"), ("regtest", 1200, "bitcoin_regtest")])
+@pytest.mark.parametrize(
+    "mode,target,network",
+    [
+        ("mainnet", 1, "bitcoin"),
+        ("mainnet", 100000, "bitcoin"),
+        ("mainnet", 400000, "bitcoin"),
+        ("mainnet", 401000, "bitcoin"),
+        ("regtest", 1200, "bitcoin_regtest"),
+    ],
+)
 def test_generated_configuration_obeys_the_production_sync_contract(tmp_path, mode, target, network):
     value = support.configuration(tmp_path, "http://127.0.0.1:9000", "sync-test", mode, target)
     config = resolve_configuration(PipelineConfiguration.from_mapping(value))
@@ -35,7 +44,7 @@ def test_generated_configuration_obeys_the_production_sync_contract(tmp_path, mo
     assert config.pbs.blocksci_image == str(tmp_path / "images/blocksci.sif")
 
 
-@pytest.mark.parametrize("target", [0, -1, 400000, 900000])
+@pytest.mark.parametrize("target", [0, -1, 450000, 900000])
 def test_test_configuration_cannot_request_a_full_mainnet(tmp_path, target):
     with pytest.raises(ValueError, match="height guard"):
         support.configuration(tmp_path, "http://127.0.0.1:9000", "sync-test", "mainnet", target)
@@ -54,10 +63,10 @@ def test_watchdog_rejects_an_ignored_target_or_an_excessive_download(tmp_path):
         support.guard(tmp_path, "mainnet", 1)
 
 
-@pytest.mark.parametrize("height", [100000, 200000, 400000, 400001])
+@pytest.mark.parametrize("height", [100000, 400000, 401000, 450000, 450001])
 def test_watchdog_limits_core_height_independently_of_scanner_progress(tmp_path, height):
     save(tmp_path / "data/runs/run/producer.json", {"height": height, "scanner_height": 900000})
-    if height > 400000:
+    if height > 450000:
         with pytest.raises(ValueError, match=f"Mainnet height guard exceeded: {height}"):
             support.guard(tmp_path, "mainnet", 1)
     else:
@@ -194,9 +203,9 @@ def test_mainnet_ci_is_automatic_and_publishes_diagnostics_on_failure():
     assert "push" in triggers and "pull_request" in triggers
     job = workflow["jobs"]["mainnet-sync-bounded"]
     assert job["needs"] == "pbs-apptainer-image" and "if" not in job
-    assert job["env"]["MAINNET_TEST_TARGET_HEIGHT"] == "100000"
+    assert job["env"]["MAINNET_TEST_TARGET_HEIGHT"] == "400000"
     run = next(step for step in job["steps"] if "test-mainnet-sync-mainnet.sh" in step.get("run", ""))
-    assert "timeout " in run["run"] and "60m" in run["run"]
+    assert "timeout " in run["run"] and "300m" in run["run"]
     upload = next(step for step in job["steps"] if step.get("uses") == "actions/upload-artifact@v4")
     assert upload["if"] == "always()"
     assert upload["with"]["path"] == "github-test-results/mainnet-sync-mainnet/"
@@ -204,7 +213,7 @@ def test_mainnet_ci_is_automatic_and_publishes_diagnostics_on_failure():
     assert {"OndrejMan/bitcoin-block-archive", "OndrejMan/Dumplings", "OndrejMan/blocksci"} <= checkouts
 
 
-@pytest.mark.parametrize("target", ["0", "-1", "150001", "900000", "not-a-height"])
+@pytest.mark.parametrize("target", ["0", "-1", "400001", "900000", "not-a-height"])
 def test_invalid_mainnet_target_is_rejected_before_touching_docker(target):
     result = subprocess.run(
         ["bash", str(ROOT / "tests/test-mainnet-sync-mainnet.sh")],

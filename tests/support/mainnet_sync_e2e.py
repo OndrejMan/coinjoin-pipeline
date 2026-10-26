@@ -13,7 +13,7 @@ import shutil
 
 import yaml
 
-MAINNET_MAX_HEIGHT = 400_000
+MAINNET_MAX_HEIGHT = 450_000
 MAINNET_GENESIS = "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"
 
 
@@ -46,7 +46,7 @@ def configuration(work: Path, endpoint: str, run: str, mode: str, target: int) -
             "root": str(work / "data"),
             "core_image": str(work / "images/core.sif"),
             "dumplings_image": str(work / "images/dumplings.sif"),
-            "dbcache_mb": 128,
+            "dbcache_mb": 1024 if mode == "mainnet" else 128,
             "poll_seconds": 1,
             "blocks_uri": "s3://local-mainnet-sync/blocks",
             "dumplings_uri": "s3://local-mainnet-sync/dumplings",
@@ -60,17 +60,17 @@ def configuration(work: Path, endpoint: str, run: str, mode: str, target: int) -
             "blocksci_image": str(work / "images/blocksci.sif"),
             "producer": {
                 "ncpus": 2,
-                "mem": "4gb",
+                "mem": "8gb" if mode == "mainnet" else "4gb",
                 "scratch": "2gb",
                 "scratch_type": "local",
-                "walltime": "00:25:00",
+                "walltime": "01:30:00" if mode == "mainnet" else "00:25:00",
             },
             "blocksci": {
                 "ncpus": 4,
-                "mem": "8gb",
+                "mem": "16gb" if mode == "mainnet" else "8gb",
                 "scratch": "4gb",
                 "scratch_type": "local",
-                "walltime": "00:20:00",
+                "walltime": "01:00:00" if mode == "mainnet" else "00:20:00",
             },
         },
     }

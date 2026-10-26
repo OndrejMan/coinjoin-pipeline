@@ -193,13 +193,18 @@ vzdálené S3. Potvrzené výsledky a jejich omezení jsou v odkazovaném protok
 
 `tests/test-mainnet-sync-mainnet.sh` používá stejný testovací řetězec jako
 regtestová varianta, ale začíná s prázdným datovým adresářem a skutečný Bitcoin
-Core stahuje mainnet přes veřejnou P2P síť. Výchozí první cíl je **100000**.
+Core stahuje mainnet přes veřejnou P2P síť. Výchozí první cíl je **400000**;
+Dumplings tak skutečně zpracovává bloky od své počáteční výšky 336861.
 Druhý průchod navazuje na skutečnou zmrazenou výšku a požaduje dalších 1000
-bloků. Nejde o přesný řez na výšce 100000: platí výše popsaný přesah o již
-rozpracované bloky. Samostatná kontrola odmítne výšku Core nad 400000 a překročení
-8 GiB součtu pracovních dat, indexu, MinIO a obnovených kopií. Image tar/SIF
+bloků. Nejde o přesný řez na výšce 400000: platí výše popsaný přesah o již
+rozpracované bloky. Samostatná kontrola odmítne výšku Core nad 450000 a překročení
+256 GiB součtu pracovních dat, indexu, MinIO a obnovených kopií. Rezerva výšky
+umožňuje přesah Core i druhou generaci nad 400000. Image tar/SIF
 soubory do tohoto datového limitu nepatří. Na každou generaci se čeká nejvýše
-1800 sekund; CI omezuje celý test včetně přípravy obrazů pro Apptainer na 60 minut.
+10800 sekund; CI omezuje celý test včetně přípravy obrazů pro Apptainer na 300 minut
+a celý job včetně buildů na 360 minut. Producer má rozpočet 8 GiB RAM / 90 minut,
+BlockSci 16 GiB RAM / 60 minut. Tyto rozpočty pro cíl 400000 jsou počáteční
+nastavení; jejich dostatečnost ještě není změřená úspěšným během v této výšce.
 
 Průběh Dumplings vykazuje zmrazenou výšku Core v `height` a checkpoint skeneru
 samostatně v `scanner_height`. Chybějící checkpoint proto nemůže vydávat výchozí
@@ -209,9 +214,9 @@ Test vyžaduje úspěch obou produkčních PBS jobů v obou generacích. Ověřu
 inkrementální postup, archiv dokončených blokových souborů v lokálním MinIO, obnovu obou záloh se SHA-256,
 skutečné spuštění obnoveného Core a načtení obnoveného indexu v BlockSci.
 Po obnově musejí oba vracet stejnou výšku, hash tipu a mainnetový genesis;
-checkpoint Core musí odkazovat na odpovídající zálohu indexu. Při výchozím cíli 100000
-se žádné CoinJoiny neočekávají: jde o test infrastruktury a historických dat,
-nikoliv měření kvality detekce. Skutečné mazání starých blk souborů zůstává
+checkpoint Core musí odkazovat na odpovídající zálohu indexu. Výchozí cíl 400000
+zahrnuje i skutečný scan Dumplings. Test nepředepisuje počet nalezených CoinJoinů
+a bez ground truth neměří kvalitu detekce. Skutečné mazání starých blk souborů zůstává
 povinnou kontrolou regtestové varianty, kde ho malý dataset spolehlivě vyvolá.
 Archiver ponechává dva nejnovější blokové soubory. Pokud se krátká historie vejde
 do nich, test nevyžaduje samostatný archiv `blk00000.dat`; ověří jeho přítomnost
@@ -232,9 +237,9 @@ Se sestavenými obrazy z předchozí sekce, dostupným PBS a MinIO image:
 
 ```bash
 cd /home/administrator/diplomka/coinjoin-pipeline
-timeout --signal=TERM --kill-after=120s 60m bash tests/test-mainnet-sync-mainnet.sh
-# Volitelně menší první cíl (kladné celé číslo nejvýše 150000):
-MAINNET_TEST_TARGET_HEIGHT=10000 timeout --signal=TERM --kill-after=120s 60m \
+timeout --signal=TERM --kill-after=120s 300m bash tests/test-mainnet-sync-mainnet.sh
+# Volitelně menší první cíl (kladné celé číslo nejvýše 400000):
+MAINNET_TEST_TARGET_HEIGHT=10000 timeout --signal=TERM --kill-after=120s 300m \
   bash tests/test-mainnet-sync-mainnet.sh
 ```
 
