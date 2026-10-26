@@ -10,8 +10,13 @@ formulář notebooku; ten index neparsuje a používá jej pouze pro čtení.
 
 ## Volitelná cílová výška
 
-V Labu lze vyplnit **Cílová výška synchronizace (volitelné)**, například `200000`.
-Totéž v YAML nastavuje `mainnet.target_height: 200000` (CLI `--mainnet-target-height`).
+V Labu je **Cílová výška synchronizace (volitelné)** předvyplněná na `400000`.
+To je doporučený minimální cíl běhu se skutečným zpracováním bloků v Dumplings,
+který na mainnetu začíná výškou 336861. Stejný cíl používá příklad
+`examples/mainnet-sync.yaml`: `mainnet.target_height: 400000`
+(CLI `--mainnet-target-height 400000`). Core stále synchronizuje historii od genesis;
+400000 je cílová výška, nikoliv počátek stahování.
+Menší cíle zůstávají dostupné pro testy infrastruktury a prázdného checkpointu.
 Prázdné pole nebo vynechané nastavení znamená současný tip řetězce.
 S limitem se nečeká na dokončení IBD ani na dohnání všech hlaviček: po dosažení
 prahu se vypne síť, Core zůstane dostupný pro Dumplings a pokračuje celý řetězec
