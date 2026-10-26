@@ -148,9 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     use_line_buffered_output()
     original = list(sys.argv[1:] if argv is None else argv)
     if not original or original[0] in {"-h", "--help"}:
-        print(
-            "usage: cjp run CONFIG.yaml [--dry-run]\n       cjp ACTION [OPTIONS]\n       cjp doctor | watch | download-report | clean-s3 | runs | scenarios"
-        )
+        build_parser().print_help()
         return 0
     target = None
     manifest = None

@@ -1,7 +1,23 @@
 import pytest
 
 from coinjoin_pipeline.arguments import load_configuration
+from coinjoin_pipeline.cli import main
 from coinjoin_pipeline.context import resolve_configuration
+
+
+def test_top_level_help_exposes_actions_and_configuration_options(capsys, monkeypatch):
+    def no_execution(*_args, **_kwargs):
+        pytest.fail("help must not prepare or execute a run")
+
+    monkeypatch.setattr("coinjoin_pipeline.cli.RunContext.prepare", no_execution)
+    assert main(["--help"]) == 0
+    output = capsys.readouterr().out
+    assert "cjp run CONFIG.yaml" in output
+    assert "--analysis-program" in output
+    assert "mainnet-sync" in output
+    assert "pbs-from-s3" in output
+    assert "download-report" in output
+    assert "--dry-run" in output
 
 
 @pytest.mark.parametrize(

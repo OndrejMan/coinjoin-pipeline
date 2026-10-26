@@ -12,6 +12,7 @@ import yaml
 
 from .configuration import (
     ConfigurationError,
+    PipelineAction,
     PipelineConfiguration,
     option_specs,
     set_mapping_path,
@@ -62,8 +63,20 @@ def action_word(argv: list[str]) -> str | None:
 
 
 def build_parser(paths: set[str] | None = None, *, add_help: bool = True) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run a CoinJoin experiment from YAML.", add_help=add_help)
-    parser.add_argument("action", nargs="?", default=argparse.SUPPRESS)
+    parser = argparse.ArgumentParser(
+        prog="cjp",
+        description="Run a CoinJoin experiment from YAML or explicit options.",
+        add_help=add_help,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Configuration: cjp run CONFIG.yaml [--dry-run]\n"
+            "Execution actions: " + ", ".join(get_args(PipelineAction)) + "\n"
+            "Utilities: version, doctor, pull, watch, download-report, clean-s3, runs, scenarios\n"
+            "watch, download-report, clean-s3, runs and scenarios accept their own --help.\n"
+            "Use --dry-run to validate and render an execution without starting work."
+        ),
+    )
+    parser.add_argument("action", nargs="?", default=argparse.SUPPRESS, help="execution action (listed below)")
     parser.add_argument(*CONFIGURATION_FLAGS, type=Path)
     for path, destination, _ in option_specs():
         if paths is not None and path not in paths:
