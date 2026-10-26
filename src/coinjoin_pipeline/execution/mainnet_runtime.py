@@ -674,7 +674,8 @@ class Worker:
                 "dumplings-scan",
                 max(0, current - self.scan_start + 1),
                 max(0, height - self.scan_start + 1),
-                height=current,
+                height=height,
+                scanner_height=current,
                 target_height=height,
             )
 

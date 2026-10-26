@@ -35,7 +35,7 @@ def test_generated_configuration_obeys_the_production_sync_contract(tmp_path, mo
     assert config.pbs.blocksci_image == str(tmp_path / "images/blocksci.sif")
 
 
-@pytest.mark.parametrize("target", [0, -1, 200000, 900000])
+@pytest.mark.parametrize("target", [0, -1, 400000, 900000])
 def test_test_configuration_cannot_request_a_full_mainnet(tmp_path, target):
     with pytest.raises(ValueError, match="height guard"):
         support.configuration(tmp_path, "http://127.0.0.1:9000", "sync-test", "mainnet", target)
@@ -51,6 +51,16 @@ def test_watchdog_rejects_an_ignored_target_or_an_excessive_download(tmp_path):
     data.parent.mkdir(parents=True)
     data.write_bytes(b"x" * (1024 * 1024 + 1))
     with pytest.raises(ValueError, match="data guard"):
+        support.guard(tmp_path, "mainnet", 1)
+
+
+@pytest.mark.parametrize("height", [100000, 200000, 400000, 400001])
+def test_watchdog_limits_core_height_independently_of_scanner_progress(tmp_path, height):
+    save(tmp_path / "data/runs/run/producer.json", {"height": height, "scanner_height": 900000})
+    if height > 400000:
+        with pytest.raises(ValueError, match=f"Mainnet height guard exceeded: {height}"):
+            support.guard(tmp_path, "mainnet", 1)
+    else:
         support.guard(tmp_path, "mainnet", 1)
 
 

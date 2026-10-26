@@ -191,16 +191,20 @@ regtestová varianta, ale začíná s prázdným datovým adresářem a skutečn
 Core stahuje mainnet přes veřejnou P2P síť. Výchozí první cíl je **100000**.
 Druhý průchod navazuje na skutečnou zmrazenou výšku a požaduje dalších 1000
 bloků. Nejde o přesný řez na výšce 100000: platí výše popsaný přesah o již
-rozpracované bloky. Samostatná kontrola odmítne výšku nad 200000 a překročení
+rozpracované bloky. Samostatná kontrola odmítne výšku Core nad 400000 a překročení
 8 GiB součtu pracovních dat, indexu, MinIO a obnovených kopií. Image tar/SIF
 soubory do tohoto datového limitu nepatří. Na každou generaci se čeká nejvýše
 1800 sekund; CI omezuje celý test včetně přípravy obrazů pro Apptainer na 60 minut.
+
+Průběh Dumplings vykazuje zmrazenou výšku Core v `height` a checkpoint skeneru
+samostatně v `scanner_height`. Chybějící checkpoint proto nemůže vydávat výchozí
+výšku skeneru 336860 za dosaženou výšku blockchainu.
 
 Test vyžaduje úspěch obou produkčních PBS jobů v obou generacích. Ověřuje
 inkrementální postup, archiv dokončených blokových souborů v lokálním MinIO, obnovu obou záloh se SHA-256,
 skutečné spuštění obnoveného Core a načtení obnoveného indexu v BlockSci.
 Po obnově musejí oba vracet stejnou výšku, hash tipu a mainnetový genesis;
-checkpoint Core musí odkazovat na odpovídající zálohu indexu. Pod výškou 200000
+checkpoint Core musí odkazovat na odpovídající zálohu indexu. Při výchozím cíli 100000
 se žádné CoinJoiny neočekávají: jde o test infrastruktury a historických dat,
 nikoliv měření kvality detekce. Skutečné mazání starých blk souborů zůstává
 povinnou kontrolou regtestové varianty, kde ho malý dataset spolehlivě vyvolá.

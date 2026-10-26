@@ -210,6 +210,44 @@ def test_existing_higher_chain_is_frozen_without_rollback(worker, monkeypatch):
     assert calls == ["getblockchaininfo", "setnetworkactive", "getblockchaininfo"]
 
 
+@pytest.mark.parametrize("height", [100000, 500000])
+def test_producer_reports_core_height_separately_from_scanner_progress(worker, monkeypatch, height):
+    worker.c["target_height"] = height
+    block_hash = "a" * 64
+    reports = []
+    monkeypatch.setattr(worker, "start_core", lambda _: None)
+    monkeypatch.setattr(worker, "stop_core", lambda: None)
+    monkeypatch.setattr(worker, "synchronize_core", lambda: {"blocks": height, "bestblockhash": block_hash})
+    monkeypatch.setattr(worker, "rpc", lambda method, *args: block_hash if method == "getblockhash" else height)
+    monkeypatch.setattr(worker, "container_command", lambda *args, **kwargs: list(args))
+    monkeypatch.setattr(worker, "archive", lambda: None)
+    monkeypatch.setattr(worker, "publish_dumplings", lambda _: "s3://local/dumps/manifest.json")
+    monkeypatch.setattr(worker, "publish_json", lambda *args: None)
+
+    def scan(command, name, poll):
+        assert name == "dumplings"
+        assert "--include-tip" in command and f"--frozen-height={height}" in command
+        scanner = worker.dumps / "Scanner"
+        progress = scanner / "LastProcessedBlockHeight.txt"
+        for checkpoint in (None, "invalid", str(worker.scan_start - 1), str(height)):
+            if checkpoint is not None:
+                progress.write_text(checkpoint)
+            poll()
+            reports.append(json.loads((worker.run / "producer.json").read_text()))
+        (scanner / "Tx0Candidates.txt").touch()
+        (scanner / "Tx0CandidateMisses.txt").touch()
+        (scanner / "Checkpoint.txt").write_text(f"{height}\nTx0Candidates.txt 0\nTx0CandidateMisses.txt 0\n")
+
+    monkeypatch.setattr(worker, "run_command", scan)
+    worker.producer()
+    assert [report["height"] for report in reports] == [height] * 4
+    assert [report["scanner_height"] for report in reports] == [worker.scan_start - 1] * 3 + [height]
+    assert [report["current"] for report in reports] == [0] * 3 + [max(0, height - worker.scan_start + 1)]
+    assert all(report["total"] == max(0, height - worker.scan_start + 1) for report in reports)
+    ready = json.loads((worker.run / "ready.json").read_text())
+    assert ready["height"] == ready["dumplings_height"] == height
+
+
 @pytest.mark.parametrize("chain,height", [("main", 99999), ("regtest", 99)])
 def test_short_historical_chain_keeps_all_blocks(worker, monkeypatch, chain, height):
     worker.chain = chain
