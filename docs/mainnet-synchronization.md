@@ -197,13 +197,18 @@ soubory do tohoto datového limitu nepatří. Na každou generaci se čeká nejv
 1800 sekund; CI omezuje celý test včetně přípravy obrazů pro Apptainer na 60 minut.
 
 Test vyžaduje úspěch obou produkčních PBS jobů v obou generacích. Ověřuje
-inkrementální postup, archiv v lokálním MinIO, obnovu obou záloh se SHA-256,
+inkrementální postup, archiv dokončených blokových souborů v lokálním MinIO, obnovu obou záloh se SHA-256,
 skutečné spuštění obnoveného Core a načtení obnoveného indexu v BlockSci.
 Po obnově musejí oba vracet stejnou výšku, hash tipu a mainnetový genesis;
 checkpoint Core musí odkazovat na odpovídající zálohu indexu. Pod výškou 200000
 se žádné CoinJoiny neočekávají: jde o test infrastruktury a historických dat,
 nikoliv měření kvality detekce. Skutečné mazání starých blk souborů zůstává
 povinnou kontrolou regtestové varianty, kde ho malý dataset spolehlivě vyvolá.
+Archiver ponechává dva nejnovější blokové soubory. Pokud se krátká historie vejde
+do nich, test nevyžaduje samostatný archiv `blk00000.dat`; ověří jeho přítomnost
+v obnoveném checkpointu Core a zaznamená `block_archive_verified: false`.
+Jakmile vznikne třetí soubor nebo existuje archivní marker, vzdálenou kopii
+`blk00000.dat` nadále vyžaduje. Regtest ji vyžaduje vždy.
 
 Job **`mainnet-sync-bounded`** ve workflow `Tests` běží automaticky při pushi
 a pull requestu podle společného CI gate. Checkoutuje a sestaví Core/archiver,

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import fields
+from typing import TYPE_CHECKING
 
-from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.pbs.defaults import (
     DEFAULT_PBS_IMAGES,
     DEFAULT_RESOURCES,
@@ -14,6 +14,9 @@ from coinjoin_pipeline.execution.pbs.defaults import (
 )
 from coinjoin_pipeline.execution.pbs.validation import walltime_to_seconds
 from coinjoin_pipeline.paths import CONTAINER_ROOT
+
+if TYPE_CHECKING:
+    from coinjoin_pipeline.configuration import PipelineConfiguration
 
 
 def truthy_env(name: str) -> bool:

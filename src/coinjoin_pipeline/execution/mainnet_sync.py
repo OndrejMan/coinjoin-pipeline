@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, fields
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
 from coinjoin_pipeline.storage.s3 import (
     S3Target,
@@ -20,6 +20,9 @@ from .pbs.scripts import directives, template
 from .pbs.submission import PBSJobSpec, persist_pbs_job_id, qdel_pbs_job, submit_pbs_job
 from .pbs.validation import PBSError, require_safe_image, require_safe_pbs_resources, walltime_to_seconds
 from .pbs_settings import pbs_image, with_singularity_scheme
+
+if TYPE_CHECKING:
+    from coinjoin_pipeline.configuration import PipelineConfiguration
 
 
 def configuration_errors(config: PipelineConfiguration) -> list[str]:

@@ -123,7 +123,13 @@ def test_size_finds_raw_hex_in_exported_blocks_without_online_lookup(monkeypatch
 def test_size_checks_indices_and_txid_before_recording_a_result(monkeypatch, workspace):
     source, output = workspace
     fake_transaction_library(monkeypatch)
-    for settings in ({"input_indices": [2]}, {"output_indices": [-1]}, {"txid": "ff" * 32}):
+    for settings in (
+        {"input_indices": [2]},
+        {"output_indices": [-1]},
+        {"input_indices": [True]},
+        {"input_indices": [0.0]},
+        {"txid": "ff" * 32},
+    ):
         with pytest.raises(ValueError):
             research.analyze_size(source, output, {"tx_hex": "aabb", **settings}, "mainnet", ANALYZER)
     assert not (output / "transaction.hex").exists()

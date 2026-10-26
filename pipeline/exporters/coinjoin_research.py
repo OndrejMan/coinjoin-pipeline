@@ -49,7 +49,8 @@ def load_functions(path, *, llm=False):
     # The research files still use bare imports of their neighboring modules.
     sys.path.insert(0, str(path.parent))
     try:
-        exec(compile(ast.Module(body=body, type_ignores=[]), str(path), "exec"), namespace)
+        # The selected upstream definitions must share this isolated module namespace.
+        exec(compile(ast.Module(body=body, type_ignores=[]), str(path), "exec"), namespace)  # pylint: disable=exec-used
     finally:
         sys.path.pop(0)
     return namespace
@@ -59,7 +60,7 @@ class RecordedRequests:
     """Keep source responses with the result and bound the existing helper's HTTP calls."""
 
     def __init__(self, directory):
-        import requests
+        requests = importlib.import_module("requests")
 
         self.session = requests.Session()
         self.RequestException = requests.RequestException
@@ -114,10 +115,10 @@ def analyze_size(root, output, settings, mode, analysis_root):
     transaction = analysis.CTransaction.deserialize(bytes.fromhex(raw))
     for key, count in (("input_indices", len(transaction.vin)), ("output_indices", len(transaction.vout))):
         indices = settings.get(key, [])
-        if any(type(index) is not int or index < 0 or index >= count for index in indices):
-            raise ValueError("{} are outside the transaction's range".format(key))
+        if any(not isinstance(index, int) or isinstance(index, bool) or index < 0 or index >= count for index in indices):
+            raise ValueError(f"{key} are outside the transaction's range")
         if len(indices) != len(set(indices)):
-            raise ValueError("{} must not repeat an index".format(key))
+            raise ValueError(f"{key} must not repeat an index")
     actual_txid = str(transaction.GetTxid()[::-1].hex())
     if settings.get("txid") and settings["txid"].lower() != actual_txid:
         raise ValueError("Raw transaction TXID does not match the selected TXID")
@@ -195,7 +196,7 @@ def update_coordinators(root, output, settings, mode, analysis_root):
     data = json.loads(source.read_text(encoding="utf-8"))
     for key in ("manual", "crawl_wasabist", "crawl_wabisator", "crawl_crocsapi"):
         if not isinstance(data.get(key), dict):
-            raise ValueError("Coordinator source must contain a {} mapping".format(key))
+            raise ValueError(f"Coordinator source must contain a {key} mapping")
     helper_source = Path(__file__).with_name("wabisator_source.py")
     if not helper_source.is_file():
         helper_source = analysis_root / "scripts/update_txids_with_wabisator.py"

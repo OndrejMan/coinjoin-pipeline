@@ -294,8 +294,10 @@ it downloads only public mainnet heights 0 and 1, builds and runs the
 environment secrets, and verifies the PBS BlockSci S3 restore and parse.
 
 `tests/test-mainnet-sync-mainnet.sh` exercises real Bitcoin Core P2P synchronization
-near height 100000, Dumplings, archive publication, two PBS/BlockSci generations,
-and recovery of both Core and the index against local MinIO. The automatic
+near height 100000, Dumplings, completed-file archival, two PBS/BlockSci generations,
+and recovery of both Core and the index against local MinIO. Histories that fit
+in the two active block files recover those files from the Core checkpoint.
+The automatic
 `mainnet-sync-bounded` CI job builds its components and retains diagnostics on
 failure. See [the bounded mainnet E2E runbook](docs/mainnet-synchronization.md#omezený-mainnet-e2e-v-ci)
 for limits, retained evidence and the standalone command.

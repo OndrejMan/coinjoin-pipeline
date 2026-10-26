@@ -114,6 +114,19 @@ def check_first(work: Path, done_path: Path, mode: str, target: int) -> None:
     assert not (work / "data/.sync-active").exists()
 
 
+def requires_block_archive(work: Path, mode: str) -> bool:
+    chain = "bitcoin" if mode == "mainnet" else "bitcoin/regtest"
+    files = sorted((work / "data" / chain / "blocks").glob("blk*.dat"))
+    assert files, "Core block files are missing"
+    # The archiver retains its two newest files. A bounded mainnet can fit
+    # entirely in those files; regtest must still exercise archival and pruning.
+    return (
+        mode == "regtest"
+        or (work / "data/archive-state/blk00000.dat.json").is_file()
+        or files[-1].name >= "blk00002.dat"
+    )
+
+
 def check_final(work: Path, token: str, mode: str, target: int) -> dict:
     first = read_json(work / f"data/runs/local-sync-{token}-1/done.json")
     done = read_json(work / f"data/runs/local-sync-{token}-2/done.json")
@@ -139,7 +152,13 @@ def check_final(work: Path, token: str, mode: str, target: int) -> dict:
         assert not (scanner / "Tx0Candidates.txt").read_text().strip()
     assert core["pruned"] and not core["automatic_pruning"]
     assert read_json(work / "recovered-core-indexes.json") == {}
-    assert read_json(work / "archived-oldest-block.json")["size"] > 0
+    archive_required = requires_block_archive(work, mode)
+    archive = read_json(work / "archived-oldest-block.json")
+    if archive_required:
+        assert archive["size"] > 0
+    else:
+        assert archive["state"] == "pending", "The active block files must stay in the Core checkpoint"
+        assert (work / "recovered" / chain / "blocks/blk00000.dat").stat().st_size > 0
     core_backup = read_json(work / "core-latest.json")
     assert core_backup["index_backup"] == done["index_backup"]
     assert core_backup["height"] == done["height"] and core_backup["hash"] == done["hash"]
@@ -153,6 +172,7 @@ def check_final(work: Path, token: str, mode: str, target: int) -> dict:
         "genesis": index["genesis"],
         "core_checkpoint": done["core_checkpoint"],
         "index_backup": done["index_backup"],
+        "block_archive_verified": archive_required,
         "recovery_verified": True,
     }
     (work / "result.json").write_text(json.dumps(summary, indent=2) + "\n")
@@ -192,6 +212,7 @@ def main() -> None:
         "config": ("work", "endpoint", "run", "mode", "target"),
         "guard": ("work", "mode", "max_data_mb"),
         "first": ("work", "done", "mode", "target"),
+        "archive-required": ("work", "mode"),
         "final": ("work", "token", "mode", "target"),
         "diagnostics": ("work", "result", "mode", "status"),
     }.items():
@@ -207,6 +228,8 @@ def main() -> None:
         guard(work, args.mode, args.max_data_mb)
     elif args.action == "first":
         check_first(work, Path(args.done), args.mode, args.target)
+    elif args.action == "archive-required":
+        print("yes" if requires_block_archive(work, args.mode) else "no")
     elif args.action == "final":
         check_final(work, args.token, args.mode, args.target)
     else:

@@ -94,6 +94,10 @@ def recovered(tmp_path):
     )
     save(tmp_path / "recovered-core-indexes.json", {})
     save(tmp_path / "archived-oldest-block.json", {"size": 100})
+    blocks = tmp_path / "data/bitcoin/blocks"
+    blocks.mkdir(parents=True)
+    for number in range(3):
+        (blocks / f"blk{number:05d}.dat").write_bytes(b"block")
     save(tmp_path / "core-latest.json", {"height": 101002, "hash": done["hash"], "index_backup": done["index_backup"]})
     (tmp_path / "recovered-genesis.txt").write_text(support.MAINNET_GENESIS)
     return tmp_path
@@ -103,7 +107,40 @@ def test_mainnet_recovery_accepts_a_small_overshoot_and_records_evidence(recover
     result = support.check_final(recovered, "token", "mainnet", 101000)
     assert result["height"] == 101002
     assert result["recovery_verified"]
+    assert result["block_archive_verified"]
     assert json.loads((recovered / "result.json").read_text()) == result
+
+
+@pytest.mark.parametrize("count", [1, 2])
+def test_bounded_mainnet_recovers_active_block_files_without_a_completed_archive(recovered, count):
+    blocks = recovered / "data/bitcoin/blocks"
+    for path in sorted(blocks.glob("blk*.dat"))[count:]:
+        path.unlink()
+    save(recovered / "archived-oldest-block.json", {"state": "pending"})
+    restored = recovered / "recovered/bitcoin/blocks/blk00000.dat"
+    restored.parent.mkdir(parents=True)
+    restored.write_bytes(b"block")
+    result = support.check_final(recovered, "token", "mainnet", 101000)
+    assert result["recovery_verified"] and not result["block_archive_verified"]
+    restored.unlink()
+    with pytest.raises(FileNotFoundError):
+        support.check_final(recovered, "token", "mainnet", 101000)
+
+
+def test_completed_block_files_still_require_a_remote_archive(recovered):
+    save(recovered / "archived-oldest-block.json", {"state": "pending"})
+    with pytest.raises(KeyError, match="size"):
+        support.check_final(recovered, "token", "mainnet", 101000)
+
+
+def test_regtest_and_previously_archived_files_cannot_skip_the_archive_check(tmp_path):
+    for chain, mode in (("bitcoin", "mainnet"), ("bitcoin/regtest", "regtest")):
+        blocks = tmp_path / "data" / chain / "blocks"
+        blocks.mkdir(parents=True)
+        (blocks / "blk00000.dat").touch()
+        assert support.requires_block_archive(tmp_path, mode) == (mode == "regtest")
+    save(tmp_path / "data/archive-state/blk00000.dat.json", {"size": 100})
+    assert support.requires_block_archive(tmp_path, "mainnet")
 
 
 @pytest.mark.parametrize("broken", ["wrong-network", "wrong-hash", "no-increment", "wrong-backup"])

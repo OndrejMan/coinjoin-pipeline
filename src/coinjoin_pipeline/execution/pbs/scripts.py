@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from coinjoin_pipeline.configuration import MappingsConfiguration
 from coinjoin_pipeline.storage.s3 import validate_artifact_uri
 
 from .defaults import PBSResources
 from .validation import PBSError, require_safe_pbs_resources
+
+if TYPE_CHECKING:
+    from coinjoin_pipeline.configuration import MappingsConfiguration
 
 TEMPLATES = Path(__file__).parent / "templates"
 

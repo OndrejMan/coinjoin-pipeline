@@ -9,13 +9,16 @@ import shlex
 import re
 import shutil
 import subprocess
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from exporters.artifact_paths import COINJOIN_ANALYSIS_TOOLS_DIR
 
-from coinjoin_pipeline.configuration import CoinjoinAnalysisConfiguration, PipelineConfiguration
 from coinjoin_pipeline.storage.s3 import validate_artifact_uri
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
+
+if TYPE_CHECKING:
+    from coinjoin_pipeline.configuration import CoinjoinAnalysisConfiguration, PipelineConfiguration
 
 PROGRAM_ACTIONS = {
     "parse_cj_logs": ("collect_local", "collect_docker", "analyze_only"),
