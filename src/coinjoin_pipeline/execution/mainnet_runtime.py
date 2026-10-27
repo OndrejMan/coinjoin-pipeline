@@ -617,8 +617,10 @@ class Worker:
             # Bounded tests must not keep downloading for a full reporting interval.
             time.sleep(min(self.c["poll_seconds"], 1) if target is not None else self.c["poll_seconds"])
         self.rpc("setnetworkactive", "false")
-        # In-flight validation can advance beyond the threshold. Every consumer
-        # uses the actual frozen height/hash, never the requested threshold.
+        # Disabling P2P does not drain blocks already being validated. A clean
+        # offline restart makes the height stable before Dumplings pins it.
+        self.stop_core()
+        self.start_core(True)
         frozen = self.rpc("getblockchaininfo")
         if target is not None:
             if frozen["blocks"] < target:

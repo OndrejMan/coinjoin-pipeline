@@ -166,6 +166,8 @@ def test_bounded_sync_freezes_actual_tip_during_initial_download(worker, monkeyp
 
     worker.core = type("Core", (), {"poll": lambda _: None})()
     monkeypatch.setattr(worker, "rpc", rpc)
+    monkeypatch.setattr(worker, "stop_core", lambda: None)
+    monkeypatch.setattr(worker, "start_core", lambda offline: None)
     monkeypatch.setattr(worker, "progress", lambda *args, **kw: progress.append((args, kw)))
     monkeypatch.setattr("coinjoin_pipeline.execution.mainnet_runtime.time.sleep", sleeps.append)
     assert worker.synchronize_core() == {"blocks": 102, "bestblockhash": "b" * 64}
@@ -190,6 +192,8 @@ def test_unbounded_sync_still_waits_for_initial_download_and_headers(worker, mon
         worker, "rpc", lambda method, *args: next(snapshots) if method == "getblockchaininfo" else {"connections": 1}
     )
     monkeypatch.setattr(worker, "progress", lambda *args, **kw: None)
+    monkeypatch.setattr(worker, "stop_core", lambda: None)
+    monkeypatch.setattr(worker, "start_core", lambda offline: None)
     sleeps = []
     monkeypatch.setattr("coinjoin_pipeline.execution.mainnet_runtime.time.sleep", sleeps.append)
     assert worker.synchronize_core()["blocks"] == 101
@@ -206,8 +210,39 @@ def test_existing_higher_chain_is_frozen_without_rollback(worker, monkeypatch):
 
     monkeypatch.setattr(worker, "rpc", rpc)
     monkeypatch.setattr(worker, "progress", lambda *args, **kw: None)
+    monkeypatch.setattr(worker, "stop_core", lambda: calls.append("stop"))
+    monkeypatch.setattr(worker, "start_core", lambda offline: calls.append(("start", offline)))
     assert worker.synchronize_core()["blocks"] == 150
-    assert calls == ["getblockchaininfo", "setnetworkactive", "getblockchaininfo"]
+    assert calls == ["getblockchaininfo", "setnetworkactive", "stop", ("start", True), "getblockchaininfo"]
+
+
+def test_frozen_height_includes_blocks_validated_after_networking_was_disabled(worker, monkeypatch):
+    worker.c["target_height"] = 400000
+    state = {"height": 400013, "network": True, "stopped": False}
+
+    def rpc(method, *args):
+        if method == "setnetworkactive":
+            assert args == ("false",)
+            state.update(network=False, height=400019)
+        elif method == "getblockchaininfo":
+            return {"blocks": state["height"], "bestblockhash": str(state["height"])}
+        else:
+            raise AssertionError(method)
+
+    def stop():
+        assert not state["network"]
+        state.update(stopped=True, height=400022)
+
+    def start(offline):
+        assert offline and state["stopped"]
+        state["stopped"] = False
+
+    monkeypatch.setattr(worker, "rpc", rpc)
+    monkeypatch.setattr(worker, "stop_core", stop)
+    monkeypatch.setattr(worker, "start_core", start)
+    monkeypatch.setattr(worker, "progress", lambda *args, **kw: None)
+    assert worker.synchronize_core() == {"blocks": 400022, "bestblockhash": "400022"}
+    assert not state["stopped"] and not state["network"]
 
 
 @pytest.mark.parametrize("height", [100000, 500000])

@@ -19,13 +19,15 @@ který na mainnetu začíná výškou 336861. Stejný cíl používá příklad
 Menší cíle zůstávají dostupné pro testy infrastruktury a prázdného checkpointu.
 Prázdné pole nebo vynechané nastavení znamená současný tip řetězce.
 S limitem se nečeká na dokončení IBD ani na dohnání všech hlaviček: po dosažení
-prahu se vypne síť, Core zůstane dostupný pro Dumplings a pokračuje celý řetězec
+prahu se vypne síť, Core se čistě restartuje bez sítě pro Dumplings a pokračuje celý řetězec
 včetně indexace a checkpointu. Procento Core v tomto režimu vyjadřuje výšku vůči
 zadanému cíli; nejde o odhad zbývajícího času.
 
 Limit je práh pro vypnutí sítě, nikoliv přesný řez daty. Kontrola probíhá nejvýše
 po jedné sekundě plus čas RPC a publikování průběhu; již stažené a rozpracované
-bloky mohou výslednou výšku posunout. Všechny další kroky používají skutečnou
+bloky mohou výslednou výšku posunout. Samotné vypnutí sítě nečeká na dokončení
+jejich validace: konečná výška se proto čte až po čistém ukončení Core a jeho
+opětovném spuštění s `networkactive=0`. Všechny další kroky používají skutečnou
 zmrazenou výšku a hash; `ready.json` navíc uchovává `requested_target_height`.
 Existující vyšší řetězec se nezkracuje. Pro menší test použij oddělený Core dataset,
 index a zálohovací prefixy. Dumplings pro cíl před svým výchozím počátkem 336861
@@ -37,7 +39,8 @@ Tato možnost vyžaduje také nově sestavené Dumplings s `--frozen-height`.
 ## Dva joby
 
 `mainnet-producer` synchronizuje Core s `prune=1`, `txindex=0`, `blocksxor=0`.
-Po dosynchronizování vypne síť a zachytí výšku H a hash. Spustí jeden průchod
+Po dosynchronizování vypne síť, čistě restartuje Core bez sítě a zachytí
+stabilní výšku H a hash. Spustí jeden průchod
 Dumplings, ověří shodu výšky a checkpointu včetně délek souborů a prázdného
 `Tx0CandidateMisses.txt`. Archivuje a ověří dokončené blk soubory; dva poslední
 archiver standardně ponechává jako otevřený konec. Zálohuje a čtením zpět ověří
