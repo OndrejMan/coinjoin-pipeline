@@ -63,14 +63,14 @@ def configuration(work: Path, endpoint: str, run: str, mode: str, target: int) -
                 "mem": "8gb" if mode == "mainnet" else "4gb",
                 "scratch": "2gb",
                 "scratch_type": "local",
-                "walltime": "01:30:00" if mode == "mainnet" else "00:25:00",
+                "walltime": "06:00:00" if mode == "mainnet" else "00:25:00",
             },
             "blocksci": {
                 "ncpus": 4,
                 "mem": "16gb" if mode == "mainnet" else "8gb",
                 "scratch": "4gb",
                 "scratch_type": "local",
-                "walltime": "01:00:00" if mode == "mainnet" else "00:20:00",
+                "walltime": "03:00:00" if mode == "mainnet" else "00:20:00",
             },
         },
     }

@@ -23,7 +23,7 @@ fi
 # Independently bound a broken target-height implementation before it fills the runner.
 if [[ "$mode" == mainnet ]]; then
   max_data_mb=${MAINNET_TEST_MAX_DATA_MB:-262144}
-  generation_timeout=${MAINNET_TEST_GENERATION_TIMEOUT:-10800}
+  generation_timeout=${MAINNET_TEST_GENERATION_TIMEOUT:-34200}
 else
   max_data_mb=${MAINNET_TEST_MAX_DATA_MB:-8192}
   generation_timeout=${MAINNET_TEST_GENERATION_TIMEOUT:-1800}

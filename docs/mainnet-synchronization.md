@@ -204,10 +204,13 @@ rozpracované bloky. Samostatná kontrola odmítne výšku Core nad 450000 a př
 256 GiB součtu pracovních dat, indexu, MinIO a obnovených kopií. Rezerva výšky
 umožňuje přesah Core i druhou generaci nad 400000. Image tar/SIF
 soubory do tohoto datového limitu nepatří. Na každou generaci se čeká nejvýše
-10800 sekund; CI omezuje celý test včetně přípravy obrazů pro Apptainer na 300 minut
-a celý job včetně buildů na 360 minut. Producer má rozpočet 8 GiB RAM / 90 minut,
-BlockSci 16 GiB RAM / 60 minut. Tyto rozpočty pro cíl 400000 jsou počáteční
-nastavení; jejich dostatečnost ještě není změřená úspěšným během v této výšce.
+34200 sekund (9,5 hodiny); CI omezuje celý test včetně přípravy obrazů pro
+Apptainer na 1200 minut a celý job včetně buildů na 1260 minut. Producer má
+rozpočet 8 GiB RAM / 6 hodin, BlockSci 16 GiB RAM / 3 hodiny. Původních
+90 minut producentovi nestačilo: při cíli 400000 trvala samotná synchronizace
+Core přibližně 80 minut a PBS poté ukončil rozpracovaný sken Dumplings.
+Limit generace pokrývá oba navazující PBS joby a půlhodinovou rezervu;
+limit testu pokrývá dvě generace a hodinu na přípravu a ověření obnovy.
 
 Průběh Dumplings vykazuje zmrazenou výšku Core v `height` a checkpoint skeneru
 samostatně v `scanner_height`. Chybějící checkpoint proto nemůže vydávat výchozí
@@ -240,9 +243,9 @@ Se sestavenými obrazy z předchozí sekce, dostupným PBS a MinIO image:
 
 ```bash
 cd /home/administrator/diplomka/coinjoin-pipeline
-timeout --signal=TERM --kill-after=120s 300m bash tests/test-mainnet-sync-mainnet.sh
+timeout --signal=TERM --kill-after=120s 1200m bash tests/test-mainnet-sync-mainnet.sh
 # Volitelně menší první cíl (kladné celé číslo nejvýše 400000):
-MAINNET_TEST_TARGET_HEIGHT=10000 timeout --signal=TERM --kill-after=120s 300m \
+MAINNET_TEST_TARGET_HEIGHT=10000 timeout --signal=TERM --kill-after=120s 1200m \
   bash tests/test-mainnet-sync-mainnet.sh
 ```
 
