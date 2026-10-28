@@ -219,7 +219,7 @@ class Worker:
         return result
 
     def verify_remote_size(self, uri, expected_size):
-        result = self.s3("--json", "head", uri, stdout=subprocess.PIPE, text=True, timeout=60)
+        result = self.s3("--json", "ls", uri, stdout=subprocess.PIPE, text=True, timeout=60)
         metadata = json.loads(result.stdout)
         size = metadata.get("size")
         if metadata.get("key") != uri or not isinstance(size, int) or isinstance(size, bool) or size != expected_size:

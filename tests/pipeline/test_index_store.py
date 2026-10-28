@@ -169,7 +169,7 @@ def test_a_remote_size_mismatch_does_not_replace_the_previous_backup(tmp_path):
     backup(tmp_path)
     pointer = (s3(tmp_path) / "latest.json").read_bytes()
     failed = backup(tmp_path, job="backup-2", check=False, env={
-        "FAKE_S5CMD_HEAD_SIZE_DELTA": "1", "FAKE_S5CMD_FORBID_ARCHIVE_CAT": "1",
+        "FAKE_S5CMD_LS_SIZE_DELTA": "1", "FAKE_S5CMD_FORBID_ARCHIVE_CAT": "1",
     })
     assert failed.returncode != 0
     assert "size/key mismatch" in failed.stderr

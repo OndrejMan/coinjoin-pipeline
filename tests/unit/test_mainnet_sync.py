@@ -455,7 +455,7 @@ def test_backup_has_no_readback_and_size_failure_preserves_previous_pointer(work
     pointer = tmp_path / "s3/local/core/latest.json"
     old = pointer.read_bytes()
     worker.run_id = "new-generation"
-    worker.env["FAKE_S5CMD_HEAD_SIZE_DELTA"] = "1"
+    worker.env["FAKE_S5CMD_LS_SIZE_DELTA"] = "1"
     with pytest.raises(ValueError, match="size/key mismatch"):
         worker.backup(source, ["chainstate"], "s3://local/core", {"height": 600})
     assert pointer.read_bytes() == old

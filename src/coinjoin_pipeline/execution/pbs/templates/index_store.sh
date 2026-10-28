@@ -127,8 +127,8 @@ index_backup() {
     echo "[index] generation already published; choose a new run ID" >&2; return 1
   fi
   index_archive_upload "$INDEX_DIR" "$archive" "${INDEX_ZSTD_THREADS:-0}" config.json files.txt manifest.json parsed
-  s5 --json head "$archive" >"$RUN_WORK/index-backup-head.json"
-  python3 - "$RUN_WORK/index-backup-head.json" "$archive" "$ARCHIVE_SIZE" <<'INDEX_SIZE'
+  s5 --json ls "$archive" >"$RUN_WORK/index-backup-size.json"
+  python3 - "$RUN_WORK/index-backup-size.json" "$archive" "$ARCHIVE_SIZE" <<'INDEX_SIZE'
 import json, sys
 with open(sys.argv[1], encoding='utf-8') as handle:
     value = json.load(handle)

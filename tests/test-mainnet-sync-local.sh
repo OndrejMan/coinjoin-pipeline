@@ -205,7 +205,7 @@ run_generation "local-sync-$token-2" "$next_target"
 s5 cp s3://local-mainnet-sync/core/latest.json "$work/core-latest.json" >/dev/null
 s5 cp s3://local-mainnet-sync/index/latest.json "$work/index-latest.json" >/dev/null
 if [[ $("$python" "$repo/tests/support/mainnet_sync_e2e.py" archive-required "$work" "$mode") == yes ]]; then
-  s5 --json head s3://local-mainnet-sync/blocks/blk00000.dat >"$work/archived-oldest-block.json"
+  s5 --json ls s3://local-mainnet-sync/blocks/blk00000.dat >"$work/archived-oldest-block.json"
 else
   echo 'Bounded mainnet has no completed block files; verifying their recovery from the Core checkpoint.'
   printf '%s\n' '{"state":"pending","reason":"archiver retains the two newest block files"}' >"$work/archived-oldest-block.json"
