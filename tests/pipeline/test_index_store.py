@@ -257,3 +257,22 @@ def test_a_writer_proceeds_once_the_readers_finish(tmp_path):
 
     assert time.monotonic() - started >= 0.3
     assert [reader.wait() for reader in readers] == [0, 0]
+
+
+def test_an_aliased_index_is_bound_at_its_target_too(tmp_path):
+    # A /scratch/multijob-* alias points to another filesystem the container lacks.
+    (tmp_path / "beegfs").mkdir()
+    (tmp_path / "alias").symlink_to(tmp_path / "beegfs")
+    real = os.path.realpath(tmp_path / "beegfs")
+
+    result = shell(tmp_path, 'index_bind ro\nprintf "%s\\n" "${INDEX_BINDS[@]}"', index="alias")
+
+    assert result.stdout.split() == ["--bind", f"{real}:{real}:ro", "--bind", f"{real}:{tmp_path}/alias:ro"]
+
+
+def test_a_plain_index_is_bound_once(tmp_path):
+    real = str(tmp_path / "index")
+
+    result = shell(tmp_path, 'index_bind rw\nprintf "%s\\n" "${INDEX_BINDS[@]}"')
+
+    assert result.stdout.split() == ["--bind", f"{real}:{real}:rw"]

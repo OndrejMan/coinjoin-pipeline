@@ -200,3 +200,13 @@ index_link_into_run() {
   mkdir -p "$RUN_WORK/blocksci_data" "$INDEX_DIR/parsed"
   ln -sfn "$INDEX_DIR/parsed" "$RUN_WORK/blocksci_data/parsed"
 }
+
+# MetaCentrum's /scratch/multijob-* aliases point outside /scratch, which the node binds
+# into every container: the alias alone resolves to nothing there and the bind is lost.
+# Bind the target too, so the run's parsed link resolves inside the container as on the host.
+index_bind() {
+  local real
+  real=$(cd "$INDEX_DIR" && pwd -P)
+  INDEX_BINDS=(--bind "$real:$real:$1")
+  [ "$real" = "$INDEX_DIR" ] || INDEX_BINDS+=(--bind "$real:$INDEX_DIR:$1")
+}

@@ -339,7 +339,7 @@ def _index_reader(index: PersistentIndex, walltime: str) -> str:
             "index_link_into_run",
             'cp "$INDEX_DIR/config.json" "$RUN_WORK/blocksci_data/config.json"',
             "canonicalize_index",
-            'INDEX_BINDS=(--bind "$INDEX_DIR:$INDEX_DIR:ro")',
+            "index_bind ro",
             'echo "[index] reading $INDEX_DIR at height $(index_height "$INDEX_DIR")"',
         )
     )
@@ -711,7 +711,7 @@ def render_blocksci_parse_s3_pbs(
                 "fi",
                 'rm -rf "$INDEX_DIR/parsed" "$INDEX_DIR/config.json" "$INDEX_DIR/files.txt"',
                 *INDEX_BEGIN_WRITE,
-                'INDEX_BINDS=(--bind "$INDEX_DIR:$INDEX_DIR:rw")',
+                "index_bind rw",
                 produce_index,
             )
         )
@@ -807,7 +807,7 @@ def render_blocksci_update_s3_pbs(
                 '"$INDEX_DIR/manifest.json" | head -n 1)"',
                 *INDEX_BEGIN_WRITE,
                 'cp "$INDEX_DIR/config.json" "$RUN_WORK/blocksci_data/config.json"',
-                'INDEX_BINDS=(--bind "$INDEX_DIR:$INDEX_DIR:rw")',
+                "index_bind rw",
                 'echo "[index] updating $INDEX_DIR from height $(index_height "$INDEX_DIR")"',
             )
         )

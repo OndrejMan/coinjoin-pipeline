@@ -1394,7 +1394,7 @@ def test_persistent_update_works_in_place_under_the_writer_lock() -> None:
     assert "blocksci_data.tar.zst" not in script
     calls = [script.index(f"\n{call}\n") for call in ("index_lock_exclusive", "index_reconcile")]
     assert calls[0] < calls[1] < script.index("worker.py update")
-    assert 'INDEX_BINDS=(--bind "$INDEX_DIR:$INDEX_DIR:rw")' in script
+    assert "\nindex_bind rw\n" in script
     assert "INDEX_BACKUP=s3://bucket/blocksci-index" in script
     # The backup is its own weekly job, never part of the update.
     assert "\nindex_backup\n" not in script
@@ -1443,7 +1443,7 @@ def test_persistent_analysis_reads_under_the_shared_lock() -> None:
 
     subprocess.run(["bash", "-n"], input=script, text=True, check=True)
     assert "\nindex_lock_shared\n" in script and "\nindex_lock_exclusive\n" not in script
-    assert 'INDEX_BINDS=(--bind "$INDEX_DIR:$INDEX_DIR:ro")' in script
+    assert "\nindex_bind ro\n" in script
     assert '"${INDEX_BINDS[@]}"' in script
     assert "blocksci-parse_data/*" not in script
     assert 'cp "$INDEX_DIR/manifest.json" "$OUTPUT_DIR/blocksci-index-manifest.json"' in script
