@@ -4,9 +4,9 @@
 # manifest.json and files.txt (every other file with its size). It is complete when it
 # has no .writing marker and its files match files.txt.
 #
-# $INDEX_BACKUP points to immutable generations through latest.json. The previous
-# valid generation remains available while a new backup is uploaded and verified.
-# Legacy fixed-name backups remain readable.
+# $INDEX_BACKUP holds one backup: blocksci_index.tar.zst and manifest.json, written last.
+# A new backup deletes the old one first, so S3 never holds two copies; until its
+# manifest exists there is no valid backup.
 #
 # Lock: one writer or many readers, as directories under $INDEX_DIR/.lock. Entries are
 # built aside and renamed into place, which is atomic on NFS and BeeGFS without flock.
@@ -113,19 +113,17 @@ index_height() {
 }
 
 index_backup_available() {
-  [ -n "$INDEX_BACKUP" ] && { s5 ls "$INDEX_BACKUP/latest.json" >/dev/null 2>&1 \
-    || s5 ls "$INDEX_BACKUP/manifest.json" >/dev/null 2>&1; }
+  [ -n "$INDEX_BACKUP" ] && s5 ls "$INDEX_BACKUP/manifest.json" >/dev/null 2>&1
 }
 
-# Archive the working copy into an immutable generation. Run under at
-# least the shared lock, so no writer changes the index meanwhile.
+# Replace the S3 backup with the working copy. Run under at least the shared lock,
+# so no writer changes the index meanwhile. Only the object size is checked after
+# the upload; restore verifies the SHA-256.
 index_backup() {
-  local generation="$INDEX_BACKUP/generations/$RUN_ID" archive
-  archive="$generation/blocksci_index.tar.zst"
-  echo "[index] creating S3 backup in $generation (height $(index_height "$INDEX_DIR"))"
-  if s5 ls "$generation/manifest.json" >/dev/null 2>&1; then
-    echo "[index] generation already published; choose a new run ID" >&2; return 1
-  fi
+  local archive="$INDEX_BACKUP/blocksci_index.tar.zst"
+  echo "[index] replacing the S3 backup in $INDEX_BACKUP (height $(index_height "$INDEX_DIR"))"
+  s5 rm "$INDEX_BACKUP/manifest.json" >/dev/null 2>&1 || :
+  s5 rm "$archive" "$archive.sha256" >/dev/null 2>&1 || :
   index_archive_upload "$INDEX_DIR" "$archive" "${INDEX_ZSTD_THREADS:-0}" config.json files.txt manifest.json parsed
   s5 --json ls "$archive" >"$RUN_WORK/index-backup-size.json"
   python3 - "$RUN_WORK/index-backup-size.json" "$archive" "$ARCHIVE_SIZE" <<'INDEX_SIZE'
@@ -136,35 +134,34 @@ size = value.get('size')
 if value.get('key') != sys.argv[2] or type(size) is not int or size != int(sys.argv[3]):
     raise ValueError('Index backup S3 size/key mismatch')
 INDEX_SIZE
-  s5 cp "$INDEX_DIR/manifest.json" "$generation/manifest.json" >/dev/null
-  python3 - "$generation" "$archive" "$ARCHIVE_SHA256" "$ARCHIVE_SIZE" >"$RUN_WORK/index-latest.json" <<'INDEX_POINTER'
+  python3 - "$INDEX_DIR/manifest.json" "$archive" "$ARCHIVE_SHA256" "$ARCHIVE_SIZE" >"$RUN_WORK/index-backup.json" <<'INDEX_MANIFEST'
 import json, sys
-print(json.dumps(dict(prefix=sys.argv[1], archive_uri=sys.argv[2], archive_sha256=sys.argv[3],
-                     archive_size=int(sys.argv[4]), upload_validation='size-only')))
-INDEX_POINTER
-  s5 cp "$RUN_WORK/index-latest.json" "$INDEX_BACKUP/latest.json" >/dev/null
+from datetime import datetime, timezone
+with open(sys.argv[1], encoding='utf-8') as handle:
+    manifest = json.load(handle)
+manifest.update(archive_uri=sys.argv[2], archive_sha256=sys.argv[3], archive_size=int(sys.argv[4]),
+                upload_validation='size-only', uploaded_at=datetime.now(timezone.utc).isoformat())
+print(json.dumps(manifest, indent=2, sort_keys=True))
+INDEX_MANIFEST
+  s5 cp "$RUN_WORK/index-backup.json" "$INDEX_BACKUP/manifest.json" >/dev/null
   echo "[index] S3 backup complete"
 }
 
 # Under the writer lock: replace an incomplete working copy with the S3 backup.
 index_restore() {
-  local archive="$INDEX_BACKUP/blocksci_index.tar.zst" expected
-  if s5 ls "$INDEX_BACKUP/latest.json" >/dev/null 2>&1; then
-    s5 cat "$INDEX_BACKUP/latest.json" >"$RUN_WORK/index-latest.json"
-    python3 - "$RUN_WORK/index-latest.json" "$INDEX_BACKUP" >"$RUN_WORK/index-pointer.txt" <<'INDEX_POINTER'
+  local archive expected
+  s5 cat "$INDEX_BACKUP/manifest.json" >"$RUN_WORK/index-backup.json"
+  python3 - "$RUN_WORK/index-backup.json" "$INDEX_BACKUP" >"$RUN_WORK/index-pointer.txt" <<'INDEX_POINTER'
 import json, re, sys
 value = json.load(open(sys.argv[1]))
 archive, checksum = value['archive_uri'], value['archive_sha256']
-if not archive.startswith(sys.argv[2].rstrip('/') + '/generations/') or not re.fullmatch(r'[0-9a-f]{64}', checksum):
-    raise ValueError('Invalid index backup pointer')
+if archive != sys.argv[2].rstrip('/') + '/blocksci_index.tar.zst' or not re.fullmatch(r'[0-9a-f]{64}', checksum):
+    raise ValueError('Invalid index backup manifest')
 print(archive)
 print(checksum)
 INDEX_POINTER
-    archive=$(head -n 1 "$RUN_WORK/index-pointer.txt")
-    expected=$(tail -n 1 "$RUN_WORK/index-pointer.txt")
-  else
-    expected="$(s5 cat "$archive.sha256" | cut -d ' ' -f 1)"
-  fi
+  archive=$(head -n 1 "$RUN_WORK/index-pointer.txt")
+  expected=$(tail -n 1 "$RUN_WORK/index-pointer.txt")
   echo "[index] restoring the working copy from $archive"
   mkdir -p "$INDEX_DIR"
   touch "$INDEX_DIR/.writing"

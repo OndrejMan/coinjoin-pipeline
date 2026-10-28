@@ -131,7 +131,7 @@ VALID = {
         "--blocksci-index-backup-uri",
         "s3://bucket/blocksci-index",
     ],
-    "weekly index backup": [
+    "index backup": [
         *PBS_FROM_S3,
         "--blocksciPbs",
         "--blocksci-workflow",

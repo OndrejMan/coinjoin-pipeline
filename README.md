@@ -634,12 +634,12 @@ script task, `--blocksci-pin-height` and the half-open
 `BLOCKSCI_MAX_BLOCK` (pin + 1), `SCAN_START_HEIGHT` and `SCAN_END_HEIGHT`;
 `examples/metacentrum-mainnet-analyze.yaml` uses all of them.
 
-For a mainnet index updated every day, keep it out of S3:
+For the mainnet index, keep the working copy out of S3:
 `--blocksci-index-dir` points the parse, update and analysis jobs at one
 persistent directory, usually on MetaCentrum multijob scratch
-(`--pbs-blocksci-multijob brno`). A weekly `--blocksci-task backup` job
-archives it into one S3 backup (`--blocksci-index-backup-uri`), replacing the
-previous one. Updates take a writer lock and analyses and the backup a shared
+(`--pbs-blocksci-multijob brno`). A manually started `--blocksci-task backup`
+job archives it into one S3 backup (`--blocksci-index-backup-uri`), deleting the
+previous one first. Updates take a writer lock and analyses and the backup a shared
 one; an update restores a missing or incomplete working copy from the backup
 first. See `examples/metacentrum-mainnet-index-update.yaml`,
 `examples/metacentrum-mainnet-index-backup.yaml` and the persistent-index

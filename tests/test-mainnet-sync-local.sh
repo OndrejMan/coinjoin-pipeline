@@ -202,8 +202,7 @@ else
   next_target=$("$python" -c 'import json,sys; print(json.load(open(sys.argv[1]))["height"]+1000)' "$first_done")
 fi
 run_generation "local-sync-$token-2" "$next_target"
-s5 cp s3://local-mainnet-sync/core/latest.json "$work/core-latest.json" >/dev/null
-s5 cp s3://local-mainnet-sync/index/latest.json "$work/index-latest.json" >/dev/null
+s5 cp s3://local-mainnet-sync/core/manifest.json "$work/core-manifest.json" >/dev/null
 if [[ $("$python" "$repo/tests/support/mainnet_sync_e2e.py" archive-required "$work" "$mode") == yes ]]; then
   s5 --json ls s3://local-mainnet-sync/blocks/blk00000.dat >"$work/archived-oldest-block.json"
 else
@@ -221,10 +220,8 @@ settings = dict(root=str(work/'data'), index_dir=str(work/'index'), run_id='expl
     credentials=str(work/'credentials'), profile='local')
 (work/'recovery.json').write_text(json.dumps(settings))
 RECOVERY_SETTINGS
-manifest=$("$python" -c 'import json,sys; print(json.load(open(sys.argv[1]))["prefix"]+"/manifest.json")' "$work/core-latest.json")
-"$python" -m coinjoin_pipeline.execution.mainnet_runtime "$work/recovery.json" restore "$manifest" "$work/recovered"
-index_manifest=$("$python" -c 'import json,sys; print(json.load(open(sys.argv[1]))["prefix"]+"/manifest.json")' "$work/index-latest.json")
-"$python" -m coinjoin_pipeline.execution.mainnet_runtime "$work/recovery.json" restore "$index_manifest" "$work/recovered-index"
+"$python" -m coinjoin_pipeline.execution.mainnet_runtime "$work/recovery.json" restore s3://local-mainnet-sync/core/manifest.json "$work/recovered"
+"$python" -m coinjoin_pipeline.execution.mainnet_runtime "$work/recovery.json" restore s3://local-mainnet-sync/index/manifest.json "$work/recovered-index"
 "$python" - "$work" <<'INDEX_READER'
 import json, sys
 from pathlib import Path

@@ -1,7 +1,8 @@
 """Self-contained PBS worker. Embedded in qsub scripts; stdlib only on the host.
 
 Working data are never downloaded implicitly. Recovery is an explicit operation.
-Backups use immutable generation prefixes and switch latest.json only after verification.
+Each backup has one place: the old archive is deleted, the new one streamed and its size
+checked, and manifest.json, written last, makes it valid again.
 """
 
 from __future__ import annotations
@@ -448,28 +449,34 @@ class Worker:
             command += ["--prune-only", "--prune-ceiling-file", str(ceiling), "--prune-retain-from-file", str(number)]
         self.run_command(command, "pruning" if prune else "archiver")
 
-    def backup(self, root, members, prefix, metadata):
-        """Stream tar/zstd to S3, hashing locally and checking remote object size.
-
-        Content checksum verification is deferred to restore; no archive read-back.
-        Failure never moves latest.json.
-        """
-        generation = prefix.rstrip("/") + "/generations/" + self.run_id
-        archive = generation + "/checkpoint.tar.zst"
-        published = subprocess.run(
-            [*self.s5, "ls", generation + "/manifest.json"],
+    def remove(self, *uris):
+        """Delete objects; a missing one is not an error."""
+        subprocess.run(
+            [*self.s5, "rm", *uris],
             env=self.env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
+            timeout=600,
         )
-        if published.returncode == 0:
-            raise ValueError("Backup generation already published; choose a new run ID")
+
+    def backup(self, root, members, prefix, metadata, name):
+        """Replace the backup under prefix with a tar/zstd stream, hashing locally.
+
+        S3 never holds two copies: the manifest and the old archive go first, so until the
+        new manifest is written there is no valid backup. Only the object size is checked;
+        restore verifies the checksum.
+        """
+        prefix = prefix.rstrip("/")
+        archive = prefix + "/" + name
+        manifest_uri = prefix + "/manifest.json"
         for member in members:
             path = root / member
             if not path.exists() or path.is_symlink():
                 raise ValueError("Missing or linked checkpoint root: " + str(path))
         member_bytes = tree_bytes(root, members)
+        self.remove(manifest_uri)
+        self.remove(archive)
         producers = []
         digest = hashlib.sha256()
         archive_size = 0
@@ -506,10 +513,9 @@ class Worker:
                 "upload_validation": "size-only",
                 "uploaded_at": datetime.now(timezone.utc).isoformat(),
             }
-            self.publish_json(generation + "/manifest.json", manifest)
-            self.publish_json(prefix.rstrip("/") + "/latest.json", {"prefix": generation, **manifest})
-            self.uploaded[generation + "/manifest.json"] = {"archive_size": archive_size, "member_bytes": member_bytes}
-            return generation + "/manifest.json"
+            self.publish_json(manifest_uri, manifest)
+            self.uploaded[manifest_uri] = {"archive_size": archive_size, "member_bytes": member_bytes}
+            return manifest_uri
         finally:
             for process in [*producers, *([upload] if upload else [])]:
                 if process.poll() is None:
@@ -886,7 +892,11 @@ class Worker:
         # Writer lock remains held. Readers may use the index only after all steps exit.
         self.progress("index-backup")
         index_backup = self.backup(
-            self.index, ["config.json", "files.txt", "manifest.json", "parsed"], self.c["index_backup_uri"], manifest
+            self.index,
+            ["config.json", "files.txt", "manifest.json", "parsed"],
+            self.c["index_backup_uri"],
+            manifest,
+            "blocksci_index.tar.zst",
         )
         marker.unlink()
         self.publish_json(self.remote + "/blocksci-index-manifest.json", manifest)
@@ -910,6 +920,7 @@ class Worker:
                 ],
                 self.c["backup_uri"],
                 {"height": height, "hash": ready["hash"], "index_backup": index_backup, **signature},
+                "checkpoint.tar.zst",
             )
         done = {
             **ready,

@@ -159,7 +159,7 @@ def check_final(work: Path, token: str, mode: str, target: int) -> dict:
     else:
         assert archive["state"] == "pending", "The active block files must stay in the Core checkpoint"
         assert (work / "recovered" / chain / "blocks/blk00000.dat").stat().st_size > 0
-    core_backup = read_json(work / "core-latest.json")
+    core_backup = read_json(work / "core-manifest.json")
     assert core_backup["index_backup"] == done["index_backup"]
     assert core_backup["height"] == done["height"] and core_backup["hash"] == done["hash"]
     assert not (work / "data/.sync-active").exists()

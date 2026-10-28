@@ -98,13 +98,15 @@ bloků. Prunovaný Core bez indexu nelze rovnou použít pro prvotní parse.
 Existující index lze navázat jen se stejným zdrojem bloků a image; cizí index
 se automaticky nepřekonfiguruje.
 
-Každá záloha dostane `<backup-uri>/generations/<run-id>/checkpoint.tar.zst`
-a manifest se SHA-256 spočítaným během odesílání. Po úspěšném uploadu a kontrole
-existence a velikosti objektu se přepne `<backup-uri>/latest.json`. Manifest
-uvádí `upload_validation: size-only` a `uploaded_at`; obsah vzdálené zálohy se
-po uploadu znovu nečte. Kontrola SHA-256 celého archivu probíhá při obnově.
-Předchozí generace se nemažou. Retenci bude možné zavést odděleně; současný
-kód staré platné zálohy neodstraňuje ani při selhání nového uploadu.
+Každý prefix drží jedinou zálohu: archiv s pevným jménem
+(`<backup-uri>/checkpoint.tar.zst`, `<index-backup-uri>/blocksci_index.tar.zst`)
+a `manifest.json`. Nová záloha nejdřív smaže manifest a starý archiv, takže S3
+nikdy nedrží dvě kopie a do konce uploadu žádná platná záloha neexistuje.
+Archiv se streamuje do S3 se SHA-256 spočítaným během odesílání; po uploadu se
+ověří jen velikost objektu a nakonec se zapíše manifest
+(`upload_validation: size-only`, `uploaded_at`). Obsah se znovu nečte, SHA-256
+se kontroluje až při obnově. Selhaný upload nechá zálohu chybět do dalšího
+běhu; pracovní kopie na multijobu zůstává.
 Záloha Core obsahuje `bitcoin/blocks`, `bitcoin/chainstate`, `dumplings/Scanner`
 a stav archiveru. Neobsahuje peněženky, přihlašovací údaje ani konfiguraci Core.
 Konfiguraci pro pokračování vždy nastavuje job. Core se starými XOR bloky nebo
@@ -316,13 +318,12 @@ kořeny. Připrav malý JSON bez samotných klíčů (cesty uprav pro prostřed�
 
 ```bash
 python -m coinjoin_pipeline.execution.mainnet_runtime recovery.json restore \
-  s3://local/core/generations/GENERATION/manifest.json /storage/local/restored-core
+  s3://local/core/manifest.json /storage/local/restored-core
 ```
 
-Stejný helper obnoví index, pokud dostane jeho generační manifest a nový cílový
-adresář. Původní kopie se tím nepřepisuje. Staré pevně pojmenované zálohy indexu
-zůstávají čitelné původním `index_store.sh`; jejich formát není formátem této
-nové explicitní obnovy.
-Při společné obnově vyber index přes `index_backup` v manifestu checkpointu Core.
-Samostatný `blocksci-index/latest.json` může být novější, pokud poslední běh
-selhal až při závěrečné záloze Core. Takové dvě různé generace nelze slepě spojit.
+Stejný helper obnoví index, pokud dostane manifest jeho zálohy a nový cílový
+adresář. Původní kopie se tím nepřepisuje. Zálohu indexu umí obnovit i
+`index_store.sh` (update nad neúplnou pracovní kopií).
+Index i Core zapisuje stejný běh, index dřív. Pokud běh selže až při záloze Core,
+manifest Core chybí a záloha indexu je o generaci novější než pracovní kopie Core;
+takovou dvojici nelze slepě spojit a je potřeba nejdřív doběhnout synchronizaci.

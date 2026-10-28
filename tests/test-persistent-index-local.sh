@@ -4,9 +4,9 @@
 # singularity and s5cmd are replaced by Docker and a directory (tests/support/
 # persistent-index), the chain is regtest, and the "multijob" working copy is a
 # temporary directory. The jobs run in the order a mainnet index sees: parse,
-# the weekly S3 backup, a pinned script analysis, an update, then an update
-# after a file went missing on the working copy, which must restore it from the
-# backup, and a second backup generation that retains the first.
+# an S3 backup, a pinned script analysis, an update, then an update after a
+# file went missing on the working copy, which must restore it from the backup,
+# and a second backup that replaces the first.
 #
 # Needs Docker, zstd, bitcoin/bitcoin:29.1-alpine and the BlockSci image
 # (BLOCKSCI_IMAGE, default blocksci-complete:local).
@@ -20,7 +20,7 @@ core=persistent-index-core-$$
 export FAKE_S3="$work/s3" PATH="$support:$PATH"
 index="$work/multijob/blocksci-mainnet"
 backup_root="$FAKE_S3/bucket/blocksci-index"
-backup="$backup_root/generations/index-backup-1"
+backup="$backup_root"
 mkdir -p "$work/btc" "$FAKE_S3/bucket/runs" "$work/multijob"
 touch "$work/credentials"
 
@@ -114,11 +114,9 @@ grep -q "restoring the working copy" "$work/index-update-2.out" || { echo "FAIL:
 echo "OK: the update restored the purged working copy from the S3 backup"
 expect "index height after restore and update" "$(height "$index")" "$third"
 job backup index-backup-2
-backup="$backup_root/generations/index-backup-2"
 expect "backup height after the second backup" "$(height "$backup")" "$third"
-expect "objects in the new generation" "$(ls "$backup" | tr '\n' ' ')" "blocksci_index.tar.zst blocksci_index.tar.zst.sha256 manifest.json "
-test -f "$backup_root/generations/index-backup-1/manifest.json"
-echo "OK: the previous verified backup generation remains available"
+expect "objects in the backup prefix" "$(ls "$backup" | tr '\n' ' ')" "blocksci_index.tar.zst blocksci_index.tar.zst.sha256 manifest.json "
+echo "OK: the second backup replaced the first"
 
 job script scan-2 --script "$repo/scripts/metacentrum_mainnet_coinjoin_scan.py" --pin-height "$first"
 scan_two=$(python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["status"], d["index"]["last_height"], d["index"]["last_block_hash"])' "$FAKE_S3/bucket/runs/scan-2/blocksci-custom-analysis_data/joinmarket-mainnet-summary.json")

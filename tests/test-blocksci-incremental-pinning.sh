@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proof of concept for the daily mainnet index (scenario-lab/mainnet-analysis-plan-v2.md §2.4, §2.6).
+# Proof of concept for the incrementally updated mainnet index (scenario-lab/mainnet-analysis-plan-v2.md §2.4, §2.6).
 #
 # On a small regtest chain it checks that
 #   1. `blocksci_parser update` extends an index in place,

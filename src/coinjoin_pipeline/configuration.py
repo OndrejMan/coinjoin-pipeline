@@ -138,7 +138,7 @@ class BlockSciConfiguration(ConfigurationModel):
     scan_start_height: int | None = option(None, name="blocksci_scan_start_height", minimum=0)
     scan_end_height: int | None = option(None, name="blocksci_scan_end_height", minimum=1)
     # A persistent index in place of the S3 cache: the working copy and the S3 prefix of
-    # its verified backup generations (written by backup, read to restore it).
+    # its single backup (written by backup, read to restore it).
     index_dir: str | None = option(None, name="blocksci_index_dir")
     index_backup_uri: str | None = option(None, name="blocksci_index_backup_uri")
 

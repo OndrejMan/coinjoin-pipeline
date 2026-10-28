@@ -488,13 +488,14 @@ def test_core_shutdown_timeout_keeps_dataset_locked(worker, monkeypatch):
 
 
 @pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
-def test_backup_has_no_readback_and_size_failure_preserves_previous_pointer(worker, tmp_path, monkeypatch):
+def test_backup_replaces_the_previous_one_without_readback(worker, tmp_path, monkeypatch):
     source = tmp_path / "source"
     (source / "chainstate").mkdir(parents=True)
     (source / "chainstate/state.dat").write_bytes(b"a consistent Core snapshot")
     worker.env["FAKE_S5CMD_FORBID_ARCHIVE_CAT"] = "1"
     monkeypatch.setattr(worker, "remote_hash", lambda _: pytest.fail("archive backup must not read back content"))
-    uri = worker.backup(source, ["chainstate"], "s3://local/core", {"height": 500})
+    uri = worker.backup(source, ["chainstate"], "s3://local/core", {"height": 500}, "checkpoint.tar.zst")
+    assert uri == "s3://local/core/manifest.json"
     manifest = json.loads((tmp_path / "s3" / uri.removeprefix("s3://")).read_text())
     archive = tmp_path / "s3" / manifest["archive_uri"].removeprefix("s3://")
     assert manifest["archive_size"] == archive.stat().st_size
@@ -505,14 +506,15 @@ def test_backup_has_no_readback_and_size_failure_preserves_previous_pointer(work
     destination = tmp_path / "restored"
     worker.restore_checkpoint(uri, destination)
     assert (destination / "chainstate/state.dat").read_bytes() == b"a consistent Core snapshot"
-    pointer = tmp_path / "s3/local/core/latest.json"
-    old = pointer.read_bytes()
-    worker.run_id = "new-generation"
+    worker.run_id = "next-run"
+    worker.backup(source, ["chainstate"], "s3://local/core", {"height": 550}, "checkpoint.tar.zst")
+    assert sorted(path.name for path in (tmp_path / "s3/local/core").iterdir()) == ["checkpoint.tar.zst", "manifest.json"]
+    assert json.loads((tmp_path / "s3/local/core/manifest.json").read_text())["height"] == 550
+    # A failed upload leaves no valid backup until the next run.
     worker.env["FAKE_S5CMD_LS_SIZE_DELTA"] = "1"
     with pytest.raises(ValueError, match="size/key mismatch"):
-        worker.backup(source, ["chainstate"], "s3://local/core", {"height": 600})
-    assert pointer.read_bytes() == old
-    assert not (tmp_path / "s3/local/core/generations/new-generation/manifest.json").exists()
+        worker.backup(source, ["chainstate"], "s3://local/core", {"height": 600}, "checkpoint.tar.zst")
+    assert not (tmp_path / "s3/local/core/manifest.json").exists()
 
 
 @pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
@@ -520,7 +522,7 @@ def test_restore_still_checks_stream_checksum(worker, tmp_path):
     source = tmp_path / "source"
     (source / "chainstate").mkdir(parents=True)
     (source / "chainstate/state.dat").write_text("snapshot")
-    uri = worker.backup(source, ["chainstate"], "s3://local/core", {})
+    uri = worker.backup(source, ["chainstate"], "s3://local/core", {}, "checkpoint.tar.zst")
     manifest_path = tmp_path / "s3" / uri.removeprefix("s3://")
     manifest = json.loads(manifest_path.read_text())
     manifest["archive_sha256"] = "0" * 64
@@ -582,12 +584,12 @@ def test_final_core_checkpoint_failure_cannot_publish_done(worker, monkeypatch):
 
     monkeypatch.setattr(worker, "run_command", run)
 
-    def backup(root, members, prefix, metadata):
+    def backup(root, members, prefix, metadata, name):
         if prefix == worker.c["backup_uri"]:
             steps.append("core-backup-failed")
             raise RuntimeError("final checkpoint upload failed")
         steps.append("index-backup-verified")
-        return "s3://local/index/generations/test/manifest.json"
+        return "s3://local/index/manifest.json"
 
     monkeypatch.setattr(worker, "backup", backup)
 
@@ -655,7 +657,7 @@ def test_local_two_job_handoff_backs_up_the_post_prune_core(worker, tmp_path, mo
         (worker.archive_state / "verified.json").write_text("verified archive fixture")
         if prune:
             assert kwargs["number"] == 1
-            assert (tmp_path / "s3/local/index/latest.json").exists()
+            assert (tmp_path / "s3/local/index/manifest.json").exists()
             (worker.core_dir / "blocks/blk00000.dat").unlink()
             events.append("prune")
         else:
@@ -689,7 +691,7 @@ def test_local_two_job_handoff_backs_up_the_post_prune_core(worker, tmp_path, mo
     monkeypatch.setattr(worker, "run_command", run)
     worker.producer()
     assert not worker.active.exists()
-    assert not (tmp_path / "s3/local/core/latest.json").exists()
+    assert not (tmp_path / "s3/local/core/manifest.json").exists()
     assert not (worker.run / "done.json").exists()
     worker.blocksci()
     assert not worker.active.exists()

@@ -83,8 +83,8 @@ def recovered(tmp_path):
         "height": 101002,
         "dumplings_height": 101002,
         "hash": "a" * 64,
-        "core_checkpoint": "s3://local-mainnet-sync/core/generations/run/manifest.json",
-        "index_backup": "s3://local-mainnet-sync/index/generations/run/manifest.json",
+        "core_checkpoint": "s3://local-mainnet-sync/core/manifest.json",
+        "index_backup": "s3://local-mainnet-sync/index/manifest.json",
     }
     save(tmp_path / "data/runs/local-sync-token-1/done.json", {"height": 100000})
     save(tmp_path / "data/runs/local-sync-token-2/done.json", done)
@@ -118,7 +118,7 @@ def recovered(tmp_path):
     blocks.mkdir(parents=True)
     for number in range(3):
         (blocks / f"blk{number:05d}.dat").write_bytes(b"block")
-    save(tmp_path / "core-latest.json", {"height": 101002, "hash": done["hash"], "index_backup": done["index_backup"]})
+    save(tmp_path / "core-manifest.json", {"height": 101002, "hash": done["hash"], "index_backup": done["index_backup"]})
     (tmp_path / "recovered-genesis.txt").write_text(support.MAINNET_GENESIS)
     return tmp_path
 
@@ -174,7 +174,7 @@ def test_recovery_fails_for_another_chain_stale_index_or_unpaired_backup(recover
     elif broken == "no-increment":
         save(recovered / "data/runs/local-sync-token-1/done.json", {"height": 101002})
     else:
-        backup = recovered / "core-latest.json"
+        backup = recovered / "core-manifest.json"
         record = json.loads(backup.read_text())
         record["index_backup"] = "s3://local-mainnet-sync/index/older/manifest.json"
         save(backup, record)

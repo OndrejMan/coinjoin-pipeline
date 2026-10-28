@@ -1,4 +1,4 @@
-# Daily update of a persistent mainnet BlockSci index (no S3 cache).
+# Manual update of a persistent mainnet BlockSci index (no S3 cache).
 # The working copy lives on MetaCentrum multijob scratch and is updated in place
 # under the index writer lock; analyses read it under the shared lock. When the
 # working copy is missing or incomplete (multijob may purge unused files) the job
@@ -29,7 +29,7 @@ blocksci:
   task: update
   # Create /scratch/multijob-brno/<login>/ once by hand; PBS does not.
   index_dir: /scratch/multijob-brno/<login>/blocksci-mainnet
-  # Read only to restore the working copy; the weekly backup job writes it.
+  # Read only to restore the working copy; the backup job writes it.
   index_backup_uri: s3://xman-coinjoin-new/blocksci-index
   bitcoin_blocks_uri: s3://xman-coinjoin-new/bitcoin-mainnet/blocks
   network: bitcoin

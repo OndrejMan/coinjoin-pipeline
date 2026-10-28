@@ -293,7 +293,7 @@ class PersistentIndex:
     """A BlockSci index kept in a directory shared by jobs instead of the S3 cache.
 
     ``index_dir`` is the working copy jobs read and update in place; ``backup_uri`` is the
-    S3 prefix of its backup generations, written by the backup job and read to restore an
+    S3 prefix of its single backup, written by the backup job and read to restore an
     incomplete working copy.
     """
 
@@ -379,11 +379,11 @@ def render_blocksci_index_backup_s3_pbs(
     multijob: str | None = None,
     resources: PBSResources = BLOCKSCI,
 ) -> str:
-    """Render a job that publishes a new immutable backup generation of the working index.
+    """Render a job that replaces the S3 backup of the working index.
 
     It only reads the index, so it holds the shared lock: analyses go on and only an update
-    waits. The previous generation stays the restore source until the new archive's S3 size
-    matches the uploaded stream and ``latest.json`` is switched to it.
+    waits. The old backup is deleted first; the new one is valid once its S3 size matches the
+    uploaded stream and its ``manifest.json`` is written.
     """
     if persistent.backup_uri is None:
         raise PBSError("An index backup needs --blocksci-index-backup-uri")

@@ -1397,7 +1397,7 @@ def test_persistent_update_works_in_place_under_the_writer_lock() -> None:
     assert calls[0] < calls[1] < script.index("worker.py update")
     assert "\nindex_bind rw\n" in script
     assert "INDEX_BACKUP=s3://bucket/blocksci-index" in script
-    # The backup is its own weekly job, never part of the update.
+    # The backup is its own job, never part of the update.
     assert "\nindex_backup\n" not in script
     assert 'index_publish "$RUN_WORK/index-manifest.json"' in script
     assert "index_unlock 2>/dev/null || :" in script

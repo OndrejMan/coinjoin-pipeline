@@ -160,18 +160,16 @@ reconciles: a missing or incomplete working copy is replaced by the backup,
 streamed from S3, checked against its SHA-256 and then against `files.txt`.
 Readers never restore; they fail and name the update that does.
 
-Each `backup` job writes one immutable generation under
-`<index_backup_uri>/generations/<run-id>/`: `blocksci_index.tar.zst`
+The prefix holds one backup: `<index_backup_uri>/blocksci_index.tar.zst`
 (`config.json`, `files.txt`, `manifest.json`, `parsed/`), its `.sha256`, and
-`manifest.json`. It refuses a generation that already has a manifest. The
-archive is streamed `tar | zstd` into `s5cmd pipe` (an s5cmd without `pipe`
-stages it in scratch); its S3 size must match the uploaded stream before the
-manifest and then `<index_backup_uri>/latest.json` (`prefix`, `archive_uri`,
-`archive_sha256`, `archive_size`) are written. Until that pointer switches, the
-previous generation stays the restore source. A restore follows `latest.json`
-and verifies the SHA-256 while extracting; without a pointer it reads the
-legacy fixed-name `<index_backup_uri>/blocksci_index.tar.zst` and its
-`.sha256`. The job records the index manifest as `blocksci-index-backup.json`
+`<index_backup_uri>/manifest.json`. A `backup` job first deletes the manifest
+and the old archive, so S3 never holds two copies and there is no valid backup
+until it finishes. The archive is streamed `tar | zstd` into `s5cmd pipe` (an
+s5cmd without `pipe` stages it in scratch); its S3 size must match the uploaded
+stream before the manifest is written: the index manifest plus `archive_uri`,
+`archive_sha256`, `archive_size`, `upload_validation` and `uploaded_at`. The
+archive is not read back. A restore reads that manifest and verifies the
+SHA-256 while extracting. The job records the index manifest as `blocksci-index-backup.json`
 in its run. Neither `parse` nor
 `update` writes a backup. Analyses copy the index manifest next to their outputs as
 `blocksci-index-manifest.json`. `tests/test-persistent-index-local.sh` runs the
