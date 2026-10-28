@@ -265,6 +265,7 @@ class CoinjoinAnalysisConfiguration(ConfigurationModel):
             "analyze_tx_size",
             "generate_llm_inputs",
             "update_txids_with_wabisator",
+            "coinjoin_statistics",
         ]
         | None
     ) = option(None, name="analysis_program")

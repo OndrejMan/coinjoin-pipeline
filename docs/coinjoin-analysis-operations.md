@@ -16,10 +16,12 @@ ordinary baseline stages keep their existing behavior.
 | `analyze_tx_size` | Adapter for `cj_analysis.compute_partial_vsize`, emulation and mainnet |
 | `generate_llm_inputs` | Adapter for the existing generator, emulation with known wallets only |
 | `update_txids_with_wabisator` | Adapter for the existing metadata updater, mainnet only |
+| `coinjoin_statistics` | `wasabi2`, `wasabi1`, `joinmarket`: the CRoCS daily statistics workflow, mainnet only |
 
-The first seven are existing command-line entry points. The final three receive
+The first seven are existing command-line entry points. The next three receive
 explicit parameters through `research` and save results the original fixed-input
-entry points do not expose. `env_vars` exposes the parsing commands' existing
+entry points do not expose. `coinjoin_statistics` runs a sequence of existing
+`parse_dumplings` commands; see [CoinJoin Statistics](#coinjoin-statistics). `env_vars` exposes the parsing commands' existing
 configuration switches, including analyses enabled through those switches.
 Their interpretation, dependencies and supported protocols remain the analyzer's.
 
@@ -239,3 +241,37 @@ previous outputs. The canonical comparison baseline is not modified.
 On PBS the exit trap uploads partial results and the log even when analysis fails;
 an upload failure prevents a successful stage marker. This is artifact provenance,
 not proof that the chosen image or dataset has been tested on a live cluster.
+
+## CoinJoin Statistics
+
+`coinjoin_statistics` reproduces the daily workflow behind the CRoCS CoinJoin
+Statistics site in one analysis job. The coinjoin-analysis scripts
+`process_ww2.sh`, `process_ww1.sh`, `process_jm.sh` and `visualize_*.sh` are
+run in the order of `process_daily.sh`, followed by `file_check`. The selected
+`actions` are the protocols to process. JoinMarket always runs last. It restores
+the Wasabi false positives only when both Wasabi protocols are selected.
+
+```yaml
+coinjoin_analysis:
+  program: coinjoin_statistics
+  data_mode: mainnet
+  actions: [wasabi2, wasabi1, joinmarket]
+  input_uri: s3://my-bucket/dumplings/generations/<generation>
+```
+
+`input_uri` is a Dumplings snapshot, either its flat files or a dataset root
+containing `Scanner/`. Converted `*.txt.json` caches are deleted first. The
+workflow differs from the CRoCS scripts in these ways:
+
+- Fee rates and false positives come from the image's `data/` instead of
+  mempool.space.
+- Wallet-count predictions and image montages are skipped. The image has no
+  estimation matrices and no ImageMagick.
+
+The job publishes `site/` with the file selection of `backup_and_montage.sh`:
+plots, summaries, `summary.json` with the Dumplings height, and the pool
+liquidity fragments in `site/texts/`. It also publishes `summary.log`,
+`operation.txt` and the job log. The processed `coinjoin_tx_info.json` files
+and the snapshot copy are deleted. Scenario Lab builds the statistics pages
+from a downloaded `site/`. A full mainnet snapshot needs several hours and
+tens of GB of memory, so size `pbs.analysis` accordingly.

@@ -19,6 +19,7 @@ from exporters.verify_chain import is_block_hash
 from coinjoin_pipeline.configuration import CoinjoinAnalysisConfiguration, MappingsConfiguration
 from coinjoin_pipeline.execution.coinjoin_tools import (
     RESEARCH_PROGRAMS,
+    WORKFLOW_SCRIPTS,
     command as coinjoin_tools_command,
     command_argv,
     uses_run_input,
@@ -440,6 +441,12 @@ def render_coinjoin_tools_s3_pbs(
                 + template("wabisator_source.txt")
                 + "\nCOINJOIN_WABISATOR_SOURCE\n"
             )
+    if options.program in WORKFLOW_SCRIPTS:
+        adapter = (
+            f"cat > \"$OUTPUT/{options.program}.sh\" <<'COINJOIN_WORKFLOW'\n"
+            + WORKFLOW_SCRIPTS[options.program].read_text(encoding="utf-8")
+            + "COINJOIN_WORKFLOW\n"
+        )
     return _render_stage(
         "s3_coinjoin_tools.sh",
         "coinjoin-analysis",

@@ -44,7 +44,7 @@ def config(options, **overrides):
     [
         (program, actions)
         for program, actions in coinjoin_tools.PROGRAM_ACTIONS.items()
-        if program not in coinjoin_tools.RESEARCH_PROGRAMS
+        if program not in coinjoin_tools.RESEARCH_PROGRAMS | coinjoin_tools.WORKFLOW_PROGRAMS
     ],
 )
 def test_catalog_matches_the_analyzers_public_argparse_choices(program, actions):
@@ -92,7 +92,7 @@ def test_catalog_covers_all_existing_commands_with_configurable_cli_inputs():
         )
         if parser or positional:
             commands.add(path.stem)
-    assert commands == set(coinjoin_tools.PROGRAM_ACTIONS) - coinjoin_tools.RESEARCH_PROGRAMS
+    assert commands == set(coinjoin_tools.PROGRAM_ACTIONS) - coinjoin_tools.RESEARCH_PROGRAMS - coinjoin_tools.WORKFLOW_PROGRAMS
 
 
 @pytest.mark.parametrize("program,actions", coinjoin_tools.PROGRAM_ACTIONS.items())
@@ -152,6 +152,20 @@ def test_cli_accepts_multiple_actions_targets_and_switches_as_values():
         ({"program": "ww2_analyze_client", "actions": ["compute_num_predict_matrix"]}, "own input dataset"),
         ({"program": "scan_results_plot", "filename": "wasabi2.json", "input_uri": "s3://bucket/data"}, "filename"),
         ({"program": "parse_cj_logs", "actions": ["analyze_only"], "load_config": "/host/config"}, "relative"),
+        ({"program": "coinjoin_statistics", "actions": [], "input_uri": "s3://bucket/data"}, "at least one"),
+        ({"program": "coinjoin_statistics", "actions": ["wasabi2"]}, "own input dataset"),
+        (
+            {"program": "coinjoin_statistics", "actions": ["wasabi2"], "data_mode": "emulation", "input_uri": "s3://b/d"},
+            "mainnet operation",
+        ),
+        (
+            {"program": "coinjoin_statistics", "actions": ["wasabi2"], "env_vars": "A=1", "input_uri": "s3://b/d"},
+            "only its protocols",
+        ),
+        (
+            {"program": "coinjoin_statistics", "actions": ["wasabi2", "wasabi2"], "input_uri": "s3://b/d"},
+            "each protocol once",
+        ),
     ],
 )
 def test_invalid_combinations_fail_before_execution(options, match):
