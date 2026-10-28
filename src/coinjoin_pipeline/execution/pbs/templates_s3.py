@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+from typing import NamedTuple
 
 from exporters.artifact_paths import COINJOIN_ANALYSIS_TOOLS_DIR
 from exporters.verify_chain import is_block_hash
@@ -39,6 +40,7 @@ from .scripts import directives, download_run_directory, mappings_run, template,
 from .validation import (
     PBSError,
     require_existing_path,
+    require_notebook_port,
     require_safe_image,
     require_safe_pbs_token,
     require_storage_path,
@@ -321,13 +323,17 @@ def _index_setup(index: PersistentIndex, walltime: str, *, writer: bool) -> str:
     )
 
 
+def _require_complete_index(remedy: str) -> str:
+    """Fail a reader on an incomplete working copy; readers never restore it themselves."""
+    return f'index_complete "$INDEX_DIR" || {{ echo "[index] working copy $INDEX_DIR is incomplete; {remedy}" >&2; exit 1; }}'
+
+
 def _index_reader(index: PersistentIndex, walltime: str) -> str:
     """Read-only access for an analysis: shared lock, complete copy, run-local config."""
     return "\n".join(
         (
             _index_setup(index, walltime, writer=False),
-            'index_complete "$INDEX_DIR" || { echo "[index] working copy $INDEX_DIR is incomplete; '
-            'a persistent update restores it from the S3 backup" >&2; exit 1; }',
+            _require_complete_index("a persistent update restores it from the S3 backup"),
             *_manifest_checks('"$INDEX_DIR/manifest.json"', "Persistent BlockSci index"),
             "index_link_into_run",
             'cp "$INDEX_DIR/config.json" "$RUN_WORK/blocksci_data/config.json"',
@@ -338,13 +344,8 @@ def _index_reader(index: PersistentIndex, walltime: str) -> str:
     )
 
 
-def _index_writer(index: PersistentIndex, walltime: str) -> list[str]:
-    """Take the writer lock and expose the working copy read-write to the parser."""
-    return [
-        _index_setup(index, walltime, writer=True),
-        'touch "$INDEX_DIR/.writing"',
-        "index_link_into_run",
-    ]
+# Under the writer lock: mark the working copy incomplete until index_publish, and link it into the run.
+INDEX_BEGIN_WRITE = ('touch "$INDEX_DIR/.writing"', "index_link_into_run")
 
 
 def _index_publish(stage: str, source_kind: str, network: str, resources: PBSResources, index_dir: str) -> str:
@@ -373,11 +374,11 @@ def render_blocksci_index_backup_s3_pbs(
     multijob: str | None = None,
     resources: PBSResources = BLOCKSCI,
 ) -> str:
-    """Render a job that publishes a verified backup generation of the working index.
+    """Render a job that publishes a new immutable backup generation of the working index.
 
     It only reads the index, so it holds the shared lock: analyses go on and only an update
-    waits. The old backup remains available until the new archive passes read-back
-    verification and its latest pointer has been published.
+    waits. The previous generation stays the restore source until the new archive's S3 size
+    matches the uploaded stream and ``latest.json`` is switched to it.
     """
     if persistent.backup_uri is None:
         raise PBSError("An index backup needs --blocksci-index-backup-uri")
@@ -389,11 +390,7 @@ def render_blocksci_index_backup_s3_pbs(
         multijob=multijob,
         ncpus=resources.ncpus,
         index_reader="\n".join(
-            (
-                _index_setup(persistent, resources.walltime, writer=False),
-                'index_complete "$INDEX_DIR" || { echo "[index] working copy $INDEX_DIR is incomplete; '
-                'nothing to back up" >&2; exit 1; }',
-            )
+            (_index_setup(persistent, resources.walltime, writer=False), _require_complete_index("nothing to back up"))
         ),
     )
 
@@ -423,13 +420,8 @@ def render_coinjoin_tools_s3_pbs(
             (
                 'EXPERIMENT="$OUTPUT/input/$RUN_ID"',
                 'mkdir -p "$EXPERIMENT"',
-                'if s5 ls "$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/*" >/dev/null 2>&1; then',
-                '  s5 sync "$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/*" "$EXPERIMENT/"',
-                "fi",
-                'if s5 ls "$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/data/*" >/dev/null 2>&1; then',
-                '  mkdir -p "$EXPERIMENT/data"',
-                '  s5 sync "$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/data/*" "$EXPERIMENT/data/"',
-                "fi",
+                'download_optional coinjoin-analysis_data "$EXPERIMENT"',
+                'download_optional coinjoin_emulator_data/data "$EXPERIMENT/data"',
                 'test -n "$(find "$EXPERIMENT" -type f -print -quit)" || {',
                 '  echo "The run has no baseline or emulator data; provide analysis_input_uri" >&2; exit 1;',
                 "}",
@@ -562,11 +554,8 @@ def render_blocksci_s3_pbs(
             (
                 download_run_directory("coinjoin-analysis_data"),
                 # Retain optional mappings and prior-report provenance without fetching an index.
-                "for directory in coinjoin-mappings_data coinjoinPipeline_data; do",
-                '  if s5 ls "$ARTIFACT_URI/$RUN_ID/$directory/" >/dev/null 2>&1; then',
-                '    s5 sync "$ARTIFACT_URI/$RUN_ID/$directory/*" "$RUN_WORK/$directory/"',
-                "  fi",
-                "done",
+                'download_optional coinjoin-mappings_data "$RUN_WORK/coinjoin-mappings_data"',
+                'download_optional coinjoinPipeline_data "$RUN_WORK/coinjoinPipeline_data"',
                 f'require_file "$RUN_WORK/{baseline}" "BlockSci S3-compatible reporting requires {baseline}"',
             )
         )
@@ -582,6 +571,17 @@ def render_blocksci_s3_pbs(
     )
 
 
+class _ParseSource(NamedTuple):
+    """Where a parse job's index comes from and the script fragments that produce it."""
+
+    kind: str  # the cache manifest's source_kind
+    network: str
+    description: str
+    prepare: str
+    produce: str
+    verify: str  # the chain check before publication; empty when nothing is checked
+
+
 def _parse_source(
     command: str,
     *,
@@ -591,13 +591,13 @@ def _parse_source(
     external_blocksci_dir: Path | None,
     external_network: str | None,
     external_max_block: int | None,
-) -> tuple[str, str, str, str, str, str]:
-    """(source kind, network, description, source preparation, index production, chain check) of a parse."""
+) -> _ParseSource:
+    """Validate the parse's single source and render how its index is produced."""
     if sum(value is not None for value in (external_bitcoin_datadir, bitcoin_blocks_uri, external_blocksci_dir)) > 1:
         raise PBSError("Choose only one external Bitcoin or BlockSci source")
     if external_bitcoin_datadir is not None:
         network = _require_external_chain(external_network, external_max_block)
-        return (
+        return _ParseSource(
             "external-bitcoin",
             network,
             "external Bitcoin Core block directory",
@@ -607,7 +607,7 @@ def _parse_source(
         )
     if bitcoin_blocks_uri is not None:
         network = _require_external_chain(external_network, external_max_block)
-        return (
+        return _ParseSource(
             "bitcoin-blocks-s3",
             network,
             "verified Bitcoin block archive from S3",
@@ -623,7 +623,7 @@ def _parse_source(
         for relative in ("config.json", "parsed/chain/block.dat"):
             if not (blocksci_path / relative).is_file():
                 raise PBSError(f"External BlockSci directory must contain {relative}: {blocksci_path}")
-        return (
+        return _ParseSource(
             "external-blocksci",
             "from-config",
             "existing external BlockSci index",
@@ -640,7 +640,7 @@ def _parse_source(
             'echo "[blocksci-parse] imported external index through block $EXPORTED_MAX_BLOCK"',
             "",
         )
-    return (
+    return _ParseSource(
         "emulator",
         "bitcoin_regtest",
         "emulator Bitcoin and exported-block inputs",
@@ -648,14 +648,7 @@ def _parse_source(
             (
                 download_run_directory("bitcoin_data"),
                 download_run_directory("coinjoin_emulator_data/data/btc-node"),
-                'BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"',
-                'if [ ! -d "$BITCOIN_DATADIR/regtest/blocks" ] && [ -d "$BITCOIN_DATADIR/data/regtest/blocks" ]; then',
-                '  BITCOIN_DATADIR="$BITCOIN_DATADIR/data"',
-                "fi",
-                'test -d "$BITCOIN_DATADIR/regtest/blocks" || {',
-                '  echo "BlockSci parsing requires a Bitcoin datadir containing regtest/blocks" >&2',
-                "  exit 1",
-                "}",
+                "locate_emulator_bitcoin_datadir",
                 'EXPORTED_MAX_BLOCK="$(emulator_max_block)"',
                 'test -n "$EXPORTED_MAX_BLOCK" || { '
                 'echo "BlockSci parsing could not determine the exported maximum block" >&2; exit 1; }',
@@ -686,7 +679,7 @@ def render_blocksci_parse_s3_pbs(
     With ``persistent`` the index is parsed straight into that directory and recorded
     there instead of being archived to S3.
     """
-    source_kind, network, description, prepare_source, produce_index, verify_index = _parse_source(
+    source = _parse_source(
         command,
         external_bitcoin_datadir=external_bitcoin_datadir,
         bitcoin_blocks_uri=bitcoin_blocks_uri,
@@ -695,27 +688,27 @@ def render_blocksci_parse_s3_pbs(
         external_network=external_network,
         external_max_block=external_max_block,
     )
-    publish = _publish_cache("blocksci-parse", source_kind, network, resources.ncpus)
+    produce_index = source.produce
+    publish = _publish_cache("blocksci-parse", source.kind, source.network, resources.ncpus)
     finalize = ":"
     if persistent is not None:
-        if source_kind not in {"external-bitcoin", "bitcoin-blocks-s3"}:
+        if source.kind not in {"external-bitcoin", "bitcoin-blocks-s3"}:
             raise PBSError("A persistent index is parsed from an external Bitcoin datadir or block archive")
-        writer = _index_writer(persistent, resources.walltime)
         # The lock is taken after the block download, which has no index to protect yet.
         produce_index = "\n".join(
             (
-                writer[0],
+                _index_setup(persistent, resources.walltime, writer=True),
                 'if [ -f "$INDEX_DIR/manifest.json" ] || index_backup_available; then',
                 '  echo "[index] an index already exists for $INDEX_DIR; use --blocksci-task update" >&2',
                 "  exit 1",
                 "fi",
                 'rm -rf "$INDEX_DIR/parsed" "$INDEX_DIR/config.json" "$INDEX_DIR/files.txt"',
-                *writer[1:],
+                *INDEX_BEGIN_WRITE,
                 'INDEX_BINDS=(--bind "$INDEX_DIR:$INDEX_DIR:rw")',
                 produce_index,
             )
         )
-        publish = _index_publish("blocksci-parse", source_kind, network, resources, persistent.index_dir)
+        publish = _index_publish("blocksci-parse", source.kind, source.network, resources, persistent.index_dir)
         finalize = INDEX_UNLOCK
     return _render_stage(
         "s3_blocksci_parse.sh",
@@ -724,10 +717,10 @@ def render_blocksci_parse_s3_pbs(
         resources,
         image=image,
         multijob=multijob,
-        source_description=description,
-        prepare_source=prepare_source,
+        source_description=source.description,
+        prepare_source=source.prepare,
         produce_index=produce_index,
-        verify_index=verify_index,
+        verify_index=source.verify,
         publish_cache=publish,
         finalize_index=finalize,
     )
@@ -795,18 +788,17 @@ def render_blocksci_update_s3_pbs(
         publish = _publish_cache("blocksci-update", source_kind, "$NETWORK", resources.ncpus)
         finalize = ":"
     else:
-        writer = _index_writer(persistent, resources.walltime)
         # The template reads the source manifest from $SOURCE_CACHE_DIR, as for an S3 cache.
         restore_source = "\n".join(
             (
-                writer[0],
+                _index_setup(persistent, resources.walltime, writer=True),
                 "index_reconcile",
                 *_manifest_checks('"$INDEX_DIR/manifest.json"', "Persistent BlockSci index"),
                 source_checks.replace("$SOURCE_CACHE_DIR", "$INDEX_DIR"),
                 'cp "$INDEX_DIR/manifest.json" "$SOURCE_CACHE_DIR/manifest.json"',
                 'SOURCE_RUN_ID="$(sed -nE \'s/.*"run_id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\\1/p\' '
                 '"$INDEX_DIR/manifest.json" | head -n 1)"',
-                *writer[1:],
+                *INDEX_BEGIN_WRITE,
                 'cp "$INDEX_DIR/config.json" "$RUN_WORK/blocksci_data/config.json"',
                 'INDEX_BINDS=(--bind "$INDEX_DIR:$INDEX_DIR:rw")',
                 'echo "[index] updating $INDEX_DIR from height $(index_height "$INDEX_DIR")"',
@@ -861,8 +853,7 @@ def render_blocksci_analyze_s3_pbs(
     """
     if mode not in MODE_OUTPUTS:
         raise PBSError(f"Unsupported reusable BlockSci mode: {mode}")
-    if isinstance(notebook_port, bool) or not isinstance(notebook_port, int) or not 1024 <= notebook_port <= 65535:
-        raise PBSError("BlockSci notebook port must be between 1024 and 65535")
+    require_notebook_port(notebook_port)
     if source_run_id is not None and persistent is not None:
         raise PBSError("Choose one index source: a source run's cache or a persistent index")
     if mode == "blocksci-analyze" and persistent is not None:

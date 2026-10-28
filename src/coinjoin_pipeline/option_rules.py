@@ -8,14 +8,13 @@ from typing import TYPE_CHECKING
 
 from exporters.verify_chain import is_block_hash
 
+from .configuration import cli_flag, config_value, option_specs
 from .execution.stages import runs_unified_report
 from .storage.s3 import RUN_ID_RULE, is_valid_run_id
 
 if TYPE_CHECKING:
     from .configuration import PipelineConfiguration, PBSResourceConfiguration
 
-# Alias -> canonical action. Aliases are accepted but never named in error text.
-ACTION_ALIASES = {"coinjoin": "coinjoin-analysis"}
 # Tasks that may read the index of another run (--blocksci-cache-source-run-id) without writing to it.
 READ_ONLY_CACHE_TASKS = frozenset({"script", "external", "notebook"})
 
@@ -86,23 +85,69 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
 
 
 def cross_option_errors(config: PipelineConfiguration) -> list[str]:
-    """Return violated rules in order, retaining CLI spellings in diagnostics."""
+    """Return every violated rule in order, retaining CLI spellings in diagnostics."""
+    if config.action == "mainnet-sync":
+        from .execution.mainnet_sync import configuration_errors
+
+        errors = configuration_errors(config)
+    elif any(path.startswith("mainnet.") or path.startswith("pbs.producer.") for path in config.provided):
+        errors = ["mainnet and pbs.producer settings require action: mainnet-sync"]
+    else:
+        errors = _action_errors(config)
+    return errors + _general_errors(config)
+
+
+def _general_errors(config: PipelineConfiguration) -> list[str]:
+    """Rules that hold for every action, mainnet-sync included."""
+    errors: list[str] = []
+    for path, destination, item in option_specs():
+        permitted = item.metadata.get("actions")
+        if permitted and path in config.provided and config.action not in permitted:
+            value = config_value(config, path)
+            if value is not None and value is not False:
+                errors.append(f"{cli_flag(destination)} is not supported for {config.action}")
+    if config.action == "external analyze" and not config.run_id:
+        errors.append("external analyze requires --run-id")
+    if config.all_runs and config.stages.analysis:
+        errors.append("--all-runs is not supported with --analysisPbs; select one run")
+    if not 1024 <= config.blocksci.notebook_port <= 65535:
+        errors.append("--blocksci-notebook-port must be between 1024 and 65535")
+    if config.artifacts.backend == "s3" and config.action != "pbs-from-s3":
+        for flag, value in (
+            ("--kubernetes-btc-datadir", config.kubernetes.btc_datadir),
+            ("--pbs-bitcoin-datadir", config.pbs.bitcoin_datadir),
+            ("--copy-to-host", config.kubernetes.copy_to_host),
+        ):
+            if value:
+                errors.append(f"Kubernetes S3-compatible mode does not support shared Bitcoin storage ({flag})")
+    if config.driver == "kubernetes" and config.stages.blocksci and not config.kubernetes.copy_to_host:
+        first, second = config.kubernetes.btc_datadir, config.pbs.bitcoin_datadir
+        if first and second and Path(first).expanduser().resolve() != Path(second).expanduser().resolve():
+            errors.append("Kubernetes and PBS Bitcoin datadirs must identify the same directory")
+    external = config.external
+    if config.action != "external analyze" and external.configured:
+        errors.append("external settings require action: external analyze")
+    if config.action == "external analyze":
+        supplied = external.bitcoin_datadir is not None or external.baseline is not None
+        if external.resume and supplied:
+            errors.append("external.resume cannot be combined with external.bitcoin_datadir or external.baseline")
+        if not external.resume and (not external.bitcoin_datadir or not external.baseline):
+            errors.append("a new external analysis requires external.bitcoin_datadir and external.baseline")
+    return errors
+
+
+def _action_errors(config: PipelineConfiguration) -> list[str]:
+    """Rules of the emulation and analysis actions (everything except mainnet-sync)."""
     from .execution.coinjoin_tools import option_errors
 
     action = config.action
-    if action == "mainnet-sync":
-        from .execution.mainnet_sync import configuration_errors
-
-        return configuration_errors(config)
-    if any(path.startswith("mainnet.") or path.startswith("pbs.producer.") for path in config.provided):
-        return ["mainnet and pbs.producer settings require action: mainnet-sync"]
     analysis_pbs = _supplied(config, "stages.analysis", config.stages.analysis)
     blocksci_pbs = _supplied(config, "stages.blocksci", config.stages.blocksci)
     mappings_pbs = _supplied(config, "stages.mappings", config.stages.mappings)
     errors: list[str] = option_errors(config)
     if config.run_dir is not None and config.all_runs:
         errors.append("--run-dir and --all-runs are mutually exclusive")
-    if action in {"analyze", "export", "coinjoin-analysis", "coinjoin", "mappings"}:
+    if action in {"analyze", "export", "coinjoin-analysis", "mappings"}:
         if not _supplied(config, "run_dir", config.run_dir) and not _supplied(config, "all_runs", config.all_runs):
             errors.append(f"{action} requires --run-dir (or --all-runs where supported)")
     if (
@@ -205,8 +250,6 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
     if config.dumplings_uri:
         if action != "pbs-from-s3" or not analysis_pbs:
             errors.append("--dumplings-uri requires pbs-from-s3 --analysisPbs")
-        if config.coinjoin_type not in {"wasabi2", "joinmarket"}:
-            errors.append("--dumplings-uri covers --coinjoin-type wasabi2 or joinmarket")
         if mappings_pbs:
             errors.append("--dumplings-uri does not support --mappingsPbs")
     pin_height = config.blocksci.pin_height
@@ -271,7 +314,6 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
             ("--s3-endpoint-url", config.artifacts.endpoint_url),
             ("--s3-credentials-file", config.artifacts.credentials_file),
             ("--s3-profile", config.artifacts.profile),
-            ("--engine", config.engine),
         ):
             if not value:
                 errors.append(f"pbs-from-s3 requires {flag}")
@@ -310,13 +352,6 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
                 "Kubernetes S3-compatible mode requires --reuse-namespace because "
                 "the credentials Secret must exist before the Job is created"
             )
-        for flag, path, value in (
-            ("--kubernetes-btc-datadir", "kubernetes.btc_datadir", config.kubernetes.btc_datadir),
-            ("--pbs-bitcoin-datadir", "pbs.bitcoin_datadir", config.pbs.bitcoin_datadir),
-            ("--copy-to-host", "kubernetes.copy_to_host", config.kubernetes.copy_to_host),
-        ):
-            if _supplied(config, path, value):
-                errors.append(f"Kubernetes S3-compatible mode does not support {flag}")
     if backend == "s3" and action == "full-run":
         if blocksci_workflow == "cached":
             errors.append("full-run cannot reuse a cache before emulation; use --blocksci-workflow reusable")
@@ -332,15 +367,12 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
                 errors.append(f"full-run --artifact-backend s3 does not support {flag}")
     if action == "full-run" and backend != "s3" and (blocksci_workflow != "combined" or blocksci_task != "detect"):
         errors.append("reusable BlockSci workflows are currently supported only with the S3 artifact backend")
-    engine = config.engine
-    if engine is not None and engine not in {"wasabi", "joinmarket"}:
-        errors.append("--engine must be wasabi or joinmarket")
     script = config.blocksci.script
     if script and not Path(script).expanduser().is_file():
         errors.append(f"BlockSci script not found: {script}")
-    if mappings_pbs and config.engine not in (None, "wasabi"):
+    if mappings_pbs and config.engine != "wasabi":
         errors.append("--mappingsPbs is supported only with --engine wasabi")
-    if mappings_pbs and (config.coinjoin_type or "wasabi2") != "wasabi2":
+    if mappings_pbs and config.coinjoin_type != "wasabi2":
         errors.append("--mappingsPbs requires --coinjoin-type wasabi2")
     if action == "mappings" and not mappings_pbs:
         errors.append("mappings requires --mappingsPbs")

@@ -6,7 +6,6 @@ import json
 import re
 import unicodedata
 from datetime import datetime
-from importlib.resources import files
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -24,27 +23,27 @@ def slugify_run_component(value: str, *, max_length: int) -> str:
     return slug or "scenario"
 
 
-def run_id_for(config: PipelineConfiguration) -> str:
-    explicit_run_id = config.run_id
-    if explicit_run_id:
-        return explicit_run_id
+def scenario_file(value: str, engine: str) -> Path | None:
+    """The scenario file execution will read (a path, or a name in the scenario catalogue), else None."""
+    from .execution.scenarios import SCENARIOS_ROOT, scenario_source_path
 
-    timezone = config.run_timezone or "Europe/Prague"
-    scenario_arg = config.scenario
-    engine = config.engine or "wasabi"
-    scenario_name = "default-joinmarket" if engine == "joinmarket" else "overactive-local"
-    if scenario_arg:
-        candidate = Path(scenario_arg).expanduser()
-        if not candidate.is_file():
-            resource = files("coinjoin_pipeline").joinpath(f"resources/scenarios/{candidate.name}")
-            if resource.is_file():
-                candidate = Path(str(resource))
+    named = scenario_source_path(value, SCENARIOS_ROOT, engine)
+    return named if named.is_file() else None
+
+
+def run_id_for(config: PipelineConfiguration) -> str:
+    if config.run_id:
+        return config.run_id
+    # Without a scenario the emulator runs its engine's default one.
+    scenario_name = "default-joinmarket" if config.engine == "joinmarket" else "overactive-local"
+    if config.scenario:
+        candidate = scenario_file(config.scenario, config.engine) or Path(config.scenario).expanduser()
         try:
             data = json.loads(candidate.read_text(encoding="utf-8"))
             scenario_name = str(data.get("name") or candidate.stem)
         except (OSError, json.JSONDecodeError):
             scenario_name = candidate.stem
-    timestamp = datetime.now(ZoneInfo(timezone)).strftime("%Y-%m-%d_%H-%M")
+    timestamp = datetime.now(ZoneInfo(config.run_timezone)).strftime("%Y-%m-%d_%H-%M")
     slug = slugify_run_component(
         scenario_name,
         max_length=MAX_RUN_ID_LENGTH - len(timestamp) - 1,

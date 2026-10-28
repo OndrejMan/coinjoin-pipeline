@@ -22,7 +22,7 @@ from .defaults import (
     PBS_QUEUED_STATES,
     PBS_TERMINAL_STATES,
 )
-from .status import PBSQueryError, job_details
+from .status import PBSQueryError, job_details, job_left_scheduler
 from .validation import (
     PBSError,
     require_qsub,
@@ -83,6 +83,19 @@ def submit_pbs(script: Path | str, dependencies: Sequence[str] = ()) -> str:
     return _parse_qsub_job_id(result.stdout)
 
 
+def pbs_job_id_path(run_dir: Path, stage: str) -> Path:
+    """``<run>/.pbs/<stage>.jobid``: read by watch, overlap detection, cancellation and scenario-lab."""
+    return run_dir / ".pbs" / f"{stage}.jobid"
+
+
+def read_pbs_job_id(run_dir: Path, stage: str) -> str | None:
+    """The recorded job ID of one stage, or None when none was persisted."""
+    path = pbs_job_id_path(run_dir, stage)
+    if not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8").strip() or None
+
+
 def persist_pbs_job_id(run_dir: Path, stage: str, job_id: str) -> None:
     """Record a submitted job ID atomically.
 
@@ -90,9 +103,9 @@ def persist_pbs_job_id(run_dir: Path, stage: str, job_id: str) -> None:
     .jobid files -- which would let a duplicate graph be submitted while the
     recorded job is still active. Write-then-rename never exposes a partial file.
     """
-    marker_dir = run_dir / ".pbs"
+    target = pbs_job_id_path(run_dir, stage)
+    marker_dir = target.parent
     marker_dir.mkdir(parents=True, exist_ok=True)
-    target = marker_dir / f"{stage}.jobid"
     temp_path = marker_dir / f".{stage}.jobid.tmp"
     try:
         with temp_path.open("w", encoding="utf-8") as handle:
@@ -125,7 +138,7 @@ def qdel_pbs_job(job_id: str) -> bool:
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
         # A job that already left the queue counts as cancelled for rollback.
-        if "unknown job" in stderr.lower() or "job has finished" in stderr.lower():
+        if job_left_scheduler(stderr):
             return True
         print(
             f"[pbs] qdel {job_id} failed (exit {result.returncode}): {stderr}",

@@ -30,6 +30,12 @@ DEFAULT_RESOURCES = {
     "unified_report": PBSResources(2, "8gb", "10gb", "01:00:00"),
 }
 
+# mainnet-sync's two jobs, resolved like a stage through `pbs.producer` / `pbs.blocksci`.
+MAINNET_SYNC_RESOURCES = {
+    "producer": PBSResources(4, "16gb", "20gb", "24:00:00"),
+    "blocksci": PBSResources(16, "256gb", "20gb", "24:00:00"),
+}
+
 DEFAULT_PBS_IMAGES = {
     component: f"docker://{IMAGE_NAMES[name]}:{DEFAULT_VERSION}"
     for component, name in (

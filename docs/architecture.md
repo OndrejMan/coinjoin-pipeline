@@ -16,8 +16,12 @@ YAML or CLI options
 ```
 
 `arguments.py` is an input adapter. It merges explicitly provided values into
-YAML before decoding. `configuration.py` owns field types, option spellings,
-and value bounds; `option_rules.py` owns cross-field policy. The existing CLI
+YAML before decoding, and owns the `--help` text (grouped by configuration
+section, each option with its YAML key). `configuration.py` owns field types,
+option spellings, action aliases and value bounds; `option_rules.py` owns every
+cross-field rule (`PipelineConfiguration.validate` only calls it).
+`console.py` holds the exit codes and `ERROR:` output shared by `cli.py` and
+the `watch`, `download-report` and `clean-s3` utilities. The existing CLI
 flags remain available to scripts, but there is no YAML-to-argv conversion,
 metadata snapshot or second host Python process. `cjp run FILE.yaml` is the
 preferred entry point. An explicit `stages.<name>: false` is respected; assigning
@@ -38,10 +42,11 @@ artifact with image digests and exporter hashes.
 | Responsibility | Owner |
 |---|---|
 | Configuration and loading | `configuration.py`, `arguments.py`, `option_rules.py` |
+| Exit codes and error output of the host commands | `console.py` |
 | Resolved run and host lifetime | `context.py`, `runs.py`, `manifest.py` |
 | Action dispatch and the S3 `emulate`/`full-run`/`pbs-from-s3` branches | `execution/orchestrator.py` |
 | S3 full-run: staging, emulation Job, PBS graph, marker waits, rollback | `execution/s3_workflow.py`, `s3_staging.py`, `s3_emulation.py`, `s3_submission.py`, `s3_markers.py` |
-| In-cluster prefix preflight and artifact uploader | `execution/k8s_s3_prefix_preflight.sh`, `k8s_s3_uploader.sh` |
+| In-cluster prefix preflight and artifact uploader | `execution/k8s_s3_prefix_preflight.sh`, `k8s_s3_uploader.sh`, their shared `k8s_s3_access.sh` header |
 | Kubernetes resource generation and diagnosis | `execution/kubernetes.py` |
 | Graph definitions and dependency queries | `execution/stages.py`, `stage_executor.py` |
 | S3 index archive transport shared by emulation caches and persistent backups | `execution/pbs/templates/index_archive.sh` |

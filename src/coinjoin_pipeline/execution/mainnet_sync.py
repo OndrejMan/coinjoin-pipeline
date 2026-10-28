@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, fields
+from dataclasses import asdict
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,11 +15,12 @@ from coinjoin_pipeline.storage.s3 import (
     validate_artifact_uri,
     validate_run_id,
 )
-from .pbs.defaults import PBSResources
+from .pbs.defaults import MAINNET_SYNC_RESOURCES, PBSResources
 from .pbs.scripts import directives, template
-from .pbs.submission import PBSJobSpec, persist_pbs_job_id, qdel_pbs_job, submit_pbs_job
+from .pbs.submission import PBSJobSpec, persist_pbs_job_id, submit_pbs_job
 from .pbs.validation import PBSError, require_safe_image, require_safe_pbs_resources, walltime_to_seconds
-from .pbs_settings import pbs_image, with_singularity_scheme
+from .pbs_settings import pbs_image, stage_pbs_resources, with_singularity_scheme
+from .s3_markers import rollback_s3_pbs_submissions
 
 if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import PipelineConfiguration
@@ -112,18 +113,7 @@ def configuration_errors(config: PipelineConfiguration) -> list[str]:
 
 
 def resources(config: PipelineConfiguration, stage: str) -> PBSResources:
-    default = (
-        PBSResources(4, "16gb", "20gb", "24:00:00")
-        if stage == "producer"
-        else PBSResources(16, "256gb", "20gb", "24:00:00")
-    )
-    sources = (getattr(config.pbs, stage), config.pbs, default)
-    return PBSResources(
-        **{
-            item.name: next(getattr(source, item.name) for source in sources if getattr(source, item.name) is not None)
-            for item in fields(default)
-        }
-    )
+    return stage_pbs_resources(config, stage, default=MAINNET_SYNC_RESOURCES[stage])
 
 
 def render_sync(config: PipelineConfiguration, stage: str) -> str:
@@ -205,16 +195,16 @@ def submit_sync(config: PipelineConfiguration) -> None:
     scripts = {stage: render_sync(config, stage) for stage in ("producer", "blocksci")}
     if not config.dry_run:
         ensure_empty_run_prefix(target.access, target.artifact_uri, target.run_id)
-    submitted: list[str] = []
+    submitted: list[tuple[str, str]] = []
     try:
         for stage, script in scripts.items():
-            spec = PBSJobSpec(f"mainnet-{stage}", script, tuple(submitted[-1:]))
+            spec = PBSJobSpec(f"mainnet-{stage}", script, tuple(job for _, job in submitted[-1:]))
             job = submit_pbs_job(spec, config.dry_run)
             if job:
-                submitted.append(job)
+                submitted.append((spec.stage, job))
                 persist_pbs_job_id(config.runs_path / target.run_id, spec.stage, job)
     except BaseException as error:
-        failed = [job for job in reversed(submitted) if not qdel_pbs_job(job)]
+        failed = rollback_s3_pbs_submissions(submitted)
         if failed:
-            raise RuntimeError(f"Submission failed; could not cancel PBS jobs {failed}") from error
+            raise RuntimeError(f"Submission failed; could not cancel PBS jobs {[job for _, job in failed]}") from error
         raise

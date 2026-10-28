@@ -9,13 +9,12 @@ from pathlib import Path
 from typing import TextIO
 
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
-from coinjoin_pipeline.execution.pbs.submission import pbs_job_probe
+from coinjoin_pipeline.execution.pbs.submission import pbs_job_probe, read_pbs_job_id
 from coinjoin_pipeline.execution.run_context import run_dir_under_root
 from coinjoin_pipeline.storage.s3 import PROBE_QUEUED, PROBE_RUNNING, PROBE_UNKNOWN
 
 PBS_SUBMIT_LOCK_NAME = ".pbs-submit.lock"
 
-_LOCK_HANDLES: list[TextIO] = []
 _HELD_LOCKS: dict[Path, TextIO] = {}
 
 
@@ -45,20 +44,17 @@ def acquire_lock(path: Path) -> TextIO:
     handle.write(str(os.getpid()))
     handle.flush()
     atexit.register(handle.close)
-    _LOCK_HANDLES.append(handle)
     _HELD_LOCKS[key] = handle
     return handle
 
 
 def close_locks() -> None:
     """Close every lock handle held by this process, ignoring shutdown errors."""
-    for handle in _LOCK_HANDLES:
+    for handle in _HELD_LOCKS.values():
         try:
             handle.close()
         except OSError:
             pass
-
-    _LOCK_HANDLES.clear()
     _HELD_LOCKS.clear()
 
 
@@ -83,9 +79,8 @@ def command_lock_path(args: PipelineConfiguration, logs_root: Path) -> Path:
 def ensure_no_active_s3_pbs_submission(run_dir: Path) -> None:
     """Refuse a second S3 PBS graph while a recorded job is still active."""
     active: list[str] = []
-    marker_dir = run_dir / ".pbs"
-    for jobid_path in sorted(marker_dir.glob("*.jobid")):
-        job_id = jobid_path.read_text(encoding="utf-8").strip()
+    for jobid_path in sorted((run_dir / ".pbs").glob("*.jobid")):
+        job_id = read_pbs_job_id(run_dir, jobid_path.stem)
         if not job_id:
             continue
         state = pbs_job_probe(job_id)()

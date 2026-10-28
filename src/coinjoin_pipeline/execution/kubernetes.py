@@ -328,12 +328,11 @@ def render_s3_emulation_resources(
         "--controller-failed-marker /app/logs/.controller.failed"
         f"{btc_node_image_arg}"
     )
-    prefix_preflight = (
-        (EXECUTION_ROOT / "k8s_s3_prefix_preflight.sh")
-        .read_text(encoding="utf-8")
-        .replace("@REQUIRED_EXPORTERS@", " ".join(REQUIRED_EXPORTERS))
+    access = (EXECUTION_ROOT / "k8s_s3_access.sh").read_text(encoding="utf-8")
+    prefix_preflight = access + (EXECUTION_ROOT / "k8s_s3_prefix_preflight.sh").read_text(encoding="utf-8").replace(
+        "@REQUIRED_EXPORTERS@", " ".join(REQUIRED_EXPORTERS)
     )
-    uploader = (EXECUTION_ROOT / "k8s_s3_uploader.sh").read_text(encoding="utf-8").rstrip("\n")
+    uploader = access + (EXECUTION_ROOT / "k8s_s3_uploader.sh").read_text(encoding="utf-8").rstrip("\n")
 
     def field_ref(variable: str, path: str) -> dict:
         return {"name": variable, "valueFrom": {"fieldRef": {"fieldPath": path}}}

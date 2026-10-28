@@ -76,6 +76,13 @@ def require_safe_pbs_resources(resources: PBSResources, multijob: str | None = N
     walltime_to_seconds(resources.walltime)
 
 
+def require_notebook_port(port: int) -> int:
+    """The Jupyter port of a notebook job: an unprivileged TCP port."""
+    if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
+        raise PBSError("BlockSci notebook port must be between 1024 and 65535")
+    return port
+
+
 def require_safe_pbs_token(value: str, description: str) -> None:
     if not isinstance(value, str) or not value or not SAFE_PBS_TOKEN_RE.fullmatch(value):
         raise PBSError(f"{description} contains characters unsafe for PBS job templates: {value}")

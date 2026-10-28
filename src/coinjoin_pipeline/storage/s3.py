@@ -229,13 +229,38 @@ def run_s5cmd(access: S3Access, *arguments: str) -> subprocess.CompletedProcess[
         raise ArtifactTransportError("s5cmd is required on the frontend for S3-compatible transfers") from error
 
 
+def run_prefix_uri(artifact_uri: str, run_id: str) -> str:
+    """The S3 prefix holding every artifact and marker of one run."""
+    return f"{artifact_uri}/{run_id}"
+
+
+def stage_marker_uri(run_prefix: str, stage: str, outcome: str) -> str:
+    """``<run-prefix>/.pbs/<stage>.<outcome>``: the terminal marker a PBS stage's trap uploads."""
+    return f"{run_prefix}/.pbs/{stage}.{outcome}"
+
+
+def upload_marker_uri(run_prefix: str, outcome: str) -> str:
+    """``<run-prefix>/.k8s/upload.<outcome>``: written by the Kubernetes uploader after the emulation."""
+    return f"{run_prefix}/.k8s/upload.{outcome}"
+
+
+def staged_exporters_uri(artifact_uri: str, run_id: str) -> str:
+    """The run's ``.pipeline/exporters/`` prefix that every BlockSci and report job downloads."""
+    return f"{run_prefix_uri(artifact_uri, run_id)}/.pipeline/exporters/"
+
+
+def _no_object_found(result: subprocess.CompletedProcess[str]) -> bool:
+    """s5cmd's way of answering an ``ls`` that matched nothing (exit status is nonzero)."""
+    return "no object found" in (result.stderr or "").lower()
+
+
 def s3_object_exists(access: S3Access, object_uri: str) -> bool:
     result = run_s5cmd(access, "ls", object_uri)
     if result.returncode == 0:
         return True
-    stderr = (result.stderr or "").strip()
-    if "no object found" in stderr.lower():
+    if _no_object_found(result):
         return False
+    stderr = (result.stderr or "").strip()
     raise ArtifactTransportError(f"s5cmd ls {object_uri} failed (exit {result.returncode}): {stderr}")
 
 
@@ -259,9 +284,9 @@ def clear_s3_stage_markers(
     stage: str,
 ) -> None:
     """Clear stale completion markers before submitting the stage that owns them."""
-    prefix = f"{artifact_uri}/{run_id}/.pbs/{stage}"
-    delete_s3_object_if_present(access, f"{prefix}.failed")
-    delete_s3_object_if_present(access, f"{prefix}.done")
+    run_prefix = run_prefix_uri(artifact_uri, run_id)
+    delete_s3_object_if_present(access, stage_marker_uri(run_prefix, stage, "failed"))
+    delete_s3_object_if_present(access, stage_marker_uri(run_prefix, stage, "done"))
 
 
 # `sync --exclude` (used when staging the exporters) landed in s5cmd 2.1.
@@ -310,7 +335,7 @@ def s3_access_preflight(access: S3Access, artifact_uri: str) -> None:
     if not Path(access.credentials_file).is_file():
         raise ArtifactTransportError(f"S3 credentials file not found: {access.credentials_file}")
     result = run_s5cmd(access, "ls", f"{artifact_uri}/*")
-    if result.returncode != 0 and "no object found" not in (result.stderr or "").lower():
+    if result.returncode != 0 and not _no_object_found(result):
         raise ArtifactTransportError(
             f"S3 access preflight failed for {artifact_uri} (exit {result.returncode}): {(result.stderr or '').strip()}"
         )
@@ -318,14 +343,14 @@ def s3_access_preflight(access: S3Access, artifact_uri: str) -> None:
 
 def ensure_empty_run_prefix(access: S3Access, artifact_uri: str, run_id: str) -> None:
     """Reject every occupied run prefix, including marker-less partial runs."""
-    run_prefix = f"{artifact_uri}/{run_id}"
+    run_prefix = run_prefix_uri(artifact_uri, run_id)
     if s3_object_exists(access, f"{run_prefix}/*"):
         raise ArtifactTransportError(f"run prefix {run_prefix}/ already contains artifacts; choose a fresh --run-id")
 
 
-# Entry points of the report and BlockSci analysis paths. Both are bind-mounted
-# and executed on the compute node, so a staging step that uploads neither is
-# useless; checking them turns a late node-side failure into a frontend error.
+# Exporter files the compute-node jobs execute (parse/update/analyze worker, chain
+# check, report) or import. A staging step that misses one is useless; checking
+# them turns a late node-side failure into a frontend error.
 REQUIRED_EXPORTERS = (
     "worker.py",
     "verify_chain.py",
@@ -337,7 +362,7 @@ REQUIRED_EXPORTERS = (
 
 
 def ensure_local_exporters(exporters_dir: Path) -> None:
-    """Reject an exporter tree that is missing either entry point."""
+    """Reject an exporter tree that is missing any required exporter."""
     for relative in REQUIRED_EXPORTERS:
         candidate = exporters_dir / relative
         if not candidate.is_file():
@@ -358,7 +383,7 @@ def staged_exporters_state(access: S3Access, artifact_uri: str, run_id: str) -> 
     only fail on the compute node, which runs the renamed analysis path. The
     same holds for an upload that died halfway through.
     """
-    prefix = f"{artifact_uri}/{run_id}/.pipeline/exporters/"
+    prefix = staged_exporters_uri(artifact_uri, run_id)
     missing = [relative for relative in REQUIRED_EXPORTERS if not s3_object_exists(access, f"{prefix}{relative}")]
     if not missing:
         return STAGED_EXPORTERS_COMPLETE, []
@@ -380,7 +405,7 @@ def upload_exporters(access: S3Access, artifact_uri: str, run_id: str, exporters
     # to resolve a commit from. The unified report recomputes this hash from the
     # tree it actually ran, so the two can be compared after the fact.
     print(f"[stage] exporters tree sha256={tree_sha256(exporters_dir)}")
-    destination = f"{artifact_uri}/{run_id}/.pipeline/exporters/"
+    destination = staged_exporters_uri(artifact_uri, run_id)
     result = run_s5cmd(
         access,
         "sync",

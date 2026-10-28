@@ -54,10 +54,13 @@ AnalysisAction = Literal["collect_docker", "analyze_only"]
 ExternalNetwork = Literal["bitcoin"]
 PBSScratchType = Literal["ssd", "local"]
 PBSMultijob = Literal["brno", "plzen", "global"]
-YAML_ACTION_ALIASES = {"external-analyze": "external analyze"}
+# Alias -> canonical action, accepted from YAML and the command line alike.
+# Aliases are never named in error text.
+ACTION_ALIASES = {"coinjoin": "coinjoin-analysis", "external-analyze": "external analyze"}
 
 
 def option(default=None, *, name=None, minimum=None, actions=None):
+    """One configuration field; ``name`` is its CLI destination (help text lives in arguments.py)."""
     # Called only inside the dataclass bodies below; pylint cannot see through the helper.
     return field(  # pylint: disable=invalid-field-call
         default=default, metadata={"option": name, "minimum": minimum, "actions": actions}
@@ -118,7 +121,7 @@ class BlockSciConfiguration(ConfigurationModel):
     task: BlockSciTask = option("detect", name="blocksci_task")
     script: str | None = option(None, name="blocksci_script")
     cache_source_run_id: str | None = option(None, name="blocksci_cache_source_run_id")
-    notebook_port: int | None = option(None, name="blocksci_notebook_port", minimum=1)
+    notebook_port: int = option(8888, name="blocksci_notebook_port", minimum=1)
     notebooks_dir: str | None = option(None, name="blocksci_notebooks_dir")
     external_bitcoin_datadir: str | None = option(None, name="blocksci_external_bitcoin_datadir")
     bitcoin_blocks_uri: str | None = option(None, name="blocksci_bitcoin_blocks_uri")
@@ -328,7 +331,7 @@ class PipelineConfiguration(ConfigurationModel):
     def from_mapping(cls, value, location=None):
         data = dict(require_mapping(value, "configuration"))
         raw_action = data.get("action", "full-run")
-        data["action"] = YAML_ACTION_ALIASES.get(raw_action, raw_action) if isinstance(raw_action, str) else raw_action
+        data["action"] = ACTION_ALIASES.get(raw_action, raw_action) if isinstance(raw_action, str) else raw_action
         model = decode_model(cls, data, "configuration")
         provided = frozenset(flatten_mapping(data))
         return replace(model, _provided=provided)
@@ -336,8 +339,7 @@ class PipelineConfiguration(ConfigurationModel):
     @classmethod
     def from_flat(cls, values: Mapping[str, object]):
         mapping: dict[str, object] = {}
-        routes = {dest: path for path, dest, _ in option_specs()}
-        routes["action"] = "action"
+        routes = option_routes()
         for dest, value in values.items():
             if dest not in routes:
                 raise ConfigurationError(f"unsupported option: {dest}")
@@ -348,37 +350,6 @@ class PipelineConfiguration(ConfigurationModel):
         from .option_rules import cross_option_errors
 
         errors = cross_option_errors(self)
-        for path, destination, item in option_specs():
-            permitted = item.metadata.get("actions")
-            if permitted and path in self._provided and self.action not in permitted:
-                value = config_value(self, path)
-                if value is not None and value is not False:
-                    errors.append(f"--{destination.replace('_', '-')} is not supported for {self.action}")
-        if self.action == "external analyze" and not self.run_id:
-            errors.append("external analyze requires --run-id")
-        if self.all_runs and self.stages.analysis:
-            errors.append("--all-runs is not supported with --analysisPbs; select one run")
-        if not 1024 <= (self.blocksci.notebook_port or 8888) <= 65535:
-            errors.append("--blocksci-notebook-port must be between 1024 and 65535")
-        if (
-            self.artifacts.backend == "s3"
-            and self.action != "pbs-from-s3"
-            and (self.kubernetes.btc_datadir or self.pbs.bitcoin_datadir or self.kubernetes.copy_to_host)
-        ):
-            errors.append("Kubernetes S3-compatible mode does not support shared Bitcoin storage or --copy-to-host")
-        if self.driver == "kubernetes" and self.stages.blocksci and not self.kubernetes.copy_to_host:
-            first, second = self.kubernetes.btc_datadir, self.pbs.bitcoin_datadir
-            if first and second and Path(first).expanduser().resolve() != Path(second).expanduser().resolve():
-                errors.append("Kubernetes and PBS Bitcoin datadirs must identify the same directory")
-
-        if self.action != "external analyze" and self.external.configured:
-            errors.append("external settings require action: external analyze")
-        if self.action == "external analyze":
-            supplied = self.external.bitcoin_datadir is not None or self.external.baseline is not None
-            if self.external.resume and supplied:
-                errors.append("external.resume cannot be combined with external.bitcoin_datadir or external.baseline")
-            if not self.external.resume and (not self.external.bitcoin_datadir or not self.external.baseline):
-                errors.append("a new external analysis requires external.bitcoin_datadir and external.baseline")
         if errors:
             raise ConfigurationError("; ".join(errors))
 
@@ -407,16 +378,16 @@ def decode_value(annotation, value, location):
         return decode_value(annotation, value, location)
     if origin is Literal:
         if value not in arguments or isinstance(value, bool):
-            raise ConfigurationError(f"{location} must be one of: {', '.join(map(str, arguments))}")
+            raise ConfigurationError(f"{described(location)} must be one of: {', '.join(map(str, arguments))}")
         return value
     if origin is tuple:
         if arguments[0] is not str:
             if not isinstance(value, (list, tuple)):
-                raise ConfigurationError(f"{location} must be a list")
+                raise ConfigurationError(f"{described(location)} must be a list")
             return tuple(decode_value(arguments[0], item, f"{location}[{index}]") for index, item in enumerate(value))
         values = [value] if isinstance(value, str) else value
         if not isinstance(values, (list, tuple)) or not all(isinstance(item, str) for item in values):
-            raise ConfigurationError(f"{location} must be a string or a list of strings")
+            raise ConfigurationError(f"{described(location)} must be a string or a list of strings")
         return tuple(values)
     # Exact type: bool is an int subclass and must not pass as a number.
     valid = type(value) is annotation  # pylint: disable=unidiomatic-typecheck
@@ -431,7 +402,7 @@ def decode_value(annotation, value, location):
             int: "an integer",
             float: "a finite number",
         }.get(annotation, str(annotation))
-        raise ConfigurationError(f"{location} must be {expected}")
+        raise ConfigurationError(f"{described(location)} must be {expected}")
     return value
 
 
@@ -449,7 +420,7 @@ def decode_model(model_type, value, location):
         minimum = item.metadata.get("minimum")
         if value is not None and minimum is not None and value < minimum:
             label = "positive" if minimum == 1 else "non-negative"
-            raise ConfigurationError(f"{location}.{key} must be {label}")
+            raise ConfigurationError(f"{described(f'{location}.{key}')} must be {label}")
         values[key] = value
     return model_type(**values)
 
@@ -469,6 +440,30 @@ def option_specs(model_type=PipelineConfiguration, prefix=""):
             if model_type is PBSResourceConfiguration:
                 destination = path.replace(".", "_")
             yield path, destination, item
+
+
+def cli_flag(destination: str) -> str:
+    """The command-line spelling of one option destination."""
+    return "--" + destination.replace("_", "-")
+
+
+@lru_cache(maxsize=None)
+def option_routes() -> dict[str, str]:
+    """CLI destination -> model path, for every option and the action."""
+    routes = {destination: path for path, destination, _ in option_specs()}
+    routes["action"] = "action"
+    return routes
+
+
+@lru_cache(maxsize=None)
+def _path_flags() -> dict[str, str]:
+    return {path: cli_flag(destination) for path, destination, _ in option_specs()}
+
+
+def described(location: str) -> str:
+    """A model location with the flag that sets it, so YAML and CLI users both recognize it."""
+    flag = _path_flags().get(location.removeprefix("configuration."))
+    return f"{location} ({flag})" if flag and location.startswith("configuration.") else location
 
 
 def flatten_mapping(data, prefix=""):

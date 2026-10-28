@@ -12,7 +12,7 @@ from coinjoin_pipeline.execution.pbs_settings import pbs_image
 from coinjoin_pipeline.storage.s3 import shell_assignment
 
 from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND
-from .validation import PBSError, require_safe_image
+from .validation import require_notebook_port, require_safe_image
 
 
 def blocksci_pbs_command(
@@ -112,12 +112,7 @@ def blocksci_script_pbs_command(
 
 def blocksci_notebook_pbs_command(notebook_port: int) -> str:
     """Build notebook execution without rebuilding or reparsing BlockSci."""
-    if isinstance(notebook_port, bool) or not isinstance(notebook_port, int) or not 1024 <= notebook_port <= 65535:
-        raise PBSError("BlockSci notebook port must be between 1024 and 65535")
-    return (
-        f"{BLOCKSCI_IMAGE_PYTHON_COMMAND} /mnt/blocksci_notebook.py "
-        f"{notebook_port}"
-    )
+    return f"{BLOCKSCI_IMAGE_PYTHON_COMMAND} /mnt/blocksci_notebook.py {require_notebook_port(notebook_port)}"
 
 
 def blocksci_export_pbs_command(

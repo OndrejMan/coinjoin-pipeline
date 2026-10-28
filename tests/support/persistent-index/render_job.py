@@ -1,4 +1,4 @@
-"""Render one persistent-index or Dumplings-baseline PBS job as pbs-from-s3 would, for a local run.
+"""Render one persistent-index, Dumplings-baseline or statistics PBS job as pbs-from-s3 would, locally.
 
 The production renderers insist on MetaCentrum paths (/storage, /scratch/multijob-*);
 here those roots point at the test's temporary directory instead.
@@ -25,12 +25,14 @@ from coinjoin_pipeline.storage.s3 import S3Target
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("kind", choices=("parse", "update", "backup", "script", "compare", "dumplings"))
+    parser.add_argument("kind", choices=("parse", "update", "backup", "script", "compare", "dumplings", "statistics"))
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--root", type=Path, required=True, help="stands in for /storage and multijob scratch")
     parser.add_argument("--index-dir")
     parser.add_argument("--dumplings-uri")
     parser.add_argument("--coinjoin-type", default="joinmarket")
+    parser.add_argument("--input-uri")
+    parser.add_argument("--protocol", action="append", default=[])
     parser.add_argument("--backup-uri")
     parser.add_argument("--bitcoin-datadir", type=Path)
     parser.add_argument("--max-block", type=int)
@@ -60,6 +62,20 @@ def main() -> int:
                 dumplings_uri=args.dumplings_uri,
                 coinjoin_type=args.coinjoin_type,
             )
+            args.output.write_text(script, encoding="utf-8")
+            return 0
+        if args.kind == "statistics":
+            options = PipelineConfiguration.from_mapping(
+                {
+                    "coinjoin_analysis": {
+                        "program": "coinjoin_statistics",
+                        "data_mode": "mainnet",
+                        "actions": args.protocol,
+                        "input_uri": args.input_uri,
+                    }
+                }
+            ).coinjoin_analysis
+            script = templates_s3.render_coinjoin_tools_s3_pbs(target, "docker://coinjoin-analysis-local", options)
             args.output.write_text(script, encoding="utf-8")
             return 0
         index = templates_s3.PersistentIndex(args.index_dir, args.backup_uri)

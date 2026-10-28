@@ -7,7 +7,7 @@ import sys
 from coinjoin_pipeline.execution.pbs.submission import pbs_job_probe, qdel_pbs_job
 from coinjoin_pipeline.execution.pbs.validation import PBSError
 from coinjoin_pipeline.execution.pbs_settings import pbs_wait_timeout
-from coinjoin_pipeline.storage.s3 import S3Access, wait_for_s3_marker
+from coinjoin_pipeline.storage.s3 import S3Access, stage_marker_uri, wait_for_s3_marker
 
 
 def wait_for_s3_pbs_stage(*, stage: str, job_id: str, run_prefix: str, access: S3Access, walltime: str) -> None:
@@ -15,12 +15,21 @@ def wait_for_s3_pbs_stage(*, stage: str, job_id: str, run_prefix: str, access: S
     print(f"[full-run] Waiting for {stage} marker (PBS job {job_id})")
     wait_for_s3_marker(
         stage,
-        f"{run_prefix}/.pbs/{stage}.done",
-        f"{run_prefix}/.pbs/{stage}.failed",
+        stage_marker_uri(run_prefix, stage, "done"),
+        stage_marker_uri(run_prefix, stage, "failed"),
         access,
         timeout_seconds=pbs_wait_timeout(walltime),
         probe=pbs_job_probe(job_id),
     )
+
+
+def _cancel(log_prefix: str, stage: str, job_id: str) -> bool:
+    """qdel one job; a scheduler or spawn error counts as not cancelled, reported with the stage."""
+    try:
+        return qdel_pbs_job(job_id)
+    except (OSError, PBSError, RuntimeError) as error:
+        print(f"[{log_prefix}] Could not cancel {stage} job {job_id}: {error}", file=sys.stderr)
+        return False
 
 
 def cancel_dependent_pbs_job(stage_name: str, job_id: str) -> bool:
@@ -33,14 +42,7 @@ def cancel_dependent_pbs_job(stage_name: str, job_id: str) -> bool:
         f"[full-run] Cancelling dependent {stage_name} PBS job {job_id}",
         file=sys.stderr,
     )
-    try:
-        cancelled = qdel_pbs_job(job_id)
-    except (OSError, PBSError, RuntimeError) as error:
-        print(
-            f"[full-run] Could not cancel {stage_name} job {job_id}: {error}",
-            file=sys.stderr,
-        )
-        cancelled = False
+    cancelled = _cancel("full-run", stage_name, job_id)
     if not cancelled:
         print(
             f"[full-run] {stage_name} PBS job {job_id} may still be queued or running; cancel it with: qdel {job_id}",
@@ -49,25 +51,17 @@ def cancel_dependent_pbs_job(stage_name: str, job_id: str) -> bool:
     return cancelled
 
 
-def rollback_s3_pbs_submissions(submitted_jobs: list[tuple[str, str]]) -> None:
+def rollback_s3_pbs_submissions(submitted_jobs: list[tuple[str, str]]) -> list[tuple[str, str]]:
     """Cancel every job obtained before an S3 PBS graph submission failed.
 
     Rollback is best effort: report exactly which jobs are still queued or
     running so the operator can finish the job, instead of implying the graph
-    was fully withdrawn.
+    was fully withdrawn. Returns those ``(stage, job_id)`` pairs.
     """
     failed: list[tuple[str, str]] = []
     for stage, job_id in reversed(submitted_jobs):
         print(f"[pbs] Rolling back submitted {stage} job {job_id}", file=sys.stderr)
-        try:
-            cancelled = qdel_pbs_job(job_id)
-        except (OSError, PBSError, RuntimeError) as error:
-            print(
-                f"[pbs] Could not roll back {stage} job {job_id}: {error}",
-                file=sys.stderr,
-            )
-            cancelled = False
-        if not cancelled:
+        if not _cancel("pbs", stage, job_id):
             failed.append((stage, job_id))
     if failed:
         print(
@@ -82,3 +76,4 @@ def rollback_s3_pbs_submissions(submitted_jobs: list[tuple[str, str]]) -> None:
             f"[pbs] Rolled back {len(submitted_jobs)} submitted job(s).",
             file=sys.stderr,
         )
+    return failed

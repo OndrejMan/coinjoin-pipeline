@@ -33,16 +33,8 @@ from .validation import (
 )
 
 
-def _read_pbs_job_id(run_dir: Path, stage: str) -> str | None:
-    jobid_path = run_dir / ".pbs" / f"{stage}.jobid"
-    if not jobid_path.is_file():
-        return None
-    job_id = jobid_path.read_text(encoding="utf-8").strip()
-    return job_id or None
-
-
 def qdel_pbs_stage(run_dir: Path, stage: str) -> bool:
-    job_id = _read_pbs_job_id(run_dir, stage)
+    job_id = submission.read_pbs_job_id(run_dir, stage)
     if job_id:
         return submission.qdel_pbs_job(job_id)
     return True
@@ -104,7 +96,7 @@ def wait_for_pbs_marker(
     """Block until the PBS stage writes a marker, with qstat and deadline fallbacks."""
     done = run_dir / ".pbs" / f"{stage}.done"
     failed = run_dir / ".pbs" / f"{stage}.failed"
-    job_id = job_id or _read_pbs_job_id(run_dir, stage)
+    job_id = job_id or submission.read_pbs_job_id(run_dir, stage)
     deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
     terminal_state_seen: str | None = None
 

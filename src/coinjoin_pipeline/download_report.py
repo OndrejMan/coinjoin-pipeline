@@ -5,12 +5,13 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 
 from exporters.artifact_paths import REPORT_DIR, REPORT_JSON
 
+from .console import EXIT_FAILURE, EXIT_OK, fail
+from .paths import default_runs_root
 from .storage.s3 import (
     ArtifactTransportError,
     S3Access,
@@ -55,8 +56,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="coinjoin-pipeline download-report",
         description="Download a completed S3 unified report without a container.",
     )
-    parser.add_argument("--run-id", required=True)
-    add_s3_arguments(parser, "S3 run root, for example s3://coinjoin-thesis/runs.")
+    parser.add_argument("--run-id", required=True, help="Run whose report to download.")
+    add_s3_arguments(parser, "S3 run root, for example s3://coinjoin-thesis/runs (default: $ARTIFACT_URI).")
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -126,34 +127,27 @@ def download_report(
 
 def main(argv: list[str] | None = None, *, runs_root: Path | None = None) -> int:
     args = build_parser().parse_args(argv)
+    root = runs_root.expanduser().resolve() if runs_root else default_runs_root()
     try:
         run_id = validate_run_id(args.run_id)
         artifact_uri, access = s3_arguments_access(args)
-    except ValueError as error:
-        print(f"ERROR: {error}", file=sys.stderr)
-        return 2
-
-    root = (runs_root or Path.cwd() / "coinjoin-runs").expanduser().resolve()
-    try:
         output_dir = validate_output_directory(
             args.output_dir if args.output_dir else root / run_id / REPORT_DIR,
             root,
         )
     except ValueError as error:
-        print(f"ERROR: {error}", file=sys.stderr)
-        return 2
+        return fail(str(error))
     try:
         json_report, markdown_report = download_report(access, artifact_uri, run_id, output_dir)
     except (DownloadError, ArtifactTransportError, OSError) as error:
-        print(f"ERROR: {error}", file=sys.stderr)
-        return 5
+        return fail(str(error), code=EXIT_FAILURE)
 
     print(f"[download-report] JSON: {json_report}")
     if markdown_report is not None:
         print(f"[download-report] Markdown: {markdown_report}")
     else:
         print("[download-report] Markdown report was not present in S3")
-    return 0
+    return EXIT_OK
 
 
 if __name__ == "__main__":

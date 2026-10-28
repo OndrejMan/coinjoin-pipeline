@@ -6,12 +6,12 @@ import os
 import shutil
 import subprocess
 from enum import Enum, auto
-from importlib.resources import files
 from pathlib import Path
 
 from .configuration import PipelineConfiguration
 from .execution.kubernetes import resolve_kubeconfig
 from .images import Images
+from .runs import scenario_file
 
 
 class Capability(Enum):
@@ -72,11 +72,11 @@ def required_image_components(config: PipelineConfiguration) -> set[str]:
 def validate_arguments(config: PipelineConfiguration, runs_root: Path) -> list[str]:
     """Check host-visible inputs after effective configuration is resolved."""
     errors: list[str] = []
-    if config.scenario:
-        candidate = Path(config.scenario).expanduser()
-        packaged = files("coinjoin_pipeline").joinpath(f"resources/scenarios/{candidate.name}")
-        if not candidate.is_file() and not packaged.is_file():
-            errors.append(f"scenario not found: {config.scenario}")
+    if config.scenario and scenario_file(config.scenario, config.engine) is None:
+        errors.append(
+            f"scenario not found: {config.scenario}; pass a scenario JSON path or the name "
+            "of a catalogue scenario (see cjp scenarios list)"
+        )
     if config.driver == "kubernetes" and not config.dry_run:
         kubeconfig = resolve_kubeconfig(config.kubernetes.kubeconfig)
         if not kubeconfig.is_file():

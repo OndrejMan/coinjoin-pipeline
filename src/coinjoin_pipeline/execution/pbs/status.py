@@ -10,6 +10,12 @@ class PBSQueryError(RuntimeError):
     """The scheduler could not provide a conclusive response."""
 
 
+def job_left_scheduler(detail: str) -> bool:
+    """Whether a qstat/qdel error says the job is no longer known to PBS (finished or purged)."""
+    detail = detail.lower()
+    return "unknown job" in detail or "job has finished" in detail
+
+
 def parse_qstat(payload: str) -> dict[str, str]:
     fields: dict[str, str] = {}
     current: str | None = None
@@ -37,7 +43,7 @@ def job_details(job_id: str) -> dict[str, str] | None:
         if result.returncode == 0:
             return parse_qstat(result.stdout)
         detail = (result.stderr or result.stdout or "").strip()
-        if "unknown job" in detail.lower() or "job has finished" in detail.lower():
+        if job_left_scheduler(detail):
             return None
         errors.append(detail)
     detail = next((error for error in errors if error), "scheduler query failed")

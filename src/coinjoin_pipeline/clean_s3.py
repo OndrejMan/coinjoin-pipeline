@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from .console import EXIT_ABORTED, EXIT_FAILURE, EXIT_OK, fail
 from .storage.s3 import (
     ArtifactTransportError,
     S3Access,
@@ -24,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="coinjoin-pipeline clean-s3",
         description=("Delete every object under an S3 run root (or a single run). This is irreversible."),
     )
-    add_s3_arguments(parser, "S3 run root to clean, for example s3://<bucket>/runs.")
+    add_s3_arguments(parser, "S3 run root to clean, for example s3://<bucket>/runs (default: $ARTIFACT_URI).")
     parser.add_argument("--run-id", help="Restrict deletion to a single run under the artifact URI.")
     parser.add_argument(
         "--yes",
@@ -62,10 +63,7 @@ def delete_prefix(access: S3Access, prefix: str) -> None:
 
 def _confirm(prefix: str, count: int) -> bool:
     if not sys.stdin.isatty():
-        print(
-            "ERROR: refusing to delete without --yes on a non-interactive stdin",
-            file=sys.stderr,
-        )
+        fail("refusing to delete without --yes on a non-interactive stdin; preview with --dry-run first")
         return False
     print(f"About to delete {count} object(s) under {prefix}")
     print("This cannot be undone. Type the prefix to confirm:")
@@ -86,37 +84,34 @@ def main(argv: list[str] | None = None, *, runs_root: object = None) -> int:
         artifact_uri, access = s3_arguments_access(args)
         run_id = validate_run_id(args.run_id) if args.run_id else None
     except ValueError as error:
-        print(f"ERROR: {error}", file=sys.stderr)
-        return 2
+        return fail(str(error))
 
     prefix = artifact_uri if run_id is None else f"{artifact_uri}/{run_id}"
     try:
         objects = list_objects(access, prefix)
     except (CleanError, ArtifactTransportError) as error:
-        print(f"ERROR: {error}", file=sys.stderr)
-        return 5
+        return fail(str(error), code=EXIT_FAILURE)
 
     if not objects:
         print(f"[clean-s3] Nothing to delete under {prefix}")
-        return 0
+        return EXIT_OK
 
     if args.dry_run:
         print(f"[clean-s3] Would delete {len(objects)} object(s) under {prefix}:")
         for uri in objects:
             print(f"  {uri}")
-        return 0
+        return EXIT_OK
 
     if not args.yes and not _confirm(prefix, len(objects)):
-        return 3
+        return EXIT_ABORTED
 
     try:
         delete_prefix(access, prefix)
     except (CleanError, ArtifactTransportError) as error:
-        print(f"ERROR: {error}", file=sys.stderr)
-        return 5
+        return fail(str(error), code=EXIT_FAILURE)
 
     print(f"[clean-s3] Deleted {len(objects)} object(s) under {prefix}")
-    return 0
+    return EXIT_OK
 
 
 if __name__ == "__main__":

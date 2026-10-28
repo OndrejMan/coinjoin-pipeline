@@ -10,7 +10,7 @@ import pytest
 
 from coinjoin_pipeline.configuration import ConfigurationError, PipelineConfiguration
 from coinjoin_pipeline.context import resolve_configuration
-from coinjoin_pipeline.execution import mainnet_runtime, mainnet_sync
+from coinjoin_pipeline.execution import mainnet_runtime, mainnet_sync, s3_markers
 from coinjoin_pipeline.execution.mainnet_runtime import (
     Worker,
     require_ready,
@@ -68,7 +68,7 @@ def test_dependencies_are_persisted_and_rolled_back(config, monkeypatch):
         return "101.local"
 
     monkeypatch.setattr(mainnet_sync, "submit_pbs_job", submit)
-    monkeypatch.setattr(mainnet_sync, "qdel_pbs_job", lambda job: cancelled.append(job) or True)
+    monkeypatch.setattr(s3_markers, "qdel_pbs_job", lambda job: cancelled.append(job) or True)
     with pytest.raises(RuntimeError, match="scheduler refused"):
         mainnet_sync.submit_sync(config)
     assert calls[1].dependencies == ("101.local",)

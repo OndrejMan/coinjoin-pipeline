@@ -98,7 +98,7 @@ def run_configuration(args: PipelineConfiguration) -> None:
         try:
             with _pbs_credentials(args):
                 run_s3_full_run(args)
-        except (PBSError, RuntimeError) as error:
+        except (OSError, PBSError, RuntimeError) as error:
             exit_with_error(error)
     else:
         local.run_configuration(args, logs_root, local_build)

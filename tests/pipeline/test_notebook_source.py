@@ -167,7 +167,58 @@ def test_combined_job_publishes_an_archive_without_downloading_the_previous_inde
     )
     assert 's5 sync "$RUN_WORK/blocksci_data/"' not in script
     assert 's5 sync "$ARTIFACT_URI/$RUN_ID/*"' not in script
-    assert script.index("require_zstd\n") < script.index('s5 sync "$ARTIFACT_URI/')
+    # The stage header only defines download helpers; the job's work starts after its trap.
+    work = script[script.index("trap on_exit EXIT") :]
+    assert work.index("require_zstd\n") < work.index('s5 sync "$ARTIFACT_URI/')
+
+
+def test_combined_report_job_reads_a_nested_datadir_and_only_present_optional_inputs(tmp_path):
+    # The emulator may upload the datadir under bitcoin_data/data/; mappings exist, no prior report.
+    inputs = tmp_path / "s3/bucket/runs/source"
+    for relative in (
+        "bitcoin_data/data/regtest/blocks",
+        ".pipeline/exporters",
+        "coinjoin_emulator_data/data/btc-node",
+        "coinjoin-analysis_data",
+        "coinjoin-mappings_data",
+    ):
+        (inputs / relative).mkdir(parents=True)
+    (inputs / "coinjoin_emulator_data/data/btc-node/block_7.json").write_text("{}")
+    (inputs / "coinjoin-analysis_data/coinjoin_tx_info.json").write_text("{}")
+    (inputs / "coinjoin-mappings_data/coinjoin_mappings.json").write_text("{}")
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    singularity = binary / "singularity"
+    singularity.write_text(
+        "#!/bin/bash\nset -eu\n"
+        'work="$SCRATCHDIR/coinjoin-run/source"\n'
+        'case "$*" in *"/bitcoin_data/data:/mnt/data:ro"*) ;; *) echo "wrong datadir: $*" >&2; exit 1 ;; esac\n'
+        'test -f "$work/coinjoin-mappings_data/coinjoin_mappings.json"\n'
+        'test ! -e "$work/coinjoinPipeline_data"\n'
+        'mkdir -p "$work/blocksci_data/parsed/chain" "$work/coinjoinPipeline_data"\n'
+        'printf index > "$work/blocksci_data/parsed/chain/block.dat"\n'
+        'printf \'{"chainConfig":{"dataDirectory":"/old/source"}}\' > "$work/blocksci_data/config.json"\n'
+        'printf report > "$work/coinjoinPipeline_data/unified_report.json"\n'
+    )
+    singularity.chmod(0o755)
+    target = S3Target("s3://bucket/runs", "source", "https://s3.test", "/dev/null", "test")
+    script = render_blocksci_s3_pbs(target, "docker://blocksci", "true", include_report=True)
+    (tmp_path / "scratch").mkdir()
+    result = subprocess.run(
+        ["bash", "-c", script],
+        text=True,
+        capture_output=True,
+        timeout=3,
+        env={
+            **os.environ,
+            "SCRATCHDIR": str(tmp_path / "scratch"),
+            "FAKE_S3": str(tmp_path / "s3"),
+            "PATH": os.pathsep.join((str(binary), str(FAKE_S5CMD), os.environ["PATH"])),
+        },
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (inputs / ".pbs/blocksci.done").is_file()
+    assert (inputs / "coinjoinPipeline_data/unified_report.json").read_text() == "report"
 
 
 @pytest.mark.parametrize("workflow", ["combined", "reusable"])

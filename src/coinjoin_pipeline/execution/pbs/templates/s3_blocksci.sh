@@ -4,14 +4,7 @@ require_zstd
 s5 sync "$ARTIFACT_URI/$RUN_ID/bitcoin_data/*" "$RUN_WORK/bitcoin_data/"
 s5 sync "$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/*" "$RUN_WORK/coinjoin_emulator_data/"
 s5 sync "$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/*" "$RUN_WORK/.pipeline/exporters/"
-BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"
-if [ ! -d "$BITCOIN_DATADIR/regtest/blocks" ] && [ -d "$BITCOIN_DATADIR/data/regtest/blocks" ]; then
-  BITCOIN_DATADIR="$BITCOIN_DATADIR/data"
-fi
-test -d "$BITCOIN_DATADIR/regtest/blocks" || {{
-  echo "BlockSci S3-compatible reporting requires a Bitcoin datadir containing regtest/blocks; checked $RUN_WORK/bitcoin_data and $RUN_WORK/bitcoin_data/data" >&2
-  exit 1
-}}
+locate_emulator_bitcoin_datadir
 test -d "$RUN_WORK/.pipeline/exporters"
 {before}
 EXPORTED_MAX_BLOCK="$(emulator_max_block)"

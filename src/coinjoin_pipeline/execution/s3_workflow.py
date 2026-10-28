@@ -25,7 +25,15 @@ from coinjoin_pipeline.execution.s3_markers import cancel_dependent_pbs_job, wai
 from coinjoin_pipeline.execution.s3_staging import stage_kubernetes_s3_run
 from coinjoin_pipeline.execution.s3_submission import s3_full_run_plan_from_args, submit_s3_pbs_graph
 from coinjoin_pipeline.execution.stages import StageGraph, StagePlan, resource_group
-from coinjoin_pipeline.storage.s3 import ArtifactTransportError, S3Access, S3Target, wait_for_s3_marker
+from coinjoin_pipeline.storage.s3 import (
+    ArtifactTransportError,
+    S3Access,
+    S3Target,
+    run_prefix_uri,
+    stage_marker_uri,
+    upload_marker_uri,
+    wait_for_s3_marker,
+)
 
 
 def _wait_for_pbs_stage(
@@ -72,7 +80,7 @@ def run_s3_full_run(args: PipelineConfiguration) -> None:
     """Run the canonical S3 full-run graph and wait for its terminal report."""
     target = S3Target.from_args(args)
     access = target.access
-    run_prefix = f"{target.artifact_uri}/{target.run_id}"
+    run_prefix = run_prefix_uri(target.artifact_uri, target.run_id)
     kubeconfig_path = resolve_kubeconfig(args.kubernetes.kubeconfig)
     job_name = s3_emulation_job_name(target.run_id)
     plan = s3_full_run_plan_from_args(args)
@@ -81,23 +89,23 @@ def run_s3_full_run(args: PipelineConfiguration) -> None:
 
     if args.dry_run:
         run_s3_kubernetes_emulation(args)
-        print(f"[dry-run] Would wait for {run_prefix}/.k8s/upload.done (timeout {args.emulation_timeout}s)")
+        print(f"[dry-run] Would wait for {upload_marker_uri(run_prefix, 'done')} (timeout {args.emulation_timeout}s)")
         if analyzed:
             submit_s3_pbs_graph(args)
         for stage in plan.scheduled():
-            print(f"[dry-run] Would wait for {run_prefix}/.pbs/{stage.name}.done")
+            print(f"[dry-run] Would wait for {stage_marker_uri(run_prefix, stage.name, 'done')}")
         return
 
     if analyzed:
         require_qsub()
     stage_kubernetes_s3_run(args)
     run_s3_kubernetes_emulation(args)
-    print(f"[full-run] Waiting for emulation upload marker {run_prefix}/.k8s/upload.done")
+    print(f"[full-run] Waiting for emulation upload marker {upload_marker_uri(run_prefix, 'done')}")
     try:
         wait_for_s3_marker(
             "kubernetes-emulation",
-            f"{run_prefix}/.k8s/upload.done",
-            f"{run_prefix}/.k8s/upload.failed",
+            upload_marker_uri(run_prefix, "done"),
+            upload_marker_uri(run_prefix, "failed"),
             access,
             timeout_seconds=args.emulation_timeout,
             start_timeout_seconds=S3_JOB_START_TIMEOUT_SECONDS,

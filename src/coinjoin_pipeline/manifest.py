@@ -36,7 +36,7 @@ def redact(value: object, key: str = "") -> object:
         return "<redacted>"
     if isinstance(value, Mapping):
         return {k: redact(v, str(k)) for k, v in value.items()}
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [redact(item) for item in value]
     return value
 

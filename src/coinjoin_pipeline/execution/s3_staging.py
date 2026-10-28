@@ -13,6 +13,7 @@ from coinjoin_pipeline.storage.s3 import (
     ensure_empty_run_prefix,
     s3_access_preflight,
     staged_exporters_state,
+    staged_exporters_uri,
     upload_exporters,
 )
 
@@ -45,7 +46,7 @@ def ensure_staged_exporters(args: PipelineConfiguration) -> None:
     if state == STAGED_EXPORTERS_COMPLETE:
         return
     if state == STAGED_EXPORTERS_PARTIAL:
-        prefix = f"{target.artifact_uri}/{target.run_id}/.pipeline/exporters/"
+        prefix = staged_exporters_uri(target.artifact_uri, target.run_id)
         raise ArtifactTransportError(
             f"run prefix {prefix} carries an exporter tree without {', '.join(missing)}; "
             "it predates the blocksci_export rename or a previous upload died halfway. "

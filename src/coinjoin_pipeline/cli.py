@@ -7,14 +7,23 @@ import os
 import shlex
 import subprocess
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from pathlib import Path
 
 from exporters.artifact_paths import RUN_MANIFEST
 
 from . import MANIFEST_SCHEMA_VERSION, __version__
-from .arguments import CONFIGURATION_FLAGS, action_word, build_parser, load_configuration
-from .configuration import PipelineConfiguration
+from .arguments import (
+    CONFIGURATION_FLAGS,
+    DELEGATING_UTILITIES,
+    UTILITIES,
+    UTILITY_SUMMARIES,
+    action_word,
+    build_parser,
+    load_configuration,
+)
+from .configuration import ImageConfiguration, PipelineConfiguration
+from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, fail
 from .context import RunContext
 from .doctor import check as doctor_check
 from .doctor import required_capabilities, required_image_components, validate_arguments
@@ -23,11 +32,6 @@ from .manifest import environment_snapshot, initial_manifest, mark_finished
 from .paths import PIPELINE_ROOT
 from .process import run
 from .runs import store_host_manifest
-
-
-def fail(message: str, code: int = 2) -> int:
-    print(f"ERROR: {message}", file=sys.stderr)
-    return code
 
 
 def print_version() -> None:
@@ -41,8 +45,8 @@ def print_version() -> None:
 def pull(runtime: str, images: Images) -> int:
     for image in images.as_dict().values():
         if run([runtime, "pull", image]):
-            return 5
-    return 0
+            return EXIT_FAILURE
+    return EXIT_OK
 
 
 def runtime_root() -> Path:
@@ -58,49 +62,33 @@ def use_line_buffered_output() -> None:
             reconfigure(line_buffering=True)
 
 
+# The host options every utility accepts before or after its name.
+UTILITY_OPTIONS = frozenset({"runtime", "runs_root", *("images." + item.name for item in fields(ImageConfiguration))})
+
+
+def utility_usage(action: str) -> str:
+    return (
+        f"usage: cjp {action} [--runtime {{docker,podman}}] [--runs-root DIR] "
+        "[--version TAG] [--local-build] [--<component>-image IMAGE]\n\n"
+        f"{UTILITY_SUMMARIES[action].capitalize()}."
+    )
+
+
 def _utility(argv: list[str]) -> int | None:
     if argv[:1] == ["container"]:
         return None
-    utility_actions = {
-        "version",
-        "doctor",
-        "pull",
-        "watch",
-        "download-report",
-        "clean-s3",
-        "runs",
-        "scenarios",
-    }
-    parser = build_parser(
-        {
-            "runtime",
-            "runs_root",
-            *{
-                "images." + name
-                for name in (
-                    "version",
-                    "local_build",
-                    "emulator",
-                    "coinjoin_analysis",
-                    "blocksci",
-                    "mappings",
-                    "sake",
-                    "uploader",
-                    "unified_report",
-                )
-            },
-        },
-        add_help=False,
-    )
-    values, remaining = parser.parse_known_args(argv)
+    values, remaining = build_parser(set(UTILITY_OPTIONS), add_help=False).parse_known_args(argv)
     supplied = vars(values)
     action = supplied.pop("action", None)
     supplied.pop("from_configuration", None)
-    if action not in utility_actions:
+    if action not in UTILITIES:
         return None
+    if action not in DELEGATING_UTILITIES and remaining[:1] in (["-h"], ["--help"]):
+        print(utility_usage(action))
+        return EXIT_OK
     if action == "version":
         print_version()
-        return 0
+        return EXIT_OK
     context = RunContext.prepare(PipelineConfiguration.from_flat(supplied), shlex.join(["cjp", *argv]))
     root = context.config.runs_path
     if action in {"watch", "download-report", "clean-s3"}:
@@ -122,14 +110,22 @@ def _utility(argv: list[str]) -> int | None:
             ]
         )
     if remaining:
-        return fail(f"unexpected arguments for {action}: {' '.join(remaining)}")
+        return fail(f"unexpected arguments for {action}: {' '.join(remaining)}; see cjp {action} --help")
     if action == "pull":
         return pull(context.config.runtime, context.images)
     errors = doctor_check(context.config.runtime, root, context.images)
     if errors:
-        return fail("; ".join(errors))
+        return fail(*errors)
     print(f"doctor OK: runtime={context.config.runtime} output={root}")
-    return 0
+    return EXIT_OK
+
+
+def print_dry_run_context(context: RunContext) -> None:
+    """What a dry run resolved before execution: where the run lives and which images it uses."""
+    print(f"[dry-run] run directory: {context.run_dir or '-'}")
+    if context.config.action not in {"clean", "mainnet-sync"}:
+        for component, image in context.images.as_dict().items():
+            print(f"[dry-run] image {component}: {image}")
 
 
 def execute(context: RunContext) -> None:
@@ -149,10 +145,10 @@ def main(argv: list[str] | None = None) -> int:
     original = list(sys.argv[1:] if argv is None else argv)
     if not original or original[0] in {"-h", "--help"}:
         build_parser().print_help()
-        return 0
+        return EXIT_OK
     target = None
     manifest = None
-    code = 5
+    code = EXIT_FAILURE
     try:
         if (
             not any(value.split("=", 1)[0] in CONFIGURATION_FLAGS for value in original)
@@ -178,9 +174,11 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         if errors:
-            return fail("; ".join(errors))
+            return fail(*errors)
         print(f"Run configuration: {config.action} ({config.driver}, {config.artifacts.backend})")
-        if not config.dry_run:
+        if config.dry_run:
+            print_dry_run_context(context)
+        else:
             for path in (root, root / ".notebooks"):
                 path.mkdir(parents=True, exist_ok=True)
             if context.run_dir is not None and (config.run_dir or config.action in {"emulate", "full-run"}):
@@ -202,15 +200,15 @@ def main(argv: list[str] | None = None) -> int:
                 store_host_manifest(target, manifest)
         with context.activate():
             execute(context)
-        code = 0
+        code = EXIT_OK
     except (ValueError, OSError) as error:
         code = fail(str(error))
     except (RuntimeError, subprocess.CalledProcessError) as error:
-        code = fail(str(error), 5)
+        code = fail(str(error), code=EXIT_FAILURE)
     except KeyboardInterrupt:
-        code = 130
+        code = EXIT_INTERRUPTED
     except SystemExit as error:
-        code = error.code if isinstance(error.code, int) else 2
+        code = error.code if isinstance(error.code, int) else EXIT_USAGE
     finally:
         if target and manifest is not None:
             mark_finished(manifest, code)

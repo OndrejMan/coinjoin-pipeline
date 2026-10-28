@@ -18,7 +18,7 @@ from .configuration import (
     replace_path,
 )
 from .images import Images, resolve_images
-from .paths import EXPORTERS_ROOT, SCENARIOS_ROOT
+from .paths import EXPORTERS_ROOT, SCENARIOS_ROOT, default_runs_root
 from .runs import run_id_for
 from .storage.s3 import (
     validate_artifact_uri,
@@ -34,11 +34,7 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
         ZoneInfo(config.run_timezone)
     except (KeyError, ValueError) as error:
         raise ConfigurationError(f"invalid run timezone: {config.run_timezone}") from error
-    root = (
-        Path(config.runs_root or os.environ.get("EMULATION_LOGS_DIR") or Path.cwd() / "coinjoin-runs")
-        .expanduser()
-        .resolve()
-    )
+    root = Path(config.runs_root).expanduser().resolve() if config.runs_root else default_runs_root()
     config = replace(config, runs_root=str(root))
     provided = set(config.provided)
     for stage in ("analysis", "blocksci", "mappings"):

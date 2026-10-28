@@ -189,8 +189,19 @@ unified output. `--pbs` adds PBS stdout/stderr to the Kubernetes stream, while
 `.pbs/*.jobid`, from `$HOME/<run-id>-full-run.log`, or supplied explicitly with
 repeatable `--pbs-job STAGE=JOB_ID`; job state changes are included in the
 prefixed stream. Pipeline actions are `full-run`, `emulate`, `clean`, `analyze`,
-`export`, `coinjoin-analysis`, `pbs-from-s3`, `mappings`, and `initialize`, plus
-the `runs`, `scenarios`, and `external` command groups.
+`export`, `coinjoin-analysis`, `pbs-from-s3`, `mappings`, `mainnet-sync`, and
+`initialize`, plus the `runs`, `scenarios`, and `external` command groups.
+
+`cjp --help` lists every option grouped by configuration section, each with
+its YAML key and default, so a flag and its YAML spelling can be looked up in
+one place; every utility answers `--help` too. Options given after
+`cjp run CONFIG.yaml` override the file. A `--dry-run` prints the resolved
+run directory and component images before the execution plan. Exit codes:
+`0` success; `2` invalid configuration or arguments, a failed preflight check
+(each problem on its own `ERROR:` line), or an execution failure reported as
+`[ERROR] ...`; `3` `clean-s3` not confirmed; `5` an unexpected runtime error,
+or a failed `pull`, S3 transfer or log source of a utility; `130` interrupted.
+A failed local container may also pass its own exit code through.
 
 Before a new full run, the CLI atomically creates `research_manifest.json` in
 the expected run directory. Stage-only commands update the explicitly selected

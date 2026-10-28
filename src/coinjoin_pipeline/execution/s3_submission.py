@@ -50,9 +50,14 @@ from coinjoin_pipeline.storage.s3 import (
     S3Target,
     clear_s3_stage_markers,
     ensure_empty_run_prefix,
+    run_prefix_uri,
     s3_access_preflight,
     s3_object_exists,
 )
+
+
+def _optional_path(value: str | None) -> Path | None:
+    return Path(value) if value else None
 
 
 def s3_full_run_plan_from_args(args: PipelineConfiguration) -> StageGraph:
@@ -167,9 +172,7 @@ class S3StageRunner:
             if persistent
             else required(blocksci.cache_source_run_id, "--blocksci-cache-source-run-id"),
             command=blocksci_update_pbs_command(self.target.run_id),
-            external_bitcoin_datadir=Path(blocksci.external_bitcoin_datadir)
-            if blocksci.external_bitcoin_datadir
-            else None,
+            external_bitcoin_datadir=_optional_path(blocksci.external_bitcoin_datadir),
             bitcoin_blocks_uri=blocksci.bitcoin_blocks_uri,
             expected_block_hash=blocksci.expected_block_hash,
             external_network=required(blocksci.network, "--blocksci-network"),
@@ -180,23 +183,23 @@ class S3StageRunner:
 
     def _parse(self, stage: StagePlan) -> None:
         blocksci = self.args.blocksci
-        command = blocksci_parse_pbs_command(self.target.run_id)
         if blocksci.external_bitcoin_datadir or blocksci.bitcoin_blocks_uri:
+            # An external chain is mounted as the coin directory itself, bounded by the requested height.
             command = blocksci_parse_pbs_command(
                 self.target.run_id,
                 coin_type=required(blocksci.network, "--blocksci-network"),
                 disk_path="/mnt/data",
                 max_block_expression=str(required(blocksci.max_block, "--blocksci-max-block") + 1),
             )
+        else:
+            command = blocksci_parse_pbs_command(self.target.run_id)
         script = render_blocksci_parse_s3_pbs(
             **self._blocksci(),
             command=command,
-            external_bitcoin_datadir=Path(blocksci.external_bitcoin_datadir)
-            if blocksci.external_bitcoin_datadir
-            else None,
+            external_bitcoin_datadir=_optional_path(blocksci.external_bitcoin_datadir),
             bitcoin_blocks_uri=blocksci.bitcoin_blocks_uri,
             expected_block_hash=blocksci.expected_block_hash,
-            external_blocksci_dir=Path(blocksci.external_blocksci_dir) if blocksci.external_blocksci_dir else None,
+            external_blocksci_dir=_optional_path(blocksci.external_blocksci_dir),
             external_network=blocksci.network,
             external_max_block=blocksci.max_block,
             **self._persistent_index(),
@@ -206,9 +209,11 @@ class S3StageRunner:
     def _blocksci_work(self, stage: StagePlan) -> None:
         blocksci, task = self.args.blocksci, self.args.blocksci.task
         if task == "backup":
-            common = self._blocksci()
-            del common["image"]
-            self._submit(stage, render_blocksci_index_backup_s3_pbs(**common, **self._persistent_index()))
+            # The backup only archives the index; it runs no BlockSci image.
+            script = render_blocksci_index_backup_s3_pbs(
+                target=self.target, resources=stage_pbs_resources(self.args, "blocksci"), **self._persistent_index()
+            )
+            self._submit(stage, script)
             return
         if stage.name == "blocksci":
             # A detect run keeps the report in its own stage; any other combined run reports in place.
@@ -221,11 +226,12 @@ class S3StageRunner:
             )
             self._submit(stage, script)
             return
+        notebook_port = blocksci.notebook_port or 8888
         commands = {
             "detect": lambda: blocksci_analysis_pbs_command(self.target.run_id, self.args),
             "external": lambda: blocksci_external_report_pbs_command(self.target.run_id, self.args),
             "script": lambda: blocksci_script_pbs_command(self.target.run_id, self.args),
-            "notebook": lambda: blocksci_notebook_pbs_command(blocksci.notebook_port or 8888),
+            "notebook": lambda: blocksci_notebook_pbs_command(notebook_port),
         }
         script = render_blocksci_analyze_s3_pbs(
             **self._blocksci(),
@@ -235,8 +241,8 @@ class S3StageRunner:
             user_script=Path(required(blocksci.script, "--blocksci-script")) if task == "script" else None,
             external_baseline_uri=blocksci.external_baseline_uri if task == "external" else None,
             external_false_cjtxs_uri=blocksci.external_false_cjtxs_uri if task == "external" else None,
-            notebooks_dir=Path(blocksci.notebooks_dir) if task == "notebook" and blocksci.notebooks_dir else None,
-            notebook_port=blocksci.notebook_port or 8888,
+            notebooks_dir=_optional_path(blocksci.notebooks_dir) if task == "notebook" else None,
+            notebook_port=notebook_port,
             **self._persistent_index(),
         )
         self._submit(stage, script, depends=True)
@@ -286,7 +292,7 @@ def _submit_s3_pbs_stages(args: PipelineConfiguration, submitted_jobs: list[tupl
         s3_access_preflight(access, target.artifact_uri)
         if not s3_object_exists(
             access,
-            f"{target.artifact_uri}/{source_run_id}/{BLOCKSCI_PARSE_DIR}/manifest.json",
+            f"{run_prefix_uri(target.artifact_uri, source_run_id)}/{BLOCKSCI_PARSE_DIR}/manifest.json",
         ):
             raise ArtifactTransportError(f"source BlockSci cache manifest does not exist for run {source_run_id}")
         ensure_empty_run_prefix(access, target.artifact_uri, target.run_id)
@@ -295,7 +301,7 @@ def _submit_s3_pbs_stages(args: PipelineConfiguration, submitted_jobs: list[tupl
         s3_access_preflight(access, target.artifact_uri)
         if not s3_object_exists(
             access,
-            f"{target.artifact_uri}/{target.run_id}/{BASELINE_FILE}",
+            f"{run_prefix_uri(target.artifact_uri, target.run_id)}/{BASELINE_FILE}",
         ):
             raise ArtifactTransportError(
                 f"resuming without --analysisPbs requires an existing {BASELINE_FILE} for run {target.run_id}"

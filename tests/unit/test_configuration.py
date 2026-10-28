@@ -223,3 +223,12 @@ def test_s3_full_run_report_resources_need_both_analyzers():
     )
     with pytest.raises(ConfigurationError, match="unified-report PBS resource overrides require a unified-report job"):
         resolve_configuration(config)
+
+
+def test_every_example_resolves(monkeypatch):
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.chdir(root)  # examples name checkout-relative scripts
+    examples = sorted((root / "examples").glob("*.yaml"))
+    assert examples
+    for example in examples:
+        assert resolve_configuration(load_configuration(["run", str(example), "--dry-run"])).dry_run, example.name

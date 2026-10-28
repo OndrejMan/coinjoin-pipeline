@@ -12,6 +12,13 @@ s5() {
     -u AWS_PROFILE -u AWS_DEFAULT_PROFILE -u AWS_REGION -u AWS_DEFAULT_REGION \
     s5cmd --credentials-file "$S3_CREDENTIALS_FILE" --profile "$S3_PROFILE" --endpoint-url "$S3_ENDPOINT_URL" "$@"
 }
+# Copy one run directory that earlier stages may not have produced; an absent one is skipped.
+download_optional() {
+  if s5 ls "$ARTIFACT_URI/$RUN_ID/$1/" >/dev/null 2>&1; then
+    mkdir -p "$2"
+    s5 sync "$ARTIFACT_URI/$RUN_ID/$1/*" "$2/"
+  fi
+}
 require_file() {
   test -f "$1" || { echo "$2" >&2; exit 1; }
 }
@@ -19,6 +26,17 @@ require_file() {
 emulator_max_block() {
   find "$RUN_WORK/coinjoin_emulator_data/data/btc-node" -maxdepth 1 -type f -name 'block_*.json' -printf '%f\n' \
     | sed -nE 's/^block_([0-9]+)\.json$/\1/p' | sort -n | tail -n 1
+}
+# The emulator uploads bitcoin_data/ as the datadir itself or with the datadir under data/.
+locate_emulator_bitcoin_datadir() {
+  BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"
+  if [ ! -d "$BITCOIN_DATADIR/regtest/blocks" ] && [ -d "$BITCOIN_DATADIR/data/regtest/blocks" ]; then
+    BITCOIN_DATADIR="$BITCOIN_DATADIR/data"
+  fi
+  test -d "$BITCOIN_DATADIR/regtest/blocks" || {
+    echo "BlockSci requires a Bitcoin datadir containing regtest/blocks; checked $RUN_WORK/bitcoin_data and $RUN_WORK/bitcoin_data/data" >&2
+    exit 1
+  }
 }
 publish_done() {
   s5 cp "$DONE_MARKER" "$ARTIFACT_URI/$RUN_ID/.pbs/$STAGE.done"

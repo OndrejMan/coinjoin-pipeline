@@ -57,3 +57,21 @@ def test_cancel_dependent_pbs_job_reports_manual_recovery(monkeypatch, capsys) -
 
     assert cancelled is False
     assert "cancel it with: qdel 456.server" in capsys.readouterr().err
+
+
+def test_rollback_continues_past_a_failing_qdel_and_returns_the_survivors(monkeypatch, capsys) -> None:
+    attempted = []
+
+    def qdel(job_id: str) -> bool:
+        attempted.append(job_id)
+        if job_id == "2.server":
+            raise OSError("qdel could not be spawned")
+        return job_id != "3.server"
+
+    monkeypatch.setattr(s3_markers, "qdel_pbs_job", qdel)
+
+    failed = s3_markers.rollback_s3_pbs_submissions([("a", "1.server"), ("b", "2.server"), ("c", "3.server")])
+
+    assert attempted == ["3.server", "2.server", "1.server"]
+    assert failed == [("c", "3.server"), ("b", "2.server")]
+    assert "ROLLBACK INCOMPLETE" in capsys.readouterr().err

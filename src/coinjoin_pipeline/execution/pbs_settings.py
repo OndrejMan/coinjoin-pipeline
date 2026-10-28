@@ -74,9 +74,14 @@ def resolve_unified_report_image(args: PipelineConfiguration) -> str:
     return args.images.unified_report or read_image_lock("unified-report.image")
 
 
-def stage_pbs_resources(args: PipelineConfiguration, group: str) -> PBSResources:
-    """Resolve one resource group: stage override, then the shared ``pbs.*`` value, then the default."""
-    sources = (getattr(args.pbs, group), args.pbs, DEFAULT_RESOURCES[group])
+def stage_pbs_resources(
+    args: PipelineConfiguration, group: str, *, default: PBSResources | None = None
+) -> PBSResources:
+    """Resolve one resource group: stage override, then the shared ``pbs.*`` value, then the default.
+
+    ``default`` replaces the group's ``DEFAULT_RESOURCES`` entry for jobs with their own budget.
+    """
+    sources = (getattr(args.pbs, group), args.pbs, default or DEFAULT_RESOURCES[group])
 
     def pick(name: str) -> object:
         return next(value for source in sources if (value := getattr(source, name)) is not None)

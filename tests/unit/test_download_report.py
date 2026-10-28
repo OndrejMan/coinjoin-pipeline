@@ -184,3 +184,13 @@ def test_download_replaces_destination_instead_of_merging(tmp_path: Path) -> Non
         download_report(ACCESS, "s3://bucket/runs", "run-1", output_dir)
 
     assert not stale_file.exists()
+
+
+def test_standalone_default_destination_follows_the_runs_root_environment(tmp_path: Path, monkeypatch) -> None:
+    from coinjoin_pipeline import download_report as module
+
+    monkeypatch.setenv("EMULATION_LOGS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setattr(module, "s3_arguments_access", lambda _args: ("s3://bucket/runs", ACCESS))
+    with mock.patch.object(module, "download_report", return_value=(tmp_path / "r.json", None)) as download:
+        assert module.main(["--run-id", "run-a"]) == 0
+    assert download.call_args.args[3] == (tmp_path / "runs/run-a/coinjoinPipeline_data").resolve()

@@ -9,9 +9,11 @@ Every S3 job is `directives()` (`pbs/scripts.py`), the stage identity
 (`ARTIFACT_URI`, `RUN_ID`, credentials, `STAGE`, `IMAGE`), `templates/s3_stage.sh`
 and then its own template. `s3_stage.sh` defines the helpers every job uses: `s5`
 (s5cmd with the stage credentials and no `AWS_*` variable of the node),
-`require_file`, `emulator_max_block`, `require_zstd`, `canonicalize_index`, the
-marker publishers and a no-op `stage_finalize` that a template redefines when it
-publishes outputs even on failure. `{start}` installs `templates/stage_trap.sh` and
+`require_file`, `download_optional` (sync a run directory only when it exists),
+`emulator_max_block`, `locate_emulator_bitcoin_datadir`, `require_zstd`,
+`canonicalize_index`, the marker publishers and a no-op `stage_finalize` that a
+template redefines when it publishes outputs even on failure. BlockSci templates
+also get `templates/index_archive.sh`. `{start}` installs `templates/stage_trap.sh` and
 runs `templates/s3_setup.sh`. Shared-storage jobs use `templates/local_preamble.sh`
 instead; both mappings jobs share `templates/mappings_run.sh`.
 
@@ -36,8 +38,11 @@ instead; both mappings jobs share `templates/mappings_run.sh`.
 
 All coordination state lives in the run directory under `.pbs/`:
 
-- `.pbs/<stage>.pbs` — the rendered job script (kept for reproducibility).
-- `.pbs/<stage>.jobid` — the `qsub` job id, written right after submission.
+- `.pbs/<stage>.pbs` — the rendered job script (kept for reproducibility;
+  shared-storage jobs only, S3 jobs are piped to `qsub`).
+- `.pbs/<stage>.jobid` — the `qsub` job id and a newline, written atomically
+  right after submission. Watch, overlap detection, cancellation and
+  scenario-lab read it; it is never pruned.
 - `.pbs/<stage>.done` — written by the job's `on_exit` trap on exit status 0.
 - `.pbs/<stage>.failed` — written by the trap on any non-zero exit status.
 
@@ -155,13 +160,19 @@ reconciles: a missing or incomplete working copy is replaced by the backup,
 streamed from S3, checked against its SHA-256 and then against `files.txt`.
 Readers never restore; they fail and name the update that does.
 
-The backup is one object set under `index_backup_uri`: `blocksci_index.tar.zst`
+Each `backup` job writes one immutable generation under
+`<index_backup_uri>/generations/<run-id>/`: `blocksci_index.tar.zst`
 (`config.json`, `files.txt`, `manifest.json`, `parsed/`), its `.sha256`, and
-`manifest.json`, which is written last and makes the prefix a backup. The
-`backup` job deletes the old manifest and archive first, so S3 holds one copy
-and none while the job runs, then streams `tar | zstd` into `s5cmd pipe` (an
-s5cmd older than 2.2 stages the archive in scratch). It records the index
-manifest as `blocksci-index-backup.json` in its run. Neither `parse` nor
+`manifest.json`. It refuses a generation that already has a manifest. The
+archive is streamed `tar | zstd` into `s5cmd pipe` (an s5cmd without `pipe`
+stages it in scratch); its S3 size must match the uploaded stream before the
+manifest and then `<index_backup_uri>/latest.json` (`prefix`, `archive_uri`,
+`archive_sha256`, `archive_size`) are written. Until that pointer switches, the
+previous generation stays the restore source. A restore follows `latest.json`
+and verifies the SHA-256 while extracting; without a pointer it reads the
+legacy fixed-name `<index_backup_uri>/blocksci_index.tar.zst` and its
+`.sha256`. The job records the index manifest as `blocksci-index-backup.json`
+in its run. Neither `parse` nor
 `update` writes a backup. Analyses copy the index manifest next to their outputs as
 `blocksci-index-manifest.json`. `tests/test-persistent-index-local.sh` runs the
 rendered jobs on one host with Docker in place of Singularity.
@@ -243,7 +254,8 @@ The frontend polls every `POLL_INTERVAL_SECONDS` (30 s):
 2. `done` marker exists → stage finished successfully.
 3. Deadline exceeded → raise. The timeout is the stage walltime plus one hour
    of queue margin (`pbs_wait_timeout`).
-4. If a job id is known, `qstat -x -f <jobid>` is consulted as a fallback:
+4. If a job id is known, `qstat -x -f <jobid>` (or `qstat -f` where `-x` is
+   refused) is consulted as a fallback:
    a terminal state (`C`/`F`) or a missing job without a marker means the job
    ended without writing its marker, which is treated as a failure.
 
@@ -273,10 +285,17 @@ scrubbed first):
 - `<artifact-uri>/<run-id>/.pbs/blocksci-update.done` | `.failed`
 - `<artifact-uri>/<run-id>/.pbs/blocksci-analyze.done` | `.failed`
 - `<artifact-uri>/<run-id>/.pbs/blocksci-script.done` | `.failed`
+- `<artifact-uri>/<run-id>/.pbs/blocksci-external.done` | `.failed`
 - `<artifact-uri>/<run-id>/.pbs/blocksci-notebook.done` | `.failed`
+- `<artifact-uri>/<run-id>/.pbs/blocksci-backup.done` | `.failed`
 - `<artifact-uri>/<run-id>/.pbs/unified-report.done` | `.failed`
   — uploaded by the S3 PBS job traps. A full run returns successfully only
   after the report marker is present.
+
+`mainnet-sync` jobs publish `.pbs/mainnet-producer.*` and
+`.pbs/mainnet-blocksci.*` from their own worker (`mainnet_runtime.py`); their
+bodies are JSON state records, not the `done`/`failed` lines above. Nothing in
+the frontend waits for them; scenario-lab reads them.
 
 Semantics mirror `wait_for_pbs_marker`: `failed` raises and `done` returns.
 The probe distinguishes queued from executing work. A queued job may extend
@@ -333,8 +352,8 @@ Extra rules for the S3 chain:
   `coinjoin-analysis_data/coinjoin_tx_info.json` to already exist.
 - `qsub` must be on `PATH` (a MetaCentrum frontend, or the local shims from
   `scripts/pbs-env.sh` in the meta-repo).
-- When `kinit` is on `PATH`, `pbs-from-s3` and the S3 `full-run` first run
-  `kinit -R` and refuse to start if it fails, then renew hourly in the
+- When `kinit` is on `PATH`, `pbs-from-s3`, `mainnet-sync` and the S3
+  `full-run` first run `kinit -R` and refuse to start if it fails, then renew hourly in the
   background so `qsub`/`qstat`/`qdel` keep working past the ticket's 10-hour
   lifetime. This needs a renewable ticket (`kinit -r 7d <login>@META`); the
   ticket the frontend login script obtains is not renewable. A later renewal

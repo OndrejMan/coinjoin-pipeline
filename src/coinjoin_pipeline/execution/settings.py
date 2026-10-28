@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from exporters.artifact_paths import EMULATION_MARKERS
-
 from coinjoin_pipeline.images import DEFAULT_VERSION, IMAGE_NAMES
 from coinjoin_pipeline.paths import PIPELINE_ROOT
 
@@ -29,7 +27,6 @@ DEFAULT_K8S_CONTROL_IP = "host.docker.internal"
 VALID_PULL_POLICIES = ("always", "missing", "never")
 RUNS_ROOT_CONTAINER = "/runs/emulation/logs"
 COINJOIN_ANALYSIS_SELECTED_ROOT_CONTAINER = "/runs/emulation/selected"
-RUN_MARKER_FILES = EMULATION_MARKERS
 IMAGE_PROVENANCE_ENV = {
     "BLOCKSCI_IMAGE": ("BLOCKSCI_IMAGE_ID", "BLOCKSCI_IMAGE_DIGEST"),
     "COINJOIN_ANALYSIS_IMAGE": (
@@ -41,7 +38,6 @@ IMAGE_PROVENANCE_ENV = {
         "COINJOIN_EMULATOR_IMAGE_DIGEST",
     ),
 }
-PBS_SUBMIT_LOCK_NAME = ".pbs-submit.lock"
 PEER_CONTAINERS = (
     "blocksci_analyzer",
     "coinjoin_analysis",
