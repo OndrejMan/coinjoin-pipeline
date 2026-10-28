@@ -1,9 +1,10 @@
 # Manual invocation only. CPU/RAM are starting budgets, not measured mainnet minima.
 action: mainnet-sync
 run_id: mainnet-sync-CHANGE-ME
+# The state prefix and backups are fixed: every run replaces the previous one's state
+# and backups, and keeps only its logs under <state_uri>/logs/<run_id>/.
 artifacts:
   backend: s3
-  uri: s3://xman-coinjoin-new/runs
   endpoint_url: https://s3.cl4.du.cesnet.cz
   credentials_file: /storage/brno2/home/xman/.aws/credentials
   profile: coinjoin
@@ -12,9 +13,10 @@ mainnet:
   # Omit for the current tip. Actual frozen height can be higher.
   target_height: 400000
   root: /scratch/multijob-brno/xman/bitcoin-mainnet
-  backup_uri: s3://xman-coinjoin-new/bitcoin-mainnet/core-checkpoints
+  state_uri: s3://xman-coinjoin-new/bitcoin-mainnet/sync
+  backup_uri: s3://xman-coinjoin-new/bitcoin-mainnet/core-checkpoint
   blocks_uri: s3://xman-coinjoin-new/bitcoin-mainnet/blocks
-  dumplings_uri: s3://xman-coinjoin-new/dumplings
+  dumplings_uri: s3://xman-coinjoin-new/bitcoin-mainnet/dumplings
   # Use rebuilt images containing the changes in this workspace; pin them before deployment.
   core_image: ghcr.io/ondrejman/bitcoin-block-archive:latest
   dumplings_image: ghcr.io/ondrejman/dumplings:latest
@@ -22,7 +24,7 @@ mainnet:
   reorg_reserve: 2016
 blocksci:
   index_dir: /scratch/multijob-brno/xman/blocksci-mainnet
-  index_backup_uri: s3://xman-coinjoin-new/blocksci-index
+  index_backup_uri: s3://xman-coinjoin-new/bitcoin-mainnet/blocksci-index
 pbs:
   producer:
     ncpus: 4

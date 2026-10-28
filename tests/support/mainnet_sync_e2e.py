@@ -35,7 +35,6 @@ def configuration(work: Path, endpoint: str, run: str, mode: str, target: int) -
         "runs_root": str(work / "runs"),
         "artifacts": {
             "backend": "s3",
-            "uri": "s3://local-mainnet-sync/runs",
             "endpoint_url": endpoint,
             "credentials_file": str(work / "credentials"),
             "profile": "local",
@@ -48,6 +47,7 @@ def configuration(work: Path, endpoint: str, run: str, mode: str, target: int) -
             "dumplings_image": str(work / "images/dumplings.sif"),
             "dbcache_mb": 1024 if mode == "mainnet" else 128,
             "poll_seconds": 1,
+            "state_uri": "s3://local-mainnet-sync/sync",
             "blocks_uri": "s3://local-mainnet-sync/blocks",
             "dumplings_uri": "s3://local-mainnet-sync/dumplings",
             "backup_uri": "s3://local-mainnet-sync/core",
@@ -78,7 +78,7 @@ def configuration(work: Path, endpoint: str, run: str, mode: str, target: int) -
 
 def guard(work: Path, mode: str, max_data_mb: int) -> None:
     if mode == "mainnet":
-        for name in (work / "data/runs").glob("*/producer.json"):
+        for name in (work / "data/sync").glob("producer.json"):
             # The worker replaces progress atomically; no partially written JSON is read.
             height = read_json(name).get("height")
             if height is not None and height > MAINNET_MAX_HEIGHT:
@@ -128,8 +128,9 @@ def requires_block_archive(work: Path, mode: str) -> bool:
 
 
 def check_final(work: Path, token: str, mode: str, target: int) -> dict:
-    first = read_json(work / f"data/runs/local-sync-{token}-1/done.json")
-    done = read_json(work / f"data/runs/local-sync-{token}-2/done.json")
+    first = read_json(work / "first-done.json")
+    done = read_json(work / "data/sync/done.json")
+    assert done["run_id"] == f"local-sync-{token}-2", "data/sync/ must hold the second run"
     check_height(done, mode, target)
     assert done["height"] > first["height"], "The second generation must advance the existing index"
     chain = "bitcoin" if mode == "mainnet" else "bitcoin/regtest"
@@ -185,7 +186,7 @@ def diagnostics(work: Path, result: Path, mode: str, status: int) -> None:
     (result / "exit-status").write_text(str(status) + "\n")
     (result / "test-network.txt").write_text(mode + "\n")
     # Keep full evidence in work. CI gets metadata and log tails, never large data or credentials.
-    roots = [(work, result), (work / "data/runs", result / "workers"), (work / "runs", result / "submission")]
+    roots = [(work, result), (work / "data/sync", result / "workers"), (work / "runs", result / "submission")]
     for source, destination in roots:
         files = source.iterdir() if source == work else source.rglob("*")
         for path in files:

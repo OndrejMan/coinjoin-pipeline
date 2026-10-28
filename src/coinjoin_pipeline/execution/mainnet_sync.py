@@ -7,14 +7,9 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from coinjoin_pipeline.configuration import required
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
-from coinjoin_pipeline.storage.s3 import (
-    S3Target,
-    ensure_empty_run_prefix,
-    shell_value,
-    validate_artifact_uri,
-    validate_run_id,
-)
+from coinjoin_pipeline.storage.s3 import shell_value, validate_artifact_uri, validate_run_id
 from .pbs.defaults import MAINNET_SYNC_RESOURCES, PBSResources
 from .pbs.scripts import directives, template
 from .pbs.submission import PBSJobSpec, persist_pbs_job_id, submit_pbs_job
@@ -40,7 +35,6 @@ def configuration_errors(config: PipelineConfiguration) -> list[str]:
         "blocksci.index_dir",
         "blocksci.index_backup_uri",
         "artifacts.backend",
-        "artifacts.uri",
         "artifacts.endpoint_url",
         "artifacts.credentials_file",
         "artifacts.profile",
@@ -57,11 +51,11 @@ def configuration_errors(config: PipelineConfiguration) -> list[str]:
             errors.append(f"{path} is not used by mainnet-sync")
     for label, value, validator in (
         ("run_id", config.run_id, validate_run_id),
+        ("mainnet.state_uri", config.mainnet.state_uri, validate_artifact_uri),
         ("mainnet.backup_uri", config.mainnet.backup_uri, validate_artifact_uri),
         ("mainnet.blocks_uri", config.mainnet.blocks_uri, validate_artifact_uri),
         ("mainnet.dumplings_uri", config.mainnet.dumplings_uri, validate_artifact_uri),
         ("blocksci.index_backup_uri", config.blocksci.index_backup_uri, validate_artifact_uri),
-        ("artifacts.uri", config.artifacts.uri, validate_artifact_uri),
     ):
         if value is None:
             errors.append(f"mainnet-sync requires {label}")
@@ -73,9 +67,16 @@ def configuration_errors(config: PipelineConfiguration) -> list[str]:
     for name in ("endpoint_url", "credentials_file", "profile"):
         if not getattr(config.artifacts, name):
             errors.append(f"mainnet-sync requires artifacts.{name}")
-    backups = (config.mainnet.backup_uri, config.blocksci.index_backup_uri, config.mainnet.dumplings_uri)
-    if len({value.rstrip("/") for value in backups if value}) != len(backups):
-        errors.append("Core, index and Dumplings backup prefixes must be distinct")
+    prefixes = (
+        config.mainnet.state_uri,
+        config.mainnet.backup_uri,
+        config.blocksci.index_backup_uri,
+        config.mainnet.dumplings_uri,
+        config.mainnet.blocks_uri,
+    )
+    present = [value.rstrip("/") for value in prefixes if value]
+    if any(a == b or b.startswith(a + "/") for a in present for b in present if a is not b):
+        errors.append("The state, Core, index, Dumplings and block prefixes must be distinct, without nesting")
     root, index = config.mainnet.root, config.blocksci.index_dir
     if not root or not index:
         errors.append("mainnet-sync requires mainnet.root and blocksci.index_dir")
@@ -119,15 +120,15 @@ def resources(config: PipelineConfiguration, stage: str) -> PBSResources:
 def render_sync(config: PipelineConfiguration, stage: str) -> str:
     """Self-contained job: only small helpers/config are copied, data stay in place."""
     budget = resources(config, stage)
-    target = S3Target.from_args(config)
+    run_id = required(config.run_id, "run_id")
+    credentials = required(config.artifacts.credentials_file, "artifacts.credentials_file")
     settings = {
         **asdict(config.mainnet),
-        "run_id": target.run_id,
-        "log_root": str(config.runs_path / target.run_id / "logs"),
-        "artifact_uri": target.artifact_uri,
-        "endpoint": target.endpoint_url,
-        "credentials": target.credentials_file,
-        "profile": target.profile,
+        "run_id": run_id,
+        "log_root": str(config.runs_path / run_id / "logs"),
+        "endpoint": config.artifacts.endpoint_url,
+        "credentials": credentials,
+        "profile": config.artifacts.profile,
         "index_dir": config.blocksci.index_dir,
         "index_backup_uri": config.blocksci.index_backup_uri,
         "blocksci_image": pbs_image(config, "blocksci"),
@@ -137,7 +138,7 @@ def render_sync(config: PipelineConfiguration, stage: str) -> str:
     }
     runtime = Path(__file__).with_name("mainnet_runtime.py").read_text(encoding="utf-8")
     verifier = (EXPORTERS_ROOT / "verify_chain.py").read_text(encoding="utf-8")
-    identity = f"STAGE=mainnet-{stage}\nRUN_ID={shell_value(target.run_id)}\n"
+    identity = f"STAGE=mainnet-{stage}\nRUN_ID={shell_value(run_id)}\n"
     index_lock = ""
     if stage == "blocksci":
         index_lock = f"""
@@ -181,7 +182,7 @@ finish() {{
 trap finish EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
-test -r {shell_value(target.credentials_file)} || {{ echo 'S3 credentials file is not readable' >&2; exit 1; }}
+test -r {shell_value(credentials)} || {{ echo 'S3 credentials file is not readable' >&2; exit 1; }}
 for tool in s5cmd tar zstd; do command -v "$tool" >/dev/null || {{ echo "Required tool missing: $tool" >&2; exit 1; }}; done
 s5cmd pipe --help >/dev/null || {{ echo 's5cmd with pipe support is required' >&2; exit 1; }}
 {index_lock}
@@ -191,11 +192,13 @@ python3 "$WORK/worker.py" "$WORK/settings.json" {stage}
 
 
 def submit_sync(config: PipelineConfiguration) -> None:
-    """Persist both IDs immediately and roll back partial submissions."""
-    target = S3Target.from_args(config)
+    """Persist both IDs immediately and roll back partial submissions.
+
+    The S3 state prefix is fixed: the producer clears the previous run's state once it
+    holds the dataset lock, so submission checks nothing there.
+    """
+    run_id = required(config.run_id, "run_id")
     scripts = {stage: render_sync(config, stage) for stage in ("producer", "blocksci")}
-    if not config.dry_run:
-        ensure_empty_run_prefix(target.access, target.artifact_uri, target.run_id)
     submitted: list[tuple[str, str]] = []
     try:
         for stage, script in scripts.items():
@@ -203,7 +206,7 @@ def submit_sync(config: PipelineConfiguration) -> None:
             job = submit_pbs_job(spec, config.dry_run)
             if job:
                 submitted.append((spec.stage, job))
-                persist_pbs_job_id(config.runs_path / target.run_id, spec.stage, job)
+                persist_pbs_job_id(config.runs_path / run_id, spec.stage, job)
     except BaseException as error:
         failed = rollback_s3_pbs_submissions(submitted)
         if failed:

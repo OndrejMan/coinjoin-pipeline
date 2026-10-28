@@ -62,7 +62,7 @@ Ověří počet bloků H+1 a hash H, následně zazálohuje index a ověří exi
 a velikost odeslaného objektu. Archiv znovu nestahuje. Spustí Core offline, zkontroluje H/hash, provede `--prune-only`,
 čistě Core vypne a až potom zálohuje jeho výsledný stav. Během kopírování drží
 POSIX zámek datadiru a odmítne přítomnou RPC cookie. Teprve dokončený upload checkpointu
-umožní publikovat závěrečné `synchronization/done.json`.
+umožní publikovat závěrečné `<state_uri>/done.json`.
 
 Pruning neprovádí uploady. Ověří existující archivované kopie. Limit výšky je
 minimum pokroku obou konzumentů minus rezerva (výchozí 2016 bloků). Navíc chrání
@@ -84,7 +84,7 @@ mainnet.root/
   bitcoin/{blocks,chainstate}
   dumplings/Scanner/
   archive-state/
-  runs/<run-id>/{ready.json,done.json,producer.json,blocksci.json,*.log}
+  sync/{ready.json,done.json,producer.json,blocksci.json}
   current-ready.json
   .sync-active/owner.json
 blocksci.index_dir/
@@ -122,10 +122,18 @@ kořene. Závěrečné `done.json` z nich skládá `storage`: obsazení multijob
 (`multijob.core`, `multijob.index`, po kořenech) a velikost nově odeslaných archivů
 (`s3.core_checkpoint`, `s3.index_backup`). Měří se při zastaveném Core a drženém
 zápisovém zámku indexu, takže samostatný měřicí job není pro tato čísla potřeba.
-Celkové obsazení S3 včetně starších generací a archivu bloků zjistí až listování
-prefixů.
+Celkové obsazení S3 včetně archivu bloků zjistí až listování prefixů.
 
-Průběh v `runs/<run-id>/synchronization/{producer,blocksci}.json` obsahuje fázi,
+Stav synchronizace má pevné místo, nikoli složku podle run ID: lokálně
+`mainnet.root/sync/`, v S3 `mainnet.state_uri` (`ready.json`, `done.json`,
+`producer.json`, `blocksci.json`, `blocksci-index-manifest.json`,
+`.pbs/mainnet-{producer,blocksci}.{done,failed}`). Producent nového běhu je pod
+zámkem datasetu nejdřív smaže, takže prefix vždy popisuje poslední běh; `run_id`
+v každém JSON říká, ke kterému patří. Logy každého běhu zůstávají v
+`<state_uri>/logs/<run-id>/`. Konfigurace synchronizace proto nemá `artifacts.uri`;
+sekce `artifacts` nese jen endpoint, soubor s klíči a profil.
+
+Průběh v `<state_uri>/{producer,blocksci}.json` obsahuje fázi,
 výšku, procento nebo null a čas aktualizace. Pro Core jde o RPC odhad; procento
 parseru platí pro jeho právě hlášenou fázi. Streamovaná záloha a její ověřování
 mají neurčité procento. Značka prvního jobu ani `blocksci.json: done` nenahrazuje
@@ -140,7 +148,7 @@ cestou. Pracovní blockchain a index zůstávají v multijob adresářích.
 Watcher sleduje i soubory vzniklé až během běhu, označuje výstup komponentou
 a při připojení přehraje posledních 200 řádků každého zdroje (`--tail`).
 Nečeká na doručení PBS stdout ani na upload do S3. Při ukončení fáze se její
-logy stále archivují do S3 pod `logs/`. Dříve odeslané PBS skripty obsahují
+logy stále archivují do S3 pod `<state_uri>/logs/<run-id>/`. Dříve odeslané PBS skripty obsahují
 původní worker a toto průběžné ukládání se na ně zpětně nevztahuje.
 
 ## Selhání a souběh
@@ -314,7 +322,7 @@ kořeny. Připrav malý JSON bez samotných klíčů (cesty uprav pro prostřed�
   "root": "/storage/local/mainnet",
   "index_dir": "/storage/local/index",
   "run_id": "explicit-recovery",
-  "artifact_uri": "s3://local/runs",
+  "state_uri": "s3://local/sync",
   "endpoint": "http://127.0.0.1:9000",
   "credentials": "/storage/local/credentials",
   "profile": "local"

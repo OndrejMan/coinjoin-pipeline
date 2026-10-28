@@ -41,7 +41,7 @@ def test_generated_configuration_obeys_the_production_sync_contract(tmp_path, mo
     assert config.mainnet.network == network
     assert config.mainnet.target_height == target
     assert config.mainnet.scan_start_height == (None if mode == "mainnet" else 1)
-    assert config.artifacts.uri == "s3://local-mainnet-sync/runs"
+    assert config.mainnet.state_uri == "s3://local-mainnet-sync/sync"
     assert config.pbs.blocksci_image == str(tmp_path / "images/blocksci.sif")
 
 
@@ -52,7 +52,7 @@ def test_test_configuration_cannot_request_a_full_mainnet(tmp_path, target):
 
 
 def test_watchdog_rejects_an_ignored_target_or_an_excessive_download(tmp_path):
-    progress = tmp_path / "data/runs/run/producer.json"
+    progress = tmp_path / "data/sync/producer.json"
     save(progress, {"height": 900000})
     with pytest.raises(ValueError, match="height guard"):
         support.guard(tmp_path, "mainnet", 1)
@@ -66,7 +66,7 @@ def test_watchdog_rejects_an_ignored_target_or_an_excessive_download(tmp_path):
 
 @pytest.mark.parametrize("height", [100000, 400000, 401000, 450000, 450001])
 def test_watchdog_limits_core_height_independently_of_scanner_progress(tmp_path, height):
-    save(tmp_path / "data/runs/run/producer.json", {"height": height, "scanner_height": 900000})
+    save(tmp_path / "data/sync/producer.json", {"height": height, "scanner_height": 900000})
     if height > 450000:
         with pytest.raises(ValueError, match=f"Mainnet height guard exceeded: {height}"):
             support.guard(tmp_path, "mainnet", 1)
@@ -77,6 +77,7 @@ def test_watchdog_limits_core_height_independently_of_scanner_progress(tmp_path,
 @pytest.fixture
 def recovered(tmp_path):
     done = {
+        "run_id": "local-sync-token-2",
         "state": "done",
         "network": "bitcoin",
         "requested_target_height": 101000,
@@ -86,8 +87,8 @@ def recovered(tmp_path):
         "core_checkpoint": "s3://local-mainnet-sync/core/manifest.json",
         "index_backup": "s3://local-mainnet-sync/index/manifest.json",
     }
-    save(tmp_path / "data/runs/local-sync-token-1/done.json", {"height": 100000})
-    save(tmp_path / "data/runs/local-sync-token-2/done.json", done)
+    save(tmp_path / "first-done.json", {"height": 100000})
+    save(tmp_path / "data/sync/done.json", done)
     (tmp_path / "recovered/bitcoin/chainstate").mkdir(parents=True)
     scanner = tmp_path / "recovered/dumplings/Scanner"
     scanner.mkdir(parents=True)
@@ -172,7 +173,7 @@ def test_recovery_fails_for_another_chain_stale_index_or_unpaired_backup(recover
     elif broken == "wrong-hash":
         value["bestblockhash"] = "b" * 64
     elif broken == "no-increment":
-        save(recovered / "data/runs/local-sync-token-1/done.json", {"height": 101002})
+        save(recovered / "first-done.json", {"height": 101002})
     else:
         backup = recovered / "core-manifest.json"
         record = json.loads(backup.read_text())
@@ -187,12 +188,12 @@ def test_ci_diagnostics_keep_logs_and_results_without_copying_raw_data_or_creden
     (recovered / "credentials").write_text("do not export")
     (recovered / "images").mkdir()
     (recovered / "images/core.sif").write_bytes(b"image")
-    log = recovered / "data/runs/local-sync-token-2/blocksci.log"
+    log = recovered / "data/sync/blocksci.log"
     log.write_text("parse failed")
     result = tmp_path / "artifacts"
     support.diagnostics(recovered, result, "mainnet", 1)
     assert (result / "exit-status").read_text() == "1\n"
-    assert (result / "workers/local-sync-token-2/blocksci.log").read_text() == "parse failed"
+    assert (result / "workers/blocksci.log").read_text() == "parse failed"
     assert not (result / "credentials").exists()
     assert not (result / "images").exists()
     assert not (result / "recovered").exists()

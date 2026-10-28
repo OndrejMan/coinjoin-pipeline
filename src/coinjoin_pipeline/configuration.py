@@ -224,6 +224,8 @@ class MainnetSyncConfiguration(ConfigurationModel):
     network: Literal["bitcoin", "bitcoin_regtest"] = option("bitcoin", name="mainnet_network")
     scan_start_height: int | None = option(None, name="mainnet_scan_start_height", minimum=1)
     root: str | None = option(None, name="mainnet_root")
+    # Fixed S3 prefix of the synchronization's state, markers and per-run logs.
+    state_uri: str | None = option(None, name="mainnet_state_uri")
     backup_uri: str | None = option(None, name="mainnet_backup_uri")
     blocks_uri: str | None = option(None, name="mainnet_blocks_uri")
     dumplings_uri: str | None = option(None, name="mainnet_dumplings_uri")

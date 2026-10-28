@@ -30,13 +30,13 @@ def config(tmp_path):
                 "run_id": "mainnet-sync-local-1",
                 "runs_root": str(tmp_path / "runs"),
                 "artifacts": {
-                    "uri": "s3://local/runs",
                     "endpoint_url": "http://127.0.0.1:9000",
                     "credentials_file": str(tmp_path / "credentials"),
                     "profile": "local",
                 },
                 "mainnet": {
                     "root": str(tmp_path / "core"),
+                    "state_uri": "s3://local/sync",
                     "backup_uri": "s3://local/core",
                     "blocks_uri": "s3://local/blocks",
                     "dumplings_uri": "s3://local/dumps",
@@ -60,7 +60,6 @@ def test_two_scripts_are_self_contained_and_syntactically_valid(config):
 
 def test_dependencies_are_persisted_and_rolled_back(config, monkeypatch):
     calls, cancelled = [], []
-    monkeypatch.setattr(mainnet_sync, "ensure_empty_run_prefix", lambda *_: None)
 
     def submit(job, _dry):
         calls.append(job)
@@ -304,7 +303,6 @@ def worker(config, tmp_path, monkeypatch):
             index_dir=config.blocksci.index_dir,
             run_id=config.run_id,
             log_root=str(config.runs_path / config.run_id / "logs"),
-            artifact_uri=config.artifacts.uri,
             endpoint=config.artifacts.endpoint_url,
             credentials=config.artifacts.credentials_file,
             profile=config.artifacts.profile,
@@ -367,7 +365,7 @@ def test_parser_progress_and_s3_upload_use_the_shared_component_logs(worker, mon
     worker.parse_progress()
     worker.publish_logs()
     assert progress == [(("blocksci-parse", 50.0, 100), {"detail": "parsing blocks"})]
-    assert uploaded == [(worker.logs / "blocksci.log", worker.remote + "/logs/blocksci.log")]
+    assert uploaded == [(worker.logs / "blocksci.log", f"{worker.remote}/logs/{worker.run_id}/blocksci.log")]
 
 
 @pytest.mark.parametrize("readonly,index_writable", [(False, False), (True, True)])

@@ -190,9 +190,10 @@ class Worker:
         self.archive_state = self.root / "archive-state"
         self.index = Path(settings["index_dir"])
         self.run_id = settings["run_id"]
-        self.run = self.root / "runs" / self.run_id
+        # One synchronization's state: each run replaces the previous one, only its logs stay.
+        self.run = self.root / "sync"
         self.active = self.root / ".sync-active"
-        self.remote = settings["artifact_uri"].rstrip("/") + "/" + self.run_id
+        self.remote = settings["state_uri"].rstrip("/")
         self.s5 = [
             "s5cmd",
             "--credentials-file",
@@ -243,7 +244,7 @@ class Worker:
             **extra,
         }
         atomic_json(self.run / f"{self.stage}.json", value)
-        self.publish_json(f"{self.remote}/synchronization/{self.stage}.json", value)
+        self.publish_json(f"{self.remote}/{self.stage}.json", value)
         print(json.dumps(value), flush=True)
 
     def owns_dataset(self):
@@ -261,6 +262,17 @@ class Worker:
     def release_dataset(self):
         if self.owns_dataset():
             shutil.rmtree(self.active)
+
+    def reset_state(self):
+        """Clear the previous synchronization's state; its logs stay under logs/<run-id>/."""
+        names = ("ready.json", "done.json", "producer.json", "blocksci.json", "blocksci-index-manifest.json")
+        for name in (*names, "blocksci.quiescent"):
+            (self.run / name).unlink(missing_ok=True)
+        for name in names:
+            self.remove(f"{self.remote}/{name}")
+        for stage in ("producer", "blocksci"):
+            for outcome in ("done", "failed"):
+                self.remove(f"{self.remote}/.pbs/mainnet-{stage}.{outcome}")
 
     def container_command(self, image, *args, cwd=None, readonly=False, index_writable=False, environment=None):
         if self.container is None:
@@ -700,8 +712,7 @@ class Worker:
         self.stage = "producer"
         self.acquire_dataset()
         atomic_json(self.root / "current-ready.json", {"run_id": self.run_id, "state": "preparing"})
-        if (self.run / "ready.json").exists():
-            raise ValueError("A published generation cannot be reused; choose a fresh run ID")
+        self.reset_state()
         self.progress("core-startup")
         self.start_core(False)
         info = self.synchronize_core()
@@ -780,7 +791,7 @@ class Worker:
         }
         atomic_json(self.run / "ready.json", ready)
         atomic_json(self.root / "current-ready.json", ready)
-        self.publish_json(self.remote + "/synchronization/ready.json", ready)
+        self.publish_json(self.remote + "/ready.json", ready)
         self.progress("ready-for-blocksci", state="done", height=height)
         self.publish_json(self.remote + "/.pbs/mainnet-producer.done", ready)
         self.release_dataset()
@@ -966,7 +977,7 @@ class Worker:
         }
         self.progress("complete", state="done", height=height)
         self.publish_json(self.remote + "/.pbs/mainnet-blocksci.done", done)
-        self.publish_json(self.remote + "/synchronization/done.json", done)
+        self.publish_json(self.remote + "/done.json", done)
         self.release_dataset()
         atomic_json(self.run / "done.json", done)
 
@@ -982,7 +993,7 @@ class Worker:
 
     def publish_logs(self):
         for path in sorted(self.logs.glob("*.log")):
-            self.upload(path, self.remote + "/logs/" + path.name)
+            self.upload(path, f"{self.remote}/logs/{self.run_id}/{path.name}")
 
 
 def main(argv=None):
@@ -1003,6 +1014,8 @@ def main(argv=None):
         worker.publish_json(worker.remote + f"/.pbs/mainnet-{worker.stage}.failed", {"run_id": worker.run_id})
         return
     worker.stage = args[1]
+    # The fixed state directory may hold the marker of an earlier run of this stage.
+    (worker.run / f"{worker.stage}.quiescent").unlink(missing_ok=True)
 
     def interrupted(_signum, _frame):
         raise InterruptedError("PBS job interrupted")

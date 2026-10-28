@@ -10,7 +10,7 @@ engine: joinmarket
 coinjoin_type: joinmarket
 
 run_id: mainnet-baseline-joinmarket-20261019
-dumplings_uri: s3://xman-coinjoin-new/dumplings
+dumplings_uri: s3://xman-coinjoin-new/bitcoin-mainnet/dumplings
 
 artifacts:
   backend: s3

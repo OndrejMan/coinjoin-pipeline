@@ -173,14 +173,16 @@ run_generation() {
         if [[ "${BASH_REMATCH[1]}" != 0 ]]; then
           printf '%s\n' "$info" >"$work/$run-failed-job.txt"
           echo "PBS stage failed: $(basename "$marker")" >&2
-          tail -n 25 "$work/data/runs/$run/"*.log >&2 || true
+          tail -n 25 "$work/runs/$run/logs/"*/*.log >&2 || true
           return 1
         fi
       else
         pending=1
       fi
     done
-    if [[ -f "$work/data/runs/$run/done.json" && "$pending" == 0 ]]; then
+    # The fixed state directory holds the newest synchronization; check it is this one.
+    if [[ "$pending" == 0 ]] && "$python" -c 'import json,sys; sys.exit(json.load(open(sys.argv[1])).get("run_id") != sys.argv[2])' \
+        "$work/data/sync/done.json" "$run" 2>/dev/null; then
       echo "Completed $run (both PBS jobs exited successfully)"
       return
     fi
@@ -189,7 +191,9 @@ run_generation() {
   echo "Timed out: $run" >&2; return 1
 }
 run_generation "local-sync-$token-1" "$target"
-first_done="$work/data/runs/local-sync-$token-1/done.json"
+# The second run replaces data/sync/; keep the first result for the comparison.
+first_done="$work/first-done.json"
+cp "$work/data/sync/done.json" "$first_done"
 "$python" "$repo/tests/support/mainnet_sync_e2e.py" first "$work" "$first_done" "$mode" "$target"
 if [[ "$mode" == regtest ]]; then
   seed_start
