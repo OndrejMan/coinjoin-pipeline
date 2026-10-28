@@ -6,7 +6,7 @@ import hashlib
 import json
 import subprocess
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -275,3 +275,28 @@ def compute_optional_rate(numerator: int, denominator: int) -> float | None:
     if denominator == 0:
         return None
     return round(numerator / denominator, 6)
+
+
+def f1_score(precision: float | None, recall: float | None) -> float | None:
+    """Harmonic mean of two rates, rounded like them; None when it is undefined."""
+    if precision is None or recall is None or precision + recall <= 0:
+        return None
+    return round(2 * precision * recall / (precision + recall), 6)
+
+
+IO_SIDES = ("inputs", "outputs")
+
+
+def io_items(record: Mapping[str, object] | None) -> Iterator[Mapping[str, object]]:
+    """Every input then every output of a transaction record that keeps them as lists."""
+    for side in IO_SIDES:
+        items = (record or {}).get(side)
+        if isinstance(items, list):
+            for item in items:
+                if isinstance(item, Mapping):
+                    yield item
+
+
+def wallet_names(record: Mapping[str, object] | None) -> list[str]:
+    """Sorted wallets owning any input or output of ``record``."""
+    return sorted({str(item["wallet_name"]) for item in io_items(record) if item.get("wallet_name")})

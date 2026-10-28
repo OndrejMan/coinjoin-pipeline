@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from exporters.artifact_paths import emulator_dir
-from exporters.common import JsonObject, coerce_sats, load_json, sha256_json
+from exporters.artifact_paths import SCENARIO_FILE
+from exporters.common import JsonObject, coerce_sats, load_json, sha256_json, wallet_names
 from exporters.report_types import TransactionRecord
 
 
@@ -52,7 +52,7 @@ def normalize_scenario(scenario: JsonObject, source_path: Path) -> JsonObject:
 
 
 def load_scenario(run_dir: Path, fallback_path: Path | None) -> JsonObject | None:
-    run_scenario_path = emulator_dir(run_dir) / "scenario.json"
+    run_scenario_path = run_dir / SCENARIO_FILE
     if run_scenario_path.exists():
         return normalize_scenario(load_json(run_scenario_path), run_scenario_path)
 
@@ -63,32 +63,19 @@ def load_scenario(run_dir: Path, fallback_path: Path | None) -> JsonObject | Non
 
 
 def coinjoin_analysis_wallet_names(coinjoin_analysis: dict[str, TransactionRecord]) -> set[str]:
-    names = set()
-    for tx in coinjoin_analysis.values():
-        for side in (tx.get("inputs", []), tx.get("outputs", [])):
-            for item in side:
-                wallet = item.get("wallet_name")
-                if wallet and wallet.startswith("wallet-"):
-                    names.add(wallet)
-    return names
+    """Scenario wallets (``wallet-NNN``) seen in any baseline CoinJoin."""
+    return {name for tx in coinjoin_analysis.values() for name in wallet_names(tx) if name.startswith("wallet-")}
 
 
 def per_wallet_observed_counts(coinjoin_analysis: dict[str, TransactionRecord]) -> dict[str, dict[str, int]]:
     counts: dict[str, dict[str, int]] = {}
     for tx in coinjoin_analysis.values():
-        for item in tx.get("inputs", []):
-            wallet = item.get("wallet_name")
-            if not wallet:
-                continue
-            counts.setdefault(wallet, {"input_count": 0, "output_count": 0})
-            counts[wallet]["input_count"] += 1
-        for item in tx.get("outputs", []):
-            wallet = item.get("wallet_name")
-            if not wallet:
-                continue
-            counts.setdefault(wallet, {"input_count": 0, "output_count": 0})
-            counts[wallet]["output_count"] += 1
-
+        for items, field in ((tx.get("inputs", []), "input_count"), (tx.get("outputs", []), "output_count")):
+            for item in items:
+                wallet = item.get("wallet_name")
+                if wallet:
+                    counts.setdefault(wallet, {"input_count": 0, "output_count": 0})
+                    counts[wallet][field] += 1
     return {wallet: counts[wallet] for wallet in sorted(counts)}
 
 
@@ -97,7 +84,7 @@ def build_scenario_checks(
     coinjoin_analysis: dict[str, TransactionRecord],
     coinjoin_type: str | None = None,
 ) -> JsonObject:
-    wallet_names = coinjoin_analysis_wallet_names(coinjoin_analysis)
+    observed_wallets = coinjoin_analysis_wallet_names(coinjoin_analysis)
     input_sats_per_coinjoin = [tx.get("total_input_sats", 0) for tx in coinjoin_analysis.values()]
     coinjoin_analysis_input_sats = sum(input_sats_per_coinjoin)
     max_coinjoin_input_sats = max(input_sats_per_coinjoin, default=0)
@@ -111,7 +98,7 @@ def build_scenario_checks(
     # `default-joinmarket` has 2 takers and 8 makers over 3 rounds and legitimately
     # lands anywhere from 5 to 10 observed wallets. Demanding equality there
     # reported a false negative on nearly every run.
-    observed_wallet_count = len(wallet_names)
+    observed_wallet_count = len(observed_wallets)
     if not scenario:
         wallet_count_rule = None
         wallet_count_matches = None

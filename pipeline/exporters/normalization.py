@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
-from exporters.artifact_paths import FALSE_CJTXS_GLOB, emulator_dir
+from exporters.artifact_paths import EXPORTED_BLOCKS_DIR, FALSE_CJTXS_GLOB
 from exporters.common import (
     DEFAULT_FIRST_WASABI2_BLOCK,
     JsonObject,
@@ -34,6 +35,21 @@ def load_false_positive_txids(analysis_dir: Path) -> tuple[set[str], list[JsonOb
         txids.update(source_txids)
         sources.append({"file": path.name, "txids": len(source_txids)})
     return txids, sources
+
+
+def baseline_filter_summary(
+    sources: list[JsonObject],
+    false_positive_txids: set[str],
+    filtered_txids: list[str],
+) -> JsonObject:
+    """The report's ``baseline_filter`` section: which sidecars removed which baseline txids."""
+    return {
+        "enabled": bool(sources),
+        "sources": sources,
+        "listed_txids": len(false_positive_txids),
+        "filtered_txids": filtered_txids,
+        "filtered_count": len(filtered_txids),
+    }
 
 
 def filter_coinjoin_analysis_false_positives(
@@ -107,25 +123,37 @@ def is_coinbase_tx(tx: JsonObject) -> bool:
     return bool(inputs) and "coinbase" in inputs[0]
 
 
-def load_exported_block_tx_index(run_dir: Path) -> dict[str, int]:
-    block_dir = emulator_dir(run_dir) / "data" / "btc-node"
-    if not block_dir.exists():
-        return {}
+def exported_block_paths(run_dir: Path) -> list[Path]:
+    """The emulator's exported ``block_<height>.json`` files, lowest height first."""
+    block_dir = run_dir / EXPORTED_BLOCKS_DIR
+    if not block_dir.is_dir():
+        return []
+    return sorted(block_dir.glob("block_*.json"), key=lambda path: block_height_from_path(path) or -1)
 
-    tx_index: dict[str, int] = {}
-    for block_path in sorted(block_dir.glob("block_*.json"), key=lambda path: block_height_from_path(path) or -1):
-        block = load_json(block_path)
+
+def iter_exported_blocks(run_dir: Path) -> Iterator[tuple[Path, int | None, JsonObject]]:
+    """Each exported block with its height: the block's own, else the file name's.
+
+    Inputs reference outputs of lower blocks, so consumers that index outputs
+    rely on this order.
+    """
+    for path in exported_block_paths(run_dir):
+        block = load_json(path)
         height = block.get("height")
         if height is None:
-            height = block_height_from_path(block_path)
+            height = block_height_from_path(path)
+        yield path, int(height) if height is not None else None, block
+
+
+def load_exported_block_tx_index(run_dir: Path) -> dict[str, int]:
+    tx_index: dict[str, int] = {}
+    for _path, height, block in iter_exported_blocks(run_dir):
         if height is None:
             continue
-
         for tx in block.get("tx", []):
             txid = tx.get("txid")
             if txid:
-                tx_index[str(txid)] = int(height)
-
+                tx_index[str(txid)] = height
     return tx_index
 
 

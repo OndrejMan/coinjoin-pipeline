@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 from bisect import bisect_right
+from collections import Counter
 from pathlib import Path
 
 from exporters.artifact_paths import (
@@ -20,7 +21,8 @@ from exporters.artifact_paths import (
     LIQUIDITY_EVENTS_CSV,
     POSTMIX_SPENDS_FILE,
 )
-from exporters.common import JsonObject, compute_optional_rate, load_json, save_json
+from exporters.common import IO_SIDES, JsonObject, compute_optional_rate, io_items, load_json, save_json
+from exporters.scenario import wallet_name
 
 LIQUIDITY_DATASET_SCHEMA_VERSION = "1.0"
 # An output spent within this many later coinjoins leaves or remixes "fast". The paper
@@ -96,10 +98,7 @@ def spend_distance(
 
 
 def standard_denominations(outputs: list[JsonObject]) -> set[int]:
-    counts: dict[int, int] = {}
-    for item in outputs:
-        if isinstance(item.get("value"), int):
-            counts[item["value"]] = counts.get(item["value"], 0) + 1
+    counts = Counter(item["value"] for item in outputs if isinstance(item.get("value"), int))
     return {value for value, count in counts.items() if count > 1}
 
 
@@ -242,7 +241,7 @@ def classification_agreement(coinjoins: list[JsonObject], event_field: str = "ob
     confusion: dict[str, int] = {}
     agreeing = total = 0
     for coinjoin in coinjoins:
-        for side in ("inputs", "outputs"):
+        for side in IO_SIDES:
             for item in coinjoin[side]:
                 observed = item.get(event_field) or "missing"
                 key = f"{side}:{item['event']}->{observed}"
@@ -266,15 +265,7 @@ def last_index(values: list[int]) -> int | None:
 
 
 def wallet_summaries(coinjoins: list[JsonObject], pool: JsonObject) -> dict[str, JsonObject]:
-    names = sorted(
-        {
-            item["wallet"]
-            for coinjoin in coinjoins
-            for side in ("inputs", "outputs")
-            for item in coinjoin[side]
-            if item.get("wallet")
-        }
-    )
+    names = sorted({str(item["wallet"]) for coinjoin in coinjoins for item in io_items(coinjoin) if item.get("wallet")})
     summaries = {}
     for name in names:
         series = liquidity_series(coinjoins, "event", name)
@@ -334,15 +325,15 @@ def fin_evaluation(coinjoins: list[JsonObject], observed: JsonObject, wallet: st
     in_window = [item for index, item in leaving if window is not None and window[0] <= index <= window[1]]
     window_left = sum(value_of(item) for item in in_window)
     window_wallet_left = sum(value_of(item) for item in in_window if item.get("wallet") == wallet)
-    precision = round(window_wallet_left / window_left, 6) if window_left else None
-    baseline = round(wallet_left / all_left, 6) if all_left else None
+    precision = compute_optional_rate(window_wallet_left, window_left)
+    baseline = compute_optional_rate(wallet_left, all_left)
     return {
         "observed_entry_index": entry_index,
-        "entry_wallet_share": round(entry_wallet / entry_total, 6) if entry_total else None,
+        "entry_wallet_share": compute_optional_rate(entry_wallet, entry_total),
         "descending_window": list(window) if window is not None else None,
         "window_leave_sats": window_left,
         "window_leave_precision": precision,
-        "window_leave_recall": round(window_wallet_left / wallet_left, 6) if wallet_left else None,
+        "window_leave_recall": compute_optional_rate(window_wallet_left, wallet_left),
         "baseline_leave_share": baseline,
         "lift": round(precision / baseline, 6) if precision is not None and baseline else None,
     }
@@ -364,7 +355,7 @@ def load_postmix_spends(run_dir: Path, transactions: JsonObject, positions: dict
         inputs = [item for spent in txids for item in (transactions.get(spent) or {}).get("inputs") or []]
         spends.append(
             {
-                "wallet": f"wallet-{int(spend['wallet_index']):03}" if spend.get("wallet_index") is not None else None,
+                "wallet": wallet_name(int(spend["wallet_index"])) if spend.get("wallet_index") is not None else None,
                 "status": spend.get("status"),
                 "txid": txid,
                 "txids": txids,
@@ -377,9 +368,7 @@ def load_postmix_spends(run_dir: Path, transactions: JsonObject, positions: dict
                 "spends_coinjoin_outputs": any(item.get("prev_txid") in positions for item in inputs),
             }
         )
-    statuses: dict[str, int] = {}
-    for spend in spends:
-        statuses[str(spend["status"])] = statuses.get(str(spend["status"]), 0) + 1
+    statuses = Counter(str(spend["status"]) for spend in spends)
     return {
         "scheduled": len(spends),
         "by_status": dict(sorted(statuses.items())),
@@ -498,7 +487,7 @@ def save_liquidity_dataset(output_dir: Path, dataset: JsonObject) -> None:
         writer = csv.DictWriter(file, fieldnames=CSV_COLUMNS)
         writer.writeheader()
         for coinjoin in dataset["coinjoins"]:
-            for side in ("inputs", "outputs"):
+            for side in IO_SIDES:
                 for item in coinjoin[side]:
                     writer.writerow(
                         {

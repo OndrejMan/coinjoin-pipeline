@@ -80,6 +80,31 @@ class RecordSummary(TypedDict):
     wallets: list[str]
 
 
+class DetectionConfusionMatrix(TypedDict):
+    """One analyzer scored against the emulator's producer labels (``detector_evaluations.*``).
+
+    Rates are None when their denominator is empty; ``unknown`` labels are in no denominator.
+    """
+
+    evaluated_transactions: int
+    detected_transactions: int
+    detected_in_scope: int
+    out_of_scope_detected: int
+    true_positives: int
+    false_positives: int
+    true_negatives: int
+    false_negatives: int
+    unknown: int
+    precision: float | None
+    recall: float | None
+    f1: float | None
+    specificity: float | None
+    false_positive_rate: float | None
+    false_positive_txids: list[str]
+    false_negative_txids: list[str]
+    out_of_scope_detected_txids: list[str]
+
+
 class _DetectorManifestFields(TypedDict):
     coinjoin_type: str
     blocksci_min_input_count: int | None

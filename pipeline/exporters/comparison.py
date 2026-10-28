@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from exporters.common import JsonObject, compute_optional_rate
+from exporters.common import JsonObject, compute_optional_rate, f1_score, wallet_names
 from exporters.emulator_data import wallet_address_labels
-from exporters.report_types import IORecord, RecordSummary, TransactionRecord
+from exporters.report_types import DetectionConfusionMatrix, IORecord, RecordSummary, TransactionRecord
 
 
 def compare_io(
@@ -60,16 +60,7 @@ def compare_records(coinjoin_analysis_record: TransactionRecord, blocksci_record
 
 
 def record_wallets(record: TransactionRecord | None) -> list[str]:
-    if record is None:
-        return []
-
-    wallets = set()
-    for side in (record.get("inputs", []), record.get("outputs", [])):
-        for item in side:
-            wallet = item.get("wallet_name")
-            if wallet:
-                wallets.add(wallet)
-    return sorted(wallets)
+    return wallet_names(record)
 
 
 def record_summary(record: TransactionRecord | None) -> RecordSummary | None:
@@ -139,7 +130,7 @@ def build_divergences(transactions: JsonObject) -> dict[str, list[JsonObject]]:
 def build_detection_confusion_matrix(
     emulator_data: JsonObject | None,
     detected_records: Mapping[str, object],
-) -> JsonObject | None:
+) -> DetectionConfusionMatrix | None:
     if not emulator_data or not (emulator_data.get("label_provenance") or {}).get("independent"):
         return None
 
@@ -172,9 +163,6 @@ def build_detection_confusion_matrix(
     recall = compute_optional_rate(true_positive, true_positive + false_negative)
     specificity = compute_optional_rate(true_negative, true_negative + false_positive)
     false_positive_rate = compute_optional_rate(false_positive, false_positive + true_negative)
-    f1 = None
-    if precision is not None and recall is not None and precision + recall > 0:
-        f1 = round(2 * precision * recall / (precision + recall), 6)
 
     return {
         "evaluated_transactions": len(evaluated_txids),
@@ -188,7 +176,7 @@ def build_detection_confusion_matrix(
         "unknown": unknown,
         "precision": precision,
         "recall": recall,
-        "f1": f1,
+        "f1": f1_score(precision, recall),
         "specificity": specificity,
         "false_positive_rate": false_positive_rate,
         "false_positive_txids": sorted(false_positives),
@@ -236,9 +224,6 @@ def evaluate_cluster_assignments(
     false_negative_pairs = len(truth_pairs - predicted_pairs)
     precision = compute_optional_rate(true_positive_pairs, true_positive_pairs + false_positive_pairs)
     recall = compute_optional_rate(true_positive_pairs, true_positive_pairs + false_negative_pairs)
-    f1 = None
-    if precision is not None and recall is not None and precision + recall > 0:
-        f1 = round(2 * precision * recall / (precision + recall), 6)
 
     wallets_by_cluster: dict[str, set[str]] = {}
     clusters_by_wallet: dict[str, set[str]] = {}
@@ -261,7 +246,7 @@ def evaluate_cluster_assignments(
         "pairwise_false_negatives": false_negative_pairs,
         "pairwise_precision": precision,
         "pairwise_recall": recall,
-        "pairwise_f1": f1,
+        "pairwise_f1": f1_score(precision, recall),
         "overmerged_clusters": len(overmerged),
         "undermerged_wallets": len(undermerged),
         "largest_overmerged_clusters": [

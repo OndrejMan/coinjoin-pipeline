@@ -201,6 +201,19 @@ def build_run_manifest(
     }
 
 
+def apply_mapping_provenance(run_manifest: RunManifest, coinjoin_mappings: JsonObject | None) -> None:
+    """Record the mapping-stage images and parameters; only Wasabi runs with mappings have them."""
+    if not coinjoin_mappings:
+        return
+    provenance = coinjoin_mappings.get("provenance") or {}
+    run_manifest["images"]["mappings_enumerator"] = provenance.get("enumerator_image")
+    run_manifest["images"]["sake"] = provenance.get("sake_image")
+    run_manifest["image_digests"]["mappings_enumerator"] = provenance.get("enumerator_image_digest")
+    run_manifest["image_digests"]["sake"] = provenance.get("sake_image_digest")
+    run_manifest["mapping_parameters"] = (coinjoin_mappings.get("enumerator") or {}).get("parameters")
+    run_manifest["sake_seed"] = (coinjoin_mappings.get("sake") or {}).get("seed")
+
+
 def compare_run_manifests(
     previous_manifest: Mapping[str, object] | None,
     current_manifest: RunManifest,

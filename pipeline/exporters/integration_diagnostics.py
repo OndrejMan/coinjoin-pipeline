@@ -7,16 +7,19 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Callable, Protocol, cast
 
-from exporters.artifact_paths import emulator_dir
+from exporters.artifact_paths import EXPORTED_BLOCKS_DIR
 from exporters.common import (
+    DEFAULT_JOINMARKET_DETECTOR,
+    DEFAULT_JOINMARKET_MAX_DEPTH,
+    DEFAULT_JOINMARKET_MIN_BASE_FEE,
+    DEFAULT_JOINMARKET_PERCENTAGE_FEE,
     JsonObject,
     JsonValue,
-    load_json,
     safe_attr,
     to_json_text,
 )
 from exporters.image_provenance import inspect_image
-from exporters.normalization import block_height_from_path, is_coinbase_tx
+from exporters.normalization import is_coinbase_tx, iter_exported_blocks
 
 # Only the images the report can actually inspect. The uploader and the PBS
 # unified-report image are pulled by Kubernetes and Singularity, never by the
@@ -101,25 +104,12 @@ def build_image_diagnostics(
 
 
 def exported_block_targets(run_dir: Path) -> tuple[list[JsonObject], JsonObject]:
-    block_dir = emulator_dir(run_dir) / "data" / "btc-node"
+    block_dir = run_dir / EXPORTED_BLOCKS_DIR
     targets: list[JsonObject] = []
     exported_heights: list[int] = []
-    if not block_dir.exists():
-        return targets, {
-            "exported_block_count": 0,
-            "max_exported_block_height": None,
-            "block_dir": str(block_dir),
-            "status": "not_ok",
-        }
-
-    for block_path in sorted(block_dir.glob("block_*.json"), key=lambda path: block_height_from_path(path) or -1):
-        block = load_json(block_path)
-        height = block.get("height")
-        if height is None:
-            height = block_height_from_path(block_path)
+    for block_path, height, block in iter_exported_blocks(run_dir):
         if height is not None:
-            exported_heights.append(int(height))
-
+            exported_heights.append(height)
         for tx in block.get("tx", []):
             txid = to_json_text(tx.get("txid"))
             if not txid or is_coinbase_tx(tx):
@@ -127,7 +117,7 @@ def exported_block_targets(run_dir: Path) -> tuple[list[JsonObject], JsonObject]
             targets.append(
                 {
                     "txid": txid,
-                    "exported_block_height": int(height) if height is not None else None,
+                    "exported_block_height": height,
                     "source_block_file": block_path.name,
                 }
             )
@@ -334,10 +324,10 @@ def build_integration_diagnostics(
     images: dict[str, str | None],
     image_ids: dict[str, str | None] | None = None,
     image_digests: dict[str, str | None] | None = None,
-    joinmarket_detector: str = "definite",
-    joinmarket_min_base_fee: int = 5000,
-    joinmarket_percentage_fee: float = 0.00004,
-    joinmarket_max_depth: int = 200000,
+    joinmarket_detector: str = DEFAULT_JOINMARKET_DETECTOR,
+    joinmarket_min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE,
+    joinmarket_percentage_fee: float = DEFAULT_JOINMARKET_PERCENTAGE_FEE,
+    joinmarket_max_depth: int = DEFAULT_JOINMARKET_MAX_DEPTH,
 ) -> JsonObject:
     problems: list[str] = []
     image_diagnostics, image_problems = build_image_diagnostics(images, image_ids, image_digests)

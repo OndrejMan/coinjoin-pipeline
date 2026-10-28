@@ -11,10 +11,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from exporters.common import load_json
-
-JsonValue = object
-JsonObject = dict
+from exporters.common import JsonObject, JsonValue, io_items, load_json, wallet_names
 
 
 def save_text(path: Path, text: str) -> None:
@@ -86,18 +83,10 @@ def denoms(record: JsonObject | None) -> str:
 
 
 def wallets(record: JsonObject | None) -> str:
+    """Wallets of a divergence summary (``wallets``) or of a full record (its inputs and outputs)."""
     if not record:
         return "-"
-    names = record.get("wallets") or []
-    if not names:
-        names = sorted(
-            {
-                item["wallet_name"]
-                for side in ("inputs", "outputs")
-                for item in record.get(side, [])
-                if item.get("wallet_name")
-            }
-        )
+    names = record.get("wallets") or wallet_names(record)
     return ", ".join(names) if names else "-"
 
 
@@ -309,6 +298,12 @@ def render_clustering_evaluation(report: JsonObject) -> list[str]:
     return lines
 
 
+def is_disagreement(confusion_key: str) -> bool:
+    """Whether a ``side:TRUTH->ANALYZER`` confusion key pairs two different events."""
+    truth, _, analyzer = confusion_key.partition("->")
+    return truth.partition(":")[2] != analyzer
+
+
 def render_liquidity_evaluation(report: JsonObject) -> list[str]:
     liquidity = report.get("liquidity_evaluation")
     if not liquidity:
@@ -367,11 +362,7 @@ def render_liquidity_evaluation(report: JsonObject) -> list[str]:
         ("Classification Disagreements", "observed", agreement.get("confusion")),
         ("BlockSci Classification Disagreements", "BlockSci", blocksci_agreement.get("confusion")),
     ):
-        disagreements = [
-            [key, count]
-            for key, count in (confusion or {}).items()
-            if key.split("->")[0].split(":")[1] != key.split("->")[1]
-        ]
+        disagreements = [[key, count] for key, count in (confusion or {}).items() if is_disagreement(key)]
         if disagreements:
             lines.extend(section(title, *table([f"ground truth -> {analyzer}", "count"], disagreements), level=3))
 
@@ -590,8 +581,7 @@ def render_heuristic_explanation(source: JsonObject, missed_by_blocksci: bool) -
 def record_has_taproot_witness_unknown(source: JsonObject) -> bool:
     return any(
         item.get("script_type") == "witness_v1_taproot" and item.get("address_type") == "WITNESS_UNKNOWN"
-        for side in ("inputs", "outputs")
-        for item in source.get(side, [])
+        for item in io_items(source)
     )
 
 
@@ -629,6 +619,18 @@ def render_io_details(title: str, records: list[JsonObject], explorer_base_url: 
     return [f"#### {title}", "", *table(headers, rows), ""]
 
 
+IMAGE_LABELS = (
+    ("blocksci", "BlockSci"),
+    ("coinjoin_analysis", "coinjoin-analysis"),
+    ("coinjoin_emulator", "coinjoin-emulator"),
+    ("uploader", "uploader"),
+    ("unified_report", "unified-report"),
+    ("mappings_enumerator", "mappings-enumerator"),
+    ("sake", "Sake"),
+)
+OPTIONAL_IMAGES = {"mappings_enumerator", "sake"}
+
+
 def render_run_manifest(report: JsonObject) -> list[str]:
     manifest = report.get("run_manifest") or {}
     if not manifest:
@@ -640,17 +642,14 @@ def render_run_manifest(report: JsonObject) -> list[str]:
     images = manifest.get("images") or {}
     image_digests = manifest.get("image_digests") or {}
     commits = manifest.get("source_commits") or {}
+    trees = manifest.get("source_trees") or {}
     comparison = report.get("run_manifest_comparison") or {}
 
     image_rows = [
         row
-        for key, label in (
-            ("blocksci", "BlockSci"),
-            ("coinjoin_analysis", "coinjoin-analysis"),
-            ("coinjoin_emulator", "coinjoin-emulator"),
-            ("uploader", "uploader"),
-            ("unified_report", "unified-report"),
-        )
+        for key, label in IMAGE_LABELS
+        # The mapping-stage images exist only in reports with a mapping stage.
+        if key in images or key not in OPTIONAL_IMAGES
         for row in ([f"{label} image", images.get(key)], [f"{label} image digest", image_digests.get(key)])
     ]
     lines = section(
@@ -664,6 +663,7 @@ def render_run_manifest(report: JsonObject) -> list[str]:
                 *image_rows,
                 ["coinjoin-emulator commit", commits.get("coinjoin_emulator")],
                 ["exporters commit", commits.get("exporters")],
+                ["exporters tree sha256", trees.get("exporters_sha256")],
             ],
             key="field",
         ),
@@ -716,7 +716,8 @@ def render_integration_diagnostics(report: JsonObject) -> list[str]:
     chain = diagnostics.get("chain") or {}
     target_txids = diagnostics.get("target_txids") or {}
     detector = diagnostics.get("detector") or {}
-    image_status = "ok" if images and all((item or {}).get("status") == "ok" for item in images.values()) else "not_ok"
+    complete_images = sum(1 for item in images.values() if (item or {}).get("status") == "ok")
+    image_status = "ok" if images and complete_images == len(images) else "not_ok"
     problems = diagnostics.get("problems") or []
     verdict = (
         "Inner report integration is OK."
@@ -733,10 +734,7 @@ def render_integration_diagnostics(report: JsonObject) -> list[str]:
                 [
                     "image provenance",
                     status_text(image_status),
-                    (
-                        f"{sum(1 for item in images.values() if (item or {}).get('status') == 'ok')}"
-                        f"/{len(images)} images complete"
-                    ),
+                    f"{complete_images}/{len(images)} images complete",
                 ],
                 [
                     "chain heights",
@@ -824,17 +822,10 @@ def render_coinjoin_mappings(report: JsonObject) -> list[str]:
     return lines
 
 
-def render_report(report: JsonObject, explorer_base_url: str = "http://localhost:3002") -> str:
-    run = report.get("run") or {}
-    scenario = report.get("scenario") or {}
-    summary = report.get("summary") or {}
-    divergences = report["divergences"]
-    divergence_counts = summary["divergence_counts"]
-
+def render_header(report: JsonObject) -> list[str]:
+    external = (report.get("run") or {}).get("mode") == "external"
     lines = [
-        "# BlockSci CoinJoin Comparison Report"
-        if (report.get("run") or {}).get("mode") == "external"
-        else "# BlockSci vs Emulator CoinJoin Report",
+        "# BlockSci CoinJoin Comparison Report" if external else "# BlockSci vs Emulator CoinJoin Report",
         "",
         "> `_N` means the block height was inferred from exported `block_*.json` files, not present in original "
         "`coinjoin_tx_info.json`.",
@@ -842,38 +833,45 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
     warnings = report.get("warnings") or []
     if warnings:
         lines.extend(section("Warnings"))
-        for warning in warnings:
-            lines.append(f"> **{warning.get('code')}:** {warning.get('message')}")
-    lines.extend(render_integration_diagnostics(report))
-    lines.extend(
-        section(
-            "Run",
-            *key_values(
-                [
-                    ["run id", run.get("id")],
-                    ["mode", run.get("mode")],
-                    ["network", run.get("network")],
-                    ["evaluation scope", report.get("evaluation_scope")],
-                    ["run time", run.get("started_at")],
-                    ["scenario", run.get("scenario_name")],
-                    ["scenario rounds", scenario.get("rounds")],
-                    ["scenario blocks", scenario.get("blocks")],
-                    ["scenario wallets", scenario.get("wallet_count")],
-                    ["coinjoin type", run.get("coinjoin_type")],
-                    ["BlockSci min input count", run.get("blocksci_min_input_count")],
-                    ["FirstWasabi2Block", run.get("first_wasabi2_block")],
-                    ["JoinMarket detector", run.get("joinmarket_detector")],
-                    ["JoinMarket min base fee", run.get("joinmarket_min_base_fee")],
-                    ["JoinMarket percentage fee", run.get("joinmarket_percentage_fee")],
-                    ["JoinMarket max depth", run.get("joinmarket_max_depth")],
-                    ["scenario sha256", run.get("scenario_sha256")],
-                ],
-                key="field",
-            ),
-        )
+        lines.extend(f"> **{warning.get('code')}:** {warning.get('message')}" for warning in warnings)
+    return lines
+
+
+def render_run(report: JsonObject) -> list[str]:
+    run = report.get("run") or {}
+    scenario = report.get("scenario") or {}
+    return section(
+        "Run",
+        *key_values(
+            [
+                ["run id", run.get("id")],
+                ["mode", run.get("mode")],
+                ["network", run.get("network")],
+                ["evaluation scope", report.get("evaluation_scope")],
+                ["run time", run.get("started_at")],
+                ["scenario", run.get("scenario_name")],
+                ["scenario rounds", scenario.get("rounds")],
+                ["scenario blocks", scenario.get("blocks")],
+                ["scenario wallets", scenario.get("wallet_count")],
+                ["coinjoin type", run.get("coinjoin_type")],
+                ["BlockSci min input count", run.get("blocksci_min_input_count")],
+                ["FirstWasabi2Block", run.get("first_wasabi2_block")],
+                ["JoinMarket detector", run.get("joinmarket_detector")],
+                ["JoinMarket min base fee", run.get("joinmarket_min_base_fee")],
+                ["JoinMarket percentage fee", run.get("joinmarket_percentage_fee")],
+                ["JoinMarket max depth", run.get("joinmarket_max_depth")],
+                ["scenario sha256", run.get("scenario_sha256")],
+            ],
+            key="field",
+        ),
     )
-    lines.extend(
-        section(
+
+
+def render_detection_summary(report: JsonObject) -> list[str]:
+    summary = report.get("summary") or {}
+    divergence_counts = summary["divergence_counts"]
+    return [
+        *section(
             "Detection Summary",
             *key_values(
                 [
@@ -890,10 +888,8 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
                     ],
                 ]
             ),
-        )
-    )
-    lines.extend(
-        section(
+        ),
+        *section(
             "Divergence Counts",
             *table(
                 ["type", "count"],
@@ -903,95 +899,98 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
                     ["shared transaction mismatches", divergence_counts.get("shared_tx_mismatches", 0)],
                 ],
             ),
-        )
-    )
-
-    if report.get("evaluation_scope") == "baseline_agreement_only":
-        lines.extend(
-            [
-                "",
-                "> This report compares BlockSci with `coinjoin-analysis`. It has no emulator ground truth; "
-                "precision, recall, and F1 are intentionally unavailable.",
-            ]
-        )
-    elif report.get("evaluation_scope") == "emulator_labels_unavailable":
-        label_provenance = (report.get("emulator_data") or {}).get("label_provenance") or {}
-        unavailable_reason = label_provenance.get("unavailable_reason")
-        lines.extend(
-            [
-                "",
-                "> Independent emulator producer labels were unavailable. Transaction labels remain unknown; "
-                "precision, recall, and F1 are intentionally unavailable.",
-            ]
-        )
-        if unavailable_reason:
-            lines.append(f"> Reason: {unavailable_reason}")
-    coverage = report.get("coverage")
-    if coverage:
-        lines.extend(
-            section(
-                "Coverage",
-                "> Only heights BlockSci scanned are compared; baseline transactions elsewhere are not BlockSci misses.",
-                "",
-                *key_values(
-                    [
-                        ["scan window", f"[{coverage.get('start_height')}, {coverage.get('end_height')})"],
-                        ["index blocks", coverage.get("index_blocks")],
-                        ["pinned at height", coverage.get("pin_height")],
-                        ["Dumplings snapshot height", coverage.get("dumplings_last_processed_height")],
-                        ["Dumplings commit", coverage.get("dumplings_commit")],
-                        ["baseline transactions", coverage.get("baseline_total")],
-                        ["baseline inside the window", coverage.get("baseline_in_window")],
-                        ["baseline outside the window", coverage.get("baseline_outside_window")],
-                        ["baseline not in the index or above the pin", coverage.get("baseline_not_in_index")],
-                    ],
-                    key="field",
-                ),
-            )
-        )
-    baseline_filter = report.get("baseline_filter") or {}
-    if baseline_filter.get("enabled"):
-        source_names = ", ".join(str(source.get("file")) for source in baseline_filter.get("sources", []))
-        lines.extend(
-            section(
-                "Baseline False-Positive Filter",
-                *key_values(
-                    [
-                        ["source files", source_names],
-                        ["listed unique TXIDs", baseline_filter.get("listed_txids")],
-                        ["filtered baseline TXIDs", baseline_filter.get("filtered_count")],
-                    ],
-                    key="field",
-                ),
-            )
-        )
-    lines.extend(render_run_manifest(report))
-    lines.extend(render_coinjoin_mappings(report))
-    lines.extend(render_emulator_detection(report, explorer_base_url))
-    lines.extend(render_skipped_transactions(report, explorer_base_url))
-    lines.extend(render_clustering_evaluation(report))
-    lines.extend(render_liquidity_evaluation(report))
-    lines.extend(
-        section(
-            "CoinJoin-Analysis vs BlockSci Diagnostic",
-            "This section preserves the analyzer comparison. Emulator reports use `emulator_data` as the "
-            "canonical source for chain-wide detection metrics; external reports measure baseline agreement only.",
-        )
-    )
-
-    overview_rows = [
-        row
-        for kind, key in (
-            ("missed_by_blocksci", "missed_by_blocksci"),
-            ("blocksci_only", "blocksci_only"),
-            ("shared_tx_mismatch", "shared_tx_mismatches"),
-        )
-        for row in divergence_rows(kind, divergences.get(key, []), explorer_base_url)
+        ),
     ]
 
+
+def render_scope_note(report: JsonObject) -> list[str]:
+    """Why precision, recall and F1 are missing, when they are."""
+    scope = report.get("evaluation_scope")
+    if scope == "baseline_agreement_only":
+        return [
+            "",
+            "> This report compares BlockSci with `coinjoin-analysis`. It has no emulator ground truth; "
+            "precision, recall, and F1 are intentionally unavailable.",
+        ]
+    if scope != "emulator_labels_unavailable":
+        return []
+    lines = [
+        "",
+        "> Independent emulator producer labels were unavailable. Transaction labels remain unknown; "
+        "precision, recall, and F1 are intentionally unavailable.",
+    ]
+    label_provenance = (report.get("emulator_data") or {}).get("label_provenance") or {}
+    unavailable_reason = label_provenance.get("unavailable_reason")
+    if unavailable_reason:
+        lines.append(f"> Reason: {unavailable_reason}")
+    return lines
+
+
+def render_coverage(report: JsonObject) -> list[str]:
+    coverage = report.get("coverage")
+    if not coverage:
+        return []
+    return section(
+        "Coverage",
+        "> Only heights BlockSci scanned are compared; baseline transactions elsewhere are not BlockSci misses.",
+        "",
+        *key_values(
+            [
+                ["scan window", f"[{coverage.get('start_height')}, {coverage.get('end_height')})"],
+                ["index blocks", coverage.get("index_blocks")],
+                ["pinned at height", coverage.get("pin_height")],
+                ["Dumplings snapshot height", coverage.get("dumplings_last_processed_height")],
+                ["Dumplings commit", coverage.get("dumplings_commit")],
+                ["baseline transactions", coverage.get("baseline_total")],
+                ["baseline inside the window", coverage.get("baseline_in_window")],
+                ["baseline outside the window", coverage.get("baseline_outside_window")],
+                ["baseline not in the index or above the pin", coverage.get("baseline_not_in_index")],
+            ],
+            key="field",
+        ),
+    )
+
+
+def render_baseline_filter(report: JsonObject) -> list[str]:
+    baseline_filter = report.get("baseline_filter") or {}
+    if not baseline_filter.get("enabled"):
+        return []
+    source_names = ", ".join(str(source.get("file")) for source in baseline_filter.get("sources", []))
+    return section(
+        "Baseline False-Positive Filter",
+        *key_values(
+            [
+                ["source files", source_names],
+                ["listed unique TXIDs", baseline_filter.get("listed_txids")],
+                ["filtered baseline TXIDs", baseline_filter.get("filtered_count")],
+            ],
+            key="field",
+        ),
+    )
+
+
+DIVERGENCE_KINDS = (
+    ("missed_by_blocksci", "missed_by_blocksci"),
+    ("blocksci_only", "blocksci_only"),
+    ("shared_tx_mismatch", "shared_tx_mismatches"),
+)
+
+
+def render_analyzer_diagnostic(report: JsonObject, explorer_base_url: str) -> list[str]:
+    """The analyzer-vs-analyzer comparison, transaction by transaction."""
+    divergences = report["divergences"]
+    lines = section(
+        "CoinJoin-Analysis vs BlockSci Diagnostic",
+        "This section preserves the analyzer comparison. Emulator reports use `emulator_data` as the "
+        "canonical source for chain-wide detection metrics; external reports measure baseline agreement only.",
+    )
     lines.extend(render_notable_divergences(divergences))
     lines.extend(section("Divergence Overview"))
-
+    overview_rows = [
+        row
+        for kind, key in DIVERGENCE_KINDS
+        for row in divergence_rows(kind, divergences.get(key, []), explorer_base_url)
+    ]
     if overview_rows:
         lines.extend(
             table(
@@ -1020,7 +1019,26 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
         lines.extend(render_source_details(title, items, source_name, explorer_base_url))
         lines.extend(render_transaction_details(title, items, source_name, explorer_base_url, report))
     lines.extend(render_shared_mismatch_details(divergences.get("shared_tx_mismatches", [])))
+    return lines
 
+
+def render_report(report: JsonObject, explorer_base_url: str = "http://localhost:3002") -> str:
+    lines = [
+        *render_header(report),
+        *render_integration_diagnostics(report),
+        *render_run(report),
+        *render_detection_summary(report),
+        *render_scope_note(report),
+        *render_coverage(report),
+        *render_baseline_filter(report),
+        *render_run_manifest(report),
+        *render_coinjoin_mappings(report),
+        *render_emulator_detection(report, explorer_base_url),
+        *render_skipped_transactions(report, explorer_base_url),
+        *render_clustering_evaluation(report),
+        *render_liquidity_evaluation(report),
+        *render_analyzer_diagnostic(report, explorer_base_url),
+    ]
     return "\n".join(lines).rstrip() + "\n"
 
 

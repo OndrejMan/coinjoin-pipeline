@@ -15,7 +15,7 @@ if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from exporters.analysis_artifact import ARTIFACT_NAME, SCHEMA_VERSION, detector_parameters
-from exporters.artifact_paths import BASELINE_FILE, blocksci_analysis_dir, emulator_dir
+from exporters.artifact_paths import BASELINE_FILE, blocksci_analysis_dir
 from exporters.blocksci_export.detector import (
     BLOCKSCI_IMPORT_ERROR,
     baseline_block_heights,
@@ -31,19 +31,21 @@ from exporters.common import (
     load_json,
     save_json,
 )
-from exporters.emulator_data import output_address
 from exporters.integration_diagnostics import build_integration_diagnostics
-from exporters.normalization import load_first_wasabi2_block
+from exporters.normalization import iter_exported_blocks, load_first_wasabi2_block, output_address
 from exporters.parameters import add_detector_arguments, add_image_arguments, add_window_arguments
 from exporters.report_types import BlockSciAnalysisArtifact
+
+IMAGE_NAMES = ("blocksci", "coinjoin_analysis", "coinjoin_emulator", "uploader", "unified_report")
+INSPECTED_IMAGE_NAMES = IMAGE_NAMES[:3]
+# The report stage resolves its own image (manifest.resolve_manifest_images).
+PROVENANCE_IMAGE_NAMES = IMAGE_NAMES[:4]
 
 
 def exported_addresses(run_dir: Path) -> set[str]:
     """Collect addresses from exported Bitcoin block JSON without baseline data."""
     addresses: set[str] = set()
-    block_dir = emulator_dir(run_dir) / "data" / "btc-node"
-    for block_path in sorted(block_dir.glob("block_*.json")):
-        block = load_json(block_path)
+    for _path, _height, block in iter_exported_blocks(run_dir):
         for tx in block.get("tx", []):
             for output in tx.get("vout", []):
                 address = output_address(output)
@@ -93,6 +95,13 @@ def write_analysis(args: argparse.Namespace) -> Path:
         baseline_path = run_dir / BASELINE_FILE
         if baseline_path.is_file():
             baseline_heights = baseline_block_heights(chain, load_json(baseline_path).get("coinjoins", {}))
+    # The uploader and report images carry at most the digest of a pinned reference.
+    references = {name: getattr(args, name + "_image", None) for name in IMAGE_NAMES}
+    image_ids = {name: getattr(args, name + "_image_id", None) for name in INSPECTED_IMAGE_NAMES}
+    image_digests = {
+        name: getattr(args, name + "_image_digest", None) or digest_from_reference(references[name])
+        for name in IMAGE_NAMES
+    }
     diagnostics = (
         build_integration_diagnostics(
             run_dir,
@@ -100,26 +109,9 @@ def write_analysis(args: argparse.Namespace) -> Path:
             blocksci,
             records,
             args.coinjoin_type,
-            {
-                "blocksci": args.blocksci_image,
-                "coinjoin_analysis": args.coinjoin_analysis_image,
-                "coinjoin_emulator": args.coinjoin_emulator_image,
-                "uploader": args.uploader_image,
-                "unified_report": args.unified_report_image,
-            },
-            image_ids={
-                name: getattr(args, name + "_image_id", None)
-                for name in ("blocksci", "coinjoin_analysis", "coinjoin_emulator")
-            },
-            image_digests={
-                **{
-                    name: getattr(args, name + "_image_digest", None)
-                    or digest_from_reference(getattr(args, name + "_image", None))
-                    for name in ("blocksci", "coinjoin_analysis", "coinjoin_emulator")
-                },
-                "uploader": digest_from_reference(args.uploader_image),
-                "unified_report": digest_from_reference(args.unified_report_image),
-            },
+            references,
+            image_ids=image_ids,
+            image_digests=image_digests,
             joinmarket_detector=args.joinmarket_detector,
             joinmarket_min_base_fee=args.joinmarket_min_base_fee,
             joinmarket_percentage_fee=args.joinmarket_percentage_fee,
@@ -152,13 +144,12 @@ def write_analysis(args: argparse.Namespace) -> Path:
         "first_wasabi2_block": load_first_wasabi2_block(config_path),
         "image_provenance": {
             name: {
-                "reference": getattr(args, name + "_image", None),
+                "reference": references[name],
                 "image_id": getattr(args, name + "_image_id", None),
-                "repo_digest": getattr(args, name + "_image_digest", None)
-                or digest_from_reference(getattr(args, name + "_image", None)),
+                "repo_digest": image_digests[name],
                 **((diagnostics or {}).get("images", {}).get(name) or {}),
             }
-            for name in ("blocksci", "coinjoin_analysis", "coinjoin_emulator", "uploader")
+            for name in PROVENANCE_IMAGE_NAMES
         },
         "records": records,
         "skipped_txids": skipped_txids,

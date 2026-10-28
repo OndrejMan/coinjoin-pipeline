@@ -12,7 +12,8 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, EXPORTED_BLOCKS_DIR, REPORT_JSON
+from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, REPORT_JSON
+from exporters.normalization import block_height_from_path, exported_block_paths
 from exporters.parameters import add_detector_arguments, add_image_arguments, add_window_arguments
 
 
@@ -55,11 +56,10 @@ def parse_chain(args):
     if args.phase != "update" and not (args.mode == "external" and args.config.is_file()):
         maximum = args.max_block
         if maximum is None and args.mode != "external":
-            blocks = args.run_dir / EXPORTED_BLOCKS_DIR
             heights = [
-                int(path.stem[len("block_") :])
-                for path in blocks.glob("block_*.json")
-                if path.stem[len("block_") :].isdigit()
+                height
+                for height in map(block_height_from_path, exported_block_paths(args.run_dir))
+                if height is not None
             ]
             if not heights:
                 raise ValueError("No exported block height is available for BlockSci parsing")

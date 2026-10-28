@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Dict, Literal, Tuple
 
-from exporters.artifact_paths import emulator_dir
-from exporters.common import JsonObject, load_json, to_json_text
-from exporters.normalization import block_height_from_path
+from exporters.common import JsonObject, to_json_text
+from exporters.normalization import iter_exported_blocks
 from exporters.report_types import IORecord, TransactionRecord
 
 
@@ -35,17 +34,14 @@ def script_metadata(script_pub_key: JsonObject | None) -> JsonObject:
     return {key: value for key, value in metadata.items() if value is not None}
 
 
-def load_exported_block_script_metadata(
-    run_dir: Path,
-) -> tuple[dict[tuple[str, str], JsonObject], dict[tuple[str, str], tuple[str, str]]]:
-    block_dir = emulator_dir(run_dir) / "data" / "btc-node"
-    if not block_dir.exists():
-        return {}, {}
+ScriptMetadataIndex = Tuple[Dict[Tuple[str, str], JsonObject], Dict[Tuple[str, str], Tuple[str, str]]]
 
+
+def load_exported_block_script_metadata(run_dir: Path) -> ScriptMetadataIndex:
+    """Script metadata of every exported output, and the outpoint each input spends."""
     outputs: dict[tuple[str, str], JsonObject] = {}
     input_prevouts: dict[tuple[str, str], tuple[str, str]] = {}
-    for block_path in sorted(block_dir.glob("block_*.json"), key=lambda path: block_height_from_path(path) or -1):
-        block = load_json(block_path)
+    for _path, _height, block in iter_exported_blocks(run_dir):
         for tx in block.get("tx", []):
             txid = to_json_text(tx.get("txid"))
             if not txid:
@@ -82,8 +78,16 @@ def apply_script_metadata(record: IORecord, metadata: JsonObject | None) -> None
             record[key] = metadata[key]
 
 
-def enrich_records_with_script_metadata(records: dict[str, TransactionRecord], run_dir: Path) -> None:
-    outputs, input_prevouts = load_exported_block_script_metadata(run_dir)
+def enrich_records_with_script_metadata(
+    records: dict[str, TransactionRecord],
+    run_dir: Path,
+    index: ScriptMetadataIndex | None = None,
+) -> None:
+    """Copy script metadata onto each record's inputs and outputs.
+
+    Pass ``index`` to enrich several record sets from one read of the blocks.
+    """
+    outputs, input_prevouts = index if index is not None else load_exported_block_script_metadata(run_dir)
     if not outputs and not input_prevouts:
         return
 

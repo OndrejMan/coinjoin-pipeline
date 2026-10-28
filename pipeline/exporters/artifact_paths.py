@@ -31,6 +31,8 @@ BASELINE_FILE = COINJOIN_ANALYSIS_DIR + "/coinjoin_tx_info.json"
 FALSE_CJTXS_FILE = COINJOIN_ANALYSIS_DIR + "/false_cjtxs.json"
 # Every false-positive sidecar, including the numbered copies of extra inputs.
 FALSE_CJTXS_GLOB = "false_cjtxs.json*"
+# External baselines only: the Dumplings state the baseline was parsed from.
+DUMPLINGS_SNAPSHOT_FILE = COINJOIN_ANALYSIS_DIR + "/dumplings-snapshot.json"
 BLOCKSCI_CONFIG_FILE = BLOCKSCI_DIR + "/config.json"
 ANALYSIS_ARTIFACT_NAME = "blocksci_analysis.json"
 ANALYSIS_ARTIFACT_FILE = BLOCKSCI_ANALYSIS_DIR + "/" + ANALYSIS_ARTIFACT_NAME
@@ -57,6 +59,7 @@ REPORT_INPUT_FILES = (
     ROUND_EVENTS_FILE,
     POSTMIX_SPENDS_FILE,
     BASELINE_FILE,
+    DUMPLINGS_SNAPSHOT_FILE,
     ANALYSIS_ARTIFACT_FILE,
     MAPPINGS_FILE,
 )
