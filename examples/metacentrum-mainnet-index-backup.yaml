@@ -18,8 +18,7 @@ images:
 
 artifacts:
   backend: s3
-  # Index jobs keep their logs and markers below bitcoin-mainnet, not in runs/.
-  uri: s3://xman-coinjoin-new/bitcoin-mainnet/index
+  uri: s3://xman-coinjoin-new/runs
   endpoint_url: https://s3.cl4.du.cesnet.cz
   credentials_file: /storage/brno2/home/<login>/.aws/credentials
   profile: coinjoin
