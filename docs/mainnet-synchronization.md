@@ -137,6 +137,8 @@ pracovní adresáře pod původní i skutečnou cestou ze `Path.resolve()`, aby 
 v kontejneru dosáhly na stejná data jako na hostiteli. Cesty v příkazech a uložených
 manifestech zůstávají původní. Pokud Core hlásí neexistující datadir, přestože
 adresář na hostiteli existuje, zkontroluj oba bindy v aktuálním workeru.
+Upload persistentních logů se zkusí i při chybě úklidu; taková chyba ale nepotvrdí
+ukončení procesů a nevytvoří značku `quiescent`.
 
 Neúplný index má `.writing` a další průchod jej odmítne. Obnov jej do nového
 adresáře z poslední platné zálohy, ověř jej a až potom ručně nahraď pracovní kopii.

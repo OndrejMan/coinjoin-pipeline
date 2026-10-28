@@ -930,13 +930,15 @@ def main(argv=None):
     try:
         getattr(worker, args[1])()
     finally:
-        worker.cleanup()
-        worker.run.mkdir(parents=True, exist_ok=True)
-        (worker.run / f"{worker.stage}.quiescent").touch()
         try:
-            worker.publish_logs()
-        except Exception as error:
-            print(f"Log upload failed; logs remain in {worker.run}: {error}", file=sys.stderr)
+            worker.cleanup()
+            worker.run.mkdir(parents=True, exist_ok=True)
+            (worker.run / f"{worker.stage}.quiescent").touch()
+        finally:
+            try:
+                worker.publish_logs()
+            except Exception as error:
+                print(f"Log upload failed; logs remain in {worker.run}: {error}", file=sys.stderr)
 
 
 if __name__ == "__main__":

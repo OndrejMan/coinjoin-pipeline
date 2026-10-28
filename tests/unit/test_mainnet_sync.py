@@ -9,7 +9,7 @@ import pytest
 
 from coinjoin_pipeline.configuration import ConfigurationError, PipelineConfiguration
 from coinjoin_pipeline.context import resolve_configuration
-from coinjoin_pipeline.execution import mainnet_sync
+from coinjoin_pipeline.execution import mainnet_runtime, mainnet_sync
 from coinjoin_pipeline.execution.mainnet_runtime import (
     Worker,
     require_ready,
@@ -338,6 +338,30 @@ def test_container_binds_symlink_targets_without_changing_workload_paths(worker,
         assert f"{source}:{source}{suffix}" in binds
         assert f"{source}:{path}{suffix}" in binds
     assert command[-3:] == [worker.c["blocksci_image"], "reader", datadir]
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_failed_worker_uploads_logs_even_when_cleanup_fails(worker, monkeypatch, cleanup_fails):
+    settings = worker.work / "settings.json"
+    settings.write_text("{}")
+    uploaded = []
+
+    def producer():
+        raise RuntimeError("Core failed to start")
+
+    def cleanup():
+        if cleanup_fails:
+            raise RuntimeError("Core did not shut down cleanly")
+
+    monkeypatch.setattr(mainnet_runtime, "Worker", lambda *_: worker)
+    monkeypatch.setattr(worker, "producer", producer)
+    monkeypatch.setattr(worker, "cleanup", cleanup)
+    monkeypatch.setattr(worker, "publish_logs", lambda: uploaded.append(True))
+    message = "Core did not shut down cleanly" if cleanup_fails else "Core failed to start"
+    with pytest.raises(RuntimeError, match=message):
+        mainnet_runtime.main([str(settings), "producer"])
+    assert uploaded == [True]
+    assert (worker.run / "producer.quiescent").exists() is not cleanup_fails
 
 
 @pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
