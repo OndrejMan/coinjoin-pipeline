@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run the rendered Dumplings-baseline PBS job on this host: coinjoin-analysis over the
-# snapshot that latest.json names, with Docker in place of Singularity and a directory
+# Scanner/ copy that manifest.json describes, with Docker in place of Singularity and a directory
 # in place of S3 (tests/support/persistent-index). The snapshot is the JoinMarket
 # sample in temp_dumplings/Scanner plus a stale `.txt.json` cache the job must drop.
 #
@@ -16,15 +16,17 @@ work=$(mktemp -d)
 export FAKE_S3="$work/s3" PATH="$support:$PATH"
 trap 'rm -rf "$work"' EXIT
 
-snapshot="$FAKE_S3/bucket/dumplings/392400"
+snapshot="$FAKE_S3/bucket/dumplings/Scanner"
 mkdir -p "$snapshot" "$work/scratch"
 cp "$sample/OtherCoinJoins.txt" "$sample/OtherCoinJoinPostMixTxs.txt" "$snapshot/"
 echo 392400 >"$snapshot/LastProcessedBlockHeight.txt"
 # A stale coinjoin-analysis cache: read instead of OtherCoinJoins.txt if it survived.
 python3 -I -c 'import pickle, sys; pickle.dump({}, open(sys.argv[1], "wb"))' "$snapshot/OtherCoinJoins.txt.json"
-cat >"$FAKE_S3/bucket/dumplings/latest.json" <<JSON
-{"last_processed_height": 392400, "prefix": "s3://bucket/dumplings/392400", "dumplings_commit": "test"}
-JSON
+python3 -I - "$snapshot" "$FAKE_S3/bucket/dumplings/manifest.json" <<'MANIFEST'
+import json, os, sys
+files = {name: os.path.getsize(os.path.join(sys.argv[1], name)) for name in os.listdir(sys.argv[1])}
+json.dump({"last_processed_height": 392400, "files": files}, open(sys.argv[2], "w"))
+MANIFEST
 touch "$work/credentials"
 
 (cd "$repo" && uv run --frozen python "$support/render_job.py" dumplings --run-id baseline-1 --root "$work" \

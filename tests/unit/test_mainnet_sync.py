@@ -493,7 +493,6 @@ def test_backup_replaces_the_previous_one_without_readback(worker, tmp_path, mon
     (source / "chainstate").mkdir(parents=True)
     (source / "chainstate/state.dat").write_bytes(b"a consistent Core snapshot")
     worker.env["FAKE_S5CMD_FORBID_ARCHIVE_CAT"] = "1"
-    monkeypatch.setattr(worker, "remote_hash", lambda _: pytest.fail("archive backup must not read back content"))
     uri = worker.backup(source, ["chainstate"], "s3://local/core", {"height": 500}, "checkpoint.tar.zst")
     assert uri == "s3://local/core/manifest.json"
     manifest = json.loads((tmp_path / "s3" / uri.removeprefix("s3://")).read_text())
@@ -515,6 +514,50 @@ def test_backup_replaces_the_previous_one_without_readback(worker, tmp_path, mon
     with pytest.raises(ValueError, match="size/key mismatch"):
         worker.backup(source, ["chainstate"], "s3://local/core", {"height": 600}, "checkpoint.tar.zst")
     assert not (tmp_path / "s3/local/core/manifest.json").exists()
+
+
+def scanner_fixture(worker, height):
+    scanner = worker.dumps / "Scanner"
+    scanner.mkdir(parents=True, exist_ok=True)
+    (scanner / "LastProcessedBlockHeight.txt").write_text(str(height))
+    (scanner / "Tx0Candidates.txt").write_text("")
+    (scanner / "Tx0CandidateMisses.txt").write_text("")
+    (scanner / "Checkpoint.txt").write_text(f"{height}\nTx0Candidates.txt 0\nTx0CandidateMisses.txt 0\n")
+    atomic_json(scanner / "ChainCheckpoint.json", {"height": height, "hash": "a" * 64})
+    return scanner
+
+
+def test_dumplings_copy_is_incremental_and_mirrors_deletions(worker, tmp_path):
+    scanner = scanner_fixture(worker, 500)
+    (scanner / "Obsolete.txt").write_text("gone next run")
+    uri = worker.publish_dumplings(500)
+    remote = tmp_path / "s3/local/dumps"
+    assert uri == "s3://local/dumps/manifest.json"
+    assert (remote / "Scanner/Obsolete.txt").exists()
+    (scanner / "Obsolete.txt").unlink()
+    scanner_fixture(worker, 600)
+    worker.publish_dumplings(600)
+    assert sorted(path.name for path in remote.iterdir()) == ["Scanner", "manifest.json"]
+    assert not (remote / "Scanner/Obsolete.txt").exists()
+    manifest = json.loads((remote / "manifest.json").read_text())
+    assert manifest["last_processed_height"] == 600
+    assert manifest["files"]["LastProcessedBlockHeight.txt"] == 3
+    restored = tmp_path / "restored/Scanner"
+    worker.restore_dumplings(uri, restored)
+    assert (restored / "LastProcessedBlockHeight.txt").read_text() == "600"
+    (remote / "Scanner/Checkpoint.txt").write_text("truncated")
+    with pytest.raises(ValueError, match="does not match its manifest"):
+        worker.restore_dumplings(uri, tmp_path / "restored-again/Scanner")
+    assert not (tmp_path / "restored-again/Scanner").exists()
+
+
+def test_a_dumplings_size_mismatch_publishes_no_manifest(worker, tmp_path, monkeypatch):
+    scanner_fixture(worker, 500)
+    worker.publish_dumplings(500)
+    monkeypatch.setattr(worker, "remote_sizes", lambda prefix: {})
+    with pytest.raises(ValueError, match="does not match Scanner"):
+        worker.publish_dumplings(500)
+    assert not (tmp_path / "s3/local/dumps/manifest.json").exists()
 
 
 @pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
@@ -711,4 +754,8 @@ def test_local_two_job_handoff_backs_up_the_post_prune_core(worker, tmp_path, mo
     assert not (restored / "bitcoin/blocks/blk00000.dat").exists()
     assert (restored / "bitcoin/blocks/blk00001.dat").exists()
     assert (restored / "bitcoin/chainstate/state.dat").read_text() == "verified chainstate"
+    # Scanner/ is not in the Core checkpoint; it comes back from its incremental copy.
+    assert not (restored / "dumplings").exists()
+    worker.restore_dumplings(done["dumplings_backup"], restored / "dumplings/Scanner")
     assert (restored / "dumplings/Scanner/Tx0Candidates.txt").exists()
+    assert (restored / "dumplings/Scanner/LastProcessedBlockHeight.txt").read_text() == str(height)

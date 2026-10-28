@@ -1,6 +1,6 @@
-# Mainnet coinjoin-analysis baseline from the latest Dumplings snapshot.
-# The Dumplings service next to the archive node publishes <dumplings_uri>/latest.json;
-# this job runs parse_dumplings over that snapshot and stores coinjoin_tx_info.json,
+# Mainnet coinjoin-analysis baseline from the Dumplings copy mainnet-sync keeps in S3.
+# mainnet-sync mirrors Scanner/ to <dumplings_uri>/Scanner/ and writes manifest.json last;
+# this job runs parse_dumplings over that copy and stores coinjoin_tx_info.json,
 # the image's curated false_cjtxs.json and dumplings-snapshot.json under its own run.
 # The comparison (blocksci.task: external) then points at them:
 #   external_baseline_uri: s3://xman-coinjoin-new/runs/<run_id>/coinjoin-analysis_data/coinjoin_tx_info.json

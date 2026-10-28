@@ -74,7 +74,7 @@ Run with `cjp run operations.yaml` (or first use `--dry-run`). Normal S3 stage
 locking, job bookkeeping, waiting and failure markers apply. This is a standalone
 operation: BlockSci, mappings and the unified report do not run alongside it.
 
-`input_uri` is a dataset prefix, not a Dumplings `latest.json` pointer. Its files
+`input_uri` is a dataset prefix, not a Dumplings `manifest.json`. Its files
 are copied to `/work/input`, retaining the original directory layout:
 
 - `parse_dumplings`: the selected target contains `Scanner/`, including raw
@@ -256,7 +256,7 @@ coinjoin_analysis:
   program: coinjoin_statistics
   data_mode: mainnet
   actions: [wasabi2, wasabi1, joinmarket]
-  input_uri: s3://my-bucket/dumplings/generations/<generation>
+  input_uri: s3://my-bucket/bitcoin-mainnet/dumplings/Scanner
 ```
 
 `input_uri` is a Dumplings snapshot, either its flat files or a dataset root

@@ -42,13 +42,6 @@ def atomic_json(path, value):
     temporary.replace(path)
 
 
-def digest_stream(stream):
-    digest = hashlib.sha256()
-    for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
-        digest.update(chunk)
-    return digest.hexdigest()
-
-
 def require_ready(ready, run_id):
     if ready.get("run_id") != run_id or ready.get("state") != "ready":
         raise ValueError("Missing ready checkpoint for this exact generation")
@@ -229,27 +222,12 @@ class Worker:
         atomic_json(path, value)
         self.upload(path, uri)
 
-    def remote_hash(self, uri):
-        with subprocess.Popen([*self.s5, "cat", uri], env=self.env, stdout=subprocess.PIPE) as process:
-            result = digest_stream(process.stdout)
-            if process.wait() != 0:
-                raise RuntimeError("S3 read-back failed: " + uri)
-        return result
-
     def verify_remote_size(self, uri, expected_size):
         result = self.s3("--json", "ls", uri, stdout=subprocess.PIPE, text=True, timeout=60)
         metadata = json.loads(result.stdout)
         size = metadata.get("size")
         if metadata.get("key") != uri or not isinstance(size, int) or isinstance(size, bool) or size != expected_size:
             raise ValueError("Checkpoint S3 size/key mismatch: " + uri)
-
-    def upload_verified(self, path, uri):
-        with path.open("rb") as handle:
-            expected = digest_stream(handle)
-        self.upload(path, uri)
-        if self.remote_hash(uri) != expected:
-            raise ValueError("Uploaded object failed SHA-256 verification: " + uri)
-        return expected
 
     def progress(self, phase, current=None, total=None, state="running", **extra):
         percent = None if total is None or current is None or total <= 0 else round(min(100, 100 * current / total), 2)
@@ -599,19 +577,65 @@ class Worker:
                     process.wait()
             thread.join(timeout=5)
 
+    def remote_sizes(self, prefix):
+        """Relative key -> size of every object under prefix (which ends with a slash)."""
+        listing = self.s3("--json", "ls", prefix + "*", stdout=subprocess.PIPE, text=True, timeout=600).stdout
+        sizes = {}
+        for line in listing.splitlines():
+            entry = json.loads(line)
+            key = entry.get("key", "")
+            if entry.get("type", "file") == "file" and key.startswith(prefix):
+                sizes[key.removeprefix(prefix)] = entry.get("size")
+        return sizes
+
     def publish_dumplings(self, height):
+        """Mirror Scanner/ incrementally; manifest.json, written last, makes the copy readable.
+
+        Only changed files travel. The copy is checked by object sizes, never read back.
+        """
         scanner = self.dumps / "Scanner"
         scanner_complete(scanner, height)
-        prefix = self.c["dumplings_uri"].rstrip("/") + "/generations/" + self.run_id
-        files = {}
-        paths = sorted(path for path in scanner.iterdir() if path.is_file())
-        for i, path in enumerate(paths):
-            files[path.name] = self.upload_verified(path, prefix + "/" + path.name)
-            self.progress("dumplings-backup", i + 1, len(paths))
-        latest = {"run_id": self.run_id, "prefix": prefix, "last_processed_height": height, "files": files}
-        self.publish_json(prefix + "/manifest.json", latest)
-        self.publish_json(self.c["dumplings_uri"].rstrip("/") + "/latest.json", latest)
-        return prefix + "/manifest.json"
+        prefix = self.c["dumplings_uri"].rstrip("/")
+        manifest_uri = prefix + "/manifest.json"
+        files = {str(path.relative_to(scanner)): path.stat().st_size for path in sorted(scanner.rglob("*")) if path.is_file()}
+        self.remove(manifest_uri)
+        self.progress("dumplings-backup")
+        self.s3("sync", "--delete", str(scanner) + "/", prefix + "/Scanner/", stdout=subprocess.DEVNULL, timeout=6 * 3600)
+        if self.remote_sizes(prefix + "/Scanner/") != files:
+            raise ValueError("The Dumplings copy in S3 does not match Scanner/")
+        manifest = {
+            "run_id": self.run_id,
+            "last_processed_height": height,
+            "files": files,
+            "upload_validation": "size-only",
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self.publish_json(manifest_uri, manifest)
+        return manifest_uri
+
+    def restore_dumplings(self, manifest_uri, destination):
+        """Explicit recovery of Scanner/ into a new directory, checked against the manifest."""
+        manifest = json.loads(self.s3("cat", manifest_uri, stdout=subprocess.PIPE, text=True, timeout=60).stdout)
+        files = manifest.get("files")
+        if (
+            not isinstance(files, dict)
+            or not files
+            or any(name.startswith("/") or ".." in Path(name).parts for name in files)
+        ):
+            raise ValueError("Invalid Dumplings manifest")
+        if destination.exists():
+            raise ValueError("Restore destination must not exist")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=destination.name + ".restoring-", dir=destination.parent))
+        try:
+            self.s3("cp", manifest_uri.rsplit("/", 1)[0] + "/Scanner/*", str(staging) + "/", stdout=subprocess.DEVNULL, timeout=6 * 3600)
+            actual = {str(path.relative_to(staging)): path.stat().st_size for path in staging.rglob("*") if path.is_file()}
+            if actual != files:
+                raise ValueError("The restored Scanner/ does not match its manifest")
+            staging.rename(destination)
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging)
 
     def synchronize_core(self):
         target = self.c.get("target_height")
@@ -915,7 +939,7 @@ class Worker:
                 [
                     str((self.core_dir / "blocks").relative_to(self.root)),
                     str((self.core_dir / "chainstate").relative_to(self.root)),
-                    "dumplings/Scanner",
+                    # Scanner/ is restored from its own incremental copy (publish_dumplings).
                     "archive-state",
                 ],
                 self.c["backup_uri"],
@@ -967,6 +991,9 @@ def main(argv=None):
     worker = Worker(json.loads(settings.read_text(encoding="utf-8")), settings.parent)
     if args[1] == "restore":
         worker.restore_checkpoint(args[2], Path(args[3]))
+        return
+    if args[1] == "restore-dumplings":
+        worker.restore_dumplings(args[2], Path(args[3]))
         return
     if args[1] == "failed":
         worker.stage = args[2].removeprefix("mainnet-")

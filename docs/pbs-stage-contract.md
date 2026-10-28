@@ -177,8 +177,9 @@ rendered jobs on one host with Docker in place of Singularity.
 
 For mainnet, `dumplings_uri` (`--dumplings-uri`, with `--analysisPbs`) replaces
 the emulator input of the `coinjoin-analysis` stage. The job reads
-`<dumplings_uri>/latest.json` from the Dumplings service, downloads the snapshot
-it names into scratch and deletes stale `*.txt.json` caches, which
+`<dumplings_uri>/manifest.json` (written last by mainnet-sync, so a copy being
+replaced has none), downloads `<dumplings_uri>/Scanner/` into scratch, checks
+the file sizes against the manifest and deletes stale `*.txt.json` caches, which
 coinjoin-analysis would otherwise read in place of the Dumplings files. It then
 runs `parse_dumplings --action process_dumplings` (`ww2` → `Scanner/wasabi2`,
 `jm` → `Scanner/joinmarket_all`) and uploads `coinjoin_tx_info.json`, the

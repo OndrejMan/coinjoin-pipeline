@@ -301,7 +301,7 @@ class PipelineConfiguration(ConfigurationModel):
     all_runs: bool = option(False, name="all_runs", actions=("coinjoin-analysis",))
     yes: bool = option(False, name="yes", actions=("clean",))
     analysis_action: AnalysisAction = option("collect_docker", name="analysis_action", actions=("coinjoin-analysis",))
-    # Mainnet baseline: the S3 prefix holding the Dumplings service's latest.json.
+    # Mainnet baseline: the S3 prefix holding the Dumplings Scanner/ copy and its manifest.json.
     dumplings_uri: str | None = option(None, name="dumplings_uri")
     emulation_timeout: int = option(21600, name="emulation_timeout", minimum=1)
     kubernetes: KubernetesConfiguration = field(default_factory=KubernetesConfiguration)

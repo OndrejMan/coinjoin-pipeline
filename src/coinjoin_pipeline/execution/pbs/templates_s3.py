@@ -483,11 +483,12 @@ def render_coinjoin_analysis_dumplings_s3_pbs(
     coinjoin_type: str,
     resources: PBSResources = DEFAULT_RESOURCES["analysis"],
 ) -> str:
-    """Render the mainnet baseline: coinjoin-analysis over the latest published Dumplings snapshot.
+    """Render the mainnet baseline: coinjoin-analysis over the published Dumplings copy.
 
-    The snapshot is found through ``<dumplings_uri>/latest.json`` (written by the Dumplings
-    service next to the archive node). The run gets ``coinjoin_tx_info.json``, the image's
-    curated ``false_cjtxs.json`` and ``dumplings-snapshot.json`` for the external comparison.
+    ``<dumplings_uri>/Scanner/`` is the copy mainnet-sync keeps incrementally and
+    ``manifest.json`` (written last) its height and file sizes. The run gets
+    ``coinjoin_tx_info.json``, the image's curated ``false_cjtxs.json`` and the manifest as
+    ``dumplings-snapshot.json`` for the external comparison.
     """
     uri = validated_s3_uri(dumplings_uri, "Dumplings snapshot URI")
     if coinjoin_type not in DUMPLINGS_PROTOCOLS:

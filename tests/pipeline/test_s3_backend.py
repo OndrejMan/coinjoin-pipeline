@@ -1518,7 +1518,7 @@ def test_false_positives_belong_to_the_external_report() -> None:
         )
 
 
-def test_dumplings_baseline_reads_the_latest_snapshot() -> None:
+def test_dumplings_baseline_reads_the_manifested_copy() -> None:
     script = render_coinjoin_analysis_dumplings_s3_pbs(
         **COMMON,
         image="docker://coinjoin-analysis",
@@ -1527,8 +1527,9 @@ def test_dumplings_baseline_reads_the_latest_snapshot() -> None:
     )
 
     subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert '"$DUMPLINGS_URI/latest.json"' in script
-    assert '"$SNAPSHOT_PREFIX/*"' in script
+    assert '"$DUMPLINGS_URI/manifest.json"' in script
+    assert '"$DUMPLINGS_URI/Scanner/*"' in script
+    assert "does not match its manifest" in script
     assert "--cjtype ww2 --action process_dumplings --target-path /work/dumplings" in script
     assert "MIX_ID=wasabi2" in script
     # A stale coinjoin-analysis cache next to the Dumplings files would replace them.

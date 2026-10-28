@@ -37,6 +37,23 @@ shift
 case "$command" in
     version) echo fake ;;
     ls)
+        if [[ "$1" == */\* ]]; then
+            # A trailing wildcard lists every object below the prefix, as s5cmd does.
+            python3 - "$(local_path "${1%\*}")" "${1%\*}" "$json_output" <<'PY'
+import json, os, sys
+root, prefix, as_json = sys.argv[1], sys.argv[2], sys.argv[3] == '1'
+found = []
+for directory, _, names in os.walk(root):
+    for name in sorted(names):
+        path = os.path.join(directory, name)
+        found.append((prefix + os.path.relpath(path, root), os.stat(path).st_size))
+if not found:
+    sys.exit('fake s5cmd: no object found')
+for key, size in sorted(found):
+    print(json.dumps(dict(key=key, size=size, type='file')) if as_json else key)
+PY
+            exit 0
+        fi
         target=$(local_path "$1")
         [ -e "$target" ] || { echo "fake s5cmd: no object found" >&2; exit 1; }
         if [ "$json_output" = 0 ]; then
@@ -71,7 +88,14 @@ PY
         ;;
     cp) copy "$1" "$2" cp ;;
     sync)
+        delete=0
+        [ "$1" = --delete ] && { delete=1; shift; }
         source=$1
+        if [ "$delete" = 1 ] && [ -d "$(local_path "${source%/}")" ]; then
+            # Mirror a directory: objects without a source file go, as with s5cmd sync --delete.
+            destination=$(local_path "$2")
+            rm -rf "$destination"
+        fi
         case "$source" in */) source="${source}*" ;; esac
         copy "$source" "$2" sync
         ;;

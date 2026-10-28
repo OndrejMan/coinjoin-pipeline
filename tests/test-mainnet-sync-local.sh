@@ -222,6 +222,7 @@ settings = dict(root=str(work/'data'), index_dir=str(work/'index'), run_id='expl
 RECOVERY_SETTINGS
 "$python" -m coinjoin_pipeline.execution.mainnet_runtime "$work/recovery.json" restore s3://local-mainnet-sync/core/manifest.json "$work/recovered"
 "$python" -m coinjoin_pipeline.execution.mainnet_runtime "$work/recovery.json" restore s3://local-mainnet-sync/index/manifest.json "$work/recovered-index"
+"$python" -m coinjoin_pipeline.execution.mainnet_runtime "$work/recovery.json" restore-dumplings s3://local-mainnet-sync/dumplings/manifest.json "$work/recovered/dumplings/Scanner"
 "$python" - "$work" <<'INDEX_READER'
 import json, sys
 from pathlib import Path

@@ -110,7 +110,7 @@ HELP = {
     "all_runs": "run coinjoin-analysis over every run in the runs root",
     "yes": "confirm the destructive clean action",
     "analysis_action": "collect_docker collects the emulator logs first; analyze_only needs an existing baseline",
-    "dumplings_uri": "S3 prefix holding the Dumplings service's latest.json, used as the mainnet baseline",
+    "dumplings_uri": "S3 prefix holding the Dumplings Scanner/ copy and its manifest.json, used as the mainnet baseline",
     "emulation_timeout": "seconds to wait for the emulation before giving up",
     "stage_exporters": "always upload the exporters into the S3 run prefix, even when no PBS stage needs them",
     "kubernetes.namespace": "namespace of the run's Kubernetes resources",

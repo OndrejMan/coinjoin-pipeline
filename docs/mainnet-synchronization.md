@@ -43,8 +43,12 @@ Po dosynchronizování vypne síť, čistě restartuje Core bez sítě a zachyt�
 stabilní výšku H a hash. Spustí jeden průchod
 Dumplings, ověří shodu výšky a checkpointu včetně délek souborů a prázdného
 `Tx0CandidateMisses.txt`. Archivuje a ověří dokončené blk soubory; dva poslední
-archiver standardně ponechává jako otevřený konec. Zálohuje a čtením zpět ověří
-Scanner včetně Tx0Candidates. Čistě vypne Core a publikuje generační `ready.json`.
+archiver standardně ponechává jako otevřený konec. Přírůstkově zrcadlí Scanner
+včetně Tx0Candidates do `<dumplings_uri>/Scanner/` (`s5cmd sync --delete`, přenesou
+se jen změněné soubory), porovná velikosti objektů s lokálními soubory a nakonec
+zapíše `<dumplings_uri>/manifest.json` s výškou a velikostmi. Nová kopie nejdřív
+smaže manifest, takže baseline nikdy nečte napůl přepsaný Scanner. Čistě vypne
+Core a publikuje `ready.json`.
 Poslední soubory bloků zůstávají pro parser na sdíleném disku a ve výsledném
 checkpointu Core. Samotné `ready.json` neznamená dokončenou synchronizaci.
 Před skenem uloží i `Scanner/ChainCheckpoint.json` s hashem zmrazeného cíle.
@@ -107,8 +111,9 @@ ověří jen velikost objektu a nakonec se zapíše manifest
 (`upload_validation: size-only`, `uploaded_at`). Obsah se znovu nečte, SHA-256
 se kontroluje až při obnově. Selhaný upload nechá zálohu chybět do dalšího
 běhu; pracovní kopie na multijobu zůstává.
-Záloha Core obsahuje `bitcoin/blocks`, `bitcoin/chainstate`, `dumplings/Scanner`
-a stav archiveru. Neobsahuje peněženky, přihlašovací údaje ani konfiguraci Core.
+Záloha Core obsahuje `bitcoin/blocks`, `bitcoin/chainstate` a stav archiveru;
+Scanner v ní není, obnoví se zvlášť z jeho přírůstkové kopie
+(`mainnet_runtime … restore-dumplings <dumplings_uri>/manifest.json <cíl>/dumplings/Scanner`). Neobsahuje peněženky, přihlašovací údaje ani konfiguraci Core.
 Konfiguraci pro pokračování vždy nastavuje job. Core se starými XOR bloky nebo
 více chainstates vyžaduje explicitní migraci.
 
