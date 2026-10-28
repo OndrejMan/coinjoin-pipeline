@@ -110,6 +110,14 @@ a stav archiveru. Neobsahuje peněženky, přihlašovací údaje ani konfiguraci
 Konfiguraci pro pokračování vždy nastavuje job. Core se starými XOR bloky nebo
 více chainstates vyžaduje explicitní migraci.
 
+Manifest každé zálohy uvádí `member_bytes`, zdánlivou velikost každého zálohovaného
+kořene. Závěrečné `done.json` z nich skládá `storage`: obsazení multijobu
+(`multijob.core`, `multijob.index`, po kořenech) a velikost nově odeslaných archivů
+(`s3.core_checkpoint`, `s3.index_backup`). Měří se při zastaveném Core a drženém
+zápisovém zámku indexu, takže samostatný měřicí job není pro tato čísla potřeba.
+Celkové obsazení S3 včetně starších generací a archivu bloků zjistí až listování
+prefixů.
+
 Průběh v `runs/<run-id>/synchronization/{producer,blocksci}.json` obsahuje fázi,
 výšku, procento nebo null a čas aktualizace. Pro Core jde o RPC odhad; procento
 parseru platí pro jeho právě hlášenou fázi. Streamovaná záloha a její ověřování

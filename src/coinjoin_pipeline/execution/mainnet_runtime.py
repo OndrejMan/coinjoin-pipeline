@@ -103,6 +103,21 @@ def stopped_core(datadir):
         yield
 
 
+def tree_bytes(root, members):
+    """Apparent size of each backup member, as tar reads it; links are not followed."""
+    sizes = {}
+    for member in members:
+        path = root / member
+        if path.is_file():
+            sizes[member] = path.stat().st_size
+            continue
+        total = 0
+        for directory, _, files in os.walk(path):
+            total += sum(os.lstat(os.path.join(directory, name)).st_size for name in files)
+        sizes[member] = total
+    return sizes
+
+
 def resume_file(index, blocks):
     path = index / "parsed/parser/blockList.dat.resume.json"
     checkpoint = json.loads(path.read_text())
@@ -196,6 +211,8 @@ class Worker:
         self.env = {key: value for key, value in os.environ.items() if not key.startswith("AWS_")}
         self.core = None
         self.children = []
+        # Manifest URI -> sizes of the backups this job uploaded, for done.json.
+        self.uploaded = {}
         self.port = None
         self.stage = ""
         self.container = shutil.which("apptainer") or shutil.which("singularity")
@@ -452,6 +469,7 @@ class Worker:
             path = root / member
             if not path.exists() or path.is_symlink():
                 raise ValueError("Missing or linked checkpoint root: " + str(path))
+        member_bytes = tree_bytes(root, members)
         producers = []
         digest = hashlib.sha256()
         archive_size = 0
@@ -484,11 +502,13 @@ class Worker:
                 "archive_sha256": checksum,
                 "archive_size": archive_size,
                 "members": members,
+                "member_bytes": member_bytes,
                 "upload_validation": "size-only",
                 "uploaded_at": datetime.now(timezone.utc).isoformat(),
             }
             self.publish_json(generation + "/manifest.json", manifest)
             self.publish_json(prefix.rstrip("/") + "/latest.json", {"prefix": generation, **manifest})
+            self.uploaded[generation + "/manifest.json"] = {"archive_size": archive_size, "member_bytes": member_bytes}
             return generation + "/manifest.json"
         finally:
             for process in [*producers, *([upload] if upload else [])]:
@@ -891,7 +911,24 @@ class Worker:
                 self.c["backup_uri"],
                 {"height": height, "hash": ready["hash"], "index_backup": index_backup, **signature},
             )
-        done = {**ready, "state": "done", "core_checkpoint": checkpoint, "index_backup": index_backup}
+        done = {
+            **ready,
+            "state": "done",
+            "core_checkpoint": checkpoint,
+            "index_backup": index_backup,
+            # Measured while Core is stopped and the index writer lock is held.
+            "storage": {
+                "measured_at": datetime.now(timezone.utc).isoformat(),
+                "multijob": {
+                    "core": self.uploaded.get(checkpoint, {}).get("member_bytes"),
+                    "index": self.uploaded.get(index_backup, {}).get("member_bytes"),
+                },
+                "s3": {
+                    "core_checkpoint": self.uploaded.get(checkpoint, {}).get("archive_size"),
+                    "index_backup": self.uploaded.get(index_backup, {}).get("archive_size"),
+                },
+            },
+        }
         self.progress("complete", state="done", height=height)
         self.publish_json(self.remote + "/.pbs/mainnet-blocksci.done", done)
         self.publish_json(self.remote + "/synchronization/done.json", done)

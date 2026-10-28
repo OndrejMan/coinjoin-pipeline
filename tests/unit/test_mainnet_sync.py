@@ -498,6 +498,7 @@ def test_backup_has_no_readback_and_size_failure_preserves_previous_pointer(work
     manifest = json.loads((tmp_path / "s3" / uri.removeprefix("s3://")).read_text())
     archive = tmp_path / "s3" / manifest["archive_uri"].removeprefix("s3://")
     assert manifest["archive_size"] == archive.stat().st_size
+    assert manifest["member_bytes"] == {"chainstate": len(b"a consistent Core snapshot")}
     assert manifest["upload_validation"] == "size-only"
     assert "uploaded_at" in manifest and "verified_at" not in manifest
     del worker.env["FAKE_S5CMD_FORBID_ARCHIVE_CAT"]
@@ -696,6 +697,13 @@ def test_local_two_job_handoff_backs_up_the_post_prune_core(worker, tmp_path, mo
     assert events[-1] == "clean-stop"
     done = json.loads((worker.run / "done.json").read_text())
     assert done["state"] == "done"
+    storage = done["storage"]
+    assert storage["multijob"]["core"]["bitcoin/chainstate"] == len("verified chainstate")
+    assert storage["multijob"]["core"]["bitcoin/blocks"] == 88
+    assert storage["multijob"]["index"]["parsed"] > 0
+    for key, uri in (("core_checkpoint", done["core_checkpoint"]), ("index_backup", done["index_backup"])):
+        manifest = json.loads((tmp_path / "s3" / uri.removeprefix("s3://")).read_text())
+        assert storage["s3"][key] == manifest["archive_size"] > 0
     restored = tmp_path / "recovered-core"
     worker.restore_checkpoint(done["core_checkpoint"], restored)
     assert not (restored / "bitcoin/blocks/blk00000.dat").exists()
