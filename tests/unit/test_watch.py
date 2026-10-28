@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import tempfile
+import queue
+import threading
 from pathlib import Path
 from unittest import mock
 
@@ -11,6 +13,7 @@ from coinjoin_pipeline.watch import (
     _job_ids_from_frontend_log,
     _kubernetes_log_command,
     _newest_pod,
+    _pbs_reader,
     build_parser,
     main,
 )
@@ -285,3 +288,98 @@ def test_frontend_log_is_replayed_whole_while_pbs_keeps_the_tail(tmp_path: Path)
     assert code == 0
     assert stream.call_args.args[0] == {"frontend": ["tail", "-n", "+1", "-f", str(log)]}
     assert stream.call_args.kwargs["tail"] == 200
+
+
+def test_main_discovers_mainnet_component_logs_in_the_selected_run(tmp_path: Path) -> None:
+    run = tmp_path / "run-1"
+    markers = run / ".pbs"
+    markers.mkdir(parents=True)
+    (markers / "mainnet-producer.jobid").write_text("101.server")
+    job = PbsJob("mainnet-producer", "101.server", tmp_path / "pbs.out", "R")
+    with (
+        mock.patch("coinjoin_pipeline.watch._pbs_job_details", return_value=job),
+        mock.patch("coinjoin_pipeline.watch.stream_sources", return_value=0) as stream,
+    ):
+        assert main(["--run-id", "run-1", "--run-dir", str(run), "--pbs-only", "--no-follow"]) == 0
+    discovered = stream.call_args.kwargs["pbs_jobs"]["pbs:mainnet-producer"]
+    assert discovered.log_dir == run / "logs/mainnet-producer"
+
+
+def test_pbs_reader_streams_late_component_logs_without_pbs_stdout(tmp_path: Path) -> None:
+    logs = tmp_path / "logs/mainnet-producer"
+    job = PbsJob("mainnet-producer", "101.server", tmp_path / "not-delivered.out", "R", logs)
+    messages = queue.Queue()
+    stop = mock.Mock()
+    stop.is_set.return_value = False
+    polls = 0
+
+    def advance(_seconds):
+        nonlocal polls
+        polls += 1
+        if polls == 1:
+            logs.mkdir(parents=True)
+            (logs / "core-producer.log").write_text("old\rcore 1\rcore 2\r")
+            # A neighbouring stage/run must never be picked up.
+            (logs.parent / "other-stage").mkdir()
+            (logs.parent / "other-stage/dumplings.log").write_text("foreign\n")
+        elif polls == 2:
+            with (logs / "core-producer.log").open("a") as file:
+                file.write("core 3\n")
+            (logs / "dumplings.log").write_text("scanner started\n")
+        else:
+            stop.is_set.return_value = True
+
+    stop.wait.side_effect = advance
+    with mock.patch("coinjoin_pipeline.watch._pbs_job_details", return_value=job):
+        _pbs_reader("pbs:producer", job, messages, stop, tail=2, follow=True)
+    lines = [line for _source, line in messages.queue]
+    assert lines[2:] == [
+        "[core-producer] core 1",
+        "[core-producer] core 2",
+        "[core-producer] core 3",
+        "[dumplings] scanner started",
+        None,
+    ]
+
+
+def test_pbs_reader_no_follow_reads_components_and_pbs_with_independent_tails(tmp_path: Path) -> None:
+    logs = tmp_path / "mainnet-blocksci"
+    logs.mkdir()
+    (logs / "blocksci.log").write_text("old parse\nparse 50%\n")
+    output = tmp_path / "pbs.out"
+    output.write_text("old PBS\njob done\n")
+    job = PbsJob("mainnet-blocksci", "102.server", output, "F", logs)
+    messages = queue.Queue()
+    with mock.patch("coinjoin_pipeline.watch._pbs_job_details") as query:
+        _pbs_reader("pbs:blocksci", job, messages, threading.Event(), tail=1, follow=False)
+    assert [line for _, line in messages.queue][1:] == ["job done", "[blocksci] parse 50%", None]
+    query.assert_not_called()
+
+
+def test_pbs_reader_drains_final_component_lines_after_job_finishes(tmp_path: Path) -> None:
+    logs = tmp_path / "mainnet-blocksci"
+    logs.mkdir()
+    output = logs / "blocksci.log"
+    output.write_text("parsing\n")
+    job = PbsJob("mainnet-blocksci", "102.server", tmp_path / "pbs.out", "R", logs)
+    finished = PbsJob("mainnet-blocksci", "102.server", job.output_path, "F", logs)
+    stop = mock.Mock()
+    stop.is_set.return_value = False
+    polls = 0
+
+    def advance(_seconds):
+        nonlocal polls
+        polls += 1
+        if polls == 2:
+            with output.open("a") as file:
+                file.write("finished\n")
+        assert polls <= 4, "watcher should finish after draining terminal logs"
+
+    stop.wait.side_effect = advance
+    messages = queue.Queue()
+    with mock.patch("coinjoin_pipeline.watch._pbs_job_details", return_value=finished):
+        _pbs_reader("pbs:blocksci", job, messages, stop, tail=200, follow=True)
+    lines = [line for _, line in messages.queue]
+    assert "[blocksci] parsing" in lines
+    assert "[blocksci] finished" in lines
+    assert lines[-1] is None

@@ -12,15 +12,19 @@ import sys
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TextIO
+from typing import Iterator, TextIO
 
+from .configuration import KubernetesConfiguration
+from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, fail
 from .execution.pbs.defaults import PBS_TERMINAL_STATES
 from .execution.pbs.status import job_details
+from .paths import default_runs_root
 from .storage.s3 import RUN_ID_RULE, is_valid_run_id
 
-DEFAULT_NAMESPACE = "coinjoin"
+# The pipeline's own default, so a run started without --namespace is found without it.
+DEFAULT_NAMESPACE = KubernetesConfiguration().namespace
 DEFAULT_WAIT_SECONDS = 120
 ALL_COMPONENTS = {"controller", "uploader", "engine"}
 VALID_COMPONENTS = ALL_COMPONENTS | {"coordinator"}
@@ -57,6 +61,7 @@ class PbsJob:
     job_id: str
     output_path: Path
     state: str
+    log_dir: Path | None = None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -70,10 +75,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=_run_id,
         help="Pipeline run ID used for Kubernetes and PBS source discovery.",
     )
-    parser.add_argument("--namespace", default=DEFAULT_NAMESPACE)
+    parser.add_argument(
+        "--namespace",
+        default=DEFAULT_NAMESPACE,
+        help=f"Kubernetes namespace of the run (default: {DEFAULT_NAMESPACE}).",
+    )
     parser.add_argument(
         "--kubeconfig",
         default=os.environ.get("KUBECONFIG", str(Path.home() / ".kube/config")),
+        help="kubeconfig file (default: $KUBECONFIG, else ~/.kube/config).",
     )
     parser.add_argument(
         "--components",
@@ -119,8 +129,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run directory containing .pbs/*.jobid (auto-detected when omitted).",
     )
     parser.add_argument("--save", type=Path, help="Write the unified prefixed stream to this file.")
-    parser.add_argument("--tail", type=int, default=200, help="Initial lines per Kubernetes and PBS source.")
-    parser.add_argument("--wait-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
+    parser.add_argument(
+        "--tail", type=int, default=200, help="Initial lines per Kubernetes and PBS source (default: 200)."
+    )
+    parser.add_argument(
+        "--wait-seconds",
+        type=int,
+        default=DEFAULT_WAIT_SECONDS,
+        help=f"How long to wait for the run's pods to appear (default: {DEFAULT_WAIT_SECONDS}).",
+    )
     parser.add_argument("--no-follow", action="store_true", help="Print current logs and exit.")
     return parser
 
@@ -242,6 +259,24 @@ def _reader(
     messages.put((name, None))
 
 
+def _log_lines(path: Path, positions: dict[Path, int], tail: int) -> Iterator[str]:
+    """Replay a source's tail once, then read only appended bytes on each poll."""
+    with path.open("rb") as stream:
+        # Binary offsets remain valid for parser progress written with bare CRs;
+        # TextIOWrapper.tell() can return an opaque newline-decoder cookie.
+        lines = (
+            line
+            for chunk in iter(stream.readline, b"")
+            for line in chunk.decode("utf-8", errors="replace").splitlines()
+        )
+        if path not in positions or path.stat().st_size < positions[path]:
+            yield from deque(lines, maxlen=tail)
+        else:
+            stream.seek(positions[path])
+            yield from lines
+        positions[path] = stream.tell()
+
+
 def _pbs_reader(
     name: str,
     job: PbsJob,
@@ -253,40 +288,27 @@ def _pbs_reader(
 ) -> None:
     last_state = job.state
     messages.put((name, f"job={job.job_id} state={last_state} output={job.output_path}"))
-    position = 0
+    positions: dict[Path, int] = {}
     announced_wait = False
     terminal_idle_polls = 0
-    initial = True
     try:
         while not stop.is_set():
+            emitted = False
             if job.output_path.is_file():
-                with job.output_path.open("r", encoding="utf-8", errors="replace") as stream:
-                    if initial:
-                        recent: deque[str] = deque(maxlen=tail)
-                        while line := stream.readline():
-                            recent.append(line)
-                        for line in recent:
-                            messages.put((name, line.rstrip("\n")))
-                        position = stream.tell()
-                        initial = False
-                    else:
-                        stream.seek(position)
-                        emitted = False
-                        for line in stream:
-                            emitted = True
-                            messages.put((name, line.rstrip("\n")))
-                        position = stream.tell()
-                        terminal_idle_polls = 0 if emitted else terminal_idle_polls + 1
-                if not follow:
-                    break
+                for line in _log_lines(job.output_path, positions, tail):
+                    emitted = True
+                    messages.put((name, line))
             elif not announced_wait:
-                messages.put((name, "output file is not available yet; waiting for PBS to start"))
+                messages.put((name, "PBS output file is not available yet; component logs are followed separately"))
                 announced_wait = True
-                if not follow:
-                    break
-            elif last_state in PBS_TERMINAL_STATES:
-                terminal_idle_polls += 1
 
+            # Mainnet workers write directly to shared storage. PBS may keep its
+            # own stdout in node-local spool until the job finishes.
+            if job.log_dir is not None:
+                for path in sorted(job.log_dir.glob("*.log")):
+                    for line in _log_lines(path, positions, tail):
+                        emitted = True
+                        messages.put((name, f"[{path.stem}] {line}"))
             if not follow:
                 break
             try:
@@ -297,6 +319,7 @@ def _pbs_reader(
             except (FileNotFoundError, RuntimeError) as error:
                 messages.put((name, f"qstat unavailable: {error}"))
                 break
+            terminal_idle_polls = 0 if emitted or last_state not in PBS_TERMINAL_STATES else terminal_idle_polls + 1
             if last_state in PBS_TERMINAL_STATES and terminal_idle_polls >= 2:
                 break
             stop.wait(2)
@@ -365,7 +388,7 @@ def stream_sources(
     except KeyboardInterrupt:
         stop.set()
         _write_line("[watch] interrupted; the remote run is still running", save_file)
-        return 130
+        return EXIT_INTERRUPTED
     finally:
         stop.set()
         for process in processes.values():
@@ -382,7 +405,7 @@ def stream_sources(
             save_file.close()
 
     failures = [process.returncode for process in processes.values() if process.returncode not in {0, None}]
-    return 5 if failures else 0
+    return EXIT_FAILURE if failures else EXIT_OK
 
 
 def main(
@@ -392,19 +415,14 @@ def main(
 ) -> int:
     args = build_parser().parse_args(argv)
     if args.tail < 0 or args.wait_seconds < 0:
-        print("ERROR: --tail and --wait-seconds must be non-negative", file=sys.stderr)
-        return 2
+        return fail("--tail and --wait-seconds must be non-negative")
 
     watch_kubernetes = not args.pbs_only
     watch_pbs = args.pbs or args.pbs_only or bool(args.pbs_job)
     components = ALL_COMPONENTS if args.all else {item.strip() for item in args.components.split(",") if item.strip()}
     unknown = components - VALID_COMPONENTS
     if unknown or not components:
-        print(
-            f"ERROR: invalid --components value; expected a subset of {','.join(sorted(VALID_COMPONENTS))}",
-            file=sys.stderr,
-        )
-        return 2
+        return fail(f"invalid --components value; expected a subset of {','.join(sorted(VALID_COMPONENTS))}")
 
     follow = not args.no_follow
     sources: dict[str, list[str]] = {}
@@ -412,8 +430,7 @@ def main(
     if watch_kubernetes:
         kubeconfig = Path(args.kubeconfig).expanduser().resolve()
         if not kubeconfig.is_file():
-            print(f"ERROR: kubeconfig not found: {kubeconfig}", file=sys.stderr)
-            return 2
+            return fail(f"kubeconfig not found: {kubeconfig}; pass --kubeconfig, or --pbs-only for PBS output alone")
         kubectl = _kubectl_base(kubeconfig, args.namespace)
         try:
             outer_pod = _discover_pod(
@@ -423,22 +440,16 @@ def main(
                 description=f"outer pod for run {args.run_id}",
             )
         except (FileNotFoundError, RuntimeError) as error:
-            print(f"ERROR: {error}", file=sys.stderr)
-            return 2
+            return fail(str(error))
         selected_engine = args.engine
         if components & {"engine", "coordinator"}:
             if selected_engine is None:
                 try:
                     selected_engine = _discover_engine(kubectl, outer_pod)
                 except RuntimeError as error:
-                    print(f"ERROR: {error}", file=sys.stderr)
-                    return 2
+                    return fail(str(error))
             if "coordinator" in components and selected_engine != "wasabi":
-                print(
-                    "ERROR: coordinator is Wasabi-specific; use --components engine for JoinMarket runs",
-                    file=sys.stderr,
-                )
-                return 2
+                return fail("coordinator is Wasabi-specific; use --components engine for JoinMarket runs")
         for component in sorted(components):
             if component in {"controller", "uploader"}:
                 pod = outer_pod
@@ -453,8 +464,7 @@ def main(
                         description=f"{selected_engine} engine pod",
                     )
                 except RuntimeError as error:
-                    print(f"ERROR: {error}", file=sys.stderr)
-                    return 2
+                    return fail(str(error))
                 container = None
             sources[component] = _kubernetes_log_command(kubectl, pod, container, tail=args.tail, follow=follow)
 
@@ -465,8 +475,7 @@ def main(
             frontend_log = candidate
     if frontend_log is not None:
         if not frontend_log.is_file():
-            print(f"ERROR: frontend log not found: {frontend_log}", file=sys.stderr)
-            return 2
+            return fail(f"frontend log not found: {frontend_log}")
         # The transcript is replayed whole: it is short, and its start (dry run, Kubernetes
         # setup) is what --tail would cut off first.
         tail_command = ["tail", "-n", "+1"]
@@ -477,34 +486,20 @@ def main(
 
     pbs_jobs: dict[str, PbsJob] = {}
     if watch_pbs:
-        default_runs_root = (
-            (
-                runs_root
-                or Path(
-                    os.environ.get(
-                        "EMULATION_LOGS_DIR",
-                        Path.cwd() / "coinjoin-runs",
-                    )
-                )
-            )
-            .expanduser()
-            .resolve()
-        )
-        run_dir = args.run_dir.expanduser().resolve() if args.run_dir else default_runs_root / args.run_id
+        root = runs_root.expanduser().resolve() if runs_root else default_runs_root()
+        run_dir = args.run_dir.expanduser().resolve() if args.run_dir else root / args.run_id
         job_ids = _job_ids_from_run_dir(run_dir)
         if frontend_log is not None:
             job_ids.update(_job_ids_from_frontend_log(frontend_log))
         try:
             job_ids.update(_parse_pbs_job_specs(args.pbs_job))
         except ValueError as error:
-            print(f"ERROR: {error}", file=sys.stderr)
-            return 2
+            return fail(str(error))
         if not job_ids:
-            print(
-                "ERROR: no PBS job IDs found; pass --frontend-log LOG, --run-dir DIR, or --pbs-job STAGE=JOB_ID",
-                file=sys.stderr,
+            return fail(
+                f"no PBS job IDs found in {run_dir / '.pbs'}; pass --frontend-log LOG, --run-dir DIR, "
+                "or --pbs-job STAGE=JOB_ID"
             )
-            return 2
         # Resolve each job on its own: .jobid files are never pruned, so one
         # stale job that qstat can no longer describe must not hide every live
         # stage. A missing qstat (FileNotFoundError) is still fatal.
@@ -512,19 +507,17 @@ def main(
         try:
             for stage, job_id in sorted(job_ids.items()):
                 try:
-                    pbs_jobs[f"pbs:{stage}"] = _pbs_job_details(stage, job_id)
+                    job = _pbs_job_details(stage, job_id)
+                    if stage in {"mainnet-producer", "mainnet-blocksci"}:
+                        job = replace(job, log_dir=run_dir / "logs" / stage)
+                    pbs_jobs[f"pbs:{stage}"] = job
                 except RuntimeError as error:
                     skipped.append(f"{stage}={job_id}")
                     print(f"[WARN] skipping {stage}={job_id}: {error}", file=sys.stderr)
         except FileNotFoundError as error:
-            print(f"ERROR: {error}", file=sys.stderr)
-            return 2
+            return fail(str(error))
         if not pbs_jobs:
-            print(
-                f"ERROR: none of the discovered PBS jobs could be inspected: {', '.join(skipped)}",
-                file=sys.stderr,
-            )
-            return 2
+            return fail(f"none of the discovered PBS jobs could be inspected: {', '.join(skipped)}")
 
     print(
         f"[watch] run={args.run_id} namespace={args.namespace} outer_pod={outer_pod or '-'} "
@@ -540,8 +533,7 @@ def main(
             follow=follow,
         )
     except FileNotFoundError as error:
-        print(f"ERROR: required command not found: {error.filename}", file=sys.stderr)
-        return 2
+        return fail(f"required command not found: {error.filename}")
 
 
 if __name__ == "__main__":

@@ -285,8 +285,8 @@ class Worker:
         return [*command, image, *map(str, args)]
 
     def run_command(self, command, name, poll=None):
-        self.run.mkdir(parents=True, exist_ok=True)
-        with (self.run / f"{name}.log").open("ab") as log:
+        self.logs.mkdir(parents=True, exist_ok=True)
+        with (self.logs / f"{name}.log").open("ab") as log:
             process = subprocess.Popen(
                 command, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True
             )
@@ -296,8 +296,13 @@ class Worker:
                     poll()
                 time.sleep(self.c["poll_seconds"])
             if process.returncode:
-                raise RuntimeError(f"{name} exited with {process.returncode}; see {self.run / (name + '.log')}")
+                raise RuntimeError(f"{name} exited with {process.returncode}; see {self.logs / (name + '.log')}")
         return process
+
+    @property
+    def logs(self):
+        """Small component logs live on the filesystem shared with the frontend."""
+        return Path(self.c["log_root"]) / f"mainnet-{self.stage}"
 
     def rpc(self, method, *args):
         command = self.container_command(
@@ -350,8 +355,8 @@ class Worker:
             f"-dbcache={self.c['dbcache_mb']}",
             f"-networkactive={0 if offline or self.chain == 'regtest' else 1}",
         )
-        self.run.mkdir(parents=True, exist_ok=True)
-        with (self.run / f"core-{self.stage}.log").open("ab") as log:
+        self.logs.mkdir(parents=True, exist_ok=True)
+        with (self.logs / f"core-{self.stage}.log").open("ab") as log:
             self.core = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         while self.core.poll() is None:
             try:
@@ -731,7 +736,7 @@ class Worker:
         self.release_dataset()
 
     def parse_progress(self):
-        path = self.run / "blocksci.log"
+        path = self.logs / "blocksci.log"
         if not path.exists():
             return
         with path.open("rb") as handle:
@@ -904,7 +909,7 @@ class Worker:
             self.stop_core(require_clean_exit=False)
 
     def publish_logs(self):
-        for path in sorted(self.run.glob("*.log")):
+        for path in sorted(self.logs.glob("*.log")):
             self.upload(path, self.remote + "/logs/" + path.name)
 
 

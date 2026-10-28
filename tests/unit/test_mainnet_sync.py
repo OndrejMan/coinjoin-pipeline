@@ -54,6 +54,7 @@ def test_two_scripts_are_self_contained_and_syntactically_valid(config):
         assert "def scanner_complete" in script
         assert "rm -rf" not in script if stage == "producer" else "INDEX_LOCK_WAIT=0" in script
         assert "clean_scratch" not in script
+        assert '"log_root": ' + json.dumps(str(config.runs_path / config.run_id / "logs")) in script
     assert not config.stages.blocksci
 
 
@@ -302,6 +303,7 @@ def worker(config, tmp_path, monkeypatch):
             root=config.mainnet.root,
             index_dir=config.blocksci.index_dir,
             run_id=config.run_id,
+            log_root=str(config.runs_path / config.run_id / "logs"),
             artifact_uri=config.artifacts.uri,
             endpoint=config.artifacts.endpoint_url,
             credentials=config.artifacts.credentials_file,
@@ -316,6 +318,56 @@ def worker(config, tmp_path, monkeypatch):
     work = tmp_path / "work"
     work.mkdir()
     return Worker(settings, work)
+
+
+def test_component_output_is_visible_to_frontend_before_command_exits(worker):
+    worker.stage = "producer"
+    worker.c["poll_seconds"] = 0.01
+    release = worker.work / "release"
+    seen = []
+    command = [
+        sys.executable,
+        "-c",
+        """
+import pathlib, sys, time
+print('core stdout', flush=True)
+print('core stderr', file=sys.stderr, flush=True)
+release = pathlib.Path(sys.argv[1])
+deadline = time.monotonic() + 2
+while not release.exists() and time.monotonic() < deadline:
+    time.sleep(0.01)
+sys.exit(0 if release.exists() else 1)
+""",
+        str(release),
+    ]
+
+    def observe():
+        log = worker.logs / "core-producer.log"
+        text = log.read_text()
+        if "core stderr" in text:
+            seen.append(text)
+            release.touch()
+
+    worker.run_command(command, "core-producer", observe)
+    assert seen and "core stdout" in seen[0]
+    assert worker.logs == Path(worker.c["log_root"]) / "mainnet-producer"
+    assert not (worker.run / "core-producer.log").exists()
+
+
+def test_parser_progress_and_s3_upload_use_the_shared_component_logs(worker, monkeypatch):
+    worker.stage = "blocksci"
+    worker.logs.mkdir(parents=True)
+    (worker.logs / "blocksci.log").write_text("50% parsing blocks\n")
+    producer = Path(worker.c["log_root"]) / "mainnet-producer"
+    producer.mkdir()
+    (producer / "core-producer.log").write_text("other stage\n")
+    progress, uploaded = [], []
+    monkeypatch.setattr(worker, "progress", lambda *args, **kwargs: progress.append((args, kwargs)))
+    monkeypatch.setattr(worker, "upload", lambda *args: uploaded.append(args))
+    worker.parse_progress()
+    worker.publish_logs()
+    assert progress == [(("blocksci-parse", 50.0, 100), {"detail": "parsing blocks"})]
+    assert uploaded == [(worker.logs / "blocksci.log", worker.remote + "/logs/blocksci.log")]
 
 
 @pytest.mark.parametrize("readonly,index_writable", [(False, False), (True, True)])

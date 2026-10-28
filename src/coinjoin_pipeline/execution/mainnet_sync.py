@@ -123,6 +123,7 @@ def render_sync(config: PipelineConfiguration, stage: str) -> str:
     settings = {
         **asdict(config.mainnet),
         "run_id": target.run_id,
+        "log_root": str(config.runs_path / target.run_id / "logs"),
         "artifact_uri": target.artifact_uri,
         "endpoint": target.endpoint_url,
         "credentials": target.credentials_file,

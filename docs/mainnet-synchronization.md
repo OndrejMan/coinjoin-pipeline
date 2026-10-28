@@ -116,6 +116,18 @@ parseru platí pro jeho právě hlášenou fázi. Streamovaná záloha a její o
 mají neurčité procento. Značka prvního jobu ani `blocksci.json: done` nenahrazuje
 závěrečné `done.json`. Lab doplňuje stav PBS i při pádu před publikováním průběhu.
 
+`Live log` v Labu (CLI `watch --pbs-only --run-id ID --run-dir RUN_DIR`)
+čte také skutečný stdout/stderr Core, Dumplings, archivátoru a BlockSci.
+Nově odeslané joby zapisují tyto malé soubory přímo do
+`<runs_root>/<run-id>/logs/mainnet-{producer,blocksci}/*.log` na úložišti
+sdíleném s frontendem; `runs_root` musí být z PBS uzlů přístupný pod stejnou
+cestou. Pracovní blockchain a index zůstávají v multijob adresářích.
+Watcher sleduje i soubory vzniklé až během běhu, označuje výstup komponentou
+a při připojení přehraje posledních 200 řádků každého zdroje (`--tail`).
+Nečeká na doručení PBS stdout ani na upload do S3. Při ukončení fáze se její
+logy stále archivují do S3 pod `logs/`. Dříve odeslané PBS skripty obsahují
+původní worker a toto průběžné ukládání se na ně zpětně nevztahuje.
+
 ## Selhání a souběh
 
 Každý job drží výhradní zámek datasetu po dobu své práce. Při předání ve frontě
