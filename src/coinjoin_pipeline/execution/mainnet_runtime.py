@@ -366,16 +366,16 @@ class Worker:
                 time.sleep(self.c["poll_seconds"])
         raise RuntimeError("Core failed to start; see its persistent log")
 
-    def stop_core(self):
+    def stop_core(self, *, require_clean_exit=True):
         if self.core is None:
             return
         if self.core.poll() is None:
             self.rpc("stop")
         # A checkpoint is forbidden until bitcoind has fully flushed and exited.
         code = self.core.wait(timeout=600)
-        if code != 0:
-            raise RuntimeError("Core did not shut down cleanly")
         self.core = None
+        if require_clean_exit and code != 0:
+            raise RuntimeError("Core did not shut down cleanly")
 
     def archive(self, prune=False, height=None, number=None):
         # Bitcoin Core 29.1 refuses pruning before these network thresholds.
@@ -899,7 +899,9 @@ class Worker:
                 os.killpg(process.pid, signal.SIGTERM)
                 process.wait(timeout=30)
         if self.core is not None:
-            self.stop_core()
+            # Cleanup needs proof of process termination; checkpoint callers
+            # additionally require a successful exit before publishing data.
+            self.stop_core(require_clean_exit=False)
 
     def publish_logs(self):
         for path in sorted(self.run.glob("*.log")):

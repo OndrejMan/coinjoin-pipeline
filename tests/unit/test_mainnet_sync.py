@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import os
 import shutil
+import sys
 
 import pytest
 
@@ -362,6 +363,76 @@ def test_failed_worker_uploads_logs_even_when_cleanup_fails(worker, monkeypatch,
         mainnet_runtime.main([str(settings), "producer"])
     assert uploaded == [True]
     assert (worker.run / "producer.quiescent").exists() is not cleanup_fails
+
+
+@pytest.mark.parametrize("foreign_owner", [False, True])
+def test_failed_core_allows_failure_hook_to_release_only_its_dataset(worker, monkeypatch, foreign_owner):
+    settings = worker.work / "settings.json"
+    settings.write_text("{}")
+    worker.core = subprocess.Popen([sys.executable, "-c", "raise SystemExit(1)"])
+    assert worker.core.wait(timeout=3) == 1
+    uploaded = []
+
+    def producer():
+        worker.acquire_dataset()
+        raise RuntimeError("Core failed to start")
+
+    monkeypatch.setattr(mainnet_runtime, "Worker", lambda *_: worker)
+    monkeypatch.setattr(worker, "producer", producer)
+    monkeypatch.setattr(worker, "publish_logs", lambda: uploaded.append(True))
+    monkeypatch.setattr(worker, "progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(worker, "publish_json", lambda *args: None)
+    with pytest.raises(RuntimeError, match="Core failed to start"):
+        mainnet_runtime.main([str(settings), "producer"])
+    assert worker.core is None
+    assert (worker.run / "producer.quiescent").is_file()
+    assert not (worker.run / "done.json").exists()
+    assert uploaded == [True]
+    assert worker.active.exists()
+    if foreign_owner:
+        atomic_json(worker.active / "owner.json", {"run_id": "another-run"})
+    mainnet_runtime.main([str(settings), "failed", "mainnet-producer", "1"])
+    assert worker.active.exists() is foreign_owner
+
+
+def test_checkpoint_shutdown_still_rejects_failed_core(worker):
+    worker.core = subprocess.Popen([sys.executable, "-c", "raise SystemExit(1)"])
+    assert worker.core.wait(timeout=3) == 1
+    with pytest.raises(RuntimeError, match="Core did not shut down cleanly"):
+        worker.stop_core()
+    assert worker.core is None
+
+
+def test_core_shutdown_timeout_keeps_dataset_locked(worker, monkeypatch):
+    class RunningCore:
+        def poll(self):
+            return None
+
+        def wait(self, timeout):
+            raise subprocess.TimeoutExpired("bitcoind", timeout)
+
+    settings = worker.work / "settings.json"
+    settings.write_text("{}")
+    worker.core = RunningCore()
+    worker.acquire_dataset()
+    uploaded = []
+
+    def producer():
+        raise RuntimeError("producer failed")
+
+    monkeypatch.setattr(mainnet_runtime, "Worker", lambda *_: worker)
+    monkeypatch.setattr(worker, "producer", producer)
+    monkeypatch.setattr(worker, "rpc", lambda *args: None)
+    monkeypatch.setattr(worker, "publish_logs", lambda: uploaded.append(True))
+    monkeypatch.setattr(worker, "progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(worker, "publish_json", lambda *args: None)
+    with pytest.raises(subprocess.TimeoutExpired):
+        mainnet_runtime.main([str(settings), "producer"])
+    assert worker.core.poll() is None
+    assert not (worker.run / "producer.quiescent").exists()
+    assert uploaded == [True]
+    mainnet_runtime.main([str(settings), "failed", "mainnet-producer", "1"])
+    assert worker.active.exists()
 
 
 @pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")

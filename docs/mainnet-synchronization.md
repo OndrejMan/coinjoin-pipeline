@@ -128,7 +128,10 @@ Pokud notebook drží index při startu druhého jobu, job ihned skončí; nezab
 velkou RAM čekáním. Notebook ukonči a spusť novou synchronizaci.
 
 Po chybě se dataset odemkne pouze pokud worker potvrdil ukončení svých procesů,
-nebo se ještě vůbec nespustil. Po SIGKILL/OOM může `.sync-active` zůstat. Nejdřív
+nebo se ještě vůbec nespustil. Nenulový návratový kód již ukončeného Core
+nebrání odemčení po chybě; stále ale zakazuje publikovat checkpoint. Timeout
+nebo chyba zastavení, která nepotvrdí konec procesu, zámek ponechá.
+Po SIGKILL/OOM může `.sync-active` zůstat. Nejdřív
 ověř konec obou PBS jobů a Core; potom lze jeho adresář přejmenovat pro audit.
 Neodstraňuj jej automaticky podle stáří: některý job může stále běžet.
 
