@@ -317,6 +317,29 @@ def worker(config, tmp_path, monkeypatch):
     return Worker(settings, work)
 
 
+@pytest.mark.parametrize("readonly,index_writable", [(False, False), (True, True)])
+def test_container_binds_symlink_targets_without_changing_workload_paths(worker, tmp_path, readonly, index_writable):
+    storage = tmp_path / "beegfs"
+    storage.mkdir()
+    alias = tmp_path / "multijob-brno"
+    alias.symlink_to(storage, target_is_directory=True)
+    worker.root, worker.work, worker.index = (alias / name for name in ("dataset", "work", "index"))
+    for path in (worker.root, worker.work, worker.index):
+        path.mkdir()
+    worker.container = "apptainer"
+    datadir = str(worker.root / "bitcoin")
+    command = worker.container_command(
+        worker.c["blocksci_image"], "reader", datadir, readonly=readonly, index_writable=index_writable
+    )
+    binds = [command[index + 1] for index, argument in enumerate(command) if argument == "--bind"]
+    for path, ro in ((worker.root, readonly), (worker.work, False), (worker.index, not index_writable)):
+        source = path.resolve()
+        suffix = ":ro" if ro else ""
+        assert f"{source}:{source}{suffix}" in binds
+        assert f"{source}:{path}{suffix}" in binds
+    assert command[-3:] == [worker.c["blocksci_image"], "reader", datadir]
+
+
 @pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
 def test_backup_has_no_readback_and_size_failure_preserves_previous_pointer(worker, tmp_path, monkeypatch):
     source = tmp_path / "source"

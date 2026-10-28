@@ -157,6 +157,16 @@ def resume_signature(index, blocks):
     }
 
 
+def container_bind(path, readonly=False):
+    path = Path(path)
+    source = path.resolve()
+    suffix = ":ro" if readonly else ""
+    # MetaCentrum's /scratch/multijob-* aliases point outside /scratch. Bind
+    # their targets too, so aliases resolve inside the container as on the host.
+    destinations = dict.fromkeys((source, path))
+    return [argument for destination in destinations for argument in ("--bind", f"{source}:{destination}{suffix}")]
+
+
 class Worker:
     def __init__(self, settings, work):
         self.c = settings
@@ -263,13 +273,11 @@ class Worker:
             self.container,
             "exec",
             "--cleanenv",
-            "--bind",
-            f"{self.root}:{self.root}{':ro' if readonly else ''}",
-            "--bind",
-            f"{self.work}:{self.work}",
+            *container_bind(self.root, readonly),
+            *container_bind(self.work),
         ]
         if self.index.exists() and image == self.c["blocksci_image"]:
-            command += ["--bind", f"{self.index}:{self.index}{'' if index_writable else ':ro'}"]
+            command += container_bind(self.index, not index_writable)
         if cwd is not None:
             command += ["--pwd", str(cwd)]
         for key, value in (environment or {}).items():
@@ -409,10 +417,9 @@ class Worker:
             "120",
         )
         # Credentials are bound only to the archiver, never copied into the dataset.
-        command[command.index(self.c["core_image"]) : command.index(self.c["core_image"])] = [
-            "--bind",
-            f"{self.c['credentials']}:{self.c['credentials']}:ro",
-        ]
+        command[command.index(self.c["core_image"]) : command.index(self.c["core_image"])] = container_bind(
+            self.c["credentials"], readonly=True
+        )
         if prune:
             ceiling = self.work / "prune-ceiling.txt"
             ceiling.write_text(str(max(0, height - self.c["reorg_reserve"])))

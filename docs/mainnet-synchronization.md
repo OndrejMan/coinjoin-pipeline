@@ -132,6 +132,12 @@ nebo se ještě vůbec nespustil. Po SIGKILL/OOM může `.sync-active` zůstat. 
 ověř konec obou PBS jobů a Core; potom lze jeho adresář přejmenovat pro audit.
 Neodstraňuj jej automaticky podle stáří: některý job může stále běžet.
 
+Na MetaCentru je `/scratch/multijob-brno` symlink na BeeGFS. Worker proto binduje
+pracovní adresáře pod původní i skutečnou cestou ze `Path.resolve()`, aby symlinky
+v kontejneru dosáhly na stejná data jako na hostiteli. Cesty v příkazech a uložených
+manifestech zůstávají původní. Pokud Core hlásí neexistující datadir, přestože
+adresář na hostiteli existuje, zkontroluj oba bindy v aktuálním workeru.
+
 Neúplný index má `.writing` a další průchod jej odmítne. Obnov jej do nového
 adresáře z poslední platné zálohy, ověř jej a až potom ručně nahraď pracovní kopii.
 Při selhání závěrečné zálohy Core zůstávají pracovní data i dokončený index na
