@@ -47,6 +47,7 @@ s5() { s5cmd "$@"; }
             "STAGE": "blocksci",
             "ARTIFACT_URI": "s3://bucket/runs",
             "IMAGE": "docker://blocksci",
+            "IMAGE_NAME": "docker://blocksci",
             "FAKE_S3": str(tmp_path / "s3"),
             "PATH": str(FAKE_S5CMD) + os.pathsep + os.environ["PATH"],
             **settings,

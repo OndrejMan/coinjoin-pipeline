@@ -20,7 +20,7 @@ from coinjoin_pipeline.execution.kubernetes import (
 )
 from coinjoin_pipeline.execution.pbs.validation import PBSError, require_qsub
 from coinjoin_pipeline.execution.pbs_settings import stage_pbs_resources
-from coinjoin_pipeline.execution.s3_emulation import run_s3_kubernetes_emulation
+from coinjoin_pipeline.execution.s3_emulation import pin_emulation_images, run_s3_kubernetes_emulation
 from coinjoin_pipeline.execution.s3_markers import cancel_dependent_pbs_job, wait_for_s3_pbs_stage
 from coinjoin_pipeline.execution.s3_staging import stage_kubernetes_s3_run
 from coinjoin_pipeline.execution.s3_submission import s3_full_run_plan_from_args, submit_s3_pbs_graph
@@ -78,6 +78,7 @@ def _wait_for_pbs_stage(
 
 def run_s3_full_run(args: PipelineConfiguration) -> None:
     """Run the canonical S3 full-run graph and wait for its terminal report."""
+    args = pin_emulation_images(args)
     target = S3Target.from_args(args)
     access = target.access
     run_prefix = run_prefix_uri(target.artifact_uri, target.run_id)

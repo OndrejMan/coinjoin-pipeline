@@ -37,6 +37,16 @@ redacted launcher record under `host_launcher`. External import manifests keep
 their input provenance. The report's manifest remains a distinct analytical
 artifact with image digests and exporter hashes.
 
+On the S3 path nothing can inspect an image afterwards: the MetaCentrum frontend
+and PBS nodes have no Docker. `registry.py` therefore pins each tag to its current
+registry digest at submission, and the jobs run that `name@sha256:` reference, so
+the report reads the digest straight from it. `full-run` also pins the emulator and
+uploader of its Kubernetes Job. A separate `pbs-from-s3` does not know what the
+emulation ran, so it keeps those tags and the report flags their digests as missing.
+Index manifests keep the configured BlockSci name (`IMAGE_NAME`), so a rebuild
+under the same tag still reuses an existing index. A failed lookup only warns and
+runs the tag.
+
 ## Module ownership
 
 | Responsibility | Owner |
@@ -61,6 +71,7 @@ artifact with image digests and exporter hashes.
 | Heavy BlockSci results | `pipeline/exporters/blocksci_export/analysis.py` |
 | Artifact reader independent of BlockSci | `pipeline/exporters/analysis_artifact.py` |
 | Container image inspection shared by the host and standalone exporters | `pipeline/exporters/image_provenance.py` |
+| Pinning registry tags to digests at submission | `registry.py` |
 | Report assembly and presentation | `pipeline/exporters/cli.py`, `report_builder.py`, `markdown_report.py` |
 
 ## One analyzer/report flow

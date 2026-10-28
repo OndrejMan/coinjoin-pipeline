@@ -9,6 +9,7 @@ from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, BLOCKSCI_CUSTOM_ANALY
 
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.pbs_settings import pbs_image
+from coinjoin_pipeline.registry import pinned_reference
 from coinjoin_pipeline.storage.s3 import shell_assignment
 
 from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND
@@ -160,8 +161,9 @@ def analysis_image_arguments(config: PipelineConfiguration) -> list[str]:
     """
     arguments: list[str] = []
     for flag, image in (
-        ("--blocksci-image", pbs_image(config, "blocksci")),
-        ("--coinjoin-analysis-image", pbs_image(config, "coinjoin_analysis")),
+        # The same pinned references the jobs run, so the artifact carries their digests.
+        ("--blocksci-image", pinned_reference(pbs_image(config, "blocksci"))),
+        ("--coinjoin-analysis-image", pinned_reference(pbs_image(config, "coinjoin_analysis"))),
         ("--coinjoin-emulator-image", config.images.emulator),
         ("--uploader-image", config.images.uploader),
     ):

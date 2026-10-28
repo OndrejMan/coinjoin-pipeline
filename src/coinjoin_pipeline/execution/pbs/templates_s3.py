@@ -25,6 +25,7 @@ from coinjoin_pipeline.execution.coinjoin_tools import (
     uses_run_input,
 )
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
+from coinjoin_pipeline.registry import pinned_reference
 from coinjoin_pipeline.storage.s3 import (
     S3Target,
     shell_value,
@@ -87,7 +88,10 @@ def _render_stage(
     ]
     if image is not None:
         require_safe_image(image)
-        identity.append(f"IMAGE={shell_value(image)}")
+        # The job runs the digest the tag names now; index manifests keep the configured
+        # name, so a rebuilt image under the same tag still reuses an existing index.
+        identity.append(f"IMAGE={shell_value(pinned_reference(image))}")
+        identity.append(f"IMAGE_NAME={shell_value(image)}")
     preamble = "\n".join(
         (
             directives(stage.replace("-", "_") + "_s3", resources, multijob),
@@ -202,7 +206,7 @@ def _manifest_checks(manifest: str, label: str, run_id: str | None = None) -> li
             f'{{ echo "{label} run ID does not match {run_id}" >&2; exit 1; }}'
         )
     checks.append(
-        f'grep -Fq "\\"blocksci_image\\": \\"$IMAGE\\"" {manifest} || '
+        f'grep -Fq "\\"blocksci_image\\": \\"$IMAGE_NAME\\"" {manifest} || '
         f'{{ echo "{label} was produced by a different BlockSci image" >&2; exit 1; }}'
     )
     return checks
@@ -270,7 +274,7 @@ def _publish_cache(stage: str, source_kind: str, network: str, ncpus: int) -> st
             f'index_archive_upload "$RUN_WORK" "$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/blocksci_data.tar.zst" '
             f'"{ncpus}" blocksci_data',
             f"printf {manifest_format} \\",
-            f'  "$RUN_ID" "$IMAGE" "{source_kind}" "{network}" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA" '
+            f'  "$RUN_ID" "$IMAGE_NAME" "{source_kind}" "{network}" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA" '
             '"$ARCHIVE_SHA256" \\',
             '  > "$CACHE_DIR/manifest.json"',
             's5 cp "$CACHE_DIR/manifest.json" "$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/manifest.json"',
@@ -357,7 +361,7 @@ def _index_publish(stage: str, source_kind: str, network: str, resources: PBSRes
         (
             f'echo "[{stage}] recording persistent index at height $EXPORTED_MAX_BLOCK"',
             f"printf {_manifest_format(last_fields)} \\",
-            f'  "$RUN_ID" "$IMAGE" "{source_kind}" "{network}" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA" \\',
+            f'  "$RUN_ID" "$IMAGE_NAME" "{source_kind}" "{network}" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA" \\',
             f'  {shell_value(json.dumps(index_dir))} {resource_record} "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\',
             '  > "$RUN_WORK/index-manifest.json"',
             'index_publish "$RUN_WORK/index-manifest.json"',

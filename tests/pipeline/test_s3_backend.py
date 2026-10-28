@@ -1358,6 +1358,7 @@ def test_persistent_manifest_records_requested_cpu_and_memory(tmp_path) -> None:
             f"INDEX_DIR={shlex.quote(str(index))}",
             "RUN_ID=parse-example",
             "IMAGE=docker://blocksci",
+            "IMAGE_NAME=docker://blocksci",
             "ARTIFACT_URI=s3://bucket/runs",
             "EXPORTED_MAX_BLOCK=42",
             "MANIFEST_EXTRA=''",

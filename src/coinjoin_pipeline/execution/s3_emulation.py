@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution import settings
@@ -14,6 +15,21 @@ from coinjoin_pipeline.execution.kubernetes import (
 )
 from coinjoin_pipeline.execution.pbs_settings import resolve_uploader_image
 from coinjoin_pipeline.paths import SCENARIOS_ROOT
+from coinjoin_pipeline.registry import pinned_reference
+
+
+def pin_emulation_images(args: PipelineConfiguration) -> PipelineConfiguration:
+    """Pin the emulator and uploader the Job runs, so the PBS analysis records their digests.
+
+    Only the process that launches the emulation knows what it ran; a later
+    pbs-from-s3 keeps the configured tags and the report flags their digests as missing.
+    """
+    images = replace(
+        args.images,
+        emulator=pinned_reference(args.images.emulator or settings.DEFAULT_EMULATOR_IMAGE),
+        uploader=pinned_reference(resolve_uploader_image(args)),
+    )
+    return replace(args, images=images)
 
 
 def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
