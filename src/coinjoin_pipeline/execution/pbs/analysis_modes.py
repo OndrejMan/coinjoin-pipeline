@@ -97,7 +97,9 @@ def prepare_analysis_mode(
         ]
         extra_binds = 'EXTRA_BINDS+=(--bind "$USER_SCRIPT:/mnt/user-analysis.py:ro")'
     else:
-        output = '"$HOME/coinjoin-notebooks/$RUN_ID"'
+        # The execution node can set HOME to another storage volume. Match the
+        # submission home, where the frontend stages files and looks for readiness.
+        output = '"${PBS_O_HOME:-$HOME}/coinjoin-notebooks/$RUN_ID"'
         if notebooks_dir is not None:
             notebook_path = notebooks_dir.expanduser().resolve()
             require_storage_path(notebook_path)
@@ -106,7 +108,7 @@ def prepare_analysis_mode(
                 raise PBSError(f"BlockSci notebooks path is not a directory: {notebook_path}")
             output = shell_value(str(notebook_path))
         prepare += [
-            'NOTEBOOK_CONTROL="$HOME/.local/share/coinjoin-pipeline/jupyter/$RUN_ID"',
+            'NOTEBOOK_CONTROL="${PBS_O_HOME:-$HOME}/.local/share/coinjoin-pipeline/jupyter/$RUN_ID"',
             'mkdir -p "$NOTEBOOK_CONTROL"',
             'chmod 700 "$NOTEBOOK_CONTROL"',
             'rm -f "$NOTEBOOK_CONTROL/connection.json"',

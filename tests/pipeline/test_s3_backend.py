@@ -299,8 +299,8 @@ def test_notebook_uses_image_python_and_keeps_control_files_outside_saved_notebo
         notebook_port=8890,
     )
     subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert 'OUTPUT_DIR="$HOME/coinjoin-notebooks/$RUN_ID"' in script
-    assert 'NOTEBOOK_CONTROL="$HOME/.local/share/coinjoin-pipeline/jupyter/$RUN_ID"' in script
+    assert 'OUTPUT_DIR="${PBS_O_HOME:-$HOME}/coinjoin-notebooks/$RUN_ID"' in script
+    assert 'NOTEBOOK_CONTROL="${PBS_O_HOME:-$HOME}/.local/share/coinjoin-pipeline/jupyter/$RUN_ID"' in script
     assert '--bind "$NOTEBOOK_CONTROL:/mnt/notebook-control:rw"' in script
     assert '--env "NOTEBOOK_JOB_ID=${PBS_JOBID:?}"' in script
     assert "--ServerApp.port_retries=0" in script
