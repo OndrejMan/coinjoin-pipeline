@@ -50,7 +50,9 @@ for directory, _, names in os.walk(root):
 if not found:
     sys.exit('fake s5cmd: no object found')
 for key, size in sorted(found):
-    print(json.dumps(dict(key=key, size=size, type='file')) if as_json else key)
+    # Like s5cmd, leave out the size of an empty object.
+    entry = dict(key=key, type='file', **({'size': size} if size else {}))
+    print(json.dumps(entry) if as_json else key)
 PY
             exit 0
         fi
@@ -68,7 +70,7 @@ for item in names:
     if item == name:
         size += int(os.environ.get('FAKE_S5CMD_LS_SIZE_DELTA', '0'))
     listed = key[: len(key) - len(name)] + item
-    print(json.dumps(dict(key=listed, size=size)) if as_json else listed)
+    print(json.dumps(dict(key=listed, **({'size': size} if size else {}))) if as_json else listed)
 PY
         ;;
     cat)

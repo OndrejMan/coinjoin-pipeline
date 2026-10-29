@@ -599,7 +599,8 @@ class Worker:
             entry = json.loads(line)
             key = entry.get("key", "")
             if entry.get("type", "file") == "file" and key.startswith(prefix):
-                sizes[key.removeprefix(prefix)] = entry.get("size")
+                # s5cmd leaves out the size of an empty object.
+                sizes[key.removeprefix(prefix)] = entry.get("size", 0)
         return sizes
 
     def publish_dumplings(self, height):
