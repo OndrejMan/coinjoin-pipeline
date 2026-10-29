@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from coinjoin_pipeline.configuration import PipelineConfiguration
-from coinjoin_pipeline.execution.pbs import templates_s3
+from coinjoin_pipeline.execution.pbs import analysis_modes, templates_s3
 from coinjoin_pipeline.execution.pbs.defaults import DEFAULT_RESOURCES
 from coinjoin_pipeline.execution.pbs.commands import (
     blocksci_external_report_pbs_command,
@@ -54,6 +54,8 @@ def main() -> int:
     with (
         mock.patch.object(templates_s3, "INDEX_ROOTS", (root,)),
         mock.patch.object(templates_s3, "require_storage_path"),
+        # The analysis modes check the script's path themselves since they moved out.
+        mock.patch.object(analysis_modes, "require_storage_path"),
     ):
         if args.kind == "dumplings":
             script = templates_s3.render_coinjoin_analysis_dumplings_s3_pbs(
