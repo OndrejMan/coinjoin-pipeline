@@ -54,16 +54,21 @@ for key, size in sorted(found):
 PY
             exit 0
         fi
-        target=$(local_path "$1")
-        [ -e "$target" ] || { echo "fake s5cmd: no object found" >&2; exit 1; }
-        if [ "$json_output" = 0 ]; then
-            echo "$1"
-            exit 0
-        fi
-        python3 - "$(local_path "$1")" "$1" <<'PY'
+        # Without a wildcard s5cmd still lists by prefix: blk.dat also lists blk.dat.json.
+        python3 - "$(local_path "$1")" "$1" "$json_output" <<'PY'
 import json, os, sys
-size = os.stat(sys.argv[1]).st_size + int(os.environ.get('FAKE_S5CMD_LS_SIZE_DELTA', '0'))
-print(json.dumps(dict(key=sys.argv[2], size=size)))
+path, key, as_json = sys.argv[1], sys.argv[2], sys.argv[3] == '1'
+directory, name = os.path.split(path)
+names = sorted(n for n in os.listdir(directory) if n.startswith(name)) if os.path.isdir(directory) else []
+names = [n for n in names if os.path.isfile(os.path.join(directory, n))]
+if not names:
+    sys.exit('fake s5cmd: no object found')
+for item in names:
+    size = os.stat(os.path.join(directory, item)).st_size
+    if item == name:
+        size += int(os.environ.get('FAKE_S5CMD_LS_SIZE_DELTA', '0'))
+    listed = key[: len(key) - len(name)] + item
+    print(json.dumps(dict(key=listed, size=size)) if as_json else listed)
 PY
         ;;
     cat)

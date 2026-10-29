@@ -128,10 +128,12 @@ index_backup() {
   s5 --json ls "$archive" >"$RUN_WORK/index-backup-size.json"
   python3 - "$RUN_WORK/index-backup-size.json" "$archive" "$ARCHIVE_SIZE" <<'INDEX_SIZE'
 import json, sys
+# ls matches a prefix: the archive's .sha256 is listed beside it.
 with open(sys.argv[1], encoding='utf-8') as handle:
-    value = json.load(handle)
+    listed = [json.loads(line) for line in handle if line.strip()]
+value = next((item for item in listed if item.get('key') == sys.argv[2]), {})
 size = value.get('size')
-if value.get('key') != sys.argv[2] or type(size) is not int or size != int(sys.argv[3]):
+if type(size) is not int or size != int(sys.argv[3]):
     raise ValueError('Index backup S3 size/key mismatch')
 INDEX_SIZE
   python3 - "$INDEX_DIR/manifest.json" "$archive" "$ARCHIVE_SHA256" "$ARCHIVE_SIZE" >"$RUN_WORK/index-backup.json" <<'INDEX_MANIFEST'

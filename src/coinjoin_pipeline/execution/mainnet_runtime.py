@@ -225,9 +225,11 @@ class Worker:
 
     def verify_remote_size(self, uri, expected_size):
         result = self.s3("--json", "ls", uri, stdout=subprocess.PIPE, text=True, timeout=60)
-        metadata = json.loads(result.stdout)
+        # ls matches a prefix, so other objects starting with the same key may be listed too.
+        listed = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+        metadata = next((item for item in listed if item.get("key") == uri), {})
         size = metadata.get("size")
-        if metadata.get("key") != uri or not isinstance(size, int) or isinstance(size, bool) or size != expected_size:
+        if not isinstance(size, int) or isinstance(size, bool) or size != expected_size:
             raise ValueError("Checkpoint S3 size/key mismatch: " + uri)
 
     def progress(self, phase, current=None, total=None, state="running", **extra):
