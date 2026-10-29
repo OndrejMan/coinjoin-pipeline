@@ -112,7 +112,7 @@ class S3StageRunner:
         if self.args.dry_run:
             print(f"[dry-run] Would clear stale .pbs/{stage.name}.done|failed markers")
         else:
-            clear_s3_stage_markers(self.target.access, self.target.artifact_uri, self.target.run_id, stage.name)
+            clear_s3_stage_markers(self.target.access, self.target.run_prefix, stage.name)
         job_id = submit_pbs_job(PBSJobSpec(stage.name, script, dependencies), self.args.dry_run)
         if job_id:
             self.submitted_jobs.append((stage.name, job_id))

@@ -324,7 +324,7 @@ def test_pbs_embeds_adapter_without_rebuilding_or_replacing_the_analyzer(tmp_pat
     assert "COINJOIN_RESEARCH_ADAPTER" in script
     assert "def analyze_size(" in script
     assert "python /work/coinjoin_research.py" in script
-    assert 's5 sync "$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/data/*"' not in script
+    assert 's5 sync "$RUN_PREFIX/coinjoin_emulator_data/data/*"' not in script
     # The adapter is valid on the analyzer image's Python 3.11 and exporters' 3.8 floor.
     ast.parse(Path(research.__file__).read_text(), feature_version=(3, 8))
     job = tmp_path / "job.sh"

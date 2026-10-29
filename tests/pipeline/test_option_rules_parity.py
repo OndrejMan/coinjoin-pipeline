@@ -145,6 +145,22 @@ VALID = {
         "--blocksci-index-backup-uri",
         "s3://bucket/blocksci-index",
     ],
+    "index backup at a fixed state prefix": [
+        *PBS_FROM_S3,
+        "--blocksciPbs",
+        "--blocksci-workflow",
+        "cached",
+        "--blocksci-task",
+        "backup",
+        "--blocksci-index-dir",
+        "/scratch/multijob-brno/user/blocksci-mainnet",
+        "--pbs-blocksci-multijob",
+        "brno",
+        "--blocksci-index-backup-uri",
+        "s3://bucket/blocksci-index",
+        "--blocksci-index-state-uri",
+        "s3://bucket/bitcoin-mainnet/index",
+    ],
     "persistent script analysis": [
         *READ_ONLY_SCRIPT,
         "--blocksci-workflow",
@@ -166,6 +182,11 @@ VALID = {
 }
 
 INVALID = {
+    "index state prefix for an analysis": [
+        *VALID["persistent script analysis"],
+        "--blocksci-index-state-uri",
+        "s3://bucket/bitcoin-mainnet/index",
+    ],
     "conflicting run selectors": ["coinjoin-analysis", "--run-dir", "run-1", "--all-runs"],
     "mainnet archive without a checkpoint": VALID["reusable parse from a bitcoin-blocks URI"][:-2],
     "mainnet archive with a malformed checkpoint": [
@@ -435,6 +456,7 @@ def test_every_input_path_rejects(argv, tmp_path):
         ("index backup outside S3", "artifact URI must use s3://"),
         ("backup task without a backup prefix", "--blocksci-task backup requires --blocksci-index-backup-uri"),
         ("persistent index for detect", "--blocksci-index-dir requires --blocksci-task parse"),
+        ("index state prefix for an analysis", "--blocksci-index-state-uri requires --blocksci-index-dir"),
         ("false positives outside the external task", "--external-false-cjtxs-uri requires --blocksci-task external"),
         ("Dumplings baseline without its PBS stage", "--dumplings-uri requires pbs-from-s3 --analysisPbs"),
     ],

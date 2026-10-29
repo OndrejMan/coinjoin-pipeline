@@ -23,5 +23,5 @@ singularity exec \
   bash -c 'cd "/runs/emulation/logs/$PBS_RUN_ID" && {command}'
 require_file "$REPORT_DIR/unified_report.json" \
   "Unified S3 report did not produce coinjoinPipeline_data/unified_report.json"
-s5 sync "$REPORT_DIR/" "$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"
+s5 sync "$REPORT_DIR/" "$RUN_PREFIX/coinjoinPipeline_data/"
 echo "[unified-report] report upload complete"

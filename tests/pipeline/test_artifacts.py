@@ -124,7 +124,7 @@ def test_clear_stage_markers_treats_missing_as_success_and_deletes_existing() ->
             return_value=_completed(0),
         ) as s5cmd,
     ):
-        clear_s3_stage_markers(ACCESS, "s3://bucket/runs", "run-1", "blocksci")
+        clear_s3_stage_markers(ACCESS, "s3://bucket/runs/run-1", "blocksci")
 
     s5cmd.assert_called_once_with(ACCESS, "rm", "s3://bucket/runs/run-1/.pbs/blocksci.done")
     assert exists.call_count == 3
@@ -139,7 +139,7 @@ def test_clear_stage_markers_propagates_delete_errors() -> None:
         ),
         pytest.raises(ArtifactTransportError, match="AccessDenied"),
     ):
-        clear_s3_stage_markers(ACCESS, "s3://bucket/runs", "run-1", "blocksci")
+        clear_s3_stage_markers(ACCESS, "s3://bucket/runs/run-1", "blocksci")
 
 
 def _wait(done: str, failed: str, exists, probe=None, timeout: int = 60) -> None:

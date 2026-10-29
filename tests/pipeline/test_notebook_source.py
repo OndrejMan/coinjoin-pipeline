@@ -46,6 +46,8 @@ s5() { s5cmd "$@"; }
             "RUN_ID": "source",
             "STAGE": "blocksci",
             "ARTIFACT_URI": "s3://bucket/runs",
+            "RUN_PREFIX": "s3://bucket/runs/source",
+            "LOG_PREFIX": "s3://bucket/runs/source/logs",
             "IMAGE": "docker://blocksci",
             "IMAGE_NAME": "docker://blocksci",
             "FAKE_S3": str(tmp_path / "s3"),
@@ -164,13 +166,13 @@ def test_combined_job_publishes_an_archive_without_downloading_the_previous_inde
     script = render_blocksci_s3_pbs(target, "docker://blocksci", "true", include_report=False)
     subprocess.run(["bash", "-n"], input=script, text=True, check=True)
     assert (
-        'index_archive_upload "$RUN_WORK" "$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/blocksci_data.tar.zst"' in script
+        'index_archive_upload "$RUN_WORK" "$RUN_PREFIX/blocksci-parse_data/blocksci_data.tar.zst"' in script
     )
     assert 's5 sync "$RUN_WORK/blocksci_data/"' not in script
-    assert 's5 sync "$ARTIFACT_URI/$RUN_ID/*"' not in script
+    assert 's5 sync "$RUN_PREFIX/*"' not in script
     # The stage header only defines download helpers; the job's work starts after its trap.
     work = script[script.index("trap on_exit EXIT") :]
-    assert work.index("require_zstd\n") < work.index('s5 sync "$ARTIFACT_URI/')
+    assert work.index("require_zstd\n") < work.index('s5 sync "$RUN_PREFIX/')
 
 
 def test_combined_report_job_reads_a_nested_datadir_and_only_present_optional_inputs(tmp_path):

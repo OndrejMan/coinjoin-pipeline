@@ -131,7 +131,9 @@ Stav synchronizace má pevné místo, nikoli složku podle run ID: lokálně
 zámkem datasetu nejdřív smaže, takže prefix vždy popisuje poslední běh; `run_id`
 v každém JSON říká, ke kterému patří. Logy každého běhu zůstávají v
 `<state_uri>/logs/<run-id>/`. Konfigurace synchronizace proto nemá `artifacts.uri`;
-sekce `artifacts` nese jen endpoint, soubor s klíči a profil.
+sekce `artifacts` nese jen endpoint, soubor s klíči a profil. Ruční indexové joby (`parse`, `update`, `backup`) mají
+podobně pevný prefix `blocksci.index_state_uri` (`bitcoin-mainnet/index/`), viz
+`docs/pbs-stage-contract.md`.
 
 Průběh v `<state_uri>/{producer,blocksci}.json` obsahuje fázi,
 výšku, procento nebo null a čas aktualizace. Pro Core jde o RPC odhad; procento

@@ -11,7 +11,7 @@ stage_finalize() {{
 {start}
 require_zstd
 {prepare_source}
-s5 sync "$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/*" "$RUN_WORK/.pipeline/exporters/"
+s5 sync "$RUN_PREFIX/.pipeline/exporters/*" "$RUN_WORK/.pipeline/exporters/"
 
 echo "[blocksci-update] restoring verified cache from run $SOURCE_RUN_ID"
 {restore_source}

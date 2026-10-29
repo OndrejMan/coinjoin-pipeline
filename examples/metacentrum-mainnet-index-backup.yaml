@@ -8,8 +8,8 @@ action: pbs-from-s3
 engine: joinmarket
 coinjoin_type: joinmarket
 
-# A fresh ID per backup; it holds the job's log, PBS markers and
-# blocksci-index-backup.json (the manifest of the backed-up index).
+# A fresh ID per backup: it names the PBS job and its logs. The markers and
+# blocksci-index-backup.json (the manifest of the backed-up index) live at index_state_uri.
 run_id: mainnet-index-backup-20261025
 
 images:
@@ -31,6 +31,9 @@ blocksci:
   task: backup
   index_dir: /scratch/multijob-brno/<login>/blocksci-mainnet
   index_backup_uri: s3://xman-coinjoin-new/bitcoin-mainnet/blocksci-index
+  # Markers and the working copy's manifest live here, replaced by every index job;
+  # logs stay under logs/<run_id>/. Nothing is written to runs/<run_id>/.
+  index_state_uri: s3://xman-coinjoin-new/bitcoin-mainnet/index
 
 pbs:
   blocksci:

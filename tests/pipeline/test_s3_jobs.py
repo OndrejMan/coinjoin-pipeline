@@ -10,7 +10,7 @@ from exporters.worker import parse_args as parse_worker_args
 
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.context import RunContext
-from coinjoin_pipeline.execution import locks, s3_markers, s3_submission
+from coinjoin_pipeline.execution import locks, s3_markers, s3_staging, s3_submission
 from coinjoin_pipeline.execution.pbs.submission import PBSJobSpec, submit_pbs_job
 from coinjoin_pipeline.storage.s3 import ArtifactTransportError
 
@@ -58,7 +58,7 @@ def backend(monkeypatch, tmp_path):
     monkeypatch.setattr(
         s3_submission,
         "clear_s3_stage_markers",
-        lambda access, uri, run, stage: state.events.append(("clear", stage)),
+        lambda access, prefix, stage: state.events.append(("clear", stage)),
     )
     monkeypatch.setattr(
         s3_submission,
@@ -380,6 +380,50 @@ def test_the_backup_task_submits_only_the_backup_job(backend):
     assert values["persistent"].backup_uri == "s3://bucket/blocksci-index"
     assert values["multijob"] == "brno"
     assert backend.staged == []
+
+
+def test_index_jobs_at_a_fixed_state_prefix_clear_their_markers_there(backend, monkeypatch):
+    prefixes = []
+    monkeypatch.setattr(
+        s3_submission, "clear_s3_stage_markers", lambda access, prefix, stage: prefixes.append((prefix, stage))
+    )
+    s3_submission.submit_s3_pbs_graph(
+        backend.config(
+            analysisPbs=False,
+            blocksci_workflow="cached",
+            blocksci_task="backup",
+            blocksci_index_dir="/scratch/multijob-brno/user/blocksci-mainnet",
+            blocksci_index_backup_uri="s3://bucket/blocksci-index",
+            blocksci_index_state_uri="s3://bucket/bitcoin-mainnet/index",
+            pbs_blocksci_multijob="brno",
+        )
+    )
+    assert prefixes == [("s3://bucket/bitcoin-mainnet/index", "blocksci-backup")]
+    target = backend.rendered["render_blocksci_index_backup_s3_pbs"]["target"]
+    assert target.run_prefix == "s3://bucket/bitcoin-mainnet/index"
+
+
+def test_a_fixed_state_prefix_always_refreshes_its_exporters(backend, monkeypatch):
+    uploads = []
+    monkeypatch.setattr(s3_staging, "upload_exporters", lambda access, prefix, root: uploads.append(prefix))
+    monkeypatch.setattr(
+        s3_staging, "staged_exporters_state", lambda *_: pytest.fail("a fixed prefix never reuses staged exporters")
+    )
+    config = backend.config(
+        analysisPbs=False,
+        blocksci_workflow="cached",
+        blocksci_task="update",
+        blocksci_index_dir="/scratch/multijob-brno/user/blocksci-mainnet",
+        blocksci_index_state_uri="s3://bucket/bitcoin-mainnet/index",
+        pbs_blocksci_multijob="brno",
+        blocksci_bitcoin_blocks_uri="s3://bucket/mainnet",
+        blocksci_network="bitcoin",
+        blocksci_max_block=850100,
+        blocksci_expected_block_hash="a" * 64,
+    )
+    s3_staging.ensure_staged_exporters(config)
+    s3_staging.ensure_staged_exporters(config)
+    assert uploads == ["s3://bucket/bitcoin-mainnet/index", "s3://bucket/bitcoin-mainnet/index"]
 
 
 def test_a_dumplings_uri_turns_the_baseline_into_the_mainnet_one(backend):

@@ -68,6 +68,7 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
         ("run_id", validate_run_id),
         ("blocksci.cache_source_run_id", validate_run_id),
         ("blocksci.index_backup_uri", validate_artifact_uri),
+        ("blocksci.index_state_uri", validate_artifact_uri),
     ):
         value = config_value(config, path)
         if value is not None:

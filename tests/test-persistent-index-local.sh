@@ -21,6 +21,7 @@ export FAKE_S3="$work/s3" PATH="$support:$PATH"
 index="$work/multijob/blocksci-mainnet"
 backup_root="$FAKE_S3/bucket/blocksci-index"
 backup="$backup_root"
+state_root="$FAKE_S3/bucket/index-state"
 mkdir -p "$work/btc" "$FAKE_S3/bucket/runs" "$work/multijob"
 touch "$work/credentials"
 
@@ -48,16 +49,19 @@ mine() {
 }
 
 # Render and run one job as PBS would: fresh SCRATCHDIR, exporters staged in "S3".
+# The index jobs share the fixed state prefix; analyses keep runs/<run-id>/.
 job() {
-    local kind=$1 run=$2
+    local kind=$1 run=$2 prefix state=()
     shift 2
-    mkdir -p "$FAKE_S3/bucket/runs/$run/.pipeline/exporters" "$work/scratch-$run"
-    cp -r "$repo/pipeline/exporters/." "$FAKE_S3/bucket/runs/$run/.pipeline/exporters/"
+    prefix="$FAKE_S3/bucket/runs/$run"
+    case "$kind" in parse|update|backup) prefix="$state_root"; state=(--state-uri s3://bucket/index-state) ;; esac
+    mkdir -p "$prefix/.pipeline/exporters" "$work/scratch-$run"
+    cp -r "$repo/pipeline/exporters/." "$prefix/.pipeline/exporters/"
     (cd "$repo" && uv run --frozen python "$support/render_job.py" "$kind" --run-id "$run" --root "$work" \
         --index-dir "$index" --backup-uri s3://bucket/blocksci-index --credentials "$work/credentials" \
-        --output "$work/$run.pbs" "$@")
+        --output "$work/$run.pbs" "${state[@]}" "$@")
     SCRATCHDIR="$work/scratch-$run" PBS_JOBID="$run.local" bash "$work/$run.pbs" >"$work/$run.out" 2>&1 \
-        || { echo "FAIL: $run"; tail -30 "$work/$run.out"; [ -f "$FAKE_S3/bucket/runs/$run/logs/blocksci-parse.pbs.log" ] && tail -30 "$FAKE_S3/bucket/runs/$run/logs/blocksci-parse.pbs.log"; exit 1; }
+        || { echo "FAIL: $run"; tail -30 "$work/$run.out"; [ -f "$state_root/logs/$run/blocksci-parse.pbs.log" ] && tail -30 "$state_root/logs/$run/blocksci-parse.pbs.log"; exit 1; }
 }
 
 height() {
@@ -83,14 +87,14 @@ first=$(cli getblockcount)
 job parse index-parse --bitcoin-datadir "$work/btc/regtest" --max-block "$first"
 expect "index height after parse" "$(height "$index")" "$first"
 expect "index height published to S3" \
-    "$(sed -nE 's/.*"exported_max_block"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p' "$FAKE_S3/bucket/runs/index-parse/blocksci-index-manifest.json")" "$first"
+    "$(sed -nE 's/.*"exported_max_block"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p' "$state_root/blocksci-index-manifest.json")" "$first"
 
 job backup index-backup-1
 expect "backup height" "$(height "$backup")" "$first"
 (cd "$backup" && sha256sum -c blocksci_index.tar.zst.sha256 >/dev/null) || { echo "FAIL: backup checksum"; exit 1; }
 echo "OK: the backup matches its SHA-256"
 expect "backup height recorded in the run" \
-    "$(sed -nE 's/.*"exported_max_block"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p' "$FAKE_S3/bucket/runs/index-backup-1/blocksci-index-backup.json")" "$first"
+    "$(sed -nE 's/.*"exported_max_block"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p' "$state_root/blocksci-index-backup.json")" "$first"
 
 job script scan-1 --script "$repo/scripts/metacentrum_mainnet_coinjoin_scan.py" --pin-height "$first"
 summary="$FAKE_S3/bucket/runs/scan-1/blocksci-custom-analysis_data/joinmarket-mainnet-summary.json"
@@ -137,4 +141,10 @@ echo "OK: the comparison recorded the index manifest it read"
 
 [ ! -e "$index/.lock/writer" ] && [ -z "$(ls -A "$index/.lock/readers")" ] || { echo "FAIL: a lock was left behind"; exit 1; }
 echo "OK: no lock left behind"
+for run in index-parse index-update-1 index-update-2 index-backup-1 index-backup-2; do
+    [ ! -e "$FAKE_S3/bucket/runs/$run" ] || { echo "FAIL: index job $run wrote runs/$run/"; exit 1; }
+done
+test -f "$state_root/logs/index-parse/blocksci-parse.pbs.log" || { echo "FAIL: no per-run parse log"; exit 1; }
+test -f "$state_root/.pbs/blocksci-backup.done" || { echo "FAIL: no backup marker at the state prefix"; exit 1; }
+echo "OK: index jobs kept their state at one prefix and their logs per run"
 echo PASS

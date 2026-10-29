@@ -1,6 +1,6 @@
 {preamble}
 {start}
-s5 sync "$ARTIFACT_URI/$RUN_ID/*" "$RUN_WORK/"
+s5 sync "$RUN_PREFIX/*" "$RUN_WORK/"
 test -d "$RUN_WORK/coinjoin_emulator_data/data" || {{
   echo "Coinjoin analysis S3-compatible reporting requires coinjoin_emulator_data/data" >&2
   exit 1
@@ -16,4 +16,4 @@ singularity exec \
   bash -c 'cd "/runs/emulation/selected/$PBS_RUN_ID" && {command}'
 require_file "$RUN_WORK/coinjoin-analysis_data/coinjoin_tx_info.json" \
   "Coinjoin analysis did not produce coinjoin-analysis_data/coinjoin_tx_info.json"
-s5 sync "$RUN_WORK/coinjoin-analysis_data/" "$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/"
+s5 sync "$RUN_WORK/coinjoin-analysis_data/" "$RUN_PREFIX/coinjoin-analysis_data/"

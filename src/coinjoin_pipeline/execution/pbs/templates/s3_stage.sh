@@ -14,9 +14,9 @@ s5() {
 }
 # Copy one run directory that earlier stages may not have produced; an absent one is skipped.
 download_optional() {
-  if s5 ls "$ARTIFACT_URI/$RUN_ID/$1/" >/dev/null 2>&1; then
+  if s5 ls "$RUN_PREFIX/$1/" >/dev/null 2>&1; then
     mkdir -p "$2"
-    s5 sync "$ARTIFACT_URI/$RUN_ID/$1/*" "$2/"
+    s5 sync "$RUN_PREFIX/$1/*" "$2/"
   fi
 }
 require_file() {
@@ -39,10 +39,10 @@ locate_emulator_bitcoin_datadir() {
   }
 }
 publish_done() {
-  s5 cp "$DONE_MARKER" "$ARTIFACT_URI/$RUN_ID/.pbs/$STAGE.done"
+  s5 cp "$DONE_MARKER" "$RUN_PREFIX/.pbs/$STAGE.done"
 }
 publish_failed() {
-  s5 cp "$FAILED_MARKER" "$ARTIFACT_URI/$RUN_ID/.pbs/$STAGE.failed"
+  s5 cp "$FAILED_MARKER" "$RUN_PREFIX/.pbs/$STAGE.failed"
 }
 # Templates with outputs to publish even on failure redefine this.
 stage_finalize() {

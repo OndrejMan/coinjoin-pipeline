@@ -62,7 +62,7 @@ def _run_id(value: str) -> str:
 
 
 def _upload(source: str, name: str) -> str:
-    return f's5 sync {source} "$ARTIFACT_URI/$RUN_ID/{name}/"'
+    return f's5 sync {source} "$RUN_PREFIX/{name}/"'
 
 
 def _render_stage(
@@ -81,6 +81,8 @@ def _render_stage(
     identity = [
         f"ARTIFACT_URI={shell_value(validate_artifact_uri(target.artifact_uri))}",
         f"RUN_ID={shell_value(validate_run_id(target.run_id))}",
+        f"RUN_PREFIX={shell_value(validate_artifact_uri(target.run_prefix))}",
+        f"LOG_PREFIX={shell_value(target.log_prefix)}",
         f"S3_ENDPOINT_URL={shell_value(validate_s3_endpoint_url(target.endpoint_url))}",
         f"S3_CREDENTIALS_FILE={shell_value(validate_credentials_file(target.credentials_file))}",
         f"S3_PROFILE={shell_value(validate_s3_profile(target.profile))}",
@@ -270,14 +272,14 @@ def _publish_cache(stage: str, source_kind: str, network: str, ncpus: int) -> st
         (
             f'echo "[{stage}] archiving reusable index"',
             'mkdir -p "$CACHE_DIR"',
-            's5 rm "$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/manifest.json" >/dev/null 2>&1 || true',
-            f'index_archive_upload "$RUN_WORK" "$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/blocksci_data.tar.zst" '
+            's5 rm "$RUN_PREFIX/blocksci-parse_data/manifest.json" >/dev/null 2>&1 || true',
+            f'index_archive_upload "$RUN_WORK" "$RUN_PREFIX/blocksci-parse_data/blocksci_data.tar.zst" '
             f'"{ncpus}" blocksci_data',
             f"printf {manifest_format} \\",
             f'  "$RUN_ID" "$IMAGE_NAME" "{source_kind}" "{network}" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA" '
             '"$ARCHIVE_SHA256" \\',
             '  > "$CACHE_DIR/manifest.json"',
-            's5 cp "$CACHE_DIR/manifest.json" "$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/manifest.json"',
+            's5 cp "$CACHE_DIR/manifest.json" "$RUN_PREFIX/blocksci-parse_data/manifest.json"',
         )
     )
 
@@ -366,7 +368,7 @@ def _index_publish(stage: str, source_kind: str, network: str, resources: PBSRes
             '  > "$RUN_WORK/index-manifest.json"',
             'index_publish "$RUN_WORK/index-manifest.json"',
             # The lab cannot see the multijob scratch; it reads the index height from here.
-            's5 cp "$INDEX_DIR/manifest.json" "$ARTIFACT_URI/$RUN_ID/blocksci-index-manifest.json"',
+            's5 cp "$INDEX_DIR/manifest.json" "$RUN_PREFIX/blocksci-index-manifest.json"',
             "index_unlock",
         )
     )
@@ -888,19 +890,19 @@ def render_blocksci_analyze_s3_pbs(
         restore = _index_reader(persistent, resources.walltime)
         setup.prepare.append('cp "$INDEX_DIR/manifest.json" "$OUTPUT_DIR/blocksci-index-manifest.json"')
     else:
-        cache_run = "$RUN_ID"
+        cache_run, cache_prefix = "$RUN_ID", "$RUN_PREFIX"
         cache = []
         if source_run_id is not None:
             source_run_id = _run_id(source_run_id)
             if source_run_id == target.run_id:
                 raise PBSError("A read-only source cache must come from a different run")
-            cache_run = "$CACHE_RUN_ID"
+            cache_run, cache_prefix = "$CACHE_RUN_ID", "$ARTIFACT_URI/$CACHE_RUN_ID"
             cache.append(f"CACHE_RUN_ID={shell_value(source_run_id)}")
             # Record which published index the outputs were computed from.
             setup.prepare.append('cp "$CACHE_DIR/manifest.json" "$OUTPUT_DIR/blocksci-cache-manifest.json"')
         setup.downloads = cache + setup.downloads
         restore = _restore_cache(
-            "$CACHE_DIR", f"$ARTIFACT_URI/{cache_run}/blocksci-parse_data", cache_run, "BlockSci index"
+            "$CACHE_DIR", f"{cache_prefix}/blocksci-parse_data", cache_run, "BlockSci index"
         )
         if source_run_id is not None:
             setup.prepare.append(
@@ -926,7 +928,7 @@ def render_blocksci_analyze_s3_pbs(
         extra_binds=setup.extra_binds,
         connection_help=setup.connection_help,
         output_check=setup.output_check,
-        upload_outputs=f's5 sync "$OUTPUT_DIR/" "$ARTIFACT_URI/$RUN_ID/{MODE_OUTPUTS[mode]}/" || upload_status=$?',
+        upload_outputs=f's5 sync "$OUTPUT_DIR/" "$RUN_PREFIX/{MODE_OUTPUTS[mode]}/" || upload_status=$?',
     )
 
 

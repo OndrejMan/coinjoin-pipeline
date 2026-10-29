@@ -72,6 +72,19 @@ class S3Target:
     endpoint_url: str
     credentials_file: str
     profile: str
+    # A fixed prefix shared by successive runs (the persistent index jobs) in place of
+    # <artifact_uri>/<run_id>; each run replaces its state there and keeps its logs apart.
+    state_prefix: str | None = None
+
+    @property
+    def run_prefix(self) -> str:
+        """Where this run's markers, staged exporters and outputs live."""
+        return self.state_prefix or run_prefix_uri(self.artifact_uri, self.run_id)
+
+    @property
+    def log_prefix(self) -> str:
+        """Where this run's logs live; under a fixed prefix every run keeps its own."""
+        return f"{self.run_prefix}/logs/{self.run_id}" if self.state_prefix else f"{self.run_prefix}/logs"
 
     @property
     def access(self) -> S3Access:
@@ -91,6 +104,7 @@ class S3Target:
             endpoint_url=required(args.artifacts.endpoint_url, "--s3-endpoint-url"),
             credentials_file=required(args.artifacts.credentials_file, "--s3-credentials-file"),
             profile=required(args.artifacts.profile, "--s3-profile"),
+            state_prefix=args.blocksci.index_state_uri,
         )
 
 
@@ -244,9 +258,9 @@ def upload_marker_uri(run_prefix: str, outcome: str) -> str:
     return f"{run_prefix}/.k8s/upload.{outcome}"
 
 
-def staged_exporters_uri(artifact_uri: str, run_id: str) -> str:
+def staged_exporters_uri(run_prefix: str) -> str:
     """The run's ``.pipeline/exporters/`` prefix that every BlockSci and report job downloads."""
-    return f"{run_prefix_uri(artifact_uri, run_id)}/.pipeline/exporters/"
+    return f"{run_prefix}/.pipeline/exporters/"
 
 
 def _no_object_found(result: subprocess.CompletedProcess[str]) -> bool:
@@ -277,14 +291,8 @@ def delete_s3_object_if_present(access: S3Access, object_uri: str) -> None:
         raise ArtifactTransportError(f"S3 object still exists after deletion: {object_uri}")
 
 
-def clear_s3_stage_markers(
-    access: S3Access,
-    artifact_uri: str,
-    run_id: str,
-    stage: str,
-) -> None:
+def clear_s3_stage_markers(access: S3Access, run_prefix: str, stage: str) -> None:
     """Clear stale completion markers before submitting the stage that owns them."""
-    run_prefix = run_prefix_uri(artifact_uri, run_id)
     delete_s3_object_if_present(access, stage_marker_uri(run_prefix, stage, "failed"))
     delete_s3_object_if_present(access, stage_marker_uri(run_prefix, stage, "done"))
 
@@ -374,7 +382,7 @@ STAGED_EXPORTERS_MISSING = "missing"
 STAGED_EXPORTERS_PARTIAL = "partial"
 
 
-def staged_exporters_state(access: S3Access, artifact_uri: str, run_id: str) -> tuple[str, list[str]]:
+def staged_exporters_state(access: S3Access, run_prefix: str) -> tuple[str, list[str]]:
     """Classify the exporter tree already staged under a run prefix.
 
     One entry point is not proof of a usable tree. A prefix staged before the
@@ -383,7 +391,7 @@ def staged_exporters_state(access: S3Access, artifact_uri: str, run_id: str) -> 
     only fail on the compute node, which runs the renamed analysis path. The
     same holds for an upload that died halfway through.
     """
-    prefix = staged_exporters_uri(artifact_uri, run_id)
+    prefix = staged_exporters_uri(run_prefix)
     missing = [relative for relative in REQUIRED_EXPORTERS if not s3_object_exists(access, f"{prefix}{relative}")]
     if not missing:
         return STAGED_EXPORTERS_COMPLETE, []
@@ -392,7 +400,7 @@ def staged_exporters_state(access: S3Access, artifact_uri: str, run_id: str) -> 
     return STAGED_EXPORTERS_PARTIAL, missing
 
 
-def upload_exporters(access: S3Access, artifact_uri: str, run_id: str, exporters_dir: Path) -> None:
+def upload_exporters(access: S3Access, run_prefix: str, exporters_dir: Path) -> None:
     """Stage the checkout's exporters into the run prefix before the Job starts.
 
     Running bare from a checkout means the tree can hold host bytecode; shipping
@@ -405,7 +413,7 @@ def upload_exporters(access: S3Access, artifact_uri: str, run_id: str, exporters
     # to resolve a commit from. The unified report recomputes this hash from the
     # tree it actually ran, so the two can be compared after the fact.
     print(f"[stage] exporters tree sha256={tree_sha256(exporters_dir)}")
-    destination = staged_exporters_uri(artifact_uri, run_id)
+    destination = staged_exporters_uri(run_prefix)
     result = run_s5cmd(
         access,
         "sync",

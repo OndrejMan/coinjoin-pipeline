@@ -32,6 +32,8 @@ def _resources_supplied(config: PipelineConfiguration, stage: str, resources: PB
 
 PERSISTENT_INDEX_TASKS = frozenset({"parse", "update", "backup"}) | READ_ONLY_CACHE_TASKS
 SHARED_ROOTS = ("/storage/", "/auto/")
+# The jobs that only maintain the index; their state can live at one fixed S3 prefix.
+INDEX_STATE_TASKS = ("parse", "update", "backup")
 MULTIJOB_ROOT = "/scratch/multijob-{}/"
 
 
@@ -48,6 +50,8 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
     ):
         if _supplied(config, f"pbs.{stage.replace('-', '_')}.multijob", resources.multijob):
             errors.append(f"--pbs-{stage}-multijob is supported only for the BlockSci stage")
+    if blocksci.index_state_uri and (not index_dir or blocksci.task not in INDEX_STATE_TASKS):
+        errors.append("--blocksci-index-state-uri requires --blocksci-index-dir and --blocksci-task parse, update or backup")
     if not index_dir:
         if backup_uri:
             errors.append("--blocksci-index-backup-uri requires --blocksci-index-dir")

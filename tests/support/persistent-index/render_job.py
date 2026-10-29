@@ -34,6 +34,7 @@ def main() -> int:
     parser.add_argument("--input-uri")
     parser.add_argument("--protocol", action="append", default=[])
     parser.add_argument("--backup-uri")
+    parser.add_argument("--state-uri", help="fixed S3 prefix of the index jobs in place of runs/<run-id>/")
     parser.add_argument("--bitcoin-datadir", type=Path)
     parser.add_argument("--max-block", type=int)
     parser.add_argument("--script", type=Path)
@@ -50,6 +51,7 @@ def main() -> int:
         endpoint_url="https://s3.example.invalid",
         credentials_file=args.credentials,
         profile="test",
+        state_prefix=args.state_uri,
     )
     with (
         mock.patch.object(templates_s3, "INDEX_ROOTS", (root,)),

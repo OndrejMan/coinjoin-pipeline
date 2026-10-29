@@ -156,6 +156,10 @@ HELP = {
         "persistent BlockSci index under /storage/ or /scratch/multijob-<location>/ instead of the S3 cache"
     ),
     "blocksci.index_backup_uri": "S3 prefix of the persistent index's backup (one archive and its manifest)",
+    "blocksci.index_state_uri": (
+        "Fixed S3 prefix of the persistent index's parse, update and backup jobs in place of the run prefix; "
+        "each job replaces its markers and manifest there and keeps its logs under logs/<run-id>/"
+    ),
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
     "pbs.bitcoin_datadir": "Bitcoin datadir the PBS BlockSci stage reads (also $PBS_BITCOIN_DATADIR)",
     "coinjoin_analysis.actions": "program operation (repeatable)",

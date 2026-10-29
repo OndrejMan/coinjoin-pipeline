@@ -175,6 +175,17 @@ in its run. Neither `parse` nor
 `blocksci-index-manifest.json`. `tests/test-persistent-index-local.sh` runs the
 rendered jobs on one host with Docker in place of Singularity.
 
+`blocksci.index_state_uri` (`--blocksci-index-state-uri`, only with `parse`,
+`update` or `backup` of a persistent index) gives those jobs one fixed S3 prefix
+in place of `<artifact_uri>/<run_id>/`. The stage header then sets `RUN_PREFIX`
+to it and `LOG_PREFIX` to `<prefix>/logs/<run_id>`; every other job keeps
+`RUN_PREFIX=<artifact_uri>/<run_id>` and `LOG_PREFIX=$RUN_PREFIX/logs`. Each
+submission clears its stage's markers there, refreshes `.pipeline/exporters/`
+instead of reusing a staged tree, and the job replaces
+`blocksci-index-manifest.json` (the working copy) or `blocksci-index-backup.json`
+(the last backup). Only the logs of every run stay. The run ID still names the
+PBS job and the run directory under `runs_root`.
+
 For mainnet, `dumplings_uri` (`--dumplings-uri`, with `--analysisPbs`) replaces
 the emulator input of the `coinjoin-analysis` stage. The job reads
 `<dumplings_uri>/manifest.json` (written last by mainnet-sync, so a copy being

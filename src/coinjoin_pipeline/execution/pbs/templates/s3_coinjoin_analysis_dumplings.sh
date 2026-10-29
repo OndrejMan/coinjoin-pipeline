@@ -41,4 +41,4 @@ singularity exec --cleanenv "$IMAGE" cat "/opt/coinjoin-analysis/data/$FALSE_CJT
   > "$OUTPUT/false_cjtxs.json" || {{ echo "[coinjoin-analysis] the image has no curated false_cjtxs.json" >&2; rm -f "$OUTPUT/false_cjtxs.json"; }}
 cp "$RUN_WORK/dumplings-manifest.json" "$OUTPUT/dumplings-snapshot.json"
 echo "[coinjoin-analysis] baseline of $(python3 -c 'import json, sys; print(len(json.load(open(sys.argv[1]))["coinjoins"]))' "$OUTPUT/coinjoin_tx_info.json") coinjoins through height $SNAPSHOT_HEIGHT"
-s5 sync "$OUTPUT/" "$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/"
+s5 sync "$OUTPUT/" "$RUN_PREFIX/coinjoin-analysis_data/"

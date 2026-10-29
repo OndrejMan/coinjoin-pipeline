@@ -39,14 +39,20 @@ def ensure_staged_exporters(args: PipelineConfiguration) -> None:
     before emulation, but a standalone ``pbs-from-s3`` — a resumed detect, above
     all — can start from a prefix that has none. Only the missing case uploads:
     a prefix that already carries exporters keeps the ones its earlier stages
-    actually ran with.
+    actually ran with. A fixed state prefix serves one run after another, so it
+    is refreshed every time.
     """
     target = S3Target.from_args(args)
-    state, missing = staged_exporters_state(target.access, target.artifact_uri, target.run_id)
+    if target.state_prefix:
+        # Every run of a fixed prefix starts its own jobs; never reuse a previous run's tree.
+        print(f"[stage] Refreshing the exporters of {target.state_prefix} from {EXPORTERS_ROOT}")
+        upload_exporters(target.access, target.run_prefix, EXPORTERS_ROOT)
+        return
+    state, missing = staged_exporters_state(target.access, target.run_prefix)
     if state == STAGED_EXPORTERS_COMPLETE:
         return
     if state == STAGED_EXPORTERS_PARTIAL:
-        prefix = staged_exporters_uri(target.artifact_uri, target.run_id)
+        prefix = staged_exporters_uri(target.run_prefix)
         raise ArtifactTransportError(
             f"run prefix {prefix} carries an exporter tree without {', '.join(missing)}; "
             "it predates the blocksci_export rename or a previous upload died halfway. "
@@ -54,7 +60,7 @@ def ensure_staged_exporters(args: PipelineConfiguration) -> None:
             "start a fresh --run-id (or delete the prefix and restage it deliberately)"
         )
     print(f"[stage] Run prefix has no exporters; uploading from {EXPORTERS_ROOT}")
-    upload_exporters(target.access, target.artifact_uri, target.run_id, EXPORTERS_ROOT)
+    upload_exporters(target.access, target.run_prefix, EXPORTERS_ROOT)
 
 
 def stage_kubernetes_s3_run(args: PipelineConfiguration) -> None:
@@ -76,4 +82,4 @@ def stage_kubernetes_s3_run(args: PipelineConfiguration) -> None:
     )
     ensure_empty_run_prefix(access, target.artifact_uri, target.run_id)
     print(f"[stage] Uploading exporters from {EXPORTERS_ROOT}")
-    upload_exporters(access, target.artifact_uri, target.run_id, EXPORTERS_ROOT)
+    upload_exporters(access, target.run_prefix, EXPORTERS_ROOT)

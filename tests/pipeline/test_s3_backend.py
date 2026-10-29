@@ -212,17 +212,17 @@ def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
     assert "#PBS -l select=1:ncpus=2:mem=8gb:scratch_ssd=10gb" in report
     for script in (blocksci, report):
         assert 'REPORT_DIR="$RUN_WORK/coinjoinPipeline_data"' in script
-        assert 'sync "$REPORT_DIR/" "$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"' in script
+        assert 'sync "$REPORT_DIR/" "$RUN_PREFIX/coinjoinPipeline_data/"' in script
         assert "blocksciEmulatorAnalysis_data" not in script
     assert "/mnt/data" not in report
-    assert '"$ARTIFACT_URI/$RUN_ID/*"' not in report
-    assert '"$ARTIFACT_URI/$RUN_ID/blocksci_data/*"' not in report
-    assert '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"' not in report
-    assert '"$ARTIFACT_URI/$RUN_ID/blocksci-analysis_data/*"' in report
-    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/*"' in report
-    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/*"' in report
-    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/*"' in mappings
-    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin-mappings_data/"' in mappings
+    assert '"$RUN_PREFIX/*"' not in report
+    assert '"$RUN_PREFIX/blocksci_data/*"' not in report
+    assert '"$RUN_PREFIX/bitcoin_data/*"' not in report
+    assert '"$RUN_PREFIX/blocksci-analysis_data/*"' in report
+    assert '"$RUN_PREFIX/coinjoin-analysis_data/*"' in report
+    assert '"$RUN_PREFIX/coinjoin_emulator_data/*"' in report
+    assert '"$RUN_PREFIX/coinjoin-analysis_data/*"' in mappings
+    assert '"$RUN_PREFIX/coinjoin-mappings_data/"' in mappings
     assert "STAGE=coinjoin-mappings\n" in mappings
     assert "coinjoin_mappings.json" in mappings
 
@@ -259,12 +259,12 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     assert '"schema_version": "1.1"' in parse
     assert "STAGE=blocksci-parse\n" in parse
     assert "blocksci_parser" not in analyze
-    assert 'index_archive_restore "$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/blocksci_data.tar.zst"' in analyze
+    assert 'index_archive_restore "$RUN_PREFIX/blocksci-parse_data/blocksci_data.tar.zst"' in analyze
     assert analyze.index("command -v zstd") < analyze.index(
-        's5 cp "$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/manifest.json"'
+        's5 cp "$RUN_PREFIX/blocksci-parse_data/manifest.json"'
     )
     assert 'grep -Fq \'"schema_version": "1.1"\'' in analyze
-    unpacked = analyze.index('index_archive_restore "$ARTIFACT_URI/$RUN_ID/')
+    unpacked = analyze.index('index_archive_restore "$RUN_PREFIX/')
     assert unpacked < analyze.index('rm -f "$RUN_WORK/blocksci_data/.writing"') < analyze.index("singularity exec")
     assert "worker.py analyze" in analyze
     assert "--cleanenv" in analyze
@@ -272,7 +272,7 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     assert "--env PATH=" not in analyze
     assert "--env PYTHONPATH=" not in analyze
     assert "STAGE=blocksci-analyze\n" in analyze
-    assert '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"' not in analyze
+    assert '"$RUN_PREFIX/bitcoin_data/*"' not in analyze
 
     notebook = render_blocksci_analyze_s3_pbs(
         **COMMON,
@@ -283,8 +283,8 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     subprocess.run(["bash", "-n"], input=notebook, text=True, check=True)
     assert "Open JupyterLab from Scenario Lab" in notebook
     assert "STAGE=blocksci-notebook\n" in notebook
-    assert '"$ARTIFACT_URI/$RUN_ID/.pipeline/exporters/*"' not in notebook
-    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/*"' not in notebook
+    assert '"$RUN_PREFIX/.pipeline/exporters/*"' not in notebook
+    assert '"$RUN_PREFIX/coinjoin_emulator_data/*"' not in notebook
 
 
 def test_notebook_uses_image_python_and_keeps_control_files_outside_saved_notebooks() -> None:
@@ -331,7 +331,7 @@ def test_cache_compression_threads_come_from_rendered_ncpus() -> None:
     for script, ncpus in ((parse, 7), (update, 5)):
         assert f"select=1:ncpus={ncpus}:" in script
         assert (
-            f'index_archive_upload "$RUN_WORK" "$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/blocksci_data.tar.zst" '
+            f'index_archive_upload "$RUN_WORK" "$RUN_PREFIX/blocksci-parse_data/blocksci_data.tar.zst" '
             f'"{ncpus}" blocksci_data' in script
         )
         for variable in ("$NCPUS", "${NCPUS", "$OMP_NUM_THREADS", "nproc"):
@@ -416,8 +416,8 @@ def test_external_bitcoin_parse_uses_shared_blocks_without_s3_emulator_inputs() 
     assert '--bind "$BITCOIN_DATADIR:/mnt/data:ro"' in script
     assert "--network bitcoin " in script
     assert "--disk /mnt/data --max-block 850001" in script
-    assert '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"' not in script
-    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin_emulator_data/' not in script
+    assert '"$RUN_PREFIX/bitcoin_data/*"' not in script
+    assert '"$RUN_PREFIX/coinjoin_emulator_data/' not in script
     assert '"external-bitcoin" "bitcoin" "$EXPORTED_MAX_BLOCK"' in script
 
 
@@ -538,7 +538,7 @@ def test_cached_external_task_downloads_dumplings_baseline_and_uploads_report() 
     assert "--mode external --network bitcoin" in script
     assert "coinjoin_tx_info.json" in script
     assert 'OUTPUT_DIR="$RUN_WORK/coinjoinPipeline_data"' in script
-    assert 's5 sync "$OUTPUT_DIR/" "$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"' in script
+    assert 's5 sync "$OUTPUT_DIR/" "$RUN_PREFIX/coinjoinPipeline_data/"' in script
     assert "STAGE=blocksci-external\n" in script
 
 
@@ -561,7 +561,7 @@ def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target(
     subprocess.run(["bash", "-n"], input=script, text=True, check=True)
     assert "SOURCE_RUN_ID=run-0" in script
     assert 's5 cp "$ARTIFACT_URI/$SOURCE_RUN_ID/blocksci-parse_data/manifest.json"' in script
-    assert '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/manifest.json"' in script
+    assert '"$RUN_PREFIX/blocksci-parse_data/manifest.json"' in script
     unpacked = script.index('index_archive_restore "$ARTIFACT_URI/$SOURCE_RUN_ID/')
     assert script.index("command -v zstd") < unpacked
     assert unpacked < script.index('rm -f "$RUN_WORK/blocksci_data/.writing"')
@@ -635,7 +635,7 @@ def test_external_blocksci_import_repackages_index_without_parser() -> None:
     assert "blocksci_parser" not in script
     assert '"external-blocksci" "from-config" "$EXPORTED_MAX_BLOCK"' in script
     assert "canonicalize_index\n" in script
-    assert '"$ARTIFACT_URI/$RUN_ID/bitcoin_data/*"' not in script
+    assert '"$RUN_PREFIX/bitcoin_data/*"' not in script
 
 
 STUB_S5CMD = """#!/usr/bin/env bash
@@ -926,7 +926,7 @@ def test_blocksci_s3_analysis_mode_uploads_precomputed_artifact() -> None:
     )
 
     assert "blocksci-analysis_data/blocksci_analysis.json" in blocksci
-    assert ('sync "$RUN_WORK/blocksci-analysis_data/" "$ARTIFACT_URI/$RUN_ID/blocksci-analysis_data/"') in blocksci
+    assert ('sync "$RUN_WORK/blocksci-analysis_data/" "$RUN_PREFIX/blocksci-analysis_data/"') in blocksci
     assert "coinjoinPipeline_data/" not in blocksci
 
 
@@ -984,8 +984,8 @@ def test_unified_report_downloads_mappings_only_when_requested() -> None:
         include_mappings=True,
     )
 
-    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin-mappings_data/*"' not in without_mappings
-    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin-mappings_data/*"' in with_mappings
+    assert '"$RUN_PREFIX/coinjoin-mappings_data/*"' not in without_mappings
+    assert '"$RUN_PREFIX/coinjoin-mappings_data/*"' in with_mappings
 
 
 def test_rendered_pbs_script_calls_fake_s5cmd_only_on_compute_path() -> None:
@@ -1310,10 +1310,10 @@ def test_read_only_source_cache_feeds_an_analysis_of_another_run() -> None:
     subprocess.run(["bash", "-n"], input=script, text=True, check=True)
     assert "CACHE_RUN_ID=mainnet-index" in script
     assert 's5 cp "$ARTIFACT_URI/$CACHE_RUN_ID/blocksci-parse_data/manifest.json"' in script
-    assert '"$ARTIFACT_URI/$RUN_ID/blocksci-parse_data/*"' not in script
+    assert '"$RUN_PREFIX/blocksci-parse_data/*"' not in script
     assert 'grep -Fq "\\"run_id\\": \\"$CACHE_RUN_ID\\""' in script
     # Outputs, markers and provenance stay with the analysis run.
-    assert '"$ARTIFACT_URI/$RUN_ID/coinjoinPipeline_data/"' in script
+    assert '"$RUN_PREFIX/coinjoinPipeline_data/"' in script
     assert "STAGE=blocksci-external\n" in script
     provenance = script.index('cp "$CACHE_DIR/manifest.json" "$OUTPUT_DIR/blocksci-cache-manifest.json"')
     assert (
@@ -1360,6 +1360,7 @@ def test_persistent_manifest_records_requested_cpu_and_memory(tmp_path) -> None:
             "IMAGE=docker://blocksci",
             "IMAGE_NAME=docker://blocksci",
             "ARTIFACT_URI=s3://bucket/runs",
+            "RUN_PREFIX=s3://bucket/runs/parse-example",
             "EXPORTED_MAX_BLOCK=42",
             "MANIFEST_EXTRA=''",
             'index_publish() { cp "$1" "$INDEX_DIR/manifest.json"; }',
@@ -1401,7 +1402,7 @@ def test_persistent_update_works_in_place_under_the_writer_lock() -> None:
     assert "\nindex_backup\n" not in script
     assert 'index_publish "$RUN_WORK/index-manifest.json"' in script
     assert "index_unlock 2>/dev/null || :" in script
-    assert '"$ARTIFACT_URI/$RUN_ID/blocksci-index-manifest.json"' in script
+    assert '"$RUN_PREFIX/blocksci-index-manifest.json"' in script
 
 
 def test_persistent_parse_refuses_an_existing_index() -> None:
@@ -1481,8 +1482,20 @@ def test_index_backup_job_reads_under_the_shared_lock() -> None:
     assert calls == sorted(calls)
     assert "\nindex_lock_exclusive\n" not in script
     assert "INDEX_ZSTD_THREADS=16" in script
-    assert '"$ARTIFACT_URI/$RUN_ID/blocksci-index-backup.json"' in script
+    assert '"$RUN_PREFIX/blocksci-index-backup.json"' in script
     assert "STAGE=blocksci-backup\n" in script
+
+
+def test_a_fixed_state_prefix_replaces_the_run_prefix_and_keeps_logs_per_run() -> None:
+    target = replace(S3_TARGET, state_prefix="s3://bucket/bitcoin-mainnet/index")
+    assert target.run_prefix == "s3://bucket/bitcoin-mainnet/index"
+    assert target.log_prefix == "s3://bucket/bitcoin-mainnet/index/logs/run-1"
+    assert (S3_TARGET.run_prefix, S3_TARGET.log_prefix) == ("s3://bucket/runs/run-1", "s3://bucket/runs/run-1/logs")
+    script = render_blocksci_index_backup_s3_pbs(target=target, **PERSISTENT)
+    assert "RUN_PREFIX=s3://bucket/bitcoin-mainnet/index\n" in script
+    assert "LOG_PREFIX=s3://bucket/bitcoin-mainnet/index/logs/run-1\n" in script
+    assert "RUN_ID=run-1\n" in script
+    assert '"$RUN_PREFIX/.pbs/$STAGE.done"' in script
 
 
 def test_index_backup_job_needs_a_backup_prefix() -> None:
@@ -1535,7 +1548,7 @@ def test_dumplings_baseline_reads_the_manifested_copy() -> None:
     # A stale coinjoin-analysis cache next to the Dumplings files would replace them.
     assert "-name '*.txt.json' -delete" in script
     assert script.index("-name '*.txt.json' -delete") < script.index("cj_process.parse_dumplings")
-    assert '"$ARTIFACT_URI/$RUN_ID/coinjoin-analysis_data/"' in script
+    assert '"$RUN_PREFIX/coinjoin-analysis_data/"' in script
     assert "STAGE=coinjoin-analysis\n" in script
 
 

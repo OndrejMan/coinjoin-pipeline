@@ -4,7 +4,7 @@ OUTPUT="$RUN_WORK/{output_directory}/{program}/$RESULT_ID"
 mkdir -p "$OUTPUT/input"
 # Keep logs, the invocation and partial outputs even when the analyzer fails.
 stage_finalize() {{
-  s5 sync "$OUTPUT/" "$ARTIFACT_URI/$RUN_ID/{output_directory}/{program}/$RESULT_ID/" || upload_status=$?
+  s5 sync "$OUTPUT/" "$RUN_PREFIX/{output_directory}/{program}/$RESULT_ID/" || upload_status=$?
 }}
 {start}
 {download}

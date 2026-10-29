@@ -141,6 +141,8 @@ class BlockSciConfiguration(ConfigurationModel):
     # its single backup (written by backup, read to restore it).
     index_dir: str | None = option(None, name="blocksci_index_dir")
     index_backup_uri: str | None = option(None, name="blocksci_index_backup_uri")
+    # Fixed S3 prefix of the index jobs (parse, update, backup) in place of runs/<run-id>/.
+    index_state_uri: str | None = option(None, name="blocksci_index_state_uri")
 
 
 @dataclass(frozen=True, slots=True)
