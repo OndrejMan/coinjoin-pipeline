@@ -154,7 +154,10 @@ def check_final(work: Path, token: str, mode: str, target: int) -> dict:
     assert core["pruned"] and not core["automatic_pruning"]
     assert read_json(work / "recovered-core-indexes.json") == {}
     archive_required = requires_block_archive(work, mode)
-    archive = read_json(work / "archived-oldest-block.json")
+    # s5cmd ls lists by prefix: blk00000.dat comes with its blk00000.dat.json sidecar.
+    lines = (work / "archived-oldest-block.json").read_text().splitlines()
+    listed = [json.loads(line) for line in lines if line.strip()]
+    archive = next((item for item in listed if not item.get("key", "").endswith(".json")), listed[0])
     if archive_required:
         assert archive["size"] > 0
     else:

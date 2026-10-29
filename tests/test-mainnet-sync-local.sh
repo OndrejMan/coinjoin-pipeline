@@ -220,7 +220,7 @@ from pathlib import Path
 work = Path(sys.argv[1])
 config = __import__('yaml').safe_load(next(work.glob('*-2.yaml')).read_text())
 settings = dict(root=str(work/'data'), index_dir=str(work/'index'), run_id='explicit-local-recovery',
-    artifact_uri=config['artifacts']['uri'], endpoint=config['artifacts']['endpoint_url'],
+    state_uri=config['mainnet']['state_uri'], endpoint=config['artifacts']['endpoint_url'],
     credentials=str(work/'credentials'), profile='local')
 (work/'recovery.json').write_text(json.dumps(settings))
 RECOVERY_SETTINGS
