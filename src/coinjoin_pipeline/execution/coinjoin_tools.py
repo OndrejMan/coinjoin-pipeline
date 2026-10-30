@@ -132,6 +132,17 @@ def option_errors(config: PipelineConfiguration) -> list[str]:
             if any(path.startswith("coinjoin_analysis.") for path in config.provided)
             else []
         )
+    return [
+        *_data_mode_errors(options),
+        *research_option_errors(config),
+        *_placement_errors(config),
+        *_operation_errors(options),
+        *_input_errors(config),
+    ]
+
+
+def _data_mode_errors(options: CoinjoinAnalysisConfiguration) -> list[str]:
+    """Mainnet operations read public-chain data; emulation operations need wallet labels."""
     errors = []
     if options.program in MAINNET_PROGRAMS and options.data_mode != "mainnet":
         errors.append(f"{options.program} is a mainnet operation; set --analysis-data-mode mainnet")
@@ -142,7 +153,12 @@ def option_errors(config: PipelineConfiguration) -> list[str]:
             errors.append("process_emulations belongs to emulation data")
         if options.data_mode == "emulation" and any(action != "process_emulations" for action in options.actions):
             errors.append("as25/as38 client experiments and their prediction matrix belong to mainnet")
-    errors.extend(research_option_errors(config))
+    return errors
+
+
+def _placement_errors(config: PipelineConfiguration) -> list[str]:
+    """Analyzer operations run alone, locally through coinjoin-analysis or on PBS through pbs-from-s3."""
+    errors = []
     if config.action not in {"coinjoin-analysis", "pbs-from-s3"}:
         errors.append("--analysis-program requires coinjoin-analysis or pbs-from-s3")
     if config.action == "pbs-from-s3" and not config.stages.analysis:
@@ -151,32 +167,42 @@ def option_errors(config: PipelineConfiguration) -> list[str]:
         errors.append("coinjoin-analysis operations run alone; disable BlockSci/mappings and select one run")
     if config.action == "coinjoin-analysis" and config.stages.analysis:
         errors.append("analysis operations on PBS use pbs-from-s3; local operations use Docker/Podman")
-    allowed = PROGRAM_ACTIONS[options.program]
+    return errors
+
+
+def _operation_errors(options: CoinjoinAnalysisConfiguration) -> list[str]:
+    """The selected operations and the switches the program accepts."""
+    errors = []
+    program = options.program or ""
+    allowed = PROGRAM_ACTIONS[program]
     if allowed and not options.actions:
         errors.append("choose at least one --analysis-operation")
     if any(action not in allowed for action in options.actions):
-        errors.append(f"invalid operation for {options.program}; choose from {', '.join(allowed)}")
-    if options.program == "parse_cj_logs" and len(options.actions) != 1:
+        errors.append(f"invalid operation for {program}; choose from {', '.join(allowed)}")
+    if program == "parse_cj_logs" and len(options.actions) != 1:
         errors.append("parse_cj_logs accepts exactly one operation")
-    if options.program == "scan_results_plot":
-        if (
-            not options.filename
-            or not relative_path(options.filename)
-            or "/" in options.filename
-            or options.filename.endswith(".json")
-        ):
+    if program == "scan_results_plot":
+        filename = options.filename
+        if not filename or not relative_path(filename) or "/" in filename or filename.endswith(".json"):
             errors.append("scan_results_plot requires --analysis-filename (a filename without .json)")
     elif options.filename is not None:
         errors.append("--analysis-filename is only supported by scan_results_plot")
-    if options.program in POSITIONAL_PROGRAMS and (options.env_vars or options.load_config):
-        errors.append(f"{options.program} has no --env_vars or --load-config option")
-    if options.program in WORKFLOW_PROGRAMS:
+    if program in POSITIONAL_PROGRAMS and (options.env_vars or options.load_config):
+        errors.append(f"{program} has no --env_vars or --load-config option")
+    if program in WORKFLOW_PROGRAMS:
         if options.env_vars or options.load_config or options.target_paths:
-            errors.append(f"{options.program} sets its own switches and paths; choose only its protocols")
+            errors.append(f"{program} sets its own switches and paths; choose only its protocols")
         if len(set(options.actions)) != len(options.actions):
-            errors.append(f"{options.program} lists each protocol once")
-    if options.load_config and options.program not in {"parse_cj_logs", "parse_dumplings"}:
+            errors.append(f"{program} lists each protocol once")
+    if options.load_config and program not in {"parse_cj_logs", "parse_dumplings"}:
         errors.append("--analysis-load-config is supported by parse_cj_logs and parse_dumplings")
+    return errors
+
+
+def _input_errors(config: PipelineConfiguration) -> list[str]:
+    """Target paths stay inside the input dataset, which comes from S3 on PBS and a directory locally."""
+    options = config.coinjoin_analysis
+    errors = []
     if options.program != "parse_cj_logs" and len(options.target_paths) > 1:
         errors.append(f"{options.program} accepts only one target path")
     if options.program == "perf_processing" and not options.target_paths:
@@ -193,8 +219,8 @@ def option_errors(config: PipelineConfiguration) -> list[str]:
             validate_artifact_uri(options.input_uri)
         except ValueError as error:
             errors.append(f"invalid analysis input URI: {error}")
-    if options.input_uri and config.action != "pbs-from-s3":
-        errors.append("--analysis-input-uri requires pbs-from-s3; use --analysis-input-dir locally")
+        if config.action != "pbs-from-s3":
+            errors.append("--analysis-input-uri requires pbs-from-s3; use --analysis-input-dir locally")
     if options.input_dir and config.action != "coinjoin-analysis":
         errors.append("--analysis-input-dir is local; use --analysis-input-uri on PBS")
     return errors
