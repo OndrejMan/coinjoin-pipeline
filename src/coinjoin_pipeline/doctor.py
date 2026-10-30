@@ -122,6 +122,36 @@ def inherited_root_ownership_errors(runs_root: Path) -> list[str]:
     return errors
 
 
+def _exit_status(command: list[str], timeout: int) -> int | None:
+    """Exit status of a silent probe, or None when it timed out."""
+    try:
+        return subprocess.run(
+            command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=timeout
+        ).returncode
+    except subprocess.TimeoutExpired:
+        return None
+
+
+def _image_errors(executable: str, images: Images, selected: set[str]) -> list[str]:
+    """Each selected image must exist locally or be pullable from its registry."""
+    errors: list[str] = []
+    for component, image in images.as_dict().items():
+        if component not in selected:
+            continue
+        local = _exit_status([executable, "image", "inspect", image], timeout=10)
+        if local is None:
+            errors.append(f"image inspection timed out: {image}")
+            continue
+        if local == 0:
+            continue
+        remote = _exit_status([executable, "manifest", "inspect", image], timeout=20)
+        if remote is None:
+            errors.append(f"registry image check timed out: {image}")
+        elif remote:
+            errors.append(f"image is unavailable locally and from its registry: {image}")
+    return errors
+
+
 def check(
     runtime: str,
     runs_root: Path,
@@ -142,18 +172,10 @@ def check(
         if not executable:
             errors.append(f"{runtime} command not found")
         else:
-            try:
-                result = subprocess.run(
-                    [executable, "info"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                    timeout=10,
-                )
-            except subprocess.TimeoutExpired:
+            status = _exit_status([executable, "info"], timeout=10)
+            if status is None:
                 errors.append(f"{runtime} daemon/API check timed out")
-                result = None
-            if result is not None and result.returncode:
+            elif status:
                 errors.append(f"{runtime} daemon/API is not reachable")
     for capability, command, purpose in (
         (Capability.KUBECTL, "kubectl", "the Kubernetes driver"),
@@ -171,33 +193,5 @@ def check(
         errors.extend(inherited_root_ownership_errors(runs_root))
     if executable and check_images and wants_runtime:
         selected = set(images.as_dict()) if image_components is None else image_components
-        for component, image in images.as_dict().items():
-            if component not in selected:
-                continue
-            try:
-                local = subprocess.run(
-                    [executable, "image", "inspect", image],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                    timeout=10,
-                )
-            except subprocess.TimeoutExpired:
-                errors.append(f"image inspection timed out: {image}")
-                continue
-            if local.returncode == 0:
-                continue
-            try:
-                remote = subprocess.run(
-                    [executable, "manifest", "inspect", image],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                    timeout=20,
-                )
-            except subprocess.TimeoutExpired:
-                errors.append(f"registry image check timed out: {image}")
-                continue
-            if remote.returncode:
-                errors.append(f"image is unavailable locally and from its registry: {image}")
+        errors.extend(_image_errors(executable, images, selected))
     return errors

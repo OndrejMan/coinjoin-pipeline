@@ -85,6 +85,91 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
     return config
 
 
+def resolve_run_images(config: PipelineConfiguration) -> tuple[PipelineConfiguration, Images]:
+    """Pin every image reference: component images, their PBS overrides and the S3 job images."""
+    images = resolve_images(
+        config.images.version,
+        {item.name: getattr(config.images, item.name) for item in fields(Images)},
+        local=config.images.local_build,
+    )
+    pbs = config.pbs
+    config = replace(
+        config,
+        images=replace(
+            config.images,
+            emulator=images.emulator,
+            coinjoin_analysis=images.coinjoin_analysis,
+            blocksci=images.blocksci,
+            mappings=images.mappings,
+            sake=images.sake,
+        ),
+        pbs=replace(
+            pbs,
+            blocksci_image=pbs.blocksci_image or pbs.image or images.blocksci,
+            coinjoin_analysis_image=pbs.coinjoin_analysis_image or pbs.image or images.coinjoin_analysis,
+            mappings_enumerator_image=pbs.mappings_enumerator_image or pbs.image or images.mappings,
+            sake_image=pbs.sake_image or pbs.image or images.sake,
+        ),
+    )
+    if config.artifacts.backend == "s3":
+        from .execution.pbs_settings import resolve_unified_report_image, resolve_uploader_image
+
+        config = replace(
+            config,
+            images=replace(
+                config.images,
+                uploader=resolve_uploader_image(config),
+                unified_report=resolve_unified_report_image(config),
+            ),
+        )
+    return config, images
+
+
+def selected_run_dir(config: PipelineConfiguration) -> Path | None:
+    """--run-dir relative to the runs root, else the directory of the run ID."""
+    if config.run_dir:
+        selected = Path(config.run_dir).expanduser()
+        return (selected if selected.is_absolute() else config.runs_path / selected).resolve()
+    return config.runs_path / config.run_id if config.run_id else None
+
+
+def host_environment(config: PipelineConfiguration, images: Images, reproduction: str) -> dict[str, str]:
+    """Variables the launched stages read, set only while the run executes."""
+    root = config.runs_path
+    environment = {
+        "CONTAINER_RUNTIME": config.runtime,
+        "EXPORTERS_DIR": str(EXPORTERS_ROOT),
+        "SCENARIOS_DIR": str(SCENARIOS_ROOT),
+        "NOTEBOOKS_DIR": str(root / ".notebooks"),
+        "EMULATION_LOGS_DIR": str(root),
+        "BLOCKSCI_LAUNCH_JUPYTER": os.environ.get("BLOCKSCI_LAUNCH_JUPYTER") or "0",
+        "COINJOIN_EMULATOR_IMAGE": images.emulator,
+        "COINJOIN_ANALYSIS_IMAGE": images.coinjoin_analysis,
+        "BLOCKSCI_IMAGE": images.blocksci,
+        "MAPPINGS_ENUMERATOR_IMAGE": images.mappings,
+        "SAKE_IMAGE": images.sake,
+        "REPRODUCTION_COMMAND": reproduction,
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    for key, value in (
+        ("COINJOIN_UPLOADER_IMAGE", config.images.uploader),
+        ("COINJOIN_UNIFIED_REPORT_IMAGE", config.images.unified_report),
+    ):
+        if value:
+            environment[key] = value
+    if config.run_id:
+        environment["PIPELINE_RUN_ID"] = config.run_id
+    if config.kubernetes.copy_to_host:
+        environment["KUBERNETES_COPY_TO_HOST_DIR"] = os.environ.get("KUBERNETES_COPY_TO_HOST_DIR") or str(
+            root / ".kubernetes-btc-data"
+        )
+    if config.engine == "joinmarket" and platform.machine() in {"arm64", "aarch64"}:
+        environment["COINJOIN_EMULATOR_DOCKER_PLATFORM"] = (
+            os.environ.get("COINJOIN_EMULATOR_DOCKER_PLATFORM") or "linux/amd64"
+        )
+    return environment
+
+
 @dataclass(frozen=True)
 class RunContext:
     config: PipelineConfiguration
@@ -94,84 +179,8 @@ class RunContext:
 
     @classmethod
     def prepare(cls, config: PipelineConfiguration, reproduction: str) -> RunContext:
-        config = resolve_configuration(config)
-        images = resolve_images(
-            config.images.version,
-            {item.name: getattr(config.images, item.name) for item in fields(Images)},
-            local=config.images.local_build,
-        )
-        config = replace(
-            config,
-            images=replace(
-                config.images,
-                emulator=images.emulator,
-                coinjoin_analysis=images.coinjoin_analysis,
-                blocksci=images.blocksci,
-                mappings=images.mappings,
-                sake=images.sake,
-            ),
-        )
-        pbs = config.pbs
-        config = replace(
-            config,
-            pbs=replace(
-                pbs,
-                blocksci_image=pbs.blocksci_image or pbs.image or images.blocksci,
-                coinjoin_analysis_image=pbs.coinjoin_analysis_image or pbs.image or images.coinjoin_analysis,
-                mappings_enumerator_image=pbs.mappings_enumerator_image or pbs.image or images.mappings,
-                sake_image=pbs.sake_image or pbs.image or images.sake,
-            ),
-        )
-        if config.artifacts.backend == "s3":
-            from .execution.pbs_settings import resolve_unified_report_image, resolve_uploader_image
-
-            config = replace(
-                config,
-                images=replace(
-                    config.images,
-                    uploader=resolve_uploader_image(config),
-                    unified_report=resolve_unified_report_image(config),
-                ),
-            )
-        root = config.runs_path
-        run_dir = None
-        if config.run_dir:
-            selected = Path(config.run_dir).expanduser()
-            run_dir = (selected if selected.is_absolute() else root / selected).resolve()
-        elif config.run_id:
-            run_dir = root / config.run_id
-        environment = {
-            "CONTAINER_RUNTIME": config.runtime,
-            "EXPORTERS_DIR": str(EXPORTERS_ROOT),
-            "SCENARIOS_DIR": str(SCENARIOS_ROOT),
-            "NOTEBOOKS_DIR": str(root / ".notebooks"),
-            "EMULATION_LOGS_DIR": str(root),
-            "BLOCKSCI_LAUNCH_JUPYTER": os.environ.get("BLOCKSCI_LAUNCH_JUPYTER") or "0",
-            "COINJOIN_EMULATOR_IMAGE": images.emulator,
-            "COINJOIN_ANALYSIS_IMAGE": images.coinjoin_analysis,
-            "BLOCKSCI_IMAGE": images.blocksci,
-            "MAPPINGS_ENUMERATOR_IMAGE": images.mappings,
-            "SAKE_IMAGE": images.sake,
-            "REPRODUCTION_COMMAND": reproduction,
-            "PYTHONDONTWRITEBYTECODE": "1",
-        }
-        for key, value in (
-            ("COINJOIN_UPLOADER_IMAGE", config.images.uploader),
-            ("COINJOIN_UNIFIED_REPORT_IMAGE", config.images.unified_report),
-        ):
-            if value:
-                environment[key] = value
-        if config.run_id:
-            environment["PIPELINE_RUN_ID"] = config.run_id
-        if config.kubernetes.copy_to_host:
-            environment["KUBERNETES_COPY_TO_HOST_DIR"] = os.environ.get("KUBERNETES_COPY_TO_HOST_DIR") or str(
-                root / ".kubernetes-btc-data"
-            )
-        if config.engine == "joinmarket" and platform.machine() in {"arm64", "aarch64"}:
-            environment["COINJOIN_EMULATOR_DOCKER_PLATFORM"] = (
-                os.environ.get("COINJOIN_EMULATOR_DOCKER_PLATFORM") or "linux/amd64"
-            )
-        return cls(config, images, environment, run_dir)
+        config, images = resolve_run_images(resolve_configuration(config))
+        return cls(config, images, host_environment(config, images, reproduction), selected_run_dir(config))
 
     @contextmanager
     def activate(self):

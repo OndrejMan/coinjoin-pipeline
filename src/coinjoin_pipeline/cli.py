@@ -140,6 +140,54 @@ def execute(context: RunContext) -> None:
         orchestrator.run_configuration(context.config)
 
 
+def preflight_errors(context: RunContext) -> list[str]:
+    """Option errors, then, for a real run, missing images and host capabilities."""
+    config = context.config
+    root = config.runs_path
+    runtime_root()
+    errors = validate_arguments(config, root)
+    if not config.dry_run:
+        errors.extend(
+            doctor_check(
+                config.runtime,
+                root,
+                context.images,
+                image_components=required_image_components(config),
+                capabilities=required_capabilities(config),
+            )
+        )
+    return errors
+
+
+def start_host_manifest(
+    context: RunContext, original: list[str], reproduction: str
+) -> tuple[Path | None, dict[str, object]]:
+    """Create the runs root and record the launch in the run's manifest when the run has a directory."""
+    config = context.config
+    root = config.runs_path
+    for path in (root, root / ".notebooks"):
+        path.mkdir(parents=True, exist_ok=True)
+    target = None
+    if context.run_dir is not None and (config.run_dir or config.action in {"emulate", "full-run"}):
+        target = context.run_dir / RUN_MANIFEST
+    effective = asdict(config)
+    effective.pop("_provided", None)
+    manifest = initial_manifest(
+        action=config.action,
+        requested_version=config.images.version or DEFAULT_VERSION,
+        effective_images=context.images.as_dict(),
+        runtime=config.runtime,
+        user_arguments=original,
+        configuration=effective,
+        environment=environment_snapshot({**os.environ, **context.environment}),
+        user_command=reproduction,
+        working_directory=str(Path.cwd()),
+    )
+    if target:
+        store_host_manifest(target, manifest)
+    return target, manifest
+
+
 def main(argv: list[str] | None = None) -> int:
     use_line_buffered_output()
     original = list(sys.argv[1:] if argv is None else argv)
@@ -160,44 +208,14 @@ def main(argv: list[str] | None = None) -> int:
         reproduction = shlex.join(["coinjoin-pipeline", *original])
         context = RunContext.prepare(load_configuration(original), reproduction)
         config = context.config
-        root = config.runs_path
-        runtime_root()
-        errors = validate_arguments(config, root)
-        if not config.dry_run:
-            errors.extend(
-                doctor_check(
-                    config.runtime,
-                    root,
-                    context.images,
-                    image_components=required_image_components(config),
-                    capabilities=required_capabilities(config),
-                )
-            )
+        errors = preflight_errors(context)
         if errors:
             return fail(*errors)
         print(f"Run configuration: {config.action} ({config.driver}, {config.artifacts.backend})")
         if config.dry_run:
             print_dry_run_context(context)
         else:
-            for path in (root, root / ".notebooks"):
-                path.mkdir(parents=True, exist_ok=True)
-            if context.run_dir is not None and (config.run_dir or config.action in {"emulate", "full-run"}):
-                target = context.run_dir / RUN_MANIFEST
-            effective = asdict(config)
-            effective.pop("_provided", None)
-            manifest = initial_manifest(
-                action=config.action,
-                requested_version=config.images.version or DEFAULT_VERSION,
-                effective_images=context.images.as_dict(),
-                runtime=config.runtime,
-                user_arguments=original,
-                configuration=effective,
-                environment=environment_snapshot({**os.environ, **context.environment}),
-                user_command=reproduction,
-                working_directory=str(Path.cwd()),
-            )
-            if target:
-                store_host_manifest(target, manifest)
+            target, manifest = start_host_manifest(context, original, reproduction)
         with context.activate():
             execute(context)
         code = EXIT_OK
