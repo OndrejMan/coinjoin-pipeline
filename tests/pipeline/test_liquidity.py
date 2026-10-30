@@ -13,6 +13,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from exporters.artifact_paths import POSTMIX_SPENDS_FILE  # noqa: E402
 from exporters.liquidity import build_liquidity, liquidity_series, save_liquidity_dataset  # noqa: E402
 from exporters.markdown_report import render_liquidity_evaluation  # noqa: E402
+from exporters.scenario import liquidity_groups  # noqa: E402
 
 BIG, SMALL, OTHER = "wallet-000", "wallet-001", "wallet-002"
 FUND, CJ1, CJ2, CJ3, P1, P2 = "fund", "cj1", "cj2", "cj3", "postmix1", "postmix2"
@@ -132,8 +133,8 @@ def blocksci_mix_events():
     }
 
 
-def build(run_dir, mix_events=None, error=None):
-    return build_liquidity(run_dir, emulator_data(), coinjoin_analysis_data(), mix_events, error)
+def build(run_dir, mix_events=None, error=None, groups=None):
+    return build_liquidity(run_dir, emulator_data(), coinjoin_analysis_data(), mix_events, error, groups)
 
 
 def events(dataset, txid, side):
@@ -244,6 +245,64 @@ def test_fin_attributes_the_descending_leaves_to_the_large_wallet(run_dir):
     assert fin["lift"] == 1.075127
 
 
+def test_a_one_wallet_group_matches_the_large_wallet(run_dir):
+    section, dataset = build(run_dir, groups={"large": [BIG]})
+    group = section["large_groups"][0]
+    wallet = section["large_wallets"][0]
+
+    assert (group["group"], group["wallets"]) == ("large", [BIG])
+    assert group["fin"] == wallet["fin"]
+    assert {key: value for key, value in group.items() if key not in {"group", "wallets", "fin"}} == {
+        key: value for key, value in wallet.items() if key not in {"wallet", "fin"}
+    }
+    assert dataset["groups"]["large"]["series"] == dataset["wallets"][BIG]["series"]
+
+
+def test_a_group_is_judged_by_the_joint_fin_of_its_wallets(run_dir):
+    section, dataset = build(run_dir, groups={"pair": [BIG, SMALL]})
+    group = section["large_groups"][0]
+    wallets = dataset["wallets"]
+
+    assert group["entered_sats"] == wallets[BIG]["entered_sats"] + wallets[SMALL]["entered_sats"]
+    assert group["left_sats"] == wallets[BIG]["left_sats"] + wallets[SMALL]["left_sats"]
+    assert group["coinjoins_participated"] == 3
+    assert (group["first_enter_index"], group["last_leave_index"]) == (0, 2)
+    fin = group["fin"]
+    assert fin["descending_window"] == [0, 1]
+    assert (fin["window_leave_precision"], fin["window_leave_recall"], fin["lift"]) == (1.0, 0.930123, 1.0)
+
+
+def test_without_groups_the_report_lists_none(run_dir):
+    section, dataset = build(run_dir)
+
+    assert section["large_groups"] == []
+    assert dataset["groups"] == {}
+
+
+@pytest.mark.parametrize(
+    ("groups", "expected"),
+    [
+        (None, {}),
+        ({"split": [0, 1]}, {"split": ["wallet-000", "wallet-001"]}),
+    ],
+)
+def test_scenario_groups_name_wallets_by_index(groups, expected):
+    scenario = {"wallets": [{}, {}, {}], **({"liquidity_groups": groups} if groups is not None else {})}
+
+    assert liquidity_groups(scenario) == expected
+
+
+def test_scenario_groups_must_map_names_to_indices():
+    with pytest.raises(TypeError, match="liquidity_groups"):
+        liquidity_groups({"wallets": [{}, {}, {}], "liquidity_groups": [0, 1]})
+
+
+@pytest.mark.parametrize("indices", [[], [3], [-1], [True], "0"])
+def test_scenario_groups_must_list_existing_wallets(indices):
+    with pytest.raises(ValueError, match="liquidity group 'split'"):
+        liquidity_groups({"wallets": [{}, {}, {}], "liquidity_groups": {"split": indices}})
+
+
 def test_observed_classification_is_compared_per_input_and_output(run_dir):
     section, _ = build(run_dir)
     agreement = section["classification_agreement"]
@@ -336,6 +395,16 @@ def test_markdown_lists_disagreements_and_the_large_wallet(run_dir):
     assert "| outputs:MIX_LEAVE->MIX_STAY | 2 |" in markdown
     assert "| wallet-000 | 0.56044 | 0 | 0 | 1 | [0, 1] | 1 | 1.075127 |" in markdown
     assert "Scheduled postmix spends: 2 (not_due 1, sent 1); 1 confirmed" in markdown
+    assert "### Wallet Groups" not in markdown
+
+
+def test_markdown_lists_the_wallet_groups(run_dir):
+    section, _ = build(run_dir, groups={"pair": [BIG, SMALL]})
+
+    markdown = "\n".join(render_liquidity_evaluation({"liquidity_evaluation": section}))
+
+    assert "### Wallet Groups" in markdown
+    assert "| pair | wallet-000, wallet-001 | 0.67033 | 0 | 0 | 2 | [0, 1] | 1 | 0.930123 | 1 |" in markdown
 
 
 def test_markdown_adds_blocksci_next_to_coinjoin_analysis(run_dir):

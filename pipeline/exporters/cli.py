@@ -173,6 +173,7 @@ def assemble_report(args: argparse.Namespace) -> int:
     if args.skip_clustering:
         predicted_address_clusters = None
         cluster_export_error = "Clustering was explicitly skipped during report assembly."
+    scenario = load_scenario(run_dir, args.scenario)
     liquidity_evaluation, liquidity_dataset = build_liquidity(
         run_dir,
         emulator_data,
@@ -181,6 +182,7 @@ def assemble_report(args: argparse.Namespace) -> int:
         analysis.get("mix_events_error")
         if "mix_events" in analysis
         else "The BlockSci analysis artifact predates liquidity event classification; rerun the analysis.",
+        (scenario or {}).get("liquidity_groups"),
     )
     output_path = output_dir / args.output_name
     report = build_report(
@@ -188,7 +190,7 @@ def assemble_report(args: argparse.Namespace) -> int:
         coinjoin_analysis,
         analysis["records"],
         args.coinjoin_type,
-        load_scenario(run_dir, args.scenario),
+        scenario,
         min_input_count=args.min_input_count,
         first_wasabi2_block=analysis["first_wasabi2_block"],
         emulator_data=emulator_data,

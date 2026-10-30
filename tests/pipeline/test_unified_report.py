@@ -2586,6 +2586,7 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(scenario["default_version"], "2.6.0")
         self.assertEqual(scenario["wallet_count"], 2)
         self.assertEqual(scenario["total_initial_funds_sats"], 3250000)
+        self.assertEqual(scenario["liquidity_groups"], {})
         self.assertEqual(
             scenario["wallets"],
             [

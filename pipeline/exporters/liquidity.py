@@ -5,7 +5,7 @@ staying the mix three times: from the exported blocks and the producer coinjoin
 labels (ground truth), from coinjoin-analysis (observed) and from BlockSci over
 the CoinJoins it detected. The cumulative liquidity of each classification, its
 decomposition by wallet ownership, and how well the observed curve reveals a
-large wallet's entry and exit form the report section.
+large wallet's, or a scenario's group of wallets', entry and exit form the report section.
 The per-wallet events are exported as the ground-truth dataset.
 """
 
@@ -187,8 +187,14 @@ def is_fast(item: JsonObject) -> bool:
     return distance is not None and distance < WINDOW_COINJOINS
 
 
-def liquidity_series(coinjoins: list[JsonObject], event_field: str, wallet: str | None = None) -> JsonObject:
-    """Cumulative liquidity of the pool, or of one wallet's coins, per coinjoin.
+def owned_by(wallets: str | set[str]) -> set[str]:
+    return {wallets} if isinstance(wallets, str) else wallets
+
+
+def liquidity_series(
+    coinjoins: list[JsonObject], event_field: str, wallets: str | set[str] | None = None
+) -> JsonObject:
+    """Cumulative liquidity of the pool, or of the coins of one wallet or a set of them, per coinjoin.
 
     interim: inflow minus outflow, an outflow charged to the coinjoin that created it.
     interim_fast_leave: the same, charging only outputs leaving within the window.
@@ -200,9 +206,10 @@ def liquidity_series(coinjoins: list[JsonObject], event_field: str, wallet: str 
     current = current_fast = current_unmoved = 0
     unmoved: dict[tuple[str, str], int] = {}
     inflow_types = OBSERVED_INFLOW if event_field == "observed_event" else {ENTER}
+    owners = None if wallets is None else owned_by(wallets)
     for coinjoin in coinjoins:
-        inputs = [item for item in coinjoin["inputs"] if wallet is None or item.get("wallet") == wallet]
-        outputs = [item for item in coinjoin["outputs"] if wallet is None or item.get("wallet") == wallet]
+        inputs = [item for item in coinjoin["inputs"] if owners is None or item.get("wallet") in owners]
+        outputs = [item for item in coinjoin["outputs"] if owners is None or item.get("wallet") in owners]
         for item in inputs:
             current_unmoved -= unmoved.pop((str(item.get("prev_txid")), str(item.get("prev_vout"))), 0)
         step_enter = sum(value_of(item) for item in inputs if item.get(event_field) in inflow_types)
@@ -264,32 +271,42 @@ def last_index(values: list[int]) -> int | None:
     return next((index for index in range(len(values) - 1, -1, -1) if values[index] > 0), None)
 
 
+def owner_summary(coinjoins: list[JsonObject], pool: JsonObject, wallets: str | set[str]) -> JsonObject:
+    """Totals, extent and peak pool share of the coins of one wallet or a set of them."""
+    owners = owned_by(wallets)
+    series = liquidity_series(coinjoins, "event", owners)
+    peak = max(series["interim"], default=0)
+    peak_index = series["interim"].index(peak) if series["interim"] else None
+    pool_at_peak = pool["interim"][peak_index] if peak_index is not None else 0
+    participated = sum(1 for coinjoin in coinjoins if any(item.get("wallet") in owners for item in coinjoin["inputs"]))
+    return {
+        "coinjoins_participated": participated,
+        "entered_sats": sum(series["enter"]),
+        "left_sats": sum(series["leave"]),
+        "stayed_sats": sum(series["stay"]),
+        "first_enter_index": first_index(series["enter"]),
+        "last_enter_index": last_index(series["enter"]),
+        "first_leave_index": first_index(series["leave"]),
+        "last_leave_index": last_index(series["leave"]),
+        "peak_interim_sats": peak,
+        "peak_index": peak_index,
+        "peak_pool_share": round(peak / pool_at_peak, 6) if pool_at_peak > 0 else None,
+        "series": series,
+    }
+
+
 def wallet_summaries(coinjoins: list[JsonObject], pool: JsonObject) -> dict[str, JsonObject]:
     names = sorted({str(item["wallet"]) for coinjoin in coinjoins for item in io_items(coinjoin) if item.get("wallet")})
-    summaries = {}
-    for name in names:
-        series = liquidity_series(coinjoins, "event", name)
-        peak = max(series["interim"], default=0)
-        peak_index = series["interim"].index(peak) if series["interim"] else None
-        pool_at_peak = pool["interim"][peak_index] if peak_index is not None else 0
-        participated = sum(
-            1 for coinjoin in coinjoins if any(item.get("wallet") == name for item in coinjoin["inputs"])
-        )
-        summaries[name] = {
-            "coinjoins_participated": participated,
-            "entered_sats": sum(series["enter"]),
-            "left_sats": sum(series["leave"]),
-            "stayed_sats": sum(series["stay"]),
-            "first_enter_index": first_index(series["enter"]),
-            "last_enter_index": last_index(series["enter"]),
-            "first_leave_index": first_index(series["leave"]),
-            "last_leave_index": last_index(series["leave"]),
-            "peak_interim_sats": peak,
-            "peak_index": peak_index,
-            "peak_pool_share": round(peak / pool_at_peak, 6) if pool_at_peak > 0 else None,
-            "series": series,
-        }
-    return summaries
+    return {name: owner_summary(coinjoins, pool, name) for name in names}
+
+
+def group_summaries(
+    coinjoins: list[JsonObject], pool: JsonObject, groups: dict[str, list[str]]
+) -> dict[str, JsonObject]:
+    """The scenario's wallet groups, each summarized as if its wallets were one."""
+    return {
+        name: {"wallets": wallets, **owner_summary(coinjoins, pool, set(wallets))} for name, wallets in groups.items()
+    }
 
 
 def descending_window(interim: list[int]) -> tuple[int, int] | None:
@@ -302,18 +319,20 @@ def descending_window(interim: list[int]) -> tuple[int, int] | None:
     return peak, trough
 
 
-def fin_evaluation(coinjoins: list[JsonObject], observed: JsonObject, wallet: str) -> JsonObject:
-    """How the observed curve reveals the wallet's entry and its postmix spends.
+def fin_evaluation(coinjoins: list[JsonObject], observed: JsonObject, wallets: str | set[str]) -> JsonObject:
+    """How the observed curve reveals the entry and postmix spends of a wallet or a group of wallets.
 
     The paper attributes outputs leaving during the descending part of a "fin" to the
     large wallet; precision is the wallet's share of the value leaving in that window,
-    lift compares it to the wallet's share of all value leaving the mix.
+    lift compares it to the wallet's share of all value leaving the mix. A group counts
+    as one wallet, so wallets acting in concert are judged by their joint fin.
     """
+    owners = owned_by(wallets)
     entry_index = observed["enter"].index(max(observed["enter"])) if observed["enter"] else None
     entry_inputs = coinjoins[entry_index]["inputs"] if entry_index is not None else []
     entry_total = sum(value_of(item) for item in entry_inputs if item["event"] == ENTER)
     entry_wallet = sum(
-        value_of(item) for item in entry_inputs if item["event"] == ENTER and item.get("wallet") == wallet
+        value_of(item) for item in entry_inputs if item["event"] == ENTER and item.get("wallet") in owners
     )
 
     window = descending_window(observed["interim"])
@@ -321,10 +340,10 @@ def fin_evaluation(coinjoins: list[JsonObject], observed: JsonObject, wallet: st
         (coinjoin["index"], item) for coinjoin in coinjoins for item in coinjoin["outputs"] if item["event"] == LEAVE
     ]
     all_left = sum(value_of(item) for _, item in leaving)
-    wallet_left = sum(value_of(item) for _, item in leaving if item.get("wallet") == wallet)
+    wallet_left = sum(value_of(item) for _, item in leaving if item.get("wallet") in owners)
     in_window = [item for index, item in leaving if window is not None and window[0] <= index <= window[1]]
     window_left = sum(value_of(item) for item in in_window)
-    window_wallet_left = sum(value_of(item) for item in in_window if item.get("wallet") == wallet)
+    window_wallet_left = sum(value_of(item) for item in in_window if item.get("wallet") in owners)
     precision = compute_optional_rate(window_wallet_left, window_left)
     baseline = compute_optional_rate(wallet_left, all_left)
     return {
@@ -423,8 +442,12 @@ def build_liquidity(
     coinjoin_analysis_data: JsonObject,
     blocksci_mix_events: JsonObject | None = None,
     blocksci_error: str | None = None,
+    groups: dict[str, list[str]] | None = None,
 ) -> tuple[JsonObject, JsonObject | None]:
-    """Return the report section and the dataset, or an unavailable section and None."""
+    """Return the report section and the dataset, or an unavailable section and None.
+
+    ``groups`` names the scenario's wallet groups, see ``scenario.liquidity_groups``.
+    """
     if not emulator_data:
         return unavailable("Liquidity ground truth needs emulator data; this is not an emulator report."), None
     if not (emulator_data.get("label_provenance") or {}).get("independent"):
@@ -442,6 +465,7 @@ def build_liquidity(
     wallets = wallet_summaries(coinjoins, pool)
     dominant = max(wallets, key=lambda name: wallets[name]["peak_interim_sats"], default=None)
     large = [name for name, summary in wallets.items() if (summary["peak_pool_share"] or 0) >= LARGE_WALLET_SHARE]
+    grouped = group_summaries(coinjoins, pool, groups or {})
     postmix_spends = load_postmix_spends(run_dir, transactions, {txid: index for index, txid in enumerate(order)})
 
     section = {
@@ -462,6 +486,14 @@ def build_liquidity(
             }
             for name in large
         ],
+        "large_groups": [
+            {
+                "group": name,
+                **{key: value for key, value in summary.items() if key != "series"},
+                "fin": fin_evaluation(coinjoins, observed_pool, set(summary["wallets"])),
+            }
+            for name, summary in grouped.items()
+        ],
         "postmix_spends": (
             {key: value for key, value in postmix_spends.items() if key != "spends"} if postmix_spends else None
         ),
@@ -474,6 +506,7 @@ def build_liquidity(
         "parameters": section["parameters"],
         "pool": {"ground_truth": pool, "observed": observed_pool, "blocksci": blocksci_pool},
         "wallets": wallets,
+        "groups": grouped,
         "coinjoins": coinjoins,
         "postmix_spends": postmix_spends["spends"] if postmix_spends else [],
     }
