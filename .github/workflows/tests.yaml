@@ -284,11 +284,11 @@ jobs:
   mainnet-sync-bounded:
     runs-on: [self-hosted, x64]
     needs: pbs-apptainer-image
-    timeout-minutes: 1260
+    timeout-minutes: 1500
     env:
       MAINNET_TEST_TARGET_HEIGHT: '400000'
       MAINNET_TEST_MAX_DATA_MB: '262144'
-      MAINNET_TEST_GENERATION_TIMEOUT: '34200'
+      MAINNET_TEST_GENERATION_TIMEOUT: '41400'
       MAINNET_CORE_LOCAL_IMAGE: coinjoin-pipeline-mainnet-core:${{ github.run_id }}-${{ github.run_attempt }}
       MAINNET_DUMPLINGS_LOCAL_IMAGE: coinjoin-pipeline-mainnet-dumplings:${{ github.run_id }}-${{ github.run_attempt }}
       MAINNET_BLOCKSCI_LOCAL_IMAGE: coinjoin-pipeline-mainnet-blocksci:${{ github.run_id }}-${{ github.run_attempt }}
@@ -342,8 +342,8 @@ jobs:
           docker build --build-arg "DUMPLINGS_COMMIT=$(git -C Dumplings rev-parse HEAD)" -t "$MAINNET_DUMPLINGS_LOCAL_IMAGE" Dumplings
           docker build --target complete --build-arg NTHREADS=4 -t "$MAINNET_BLOCKSCI_LOCAL_IMAGE" blocksci
 
-      - name: Run bounded real-mainnet synchronization and recovery
-        run: timeout --signal=TERM --kill-after=120s 1200m bash tests/test-mainnet-sync-mainnet.sh
+      - name: Run bounded real-mainnet synchronization, recovery and restore of an emptied dataset
+        run: timeout --signal=TERM --kill-after=120s 1440m bash tests/test-mainnet-sync-mainnet.sh
 
       - name: Upload mainnet synchronization diagnostics
         if: always()

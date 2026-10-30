@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Real Core + Dumplings + archive -> local OpenPBS/Apptainer -> BlockSci,
-# verified MinIO backups, pruning, incremental update and checkpoint recovery.
+# verified MinIO backups, pruning, incremental update and checkpoint recovery,
+# then the restore job refilling an emptied working dataset and refusing a partial one.
 # regtest mines a fixture; mainnet downloads public Bitcoin P2P data near target_height.
 # Existing images only. Never contacts MetaCentrum or CESNET S3.
 set -euo pipefail
@@ -23,7 +24,7 @@ fi
 # Independently bound a broken target-height implementation before it fills the runner.
 if [[ "$mode" == mainnet ]]; then
   max_data_mb=${MAINNET_TEST_MAX_DATA_MB:-262144}
-  generation_timeout=${MAINNET_TEST_GENERATION_TIMEOUT:-34200}
+  generation_timeout=${MAINNET_TEST_GENERATION_TIMEOUT:-41400}
 else
   max_data_mb=${MAINNET_TEST_MAX_DATA_MB:-8192}
   generation_timeout=${MAINNET_TEST_GENERATION_TIMEOUT:-1800}
@@ -183,8 +184,33 @@ run_generation() {
     # The fixed state directory holds the newest synchronization; check it is this one.
     if [[ "$pending" == 0 ]] && "$python" -c 'import json,sys; sys.exit(json.load(open(sys.argv[1])).get("run_id") != sys.argv[2])' \
         "$work/data/sync/done.json" "$run" 2>/dev/null; then
-      echo "Completed $run (both PBS jobs exited successfully)"
+      echo "Completed $run (every PBS job exited successfully)"
       return
+    fi
+    sleep 2
+  done
+  echo "Timed out: $run" >&2; return 1
+}
+# A generation the producer must refuse; the jobs after it never start.
+refused_generation() {
+  run=$1
+  make_config "$run" "$2"
+  echo "Submitting local generation $run, expecting the producer to refuse it"
+  (cd "$work" && "$python" -m coinjoin_pipeline.cli run "$work/$run.yaml") >"$work/$run-launch.log" 2>&1
+  producer=$(cat "$work/runs/$run/.pbs/mainnet-producer.jobid")
+  deadline=$((SECONDS + 600))
+  while (( SECONDS < deadline )); do
+    info=$(qstat -xf "$producer" 2>/dev/null || true)
+    if [[ "$info" =~ Exit_status[[:space:]]*=[[:space:]]*(-?[0-9]+) ]]; then
+      [[ "${BASH_REMATCH[1]}" != 0 ]] || { echo "$run: the producer accepted the dataset" >&2; return 1; }
+      # PBS delivers the joined job output to the submission directory after the exit.
+      for _ in {1..60}; do
+        grep -qs "$3" "$work/mainnet_producer.o${producer%%.*}" && { echo "Refused $run: $3"; return; }
+        sleep 1
+      done
+      echo "$run: the producer failed for another reason" >&2
+      cat "$work/mainnet_producer.o${producer%%.*}" >&2 || true
+      return 1
     fi
     sleep 2
   done
@@ -206,6 +232,7 @@ else
   next_target=$("$python" -c 'import json,sys; print(json.load(open(sys.argv[1]))["height"]+1000)' "$first_done")
 fi
 run_generation "local-sync-$token-2" "$next_target"
+cp "$work/data/sync/done.json" "$work/second-done.json"
 s5 cp s3://local-mainnet-sync/core/manifest.json "$work/core-manifest.json" >/dev/null
 if [[ $("$python" "$repo/tests/support/mainnet_sync_e2e.py" archive-required "$work" "$mode") == yes ]]; then
   s5 --json ls s3://local-mainnet-sync/blocks/blk00000.dat >"$work/archived-oldest-block.json"
@@ -253,3 +280,20 @@ core getblockhash 0 >"$work/recovered-genesis.txt"
 seed_stop recovery
 "$python" "$repo/tests/support/mainnet_sync_e2e.py" guard "$work" "$mode" "$max_data_mb"
 "$python" "$repo/tests/support/mainnet_sync_e2e.py" final "$work" "$token" "$mode" "$next_target"
+# Multijob storage expires: with the whole working dataset gone, job 0 restores it from S3.
+s5 ls 's3://local-mainnet-sync/blocks/*' >"$work/blocks-before-restore.txt"
+rm -rf "$work/data" "$work/index"
+if [[ "$mode" == regtest ]]; then
+  # The fixture Core mines into the working datadir, so after the restore there is nothing new.
+  restore_target=$next_target
+else
+  restore_target=$("$python" -c 'import json,sys; print(json.load(open(sys.argv[1]))["height"]+200)' "$work/second-done.json")
+fi
+run_generation "local-sync-$token-3" "$restore_target"
+cp "$work/data/sync/restore.json" "$work/third-restore.json"
+s5 ls 's3://local-mainnet-sync/blocks/*' >"$work/blocks-after-restore.txt"
+"$python" "$repo/tests/support/mainnet_sync_e2e.py" restored "$work" "$token" "$mode" "$restore_target"
+# Only part of the dataset is gone: job 0 leaves it alone and the producer refuses it.
+rm -rf "$work/index"
+refused_generation "local-sync-$token-4" "$restore_target" "The working dataset is incomplete (missing: BlockSci index)"
+"$python" "$repo/tests/support/mainnet_sync_e2e.py" refused "$work" "$token"

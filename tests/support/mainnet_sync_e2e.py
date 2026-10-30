@@ -58,6 +58,13 @@ def configuration(work: Path, endpoint: str, run: str, mode: str, target: int) -
         },
         "pbs": {
             "blocksci_image": str(work / "images/blocksci.sif"),
+            "restore": {
+                "ncpus": 1,
+                "mem": "2gb",
+                "scratch": "2gb",
+                "scratch_type": "local",
+                "walltime": "01:00:00" if mode == "mainnet" else "00:20:00",
+            },
             "producer": {
                 "ncpus": 2,
                 "mem": "8gb" if mode == "mainnet" else "4gb",
@@ -71,6 +78,13 @@ def configuration(work: Path, endpoint: str, run: str, mode: str, target: int) -
                 "scratch": "4gb",
                 "scratch_type": "local",
                 "walltime": "03:00:00" if mode == "mainnet" else "00:20:00",
+            },
+            "checkpoint": {
+                "ncpus": 2,
+                "mem": "4gb" if mode == "mainnet" else "2gb",
+                "scratch": "2gb",
+                "scratch_type": "local",
+                "walltime": "01:00:00" if mode == "mainnet" else "00:20:00",
             },
         },
     }
@@ -129,8 +143,8 @@ def requires_block_archive(work: Path, mode: str) -> bool:
 
 def check_final(work: Path, token: str, mode: str, target: int) -> dict:
     first = read_json(work / "first-done.json")
-    done = read_json(work / "data/sync/done.json")
-    assert done["run_id"] == f"local-sync-{token}-2", "data/sync/ must hold the second run"
+    done = read_json(work / "second-done.json")
+    assert done["run_id"] == f"local-sync-{token}-2", "second-done.json must hold the second run"
     check_height(done, mode, target)
     assert done["height"] > first["height"], "The second generation must advance the existing index"
     chain = "bitcoin" if mode == "mainnet" else "bitcoin/regtest"
@@ -184,6 +198,52 @@ def check_final(work: Path, token: str, mode: str, target: int) -> dict:
     return summary
 
 
+def s3_listing(path: Path) -> dict[str, tuple[str, ...]]:
+    """Key -> (date, time, size) from an `s5cmd ls` listing."""
+    rows = {}
+    for line in path.read_text().splitlines():
+        *fields, key = line.split()
+        rows[key] = tuple(fields)
+    return rows
+
+
+def check_restored(work: Path, token: str, mode: str, target: int) -> dict:
+    """The third run started from an emptied working dataset that job 0 refilled from S3."""
+    second = read_json(work / "second-done.json")
+    restore = read_json(work / "third-restore.json")
+    done = read_json(work / "data/sync/done.json")
+    assert restore["run_id"] == done["run_id"] == f"local-sync-{token}-3"
+    assert restore["action"] == "restored", restore
+    assert restore["height"] == second["height"] and restore["hash"] == second["hash"]
+    check_height(done, mode, target)
+    assert done["height"] >= second["height"]
+    # Restored archive markers: no block file archived before the restore is uploaded again.
+    before, after = s3_listing(work / "blocks-before-restore.txt"), s3_listing(work / "blocks-after-restore.txt")
+    assert before, "The block archive must not be empty before the restore"
+    changed = sorted(key for key, value in before.items() if after.get(key) != value)
+    assert not changed, f"Block files archived again after the restore: {changed}"
+    assert not (work / "data/.sync-active").exists()
+    return {"restored_from_height": restore["height"], "height_after_restore": done["height"]}
+
+
+def check_refused(work: Path, token: str) -> dict:
+    """The fourth run found only part of the working dataset and refused it before Core started."""
+    restore = read_json(work / "data/sync/restore.json")
+    producer = read_json(work / "data/sync/producer.json")
+    assert restore["run_id"] == producer["run_id"] == f"local-sync-{token}-4"
+    assert restore["action"] == "skipped-not-empty", restore
+    assert producer["state"] == "failed", producer
+    assert not (work / "index/config.json").exists(), "A partial dataset must never be refilled"
+    assert not (work / "data/sync/done.json").exists()
+    assert not (work / "data/.sync-active").exists()
+    return {"partial_dataset_refused": True}
+
+
+def record(work: Path, extra: dict) -> None:
+    path = work / "result.json"
+    path.write_text(json.dumps({**read_json(path), **extra}, indent=2) + "\n")
+
+
 def diagnostics(work: Path, result: Path, mode: str, status: int) -> None:
     result.mkdir(parents=True, exist_ok=True)
     (result / "exit-status").write_text(str(status) + "\n")
@@ -218,6 +278,8 @@ def main() -> None:
         "first": ("work", "done", "mode", "target"),
         "archive-required": ("work", "mode"),
         "final": ("work", "token", "mode", "target"),
+        "restored": ("work", "token", "mode", "target"),
+        "refused": ("work", "token"),
         "diagnostics": ("work", "result", "mode", "status"),
     }.items():
         command = sub.add_parser(action)
@@ -236,6 +298,12 @@ def main() -> None:
         print("yes" if requires_block_archive(work, args.mode) else "no")
     elif args.action == "final":
         check_final(work, args.token, args.mode, args.target)
+    elif args.action == "restored":
+        record(work, check_restored(work, args.token, args.mode, args.target))
+        print(f"PASS: {args.mode} emptied working dataset restored from S3 and synchronized again")
+    elif args.action == "refused":
+        record(work, check_refused(work, args.token))
+        print("PASS: a partial working dataset is refused before Core starts")
     else:
         diagnostics(work, Path(args.result), args.mode, args.status)
 

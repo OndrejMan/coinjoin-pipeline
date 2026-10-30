@@ -13,6 +13,7 @@ import yaml
 
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.context import resolve_configuration
+from coinjoin_pipeline.execution import mainnet_sync
 from coinjoin_pipeline.execution.mainnet_sync import configuration_errors
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -43,6 +44,7 @@ def test_generated_configuration_obeys_the_production_sync_contract(tmp_path, mo
     assert config.mainnet.scan_start_height == (None if mode == "mainnet" else 1)
     assert config.mainnet.state_uri == "s3://local-mainnet-sync/sync"
     assert config.pbs.blocksci_image == str(tmp_path / "images/blocksci.sif")
+    assert all(getattr(config.pbs, stage).configured for stage in mainnet_sync.SYNC_STAGES)
 
 
 @pytest.mark.parametrize("target", [0, -1, 450000, 900000])
@@ -88,7 +90,7 @@ def recovered(tmp_path):
         "index_backup": "s3://local-mainnet-sync/index/manifest.json",
     }
     save(tmp_path / "first-done.json", {"height": 100000})
-    save(tmp_path / "data/sync/done.json", done)
+    save(tmp_path / "second-done.json", done)
     (tmp_path / "recovered/bitcoin/chainstate").mkdir(parents=True)
     scanner = tmp_path / "recovered/dumplings/Scanner"
     scanner.mkdir(parents=True)
@@ -189,6 +191,7 @@ def test_ci_diagnostics_keep_logs_and_results_without_copying_raw_data_or_creden
     (recovered / "images").mkdir()
     (recovered / "images/core.sif").write_bytes(b"image")
     log = recovered / "data/sync/blocksci.log"
+    log.parent.mkdir(parents=True)
     log.write_text("parse failed")
     result = tmp_path / "artifacts"
     support.diagnostics(recovered, result, "mainnet", 1)
@@ -215,7 +218,7 @@ def test_mainnet_ci_is_automatic_and_publishes_diagnostics_on_failure():
     assert {"OndrejMan/bitcoin-block-archive", "OndrejMan/Dumplings", "OndrejMan/blocksci"} <= checkouts
 
 
-def test_mainnet_timeouts_cover_scanning_both_generations_and_cleanup(tmp_path):
+def test_mainnet_timeouts_cover_every_job_of_a_generation_and_cleanup(tmp_path):
     workflow = yaml.safe_load((ROOT / ".github/workflows/tests.yaml").read_text())
     job = workflow["jobs"]["mainnet-sync-bounded"]
     config = support.configuration(tmp_path, "http://127.0.0.1:9000", "sync-test", "mainnet", 400000)
@@ -224,12 +227,11 @@ def test_mainnet_timeouts_cover_scanning_both_generations_and_cleanup(tmp_path):
         hours, minutes, secs = map(int, value.split(":"))
         return hours * 3600 + minutes * 60 + secs
 
-    producer = seconds(config["pbs"]["producer"]["walltime"])
-    parser = seconds(config["pbs"]["blocksci"]["walltime"])
+    walltimes = {stage: seconds(config["pbs"][stage]["walltime"]) for stage in mainnet_sync.SYNC_STAGES}
     # Core synchronization alone took 80 minutes in the failed 400000-block run.
-    assert producer >= 6 * 3600
+    assert walltimes["producer"] >= 6 * 3600
     generation = int(job["env"]["MAINNET_TEST_GENERATION_TIMEOUT"])
-    assert generation >= producer + parser + 1800
+    assert generation >= sum(walltimes.values()) + 1800
     script = (ROOT / "tests/test-mainnet-sync-local.sh").read_text()
     assert f"MAINNET_TEST_GENERATION_TIMEOUT:-{generation}" in script
     command = next(step["run"] for step in job["steps"] if "test-mainnet-sync-mainnet.sh" in step.get("run", ""))
@@ -250,3 +252,57 @@ def test_invalid_mainnet_target_is_rejected_before_touching_docker(target):
     )
     assert result.returncode == 2
     assert "MAINNET_TEST_TARGET_HEIGHT" in result.stderr
+
+
+@pytest.fixture
+def restored(tmp_path):
+    second = {"run_id": "local-sync-token-2", "height": 1400, "hash": "a" * 64}
+    save(tmp_path / "second-done.json", second)
+    save(
+        tmp_path / "third-restore.json",
+        {"run_id": "local-sync-token-3", "action": "restored", "height": 1400, "hash": "a" * 64},
+    )
+    save(
+        tmp_path / "data/sync/done.json",
+        {
+            **second,
+            "run_id": "local-sync-token-3",
+            "state": "done",
+            "network": "bitcoin_regtest",
+            "requested_target_height": 1400,
+            "dumplings_height": 1400,
+        },
+    )
+    listing = "2026/10/30 10:00:00  88  blk00000.dat\n2026/10/30 10:00:00  120  blk00000.dat.json\n"
+    for name in ("blocks-before-restore.txt", "blocks-after-restore.txt"):
+        (tmp_path / name).write_text(listing)
+    return tmp_path
+
+
+def test_restore_evidence_requires_a_restored_dataset_without_archiving_blocks_again(restored):
+    assert support.check_restored(restored, "token", "regtest", 1400) == {
+        "restored_from_height": 1400,
+        "height_after_restore": 1400,
+    }
+    (restored / "blocks-after-restore.txt").write_text("2026/10/30 11:00:00  88  blk00000.dat\n")
+    with pytest.raises(AssertionError, match="archived again"):
+        support.check_restored(restored, "token", "regtest", 1400)
+    save(restored / "third-restore.json", {"run_id": "local-sync-token-3", "action": "skipped-not-empty"})
+    with pytest.raises(AssertionError):
+        support.check_restored(restored, "token", "regtest", 1400)
+
+
+def test_refusal_evidence_requires_an_untouched_partial_dataset(tmp_path):
+    save(tmp_path / "data/sync/restore.json", {"run_id": "local-sync-token-4", "action": "skipped-not-empty"})
+    save(tmp_path / "data/sync/producer.json", {"run_id": "local-sync-token-4", "state": "failed"})
+    assert support.check_refused(tmp_path, "token") == {"partial_dataset_refused": True}
+    save(tmp_path / "index/config.json", {})
+    with pytest.raises(AssertionError, match="never be refilled"):
+        support.check_refused(tmp_path, "token")
+
+
+def test_e2e_empties_the_dataset_and_then_removes_only_the_index():
+    script = (ROOT / "tests/test-mainnet-sync-local.sh").read_text()
+    restore, refuse = script.index('rm -rf "$work/data" "$work/index"'), script.index('rm -rf "$work/index"\nrefused')
+    assert script.index("mainnet_sync_e2e.py\" final") < restore < refuse
+    assert 'refused_generation "local-sync-$token-4"' in script
