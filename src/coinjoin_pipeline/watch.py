@@ -408,6 +408,101 @@ def stream_sources(
     return EXIT_FAILURE if failures else EXIT_OK
 
 
+# Mainnet synchronization jobs write their logs next to the run, not to PBS Output_Path.
+MAINNET_SYNC_JOBS = frozenset({"mainnet-restore", "mainnet-producer", "mainnet-blocksci", "mainnet-checkpoint"})
+
+
+class _SourceError(Exception):
+    """A log source cannot be discovered; main reports it as a usage error."""
+
+
+def _kubernetes_sources(
+    args: argparse.Namespace, components: set[str], follow: bool
+) -> tuple[str, dict[str, list[str]]]:
+    """Return the outer pod and one ``kubectl logs`` command per selected component."""
+    kubeconfig = Path(args.kubeconfig).expanduser().resolve()
+    if not kubeconfig.is_file():
+        raise _SourceError(f"kubeconfig not found: {kubeconfig}; pass --kubeconfig, or --pbs-only for PBS output alone")
+    kubectl = _kubectl_base(kubeconfig, args.namespace)
+    try:
+        outer_pod = _discover_pod(
+            kubectl,
+            f"{OUTER_POD_SELECTOR},coinjoin.run-id={args.run_id}",
+            wait_seconds=args.wait_seconds,
+            description=f"outer pod for run {args.run_id}",
+        )
+        engine = args.engine
+        if components & {"engine", "coordinator"}:
+            if engine is None:
+                engine = _discover_engine(kubectl, outer_pod)
+            if "coordinator" in components and engine != "wasabi":
+                raise _SourceError("coordinator is Wasabi-specific; use --components engine for JoinMarket runs")
+        sources: dict[str, list[str]] = {}
+        for component in sorted(components):
+            if component in {"controller", "uploader"}:
+                pod, container = outer_pod, component
+            else:
+                pod = _discover_pod(
+                    kubectl,
+                    f"{ENGINE_SELECTORS[engine]},coinjoin.run-id={args.run_id}",
+                    wait_seconds=args.wait_seconds,
+                    description=f"{engine} engine pod",
+                )
+                container = None
+            sources[component] = _kubernetes_log_command(kubectl, pod, container, tail=args.tail, follow=follow)
+    except (FileNotFoundError, RuntimeError) as error:
+        raise _SourceError(str(error)) from error
+    return outer_pod, sources
+
+
+def _frontend_log(args: argparse.Namespace, watch_pbs: bool) -> Path | None:
+    """The explicit --frontend-log, else the frontend transcript a PBS watch finds in the home directory."""
+    if args.frontend_log:
+        frontend_log = args.frontend_log.expanduser().resolve()
+        if not frontend_log.is_file():
+            raise _SourceError(f"frontend log not found: {frontend_log}")
+        return frontend_log
+    candidate = Path.home() / f"{args.run_id}-full-run.log"
+    return candidate if watch_pbs and candidate.is_file() else None
+
+
+def _pbs_sources(args: argparse.Namespace, runs_root: Path | None, frontend_log: Path | None) -> dict[str, PbsJob]:
+    root = runs_root.expanduser().resolve() if runs_root else default_runs_root()
+    run_dir = args.run_dir.expanduser().resolve() if args.run_dir else root / args.run_id
+    job_ids = _job_ids_from_run_dir(run_dir)
+    if frontend_log is not None:
+        job_ids.update(_job_ids_from_frontend_log(frontend_log))
+    try:
+        job_ids.update(_parse_pbs_job_specs(args.pbs_job))
+    except ValueError as error:
+        raise _SourceError(str(error)) from error
+    if not job_ids:
+        raise _SourceError(
+            f"no PBS job IDs found in {run_dir / '.pbs'}; pass --frontend-log LOG, --run-dir DIR, "
+            "or --pbs-job STAGE=JOB_ID"
+        )
+    # Resolve each job on its own: .jobid files are never pruned, so one
+    # stale job that qstat can no longer describe must not hide every live
+    # stage. A missing qstat (FileNotFoundError) is still fatal.
+    pbs_jobs: dict[str, PbsJob] = {}
+    skipped: list[str] = []
+    for stage, job_id in sorted(job_ids.items()):
+        try:
+            job = _pbs_job_details(stage, job_id)
+        except RuntimeError as error:
+            skipped.append(f"{stage}={job_id}")
+            print(f"[WARN] skipping {stage}={job_id}: {error}", file=sys.stderr)
+            continue
+        except FileNotFoundError as error:
+            raise _SourceError(str(error)) from error
+        if stage in MAINNET_SYNC_JOBS:
+            job = replace(job, log_dir=run_dir / "logs" / stage)
+        pbs_jobs[f"pbs:{stage}"] = job
+    if not pbs_jobs:
+        raise _SourceError(f"none of the discovered PBS jobs could be inspected: {', '.join(skipped)}")
+    return pbs_jobs
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -425,99 +520,21 @@ def main(
         return fail(f"invalid --components value; expected a subset of {','.join(sorted(VALID_COMPONENTS))}")
 
     follow = not args.no_follow
-    sources: dict[str, list[str]] = {}
     outer_pod = None
-    if watch_kubernetes:
-        kubeconfig = Path(args.kubeconfig).expanduser().resolve()
-        if not kubeconfig.is_file():
-            return fail(f"kubeconfig not found: {kubeconfig}; pass --kubeconfig, or --pbs-only for PBS output alone")
-        kubectl = _kubectl_base(kubeconfig, args.namespace)
-        try:
-            outer_pod = _discover_pod(
-                kubectl,
-                f"{OUTER_POD_SELECTOR},coinjoin.run-id={args.run_id}",
-                wait_seconds=args.wait_seconds,
-                description=f"outer pod for run {args.run_id}",
-            )
-        except (FileNotFoundError, RuntimeError) as error:
-            return fail(str(error))
-        selected_engine = args.engine
-        if components & {"engine", "coordinator"}:
-            if selected_engine is None:
-                try:
-                    selected_engine = _discover_engine(kubectl, outer_pod)
-                except RuntimeError as error:
-                    return fail(str(error))
-            if "coordinator" in components and selected_engine != "wasabi":
-                return fail("coordinator is Wasabi-specific; use --components engine for JoinMarket runs")
-        for component in sorted(components):
-            if component in {"controller", "uploader"}:
-                pod = outer_pod
-                container = component
-            else:
-                selector = ENGINE_SELECTORS[selected_engine]
-                try:
-                    pod = _discover_pod(
-                        kubectl,
-                        f"{selector},coinjoin.run-id={args.run_id}",
-                        wait_seconds=args.wait_seconds,
-                        description=f"{selected_engine} engine pod",
-                    )
-                except RuntimeError as error:
-                    return fail(str(error))
-                container = None
-            sources[component] = _kubernetes_log_command(kubectl, pod, container, tail=args.tail, follow=follow)
-
-    frontend_log = args.frontend_log.expanduser().resolve() if args.frontend_log else None
-    if frontend_log is None and watch_pbs:
-        candidate = Path.home() / f"{args.run_id}-full-run.log"
-        if candidate.is_file():
-            frontend_log = candidate
-    if frontend_log is not None:
-        if not frontend_log.is_file():
-            return fail(f"frontend log not found: {frontend_log}")
-        # The transcript is replayed whole: it is short, and its start (dry run, Kubernetes
-        # setup) is what --tail would cut off first.
-        tail_command = ["tail", "-n", "+1"]
-        if follow:
-            tail_command.append("-f")
-        tail_command.append(str(frontend_log))
-        sources["frontend"] = tail_command
-
+    sources: dict[str, list[str]] = {}
     pbs_jobs: dict[str, PbsJob] = {}
-    if watch_pbs:
-        root = runs_root.expanduser().resolve() if runs_root else default_runs_root()
-        run_dir = args.run_dir.expanduser().resolve() if args.run_dir else root / args.run_id
-        job_ids = _job_ids_from_run_dir(run_dir)
+    try:
+        if watch_kubernetes:
+            outer_pod, sources = _kubernetes_sources(args, components, follow)
+        frontend_log = _frontend_log(args, watch_pbs)
         if frontend_log is not None:
-            job_ids.update(_job_ids_from_frontend_log(frontend_log))
-        try:
-            job_ids.update(_parse_pbs_job_specs(args.pbs_job))
-        except ValueError as error:
-            return fail(str(error))
-        if not job_ids:
-            return fail(
-                f"no PBS job IDs found in {run_dir / '.pbs'}; pass --frontend-log LOG, --run-dir DIR, "
-                "or --pbs-job STAGE=JOB_ID"
-            )
-        # Resolve each job on its own: .jobid files are never pruned, so one
-        # stale job that qstat can no longer describe must not hide every live
-        # stage. A missing qstat (FileNotFoundError) is still fatal.
-        skipped: list[str] = []
-        try:
-            for stage, job_id in sorted(job_ids.items()):
-                try:
-                    job = _pbs_job_details(stage, job_id)
-                    if stage in {"mainnet-restore", "mainnet-producer", "mainnet-blocksci", "mainnet-checkpoint"}:
-                        job = replace(job, log_dir=run_dir / "logs" / stage)
-                    pbs_jobs[f"pbs:{stage}"] = job
-                except RuntimeError as error:
-                    skipped.append(f"{stage}={job_id}")
-                    print(f"[WARN] skipping {stage}={job_id}: {error}", file=sys.stderr)
-        except FileNotFoundError as error:
-            return fail(str(error))
-        if not pbs_jobs:
-            return fail(f"none of the discovered PBS jobs could be inspected: {', '.join(skipped)}")
+            # The transcript is replayed whole: it is short, and its start (dry run, Kubernetes
+            # setup) is what --tail would cut off first.
+            sources["frontend"] = ["tail", "-n", "+1", *(["-f"] if follow else []), str(frontend_log)]
+        if watch_pbs:
+            pbs_jobs = _pbs_sources(args, runs_root, frontend_log)
+    except _SourceError as error:
+        return fail(str(error))
 
     print(
         f"[watch] run={args.run_id} namespace={args.namespace} outer_pod={outer_pod or '-'} "
