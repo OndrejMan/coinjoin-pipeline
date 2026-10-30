@@ -25,7 +25,15 @@ mainnet:
 blocksci:
   index_dir: /scratch/multijob-brno/xman/blocksci-mainnet
   index_backup_uri: s3://xman-coinjoin-new/bitcoin-mainnet/blocksci-index
+# Four chained jobs: restore (fills an empty working dataset from S3, otherwise ends at
+# once), producer, blocksci, and checkpoint (index backup, pruning and Core checkpoint).
 pbs:
+  restore:
+    ncpus: 8
+    mem: 8gb
+    scratch: 20gb
+    walltime: '12:00:00'
+    multijob: brno
   producer:
     ncpus: 4
     mem: 16gb
@@ -37,4 +45,10 @@ pbs:
     mem: 256gb
     scratch: 20gb
     walltime: '24:00:00'
+    multijob: brno
+  checkpoint:
+    ncpus: 16
+    mem: 8gb
+    scratch: 20gb
+    walltime: '12:00:00'
     multijob: brno

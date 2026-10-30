@@ -36,9 +36,43 @@ U krátkého mainnetového testu pod výškou 100000 se pruning přeskočí, pro
 Core ještě nepovoluje; indexace a záloha pokračují se zachováním všech bloků.
 Tato možnost vyžaduje také nově sestavené Dumplings s `--frozen-height`.
 
-## Dva joby
+## Čtyři joby
 
-`mainnet-producer` synchronizuje Core s `prune=1`, `txindex=0`, `blocksxor=0`.
+Synchronizace odešle čtyři joby řetězené `afterok`: `mainnet-restore` →
+`mainnet-producer` → `mainnet-blocksci` → `mainnet-checkpoint`. Každý si sám vezme
+a pustí zámek datasetu. Když jeden spadne, PBS zruší ty, které na něm závisí.
+
+`mainnet-restore` (8 CPU / 8 GB) vymaže stav minulého běhu a podívá se, zda
+na multijobu existují pracovní data (`bitcoin/`, `dumplings/`, `archive-state/`,
+`config.json`, `files.txt`, `manifest.json` nebo `parsed/` indexu; zámky, `sync/`
+a logy se nepočítají).
+
+- **Něco existuje:** skončí hned s `restore.json: skipped-not-empty`.
+- **Nic neexistuje a v S3 nejsou žádné zálohy:** jde o první synchronizaci.
+  Zapíše `skipped-no-backup` a producer staví od nuly. Neprázdné `blocks_uri`
+  bez záloh je chyba, protože nový IBD by rozložil bloky do jiných `blk*.dat`.
+- **Nic neexistuje a v S3 jsou zálohy:** ověří, že všechny tři manifesty
+  (Core checkpoint, index a Dumplings) patří k sobě:
+  - Core odkazuje na tenhle index,
+  - `run_id` jsou stejná,
+  - výška Core = `exported_max_block` = `last_processed_height`,
+  - kurzor parseru `resume_file_*` se shoduje.
+
+  Potom stáhne všechny tři do `.restore-<run-id>/` s kontrolou SHA-256
+  a velikostí a teprve potom je přesune na místo. Ověří `files.txt` a kurzor parseru
+  proti obnoveným blokům a zapíše `restored`. Částečný dataset se se zálohami
+  nikdy nemíchá.
+
+`mainnet-producer` nejdřív zkontroluje úplnost datasetu: Core chainstate a bloky,
+`archive-state/`, výšku Scanneru a `config.json` indexu.
+
+- **Všechno chybí:** projde jen tehdy, když `restore.json` tohoto běhu říká
+  `skipped-no-backup`.
+- **Chybí část:** skončí dřív, než spustí Core, a vypíše, co chybí. Řešením je
+  smazat celý `mainnet.root` i `blocksci.index_dir`; další synchronizace je obnoví.
+- **Rozběhnutá první synchronizace** (bez indexu, ale s `blk00000.dat`) pokračuje.
+
+Dál producer synchronizuje Core s `prune=1`, `txindex=0`, `blocksxor=0`.
 Po dosynchronizování vypne síť, čistě restartuje Core bez sítě a zachytí
 stabilní výšku H a hash. Spustí jeden průchod
 Dumplings, ověří shodu výšky a checkpointu včetně délek souborů a prázdného
@@ -56,13 +90,25 @@ Další průchod ověří původní větev i při obnovení částečného skenu
 nebo import starého Scanner bez této vazby vyžadují explicitní ověření/obnovu;
 detekce se automaticky nepřenášejí mezi větvemi.
 
-`mainnet-blocksci` má PBS závislost `afterok` na prvním jobu. Ověří přesnou
-generaci a pod výhradním zámkem aktualizuje index přímo nad stejnými blk soubory.
-Ověří počet bloků H+1 a hash H, následně zazálohuje index a ověří existenci
-a velikost odeslaného objektu. Archiv znovu nestahuje. Spustí Core offline, zkontroluje H/hash, provede `--prune-only`,
-čistě Core vypne a až potom zálohuje jeho výsledný stav. Během kopírování drží
-POSIX zámek datadiru a odmítne přítomnou RPC cookie. Teprve dokončený upload checkpointu
-umožní publikovat závěrečné `<state_uri>/done.json`.
+`mainnet-blocksci` (256 GB) ověří přesnou generaci a pod výhradním zámkem
+aktualizuje index přímo nad stejnými blk soubory. Ověří počet bloků H+1 a hash H,
+zapíše `manifest.json` a `files.txt` a smaže `.writing`: index je hotový, i když
+ještě nemá zálohu. Core v tomto jobu neběží.
+
+`mainnet-checkpoint` (16 CPU kvůli `zstd -T`, 8 GB) drží zámek indexu jen pro čtení,
+takže notebooky mohou index dál číst a ruční indexový job jej změnit nemůže.
+
+1. Ověří, že index dokončil BlockSci job tohoto běhu: `run_id` a `exported_max_block`
+   v manifestu, `files.txt`, žádný `.writing` a kurzor parseru proti Core.
+2. Zazálohuje index a ověří existenci a velikost odeslaného objektu. Archiv znovu
+   nestahuje.
+3. Spustí Core offline s `dbcache` nejvýše 1024 MB, zkontroluje H/hash, provede
+   `--prune-only` a Core čistě vypne.
+4. Až potom zálohuje jeho výsledný stav. Během kopírování drží POSIX zámek
+   datadiru a odmítne přítomnou RPC cookie.
+
+Teprve dokončený upload checkpointu umožní publikovat závěrečné
+`<state_uri>/done.json`.
 
 Pruning neprovádí uploady. Ověří existující archivované kopie. Limit výšky je
 minimum pokroku obou konzumentů minus rezerva (výchozí 2016 bloků). Navíc chrání
@@ -84,7 +130,7 @@ mainnet.root/
   bitcoin/{blocks,chainstate}
   dumplings/Scanner/
   archive-state/
-  sync/{ready.json,done.json,producer.json,blocksci.json}
+  sync/{restore,producer,blocksci,checkpoint}.json, sync/{ready.json,done.json}
   current-ready.json
   .sync-active/owner.json
 blocksci.index_dir/
@@ -95,9 +141,9 @@ blocksci.index_dir/
   .lock/
 ```
 
-Oba joby musí mít stejné umístění multijob. Jeho adresář je oddělený od
-`$SCRATCHDIR`; úklid PBS jej nesmí odstranit. Normální průchod nic nestahuje
-ze S3. Obnova je explicitní. Počáteční parse potřebuje kompletní historii
+Všechny čtyři joby musí mít stejné umístění multijob. Jeho adresář je oddělený od
+`$SCRATCHDIR`, ale multijob storage je dočasný a může zmizet. Ze S3 stahuje jen
+`mainnet-restore`, a to jen do úplně prázdného datasetu. Počáteční parse potřebuje kompletní historii
 bloků. Prunovaný Core bez indexu nelze rovnou použít pro prvotní parse.
 Existující index lze navázat jen se stejným zdrojem bloků a image; cizí index
 se automaticky nepřekonfiguruje.
@@ -126,25 +172,25 @@ Celkové obsazení S3 včetně archivu bloků zjistí až listování prefixů.
 
 Stav synchronizace má pevné místo, nikoli složku podle run ID: lokálně
 `mainnet.root/sync/`, v S3 `mainnet.state_uri` (`ready.json`, `done.json`,
-`producer.json`, `blocksci.json`, `blocksci-index-manifest.json`,
-`.pbs/mainnet-{producer,blocksci}.{done,failed}`). Producent nového běhu je pod
-zámkem datasetu nejdřív smaže, takže prefix vždy popisuje poslední běh; `run_id`
+`{restore,producer,blocksci,checkpoint}.json`, `blocksci-index-manifest.json`,
+`.pbs/mainnet-{restore,producer,blocksci,checkpoint}.{done,failed}`). Restore job
+nového běhu je pod zámkem datasetu nejdřív smaže, takže prefix vždy popisuje poslední běh; `run_id`
 v každém JSON říká, ke kterému patří. Logy každého běhu zůstávají v
 `<state_uri>/logs/<run-id>/`. Konfigurace synchronizace proto nemá `artifacts.uri`;
 sekce `artifacts` nese jen endpoint, soubor s klíči a profil. Ruční indexové joby (`parse`, `update`, `backup`) mají
 podobně pevný prefix `blocksci.index_state_uri` (`bitcoin-mainnet/index/`), viz
 `docs/pbs-stage-contract.md`.
 
-Průběh v `<state_uri>/{producer,blocksci}.json` obsahuje fázi,
+Průběh v `<state_uri>/{restore,producer,blocksci,checkpoint}.json` obsahuje fázi,
 výšku, procento nebo null a čas aktualizace. Pro Core jde o RPC odhad; procento
 parseru platí pro jeho právě hlášenou fázi. Streamovaná záloha a její ověřování
-mají neurčité procento. Značka prvního jobu ani `blocksci.json: done` nenahrazuje
-závěrečné `done.json`. Lab doplňuje stav PBS i při pádu před publikováním průběhu.
+mají neurčité procento. Značka produceru ani `blocksci.json: indexed/done`
+nenahrazuje závěrečné `done.json`; `restore.json` navíc nese `action`. Lab doplňuje stav PBS i při pádu před publikováním průběhu.
 
 `Live log` v Labu (CLI `watch --pbs-only --run-id ID --run-dir RUN_DIR`)
 čte také skutečný stdout/stderr Core, Dumplings, archivátoru a BlockSci.
 Nově odeslané joby zapisují tyto malé soubory přímo do
-`<runs_root>/<run-id>/logs/mainnet-{producer,blocksci}/*.log` na úložišti
+`<runs_root>/<run-id>/logs/mainnet-{restore,producer,blocksci,checkpoint}/*.log` na úložišti
 sdíleném s frontendem; `runs_root` musí být z PBS uzlů přístupný pod stejnou
 cestou. Pracovní blockchain a index zůstávají v multijob adresářích.
 Watcher sleduje i soubory vzniklé až během běhu, označuje výstup komponentou
@@ -156,13 +202,14 @@ původní worker a toto průběžné ukládání se na ně zpětně nevztahuje.
 ## Selhání a souběh
 
 Každý job drží výhradní zámek datasetu po dobu své práce. Při předání ve frontě
-zůstává `current-ready.json`; druhý job ověří, že patří přesně jeho generaci.
-První job další generace tuto značku zneplatní ještě před změnou Core, takže
-starý čekající job nesmí zpracovat novější nebo částečně změněná data. Mezi joby
-se zámek nedrží: zrušení dosud nezačatého druhého jobu nezanechá zámek datasetu.
-Index používá stejný writer/readers zámek jako existující notebooky.
-Pokud notebook drží index při startu druhého jobu, job ihned skončí; nezabírá
-velkou RAM čekáním. Notebook ukonči a spusť novou synchronizaci.
+zůstává `current-ready.json`; BlockSci i checkpoint job ověří, že patří přesně
+jejich generaci. Producer další generace tuto značku zneplatní ještě před změnou
+Core, takže starý čekající job nesmí zpracovat novější nebo částečně změněná data.
+Mezi joby se zámek nedrží: zrušení dosud nezačatého jobu nezanechá zámek datasetu.
+Index používá stejný writer/readers zámek jako existující notebooky. Restore
+a BlockSci job berou zámek pro zápis, checkpoint job pro čtení. Pokud notebook drží
+index při startu restore nebo BlockSci jobu, job ihned skončí; nezabírá RAM
+čekáním. Notebook ukonči a spusť novou synchronizaci.
 
 Po chybě se dataset odemkne pouze pokud worker potvrdil ukončení svých procesů,
 nebo se ještě vůbec nespustil. Nenulový návratový kód již ukončeného Core
@@ -180,10 +227,12 @@ adresář na hostiteli existuje, zkontroluj oba bindy v aktuálním workeru.
 Upload persistentních logů se zkusí i při chybě úklidu; taková chyba ale nepotvrdí
 ukončení procesů a nevytvoří značku `quiescent`.
 
-Neúplný index má `.writing` a další průchod jej odmítne. Obnov jej do nového
-adresáře z poslední platné zálohy, ověř jej a až potom ručně nahraď pracovní kopii.
-Při selhání závěrečné zálohy Core zůstávají pracovní data i dokončený index na
-multijob, platný starší checkpoint zůstává v S3 a celý běh není úspěšný.
+Neúplný index má `.writing` a další průchod jej odmítne. Vzniká jen při pádu
+samotného BlockSci updatu; pak smaž celý dataset a nech restore job obnovit
+poslední platné zálohy. Selhání checkpoint jobu index nepoškodí: index i Core
+zůstávají na multijobu použitelné, v S3 chybí jen záloha, kterou smazal začátek
+uploadu, a další synchronizace ji vyrobí znovu. Do té doby ale prázdný multijob
+obnovit nejde, protože zálohy v S3 k sobě nesedí.
 
 ## Lokální ověřování bez služeb MetaCentra
 
@@ -313,6 +362,9 @@ cd /home/administrator/diplomka/coinjoin-pipeline
 ```
 
 ## Explicitní obnova checkpointu
+
+Běžnou obnovu prázdného datasetu dělá `mainnet-restore`. Tato kapitola popisuje
+ruční obnovu jednotlivé zálohy, například pro kontrolu.
 
 Helper `coinjoin_pipeline.execution.mainnet_runtime` umí obnovit ověřený
 manifest do **neexistujícího** adresáře. Použije staging vedle cíle; neúspěšná

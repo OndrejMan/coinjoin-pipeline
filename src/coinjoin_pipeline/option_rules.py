@@ -31,6 +31,8 @@ def _resources_supplied(config: PipelineConfiguration, stage: str, resources: PB
 
 
 PERSISTENT_INDEX_TASKS = frozenset({"parse", "update", "backup"}) | READ_ONLY_CACHE_TASKS
+# Resource groups only the mainnet synchronization submits.
+MAINNET_ONLY_PBS_GROUPS = ("pbs.producer.", "pbs.restore.", "pbs.checkpoint.")
 SHARED_ROOTS = ("/storage/", "/auto/")
 # The jobs that only maintain the index; their state can live at one fixed S3 prefix.
 INDEX_STATE_TASKS = ("parse", "update", "backup")
@@ -94,8 +96,8 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
         from .execution.mainnet_sync import configuration_errors
 
         errors = configuration_errors(config)
-    elif any(path.startswith("mainnet.") or path.startswith("pbs.producer.") for path in config.provided):
-        errors = ["mainnet and pbs.producer settings require action: mainnet-sync"]
+    elif any(path.startswith(("mainnet.", *MAINNET_ONLY_PBS_GROUPS)) for path in config.provided):
+        errors = ["mainnet, pbs.producer, pbs.restore and pbs.checkpoint settings require action: mainnet-sync"]
     else:
         errors = _action_errors(config)
     return errors + _general_errors(config)

@@ -47,15 +47,32 @@ def config(tmp_path):
     )
 
 
-def test_two_scripts_are_self_contained_and_syntactically_valid(config):
-    for stage in ("producer", "blocksci"):
+def test_four_scripts_are_self_contained_and_syntactically_valid(config):
+    locks = {"restore": "index_lock_exclusive", "blocksci": "index_lock_exclusive", "checkpoint": "index_lock_shared"}
+    for stage in mainnet_sync.SYNC_STAGES:
         script = mainnet_sync.render_sync(config, stage)
         subprocess.run(["bash", "-n"], input=script, text=True, check=True)
         assert "def scanner_complete" in script
-        assert "rm -rf" not in script if stage == "producer" else "INDEX_LOCK_WAIT=0" in script
+        if stage in locks:
+            assert "INDEX_LOCK_WAIT=0" in script and f"\n{locks[stage]}\n" in script
+        else:
+            assert "rm -rf" not in script
+        assert script.rstrip().endswith(f'"$WORK/settings.json" {stage}')
         assert "clean_scratch" not in script
         assert '"log_root": ' + json.dumps(str(config.runs_path / config.run_id / "logs")) in script
     assert not config.stages.blocksci
+
+
+def test_checkpoint_job_defaults_to_little_memory(config):
+    resources = {stage: mainnet_sync.resources(config, stage) for stage in mainnet_sync.SYNC_STAGES}
+    assert resources["blocksci"].mem == "256gb"
+    assert resources["checkpoint"].mem == resources["restore"].mem == "8gb"
+    assert resources["checkpoint"].ncpus == 16
+
+
+def test_every_job_must_use_the_same_multijob(config):
+    changed = replace(config, pbs=replace(config.pbs, checkpoint=replace(config.pbs.checkpoint, multijob="brno")))
+    assert "All jobs must request the same multijob location" in mainnet_sync.configuration_errors(changed)
 
 
 def test_dependencies_are_persisted_and_rolled_back(config, monkeypatch):
@@ -71,9 +88,20 @@ def test_dependencies_are_persisted_and_rolled_back(config, monkeypatch):
     monkeypatch.setattr(s3_markers, "qdel_pbs_job", lambda job: cancelled.append(job) or True)
     with pytest.raises(RuntimeError, match="scheduler refused"):
         mainnet_sync.submit_sync(config)
+    assert [job.stage for job in calls] == ["mainnet-restore", "mainnet-producer"]
     assert calls[1].dependencies == ("101.local",)
     assert cancelled == ["101.local"]
-    assert (config.runs_path / config.run_id / ".pbs/mainnet-producer.jobid").read_text().strip() == "101.local"
+    assert (config.runs_path / config.run_id / ".pbs/mainnet-restore.jobid").read_text().strip() == "101.local"
+
+
+def test_jobs_are_chained_in_order(config, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        mainnet_sync, "submit_pbs_job", lambda job, _dry: calls.append(job) or f"{100 + len(calls)}.local"
+    )
+    mainnet_sync.submit_sync(config)
+    assert [job.stage for job in calls] == [f"mainnet-{stage}" for stage in mainnet_sync.SYNC_STAGES]
+    assert [job.dependencies for job in calls] == [(), ("101.local",), ("102.local",), ("103.local",)]
 
 
 def test_ready_marker_must_match_exact_generation():
@@ -142,10 +170,10 @@ def test_invalid_sync_target_is_rejected(value):
         PipelineConfiguration.from_mapping({"mainnet": {"target_height": value}})
 
 
-def test_sync_target_is_embedded_in_both_jobs(config):
+def test_sync_target_is_embedded_in_every_job(config):
     bounded = replace(config, mainnet=replace(config.mainnet, target_height=200000))
     assert mainnet_sync.configuration_errors(bounded) == []
-    for stage in ("producer", "blocksci"):
+    for stage in mainnet_sync.SYNC_STAGES:
         assert '"target_height": 200000' in mainnet_sync.render_sync(bounded, stage)
 
 
@@ -275,6 +303,7 @@ def test_producer_reports_core_height_separately_from_scanner_progress(worker, m
         (scanner / "Checkpoint.txt").write_text(f"{height}\nTx0Candidates.txt 0\nTx0CandidateMisses.txt 0\n")
 
     monkeypatch.setattr(worker, "run_command", scan)
+    first_synchronization(worker)
     worker.producer()
     assert [report["height"] for report in reports] == [height] * 4
     assert [report["scanner_height"] for report in reports] == [worker.scan_start - 1] * 3 + [height]
@@ -289,6 +318,11 @@ def test_short_historical_chain_keeps_all_blocks(worker, monkeypatch, chain, hei
     worker.chain = chain
     monkeypatch.setattr(worker, "run_command", lambda *args: pytest.fail("Core cannot prune this short chain"))
     worker.archive(prune=True, height=height, number=0)
+
+
+def first_synchronization(worker):
+    """What the restore job leaves for a producer that builds from scratch."""
+    atomic_json(worker.run / "restore.json", {"run_id": worker.run_id, "action": "skipped-no-backup"})
 
 
 @pytest.fixture
@@ -591,152 +625,120 @@ def test_backup_metadata_must_match_key_and_integer_size(worker, monkeypatch, me
         worker.verify_remote_size("s3://local/archive", 1)
 
 
-def test_final_core_checkpoint_failure_cannot_publish_done(worker, monkeypatch):
-    ready = {
-        "run_id": worker.run_id,
-        "state": "ready",
-        "height": 500,
-        "hash": "a" * 64,
-        "dumplings_height": 500,
-        "dumplings_backup": "s3://local/dumps",
-        "source_dir": str(worker.core_dir),
-    }
-    atomic_json(worker.run / "ready.json", ready)
-    atomic_json(worker.root / "current-ready.json", ready)
-    (worker.core_dir / "blocks").mkdir(parents=True)
-    (worker.core_dir / "blocks/blk00000.dat").write_bytes(bytes(88))
-    (worker.core_dir / ".lock").touch()
-    published, steps = [], []
-    monkeypatch.setattr(worker, "progress", lambda *args, **kwargs: None)
-    monkeypatch.setattr(worker, "publish_json", lambda uri, value: published.append(uri))
+HEIGHT, BLOCK_HASH = 500000, "a" * 64
+
+
+def fake_components(worker, monkeypatch, events):
+    """Core, Dumplings, archiver and parser stand-ins; S3 transport and backups stay real."""
     monkeypatch.setattr(worker, "container_command", lambda *args, **kwargs: list(args))
 
-    def run(command, name, poll=None):
-        if name == "blocksci-config":
-            atomic_json(worker.index / "config.json", {"parser": {"maxBlockNum": 501}})
-        if name == "blocksci":
-            atomic_json(
-                worker.index / "parsed/parser/blockList.dat.resume.json",
-                {"schema_version": 1, "file_number": 0, "data_offset": 8, "block_size": 80},
-            )
-        if name == "blocksci-verify":
-            atomic_json(worker.work / "verified.json", {"exported_max_block": 500, "exported_block_hash": "a" * 64})
-        steps.append(name)
-
-    monkeypatch.setattr(worker, "run_command", run)
-
-    def backup(root, members, prefix, metadata, name):
-        if prefix == worker.c["backup_uri"]:
-            steps.append("core-backup-failed")
-            raise RuntimeError("final checkpoint upload failed")
-        steps.append("index-backup-verified")
-        return "s3://local/index/manifest.json"
-
-    monkeypatch.setattr(worker, "backup", backup)
-
-    def start(offline):
-        assert offline
-        steps.append("offline-core")
-        return {"blocks": 500, "bestblockhash": "a" * 64}
-
-    monkeypatch.setattr(worker, "start_core", start)
-    monkeypatch.setattr(worker, "archive", lambda **kwargs: steps.append("prune"))
-    monkeypatch.setattr(worker, "stop_core", lambda: steps.append("clean-stop"))
-    with pytest.raises(RuntimeError, match="final checkpoint"):
-        worker.blocksci()
-    assert steps[-5:] == ["index-backup-verified", "offline-core", "prune", "clean-stop", "core-backup-failed"]
-    assert not (worker.run / "done.json").exists()
-    assert not any(uri.endswith("/done.json") or uri.endswith("mainnet-blocksci.done") for uri in published)
-    assert worker.index.exists()
-
-
-@pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
-def test_local_two_job_handoff_backs_up_the_post_prune_core(worker, tmp_path, monkeypatch):
-    """Real local backup transport; only Core, Dumplings and parser processes are mocked."""
-    height, block_hash = 500000, "a" * 64
-    events = []
-    monkeypatch.setattr(worker, "container_command", lambda *args, **kwargs: list(args))
-
-    def start_core(offline):
-        events.append("offline-core" if offline else "online-core")
+    def start_core(offline, dbcache_mb=None):
+        events.append(("offline-core", dbcache_mb) if offline else "online-core")
         (worker.core_dir / "blocks").mkdir(parents=True, exist_ok=True)
         (worker.core_dir / "chainstate").mkdir(exist_ok=True)
         (worker.core_dir / "chainstate/state.dat").write_text("verified chainstate")
         (worker.core_dir / ".lock").touch()
         (worker.core_dir / ".cookie").write_text("local fixture")
-        for number in (0, 1):
-            (worker.core_dir / f"blocks/blk{number:05d}.dat").write_bytes(bytes(88))
-        return {"blocks": height, "bestblockhash": block_hash}
-
-    monkeypatch.setattr(worker, "start_core", start_core)
+        if not offline:
+            for number in (0, 1):
+                (worker.core_dir / f"blocks/blk{number:05d}.dat").write_bytes(bytes(88))
+        return {"blocks": HEIGHT, "bestblockhash": BLOCK_HASH}
 
     def stop_core():
         events.append("clean-stop")
         (worker.core_dir / ".cookie").unlink()
 
-    monkeypatch.setattr(worker, "stop_core", stop_core)
-
     def rpc(method, *args):
         return {
             "getblockchaininfo": {
-                "blocks": height,
-                "headers": height,
-                "bestblockhash": block_hash,
+                "blocks": HEIGHT,
+                "headers": HEIGHT,
+                "bestblockhash": BLOCK_HASH,
                 "verificationprogress": 1,
                 "initialblockdownload": False,
             },
             "getnetworkinfo": {"connections": 1},
             "setnetworkactive": False,
-            "getblockhash": block_hash,
-            "getblockcount": height,
+            "getblockhash": BLOCK_HASH,
+            "getblockcount": HEIGHT,
         }[method]
-
-    monkeypatch.setattr(worker, "rpc", rpc)
 
     def archive(prune=False, **kwargs):
         worker.archive_state.mkdir(exist_ok=True)
         (worker.archive_state / "verified.json").write_text("verified archive fixture")
         if prune:
             assert kwargs["number"] == 1
-            assert (tmp_path / "s3/local/index/manifest.json").exists()
             (worker.core_dir / "blocks/blk00000.dat").unlink()
             events.append("prune")
         else:
             events.append("verified-block-archive")
 
-    monkeypatch.setattr(worker, "archive", archive)
-
     def run(command, name, poll=None):
         events.append(name)
         if name == "dumplings":
-            scanner = worker.dumps / "Scanner"
-            scanner.mkdir(exist_ok=True)
-            (scanner / "LastProcessedBlockHeight.txt").write_text(str(height))
-            (scanner / "Tx0Candidates.txt").write_text("")
-            (scanner / "Tx0CandidateMisses.txt").write_text("")
-            (scanner / "Checkpoint.txt").write_text(f"{height}\nTx0Candidates.txt 0\nTx0CandidateMisses.txt 0\n")
+            scanner_fixture(worker, HEIGHT)
         elif name == "blocksci-config":
-            atomic_json(worker.index / "config.json", {"parser": {"maxBlockNum": height + 1}})
+            atomic_json(worker.index / "config.json", {"parser": {"maxBlockNum": HEIGHT + 1}})
         elif name == "blocksci":
             atomic_json(
                 worker.index / "parsed/parser/blockList.dat.resume.json",
                 {"schema_version": 1, "file_number": 1, "data_offset": 8, "block_size": 80},
             )
-            (worker.index / "parsed/chain").mkdir()
+            (worker.index / "parsed/chain").mkdir(exist_ok=True)
             (worker.index / "parsed/chain/block.dat").write_text("indexed fixture")
         elif name == "blocksci-verify":
             atomic_json(
-                worker.work / "verified.json", {"exported_max_block": height, "exported_block_hash": block_hash}
+                worker.work / "verified.json", {"exported_max_block": HEIGHT, "exported_block_hash": BLOCK_HASH}
             )
 
-    monkeypatch.setattr(worker, "run_command", run)
-    worker.producer()
-    assert not worker.active.exists()
-    assert not (tmp_path / "s3/local/core/manifest.json").exists()
+    for name, value in {
+        "start_core": start_core,
+        "stop_core": stop_core,
+        "rpc": rpc,
+        "archive": archive,
+        "run_command": run,
+    }.items():
+        monkeypatch.setattr(worker, name, value)
+
+
+def synchronize(worker, *stages):
+    for stage in stages:
+        worker.stage = stage
+        (worker.restore_dataset if stage == "restore" else getattr(worker, stage))()
+        assert not worker.active.exists(), f"{stage} must release the dataset"
+
+
+def wipe_working_dataset(worker):
+    shutil.rmtree(worker.root)
+    shutil.rmtree(worker.index)
+
+
+@pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
+def test_blocksci_job_completes_the_index_without_backing_it_up(worker, tmp_path, monkeypatch):
+    events = []
+    fake_components(worker, monkeypatch, events)
+    synchronize(worker, "restore", "producer", "blocksci")
+    assert not (worker.index / ".writing").exists()
+    assert (worker.index / "files.txt").read_text() == mainnet_runtime.index_inventory(worker.index)
+    progress = json.loads((worker.run / "blocksci.json").read_text())
+    assert (progress["phase"], progress["state"]) == ("indexed", "done")
+    assert not (tmp_path / "s3/local/index/manifest.json").exists()
     assert not (worker.run / "done.json").exists()
-    worker.blocksci()
-    assert not worker.active.exists()
+    # Core never starts in the BlockSci job.
+    assert events[events.index("blocksci-config") :] == ["blocksci-config", "blocksci", "blocksci-verify"]
+
+
+@pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
+def test_local_four_job_chain_backs_up_the_post_prune_core(worker, tmp_path, monkeypatch):
+    """Real local backup transport; only Core, Dumplings and parser processes are mocked."""
+    events = []
+    fake_components(worker, monkeypatch, events)
+    synchronize(worker, "restore")
+    assert json.loads((worker.run / "restore.json").read_text())["action"] == "skipped-no-backup"
+    synchronize(worker, "producer", "blocksci", "checkpoint")
     assert events.index("verified-block-archive") < events.index("blocksci") < events.index("prune")
+    # The checkpoint job's offline Core gets a small cache; it only loads the chain to prune.
+    assert ("offline-core", min(1024, worker.c["dbcache_mb"])) in events
     assert events[-1] == "clean-stop"
     done = json.loads((worker.run / "done.json").read_text())
     assert done["state"] == "done"
@@ -754,6 +756,129 @@ def test_local_two_job_handoff_backs_up_the_post_prune_core(worker, tmp_path, mo
     assert (restored / "bitcoin/chainstate/state.dat").read_text() == "verified chainstate"
     # Scanner/ is not in the Core checkpoint; it comes back from its incremental copy.
     assert not (restored / "dumplings").exists()
-    worker.restore_dumplings(done["dumplings_backup"], restored / "dumplings/Scanner")
-    assert (restored / "dumplings/Scanner/Tx0Candidates.txt").exists()
-    assert (restored / "dumplings/Scanner/LastProcessedBlockHeight.txt").read_text() == str(height)
+
+
+@pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
+def test_restore_job_refills_an_emptied_dataset_for_the_next_synchronization(worker, tmp_path, monkeypatch):
+    events = []
+    fake_components(worker, monkeypatch, events)
+    synchronize(worker, "restore", "producer", "blocksci", "checkpoint")
+    index_files = (worker.index / "files.txt").read_text()
+    wipe_working_dataset(worker)
+    worker.run_id = "mainnet-sync-local-2"
+    synchronize(worker, "restore")
+    restore = json.loads((worker.run / "restore.json").read_text())
+    assert (restore["action"], restore["height"]) == ("restored", HEIGHT)
+    assert (worker.core_dir / "chainstate/state.dat").read_text() == "verified chainstate"
+    assert not (worker.core_dir / "blocks/blk00000.dat").exists()
+    assert (worker.archive_state / "verified.json").is_file()
+    assert (worker.dumps / "Scanner/LastProcessedBlockHeight.txt").read_text() == str(HEIGHT)
+    assert (worker.index / "files.txt").read_text() == index_files
+    assert not [*worker.root.glob(".restore-*"), *worker.index.glob(".restore-*")]
+    # The restored copy is complete, so the producer continues incrementally.
+    worker.stage = "producer"
+    worker.require_complete_dataset()
+
+
+@pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
+def test_restore_job_leaves_a_dataset_that_is_not_empty(worker, monkeypatch):
+    events = []
+    fake_components(worker, monkeypatch, events)
+    synchronize(worker, "restore", "producer", "blocksci", "checkpoint")
+    shutil.rmtree(worker.index)
+    monkeypatch.setattr(worker, "restore_checkpoint", lambda *args: pytest.fail("a partial dataset is never mixed"))
+    synchronize(worker, "restore")
+    assert json.loads((worker.run / "restore.json").read_text())["action"] == "skipped-not-empty"
+    worker.stage = "producer"
+    with pytest.raises(ValueError, match=r"incomplete \(missing: BlockSci index\)"):
+        worker.require_complete_dataset()
+
+
+@pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
+@pytest.mark.parametrize("damage", ["foreign-run", "missing-index-backup"])
+def test_restore_job_refuses_backups_that_do_not_belong_together(worker, tmp_path, monkeypatch, damage):
+    events = []
+    fake_components(worker, monkeypatch, events)
+    synchronize(worker, "restore", "producer", "blocksci", "checkpoint")
+    wipe_working_dataset(worker)
+    if damage == "foreign-run":
+        manifest = tmp_path / "s3/local/dumps/manifest.json"
+        atomic_json(manifest, {**json.loads(manifest.read_text()), "run_id": "another-run"})
+        message = "do not belong together: run IDs differ"
+    else:
+        (tmp_path / "s3/local/index/manifest.json").unlink()
+        message = "lacks the backups index"
+    worker.stage = "restore"
+    with pytest.raises(ValueError, match=message):
+        worker.restore_dataset()
+    assert worker.dataset_members() == []
+
+
+def test_restore_job_refuses_archived_blocks_without_backups(worker, tmp_path):
+    (tmp_path / "s3/local/blocks").mkdir(parents=True)
+    (tmp_path / "s3/local/blocks/blk00000.dat").write_bytes(bytes(88))
+    worker.stage = "restore"
+    with pytest.raises(ValueError, match="archived blocks but no backups"):
+        worker.restore_dataset()
+
+
+def test_producer_refuses_an_empty_dataset_the_restore_job_did_not_check(worker):
+    worker.stage = "producer"
+    with pytest.raises(ValueError, match="restore job did not check S3"):
+        worker.require_complete_dataset()
+    atomic_json(worker.run / "restore.json", {"run_id": "an-earlier-run", "action": "skipped-no-backup"})
+    with pytest.raises(ValueError, match="restore job did not check S3"):
+        worker.require_complete_dataset()
+    first_synchronization(worker)
+    worker.require_complete_dataset()
+
+
+def test_producer_continues_an_unfinished_first_synchronization(worker):
+    (worker.core_dir / "blocks").mkdir(parents=True)
+    (worker.core_dir / "blocks/blk00000.dat").write_bytes(bytes(88))
+    worker.require_complete_dataset()
+    # Without the full block history and without an index, nothing can be parsed any more.
+    (worker.core_dir / "blocks/blk00000.dat").unlink()
+    with pytest.raises(ValueError, match="incomplete"):
+        worker.require_complete_dataset()
+
+
+@pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
+def test_checkpoint_job_refuses_an_index_another_job_changed(worker, tmp_path, monkeypatch):
+    events = []
+    fake_components(worker, monkeypatch, events)
+    synchronize(worker, "restore", "producer", "blocksci")
+    manifest = json.loads((worker.index / "manifest.json").read_text())
+    atomic_json(worker.index / "manifest.json", {**manifest, "run_id": "a-manual-index-update"})
+    worker.stage = "checkpoint"
+    with pytest.raises(ValueError, match="not the one this synchronization"):
+        worker.checkpoint()
+    assert not (tmp_path / "s3/local/index").exists()
+
+
+@pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
+def test_failed_core_checkpoint_cannot_publish_done(worker, monkeypatch):
+    events = []
+    fake_components(worker, monkeypatch, events)
+    synchronize(worker, "restore", "producer", "blocksci")
+    published = []
+    real_backup, real_publish = worker.backup, worker.publish_json
+
+    def backup(root, members, prefix, metadata, name):
+        if prefix == worker.c["backup_uri"]:
+            events.append("core-backup-failed")
+            raise RuntimeError("final checkpoint upload failed")
+        events.append("index-backup")
+        return real_backup(root, members, prefix, metadata, name)
+
+    monkeypatch.setattr(worker, "backup", backup)
+    monkeypatch.setattr(worker, "publish_json", lambda uri, value: published.append(uri) or real_publish(uri, value))
+    worker.stage = "checkpoint"
+    with pytest.raises(RuntimeError, match="final checkpoint"):
+        worker.checkpoint()
+    offline = ("offline-core", min(1024, worker.c["dbcache_mb"]))
+    assert events[-5:] == ["index-backup", offline, "prune", "clean-stop", "core-backup-failed"]
+    assert not (worker.run / "done.json").exists()
+    assert not any(uri.endswith(("/done.json", "mainnet-checkpoint.done")) for uri in published)
+    # The index stays complete: the next synchronization updates it and backs it up again.
+    assert not (worker.index / ".writing").exists()

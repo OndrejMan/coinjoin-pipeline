@@ -1,6 +1,7 @@
 """Self-contained PBS worker. Embedded in qsub scripts; stdlib only on the host.
 
-Working data are never downloaded implicitly. Recovery is an explicit operation.
+One synchronization is four jobs: restore, producer, blocksci and checkpoint. Working
+data are downloaded only by the restore job and only into an empty working dataset.
 Each backup has one place: the old archive is deleted, the new one streamed and its size
 checked, and manifest.json, written last, makes it valid again.
 """
@@ -147,6 +148,10 @@ def index_inventory(index):
     return "\n".join(sorted(rows)) + "\n"
 
 
+# The resume bytes of the parser, recorded in the index manifest and the Core checkpoint.
+SIGNATURE_KEYS = ("resume_file_number", "resume_file_prefix_size", "resume_file_prefix_sha256")
+
+
 def resume_signature(index, blocks):
     number = resume_file(index, blocks)
     checkpoint = json.loads((index / "parsed/parser/blockList.dat.resume.json").read_text())
@@ -267,12 +272,15 @@ class Worker:
 
     def reset_state(self):
         """Clear the previous synchronization's state; its logs stay under logs/<run-id>/."""
-        names = ("ready.json", "done.json", "producer.json", "blocksci.json", "blocksci-index-manifest.json")
-        for name in (*names, "blocksci.quiescent"):
+        stages = ("restore", "producer", "blocksci", "checkpoint")
+        # <stage>.json is each job's progress; restore.json also says what the restore did.
+        names = ("ready.json", "done.json", "blocksci-index-manifest.json")
+        names += tuple(f"{stage}.json" for stage in stages)
+        for name in (*names, *(f"{stage}.quiescent" for stage in stages if stage != self.stage)):
             (self.run / name).unlink(missing_ok=True)
         for name in names:
             self.remove(f"{self.remote}/{name}")
-        for stage in ("producer", "blocksci"):
+        for stage in stages:
             for outcome in ("done", "failed"):
                 self.remove(f"{self.remote}/.pbs/mainnet-{stage}.{outcome}")
 
@@ -334,7 +342,7 @@ class Worker:
         except ValueError:
             return output.strip()
 
-    def start_core(self, offline):
+    def start_core(self, offline, dbcache_mb=None):
         self.core_dir.mkdir(parents=True, exist_ok=True)
         xor = self.core_dir / "blocks/xor.dat"
         if xor.exists() and any(xor.read_bytes()):
@@ -362,7 +370,7 @@ class Worker:
             "-rpcbind=127.0.0.1",
             "-rpcallowip=127.0.0.1",
             f"-rpcport={self.port}",
-            f"-dbcache={self.c['dbcache_mb']}",
+            f"-dbcache={dbcache_mb or self.c['dbcache_mb']}",
             f"-networkactive={0 if offline or self.chain == 'regtest' else 1}",
         )
         self.logs.mkdir(parents=True, exist_ok=True)
@@ -711,11 +719,150 @@ class Worker:
             )
         return frozen
 
+    def remote_listing(self, pattern):
+        """Objects matching pattern; empty when there are none, other S3 errors raise."""
+        result = subprocess.run(
+            [*self.s5, "--json", "ls", pattern],
+            env=self.env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+        if result.returncode != 0:
+            if "no object found" in result.stderr + result.stdout:
+                return []
+            raise RuntimeError(f"S3 listing of {pattern} failed: {result.stderr.strip()}")
+        return [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+
+    def remote_json(self, uri):
+        """The JSON object at uri, or None when it does not exist."""
+        if not any(item.get("key") == uri for item in self.remote_listing(uri)):
+            return None
+        return json.loads(self.s3("cat", uri, stdout=subprocess.PIPE, text=True, timeout=120).stdout)
+
+    def dataset_members(self):
+        """Working data that exist; locks, synchronization state and logs do not count."""
+        index = (self.index / name for name in ("config.json", "files.txt", "manifest.json", "parsed"))
+        return [path for path in (self.datadir, self.dumps, self.archive_state, *index) if path.exists()]
+
+    def restore_dataset(self):
+        """Job 0: fill an empty working dataset from the S3 backups, otherwise do nothing.
+
+        The working copy on multijob storage can expire. Only a completely empty one is
+        restored, from three backups of one synchronization; a partial one is never mixed
+        with backups, and the producer refuses it.
+        """
+        self.stage = "restore"
+        self.acquire_dataset()
+        self.reset_state()
+        # Only a killed restore leaves these; both locks are held, so none is in use.
+        for leftover in (*self.root.glob(".restore-*"), *self.index.glob(".restore-*")):
+            shutil.rmtree(leftover)
+        present = self.dataset_members()
+        if present:
+            self.finish_restore("skipped-not-empty", present=[str(path) for path in present])
+            return
+        backups = {
+            "core": self.c["backup_uri"].rstrip("/") + "/manifest.json",
+            "index": self.c["index_backup_uri"].rstrip("/") + "/manifest.json",
+            "dumplings": self.c["dumplings_uri"].rstrip("/") + "/manifest.json",
+        }
+        self.progress("restore-check")
+        manifests = {name: self.remote_json(uri) for name, uri in backups.items()}
+        missing = sorted(name for name, value in manifests.items() if value is None)
+        if len(missing) == len(backups):
+            if self.remote_listing(self.c["blocks_uri"].rstrip("/") + "/*"):
+                raise ValueError(
+                    "S3 holds archived blocks but no backups; a new initial download would mix its block files "
+                    "with the archived ones. Restore the backups or empty " + self.c["blocks_uri"]
+                )
+            self.finish_restore("skipped-no-backup")
+            return
+        if missing:
+            raise ValueError("S3 lacks the backups " + ", ".join(missing) + "; the working dataset cannot be restored")
+        core, index, dumplings = manifests["core"], manifests["index"], manifests["dumplings"]
+        mismatches = [
+            label
+            for label, matches in (
+                ("the Core checkpoint names another index backup", core.get("index_backup") == backups["index"]),
+                ("run IDs differ", core.get("run_id") == index.get("run_id") == dumplings.get("run_id")),
+                (
+                    "heights differ",
+                    core.get("height") == index.get("exported_max_block") == dumplings.get("last_processed_height"),
+                ),
+                ("parser resume bytes differ", all(core.get(key) == index.get(key) for key in SIGNATURE_KEYS)),
+            )
+            if not matches
+        ]
+        if mismatches:
+            raise ValueError("The S3 backups do not belong together: " + "; ".join(mismatches))
+        self.progress("restore-download", height=core["height"])
+        staging = self.root / f".restore-{self.run_id}"
+        index_staging = self.index / f".restore-{self.run_id}"
+        try:
+            staging.mkdir()
+            index_staging.mkdir(parents=True)
+            self.restore_checkpoint(backups["core"], staging / "core")
+            self.restore_dumplings(backups["dumplings"], staging / "Scanner")
+            self.restore_checkpoint(backups["index"], index_staging / "index")
+            # Every backup is downloaded and verified; only now does any of it take its place.
+            for entry in (staging / "core").iterdir():
+                entry.rename(self.root / entry.name)
+            self.dumps.mkdir()
+            (staging / "Scanner").rename(self.dumps / "Scanner")
+            for entry in (index_staging / "index").iterdir():
+                entry.rename(self.index / entry.name)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+            shutil.rmtree(index_staging, ignore_errors=True)
+        if (self.index / "files.txt").read_text() != index_inventory(self.index):
+            raise ValueError("The restored index does not match its file inventory")
+        if resume_signature(self.index, self.core_dir / "blocks") != {key: core[key] for key in SIGNATURE_KEYS}:
+            raise ValueError("The restored index and Core blocks do not belong together")
+        self.finish_restore("restored", height=core["height"], hash=core["hash"], backups=backups)
+
+    def finish_restore(self, action, **extra):
+        value = {"action": action, **extra}
+        self.progress("complete", state="done", **value)
+        self.publish_json(self.remote + "/.pbs/mainnet-restore.done", {"run_id": self.run_id, **value})
+        self.release_dataset()
+
+    def require_complete_dataset(self):
+        """Refuse a partly lost working dataset before Core starts.
+
+        The restore job fills only an empty dataset. An unfinished first synchronization
+        (unpruned blocks, no index yet) continues; anything else that is missing is an error.
+        """
+        present = {
+            "Core chainstate": (self.core_dir / "chainstate").is_dir(),
+            "Core blocks": (self.core_dir / "blocks").is_dir(),
+            "block archive state": self.archive_state.is_dir(),
+            "Dumplings Scanner": (self.dumps / "Scanner/LastProcessedBlockHeight.txt").is_file(),
+            "BlockSci index": (self.index / "config.json").is_file(),
+        }
+        if not any(present.values()):
+            try:
+                restore = json.loads((self.run / "restore.json").read_text())
+            except (OSError, ValueError):
+                restore = {}
+            if restore.get("run_id") != self.run_id or restore.get("action") != "skipped-no-backup":
+                raise ValueError("The working dataset is empty but this synchronization's restore job did not check S3")
+            return
+        missing = [name for name, found in present.items() if not found]
+        unfinished_first = not present["BlockSci index"] and (self.core_dir / "blocks/blk00000.dat").is_file()
+        if missing and not unfinished_first:
+            raise ValueError(
+                "The working dataset is incomplete (missing: " + ", ".join(missing) + "). Remove "
+                f"{self.root} and {self.index} entirely; the next synchronization restores both from S3."
+            )
+
     def producer(self):
         self.stage = "producer"
         self.acquire_dataset()
+        self.require_complete_dataset()
         atomic_json(self.root / "current-ready.json", {"run_id": self.run_id, "state": "preparing"})
-        self.reset_state()
         self.progress("core-startup")
         self.start_core(False)
         info = self.synchronize_core()
@@ -881,7 +1028,6 @@ class Worker:
             "blocksci",
             self.parse_progress,
         )
-        number = resume_file(self.index, self.core_dir / "blocks")
         signature = resume_signature(self.index, self.core_dir / "blocks")
         output = self.work / "verified.json"
         self.progress("blocksci-verify")
@@ -927,7 +1073,37 @@ class Worker:
         }
         atomic_json(self.index / "manifest.json", manifest)
         (self.index / "files.txt").write_text(index_inventory(self.index))
-        # Writer lock remains held. Readers may use the index only after all steps exit.
+        # The index is complete; its backup is the checkpoint job's, so a failed upload
+        # leaves a usable working copy.
+        marker.unlink()
+        self.publish_json(self.remote + "/blocksci-index-manifest.json", manifest)
+        self.progress("indexed", state="done", height=height)
+        self.publish_json(self.remote + "/.pbs/mainnet-blocksci.done", manifest)
+        self.release_dataset()
+
+    def checkpoint(self):
+        """Job 3: back up the index, prune Core and back up its checkpoint, with little memory.
+
+        Holds the index reader lock: notebooks keep reading, index jobs cannot write.
+        """
+        self.stage = "checkpoint"
+        self.acquire_dataset()
+        ready = json.loads((self.run / "ready.json").read_text())
+        height = require_ready(ready, self.run_id)
+        if json.loads((self.root / "current-ready.json").read_text()) != ready:
+            raise ValueError("The working dataset no longer matches this ready generation")
+        manifest = json.loads((self.index / "manifest.json").read_text())
+        if (
+            (self.index / ".writing").exists()
+            or manifest.get("run_id") != self.run_id
+            or manifest.get("exported_max_block") != height
+            or (self.index / "files.txt").read_text() != index_inventory(self.index)
+        ):
+            raise ValueError("The index is not the one this synchronization's BlockSci job completed")
+        number = resume_file(self.index, self.core_dir / "blocks")
+        signature = resume_signature(self.index, self.core_dir / "blocks")
+        if any(manifest.get(key) != value for key, value in signature.items()):
+            raise ValueError("BlockSci resume bytes no longer match this Core working copy")
         self.progress("index-backup")
         index_backup = self.backup(
             self.index,
@@ -936,10 +1112,9 @@ class Worker:
             manifest,
             "blocksci_index.tar.zst",
         )
-        marker.unlink()
-        self.publish_json(self.remote + "/blocksci-index-manifest.json", manifest)
         self.progress("pruning")
-        info = self.start_core(True)
+        # Offline Core only loads its chain for pruning; a large cache would just cost memory.
+        info = self.start_core(True, dbcache_mb=min(1024, self.c["dbcache_mb"]))
         if info["blocks"] != height or info["bestblockhash"] != ready["hash"]:
             raise ValueError("Offline Core does not match the ready generation")
         self.archive(prune=True, height=min(height, ready["dumplings_height"]), number=number)
@@ -965,7 +1140,7 @@ class Worker:
             "state": "done",
             "core_checkpoint": checkpoint,
             "index_backup": index_backup,
-            # Measured while Core is stopped and the index writer lock is held.
+            # Measured while Core is stopped and no index job can write.
             "storage": {
                 "measured_at": datetime.now(timezone.utc).isoformat(),
                 "multijob": {
@@ -979,7 +1154,7 @@ class Worker:
             },
         }
         self.progress("complete", state="done", height=height)
-        self.publish_json(self.remote + "/.pbs/mainnet-blocksci.done", done)
+        self.publish_json(self.remote + "/.pbs/mainnet-checkpoint.done", done)
         self.publish_json(self.remote + "/done.json", done)
         self.release_dataset()
         atomic_json(self.run / "done.json", done)
@@ -1003,7 +1178,8 @@ def main(argv=None):
     args = argv or sys.argv[1:]
     settings = Path(args[0])
     worker = Worker(json.loads(settings.read_text(encoding="utf-8")), settings.parent)
-    if args[1] == "restore":
+    # Explicit recovery: restore <manifest> <new directory>; the restore job takes no arguments.
+    if args[1] == "restore" and len(args) == 4:
         worker.restore_checkpoint(args[2], Path(args[3]))
         return
     if args[1] == "restore-dumplings":
@@ -1017,6 +1193,7 @@ def main(argv=None):
         worker.publish_json(worker.remote + f"/.pbs/mainnet-{worker.stage}.failed", {"run_id": worker.run_id})
         return
     worker.stage = args[1]
+    job = worker.restore_dataset if args[1] == "restore" else getattr(worker, args[1])
     # The fixed state directory may hold the marker of an earlier run of this stage.
     (worker.run / f"{worker.stage}.quiescent").unlink(missing_ok=True)
 
@@ -1026,7 +1203,7 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
     try:
-        getattr(worker, args[1])()
+        job()
     finally:
         try:
             worker.cleanup()

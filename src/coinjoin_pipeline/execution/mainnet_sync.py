@@ -1,4 +1,4 @@
-"""Manual Core/Dumplings → BlockSci PBS graph over a shared working directory."""
+"""Manual restore → Core/Dumplings → BlockSci → checkpoint PBS chain over a shared working directory."""
 
 from __future__ import annotations
 
@@ -19,6 +19,9 @@ from .s3_markers import rollback_s3_pbs_submissions
 
 if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import PipelineConfiguration
+
+# Submission order; each job depends on the previous one.
+SYNC_STAGES = ("restore", "producer", "blocksci", "checkpoint")
 
 
 def configuration_errors(config: PipelineConfiguration) -> list[str]:
@@ -47,7 +50,7 @@ def configuration_errors(config: PipelineConfiguration) -> list[str]:
         "pbs.blocksci_image",
     }
     for path in sorted(config.provided):
-        if path not in allowed and not path.startswith(("mainnet.", "pbs.producer.", "pbs.blocksci.")):
+        if path not in allowed and not path.startswith(("mainnet.", *(f"pbs.{stage}." for stage in SYNC_STAGES))):
             errors.append(f"{path} is not used by mainnet-sync")
     for label, value, validator in (
         ("run_id", config.run_id, validate_run_id),
@@ -86,21 +89,21 @@ def configuration_errors(config: PipelineConfiguration) -> list[str]:
                 errors.append("Working directories must be absolute, below a parent directory, without '..'")
         if Path(root) == Path(index) or Path(root) in Path(index).parents or Path(index) in Path(root).parents:
             errors.append("Core and index working directories must be separate, without nesting")
-        locations = {config.pbs.producer.multijob, config.pbs.blocksci.multijob}
+        locations = {getattr(config.pbs, stage).multijob for stage in SYNC_STAGES}
         if len(locations) != 1:
-            errors.append("Both jobs must request the same multijob location")
+            errors.append("All jobs must request the same multijob location")
         for path in (root, index):
             if path.startswith("/scratch/multijob-"):
                 location = path.split("/")[2].removeprefix("multijob-")
                 if locations != {location}:
-                    errors.append(f"{path} requires multijob: {location} on both jobs")
+                    errors.append(f"{path} requires multijob: {location} on all jobs")
     if any((config.stages.analysis, config.stages.blocksci, config.stages.mappings)):
-        errors.append("mainnet-sync owns its two stages; omit stages.*")
+        errors.append("mainnet-sync owns its jobs; omit stages.*")
     if config.driver != "docker":
         errors.append("mainnet-sync runs Apptainer PBS jobs; omit driver: kubernetes")
     if config.mainnet.network == "bitcoin" and config.mainnet.scan_start_height is not None:
         errors.append("scan_start_height is only for isolated regtest validation")
-    for stage in ("producer", "blocksci"):
+    for stage in SYNC_STAGES:
         try:
             require_safe_pbs_resources(resources(config, stage), getattr(config.pbs, stage).multijob)
         except (ValueError, PBSError) as error:
@@ -140,15 +143,17 @@ def render_sync(config: PipelineConfiguration, stage: str) -> str:
     verifier = (EXPORTERS_ROOT / "verify_chain.py").read_text(encoding="utf-8")
     identity = f"STAGE=mainnet-{stage}\nRUN_ID={shell_value(run_id)}\n"
     index_lock = ""
-    if stage == "blocksci":
+    # Restore and BlockSci write the index; the checkpoint only reads it, so readers stay.
+    lock = {"restore": "index_lock_exclusive", "blocksci": "index_lock_exclusive", "checkpoint": "index_lock_shared"}
+    if stage in lock:
         index_lock = f"""
 INDEX_DIR={shell_value(str(config.blocksci.index_dir))}
 INDEX_LOCK_EXPIRES=$(($(date +%s) + {walltime_to_seconds(budget.walltime)} + 600))
-# Fail immediately on an active notebook instead of holding a large allocation waiting.
+# Fail immediately on an active notebook or index job instead of holding an allocation waiting.
 INDEX_LOCK_WAIT=0
 INDEX_LOCK_POLL=1
 {template("index_store.sh")}
-index_lock_exclusive
+{lock[stage]}
 """
     return f"""{directives("mainnet_" + stage, budget, getattr(config.pbs, stage).multijob)}
 set -euo pipefail
@@ -192,13 +197,13 @@ python3 "$WORK/worker.py" "$WORK/settings.json" {stage}
 
 
 def submit_sync(config: PipelineConfiguration) -> None:
-    """Persist both IDs immediately and roll back partial submissions.
+    """Persist every ID immediately and roll back partial submissions.
 
-    The S3 state prefix is fixed: the producer clears the previous run's state once it
+    The S3 state prefix is fixed: the restore job clears the previous run's state once it
     holds the dataset lock, so submission checks nothing there.
     """
     run_id = required(config.run_id, "run_id")
-    scripts = {stage: render_sync(config, stage) for stage in ("producer", "blocksci")}
+    scripts = {stage: render_sync(config, stage) for stage in SYNC_STAGES}
     submitted: list[tuple[str, str]] = []
     try:
         for stage, script in scripts.items():

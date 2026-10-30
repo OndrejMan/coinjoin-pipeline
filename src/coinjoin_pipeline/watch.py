@@ -508,7 +508,7 @@ def main(
             for stage, job_id in sorted(job_ids.items()):
                 try:
                     job = _pbs_job_details(stage, job_id)
-                    if stage in {"mainnet-producer", "mainnet-blocksci"}:
+                    if stage in {"mainnet-restore", "mainnet-producer", "mainnet-blocksci", "mainnet-checkpoint"}:
                         job = replace(job, log_dir=run_dir / "logs" / stage)
                     pbs_jobs[f"pbs:{stage}"] = job
                 except RuntimeError as error:
