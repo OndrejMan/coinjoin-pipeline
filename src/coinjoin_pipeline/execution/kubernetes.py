@@ -295,6 +295,55 @@ def delete_s3_emulation_support_resources(kubeconfig_path: Path, namespace: str,
             return
 
 
+# What the controller needs to create, watch and exec into the emulation pods.
+S3_EMULATION_ROLE_RULES = (
+    {"apiGroups": [""], "resources": ["pods", "services"], "verbs": ["create", "get", "list", "watch", "delete"]},
+    {"apiGroups": [""], "resources": ["pods/log", "pods/status"], "verbs": ["get"]},
+    {"apiGroups": [""], "resources": ["pods/exec"], "verbs": ["create", "get"]},
+    {"apiGroups": [""], "resources": ["events"], "verbs": ["get", "list", "watch"]},
+)
+S3_EMULATION_POD_SECURITY = {
+    "runAsNonRoot": True,
+    "runAsUser": 1000,
+    "runAsGroup": 1000,
+    "fsGroup": 1000,
+    "seccompProfile": {"type": "RuntimeDefault"},
+}
+
+
+def _env(name: str, value: str) -> dict:
+    return {"name": name, "value": value}
+
+
+def _field_env(name: str, path: str) -> dict:
+    return {"name": name, "valueFrom": {"fieldRef": {"fieldPath": path}}}
+
+
+def _secret_env(secret_name: str, key: str, *, optional: bool = False) -> dict:
+    return {"name": key, "valueFrom": {"secretKeyRef": {"name": secret_name, "key": key, "optional": optional}}}
+
+
+def _container(name: str, image: str, script: str, environment: list[dict], limits: tuple, mounts: dict) -> dict:
+    """A non-root shell container; only the scenario volume is mounted read-only."""
+    requests, maximum = limits
+    return {
+        "name": name,
+        "image": image,
+        "command": ["sh", "-c", script],
+        "env": environment,
+        "securityContext": {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}},
+        "resources": {"requests": requests, "limits": maximum},
+        "volumeMounts": [
+            {"name": volume, "mountPath": path, **({"readOnly": True} if volume == "scenario" else {})}
+            for volume, path in mounts.items()
+        ],
+    }
+
+
+def _execution_script(*names: str) -> str:
+    return "".join((EXECUTION_ROOT / name).read_text(encoding="utf-8") for name in names)
+
+
 def render_s3_emulation_resources(
     *,
     namespace: str,
@@ -328,41 +377,22 @@ def render_s3_emulation_resources(
         "--controller-failed-marker /app/logs/.controller.failed"
         f"{btc_node_image_arg}"
     )
-    access = (EXECUTION_ROOT / "k8s_s3_access.sh").read_text(encoding="utf-8")
-    prefix_preflight = access + (EXECUTION_ROOT / "k8s_s3_prefix_preflight.sh").read_text(encoding="utf-8").replace(
+    prefix_preflight = _execution_script("k8s_s3_access.sh", "k8s_s3_prefix_preflight.sh").replace(
         "@REQUIRED_EXPORTERS@", " ".join(REQUIRED_EXPORTERS)
     )
-    uploader = access + (EXECUTION_ROOT / "k8s_s3_uploader.sh").read_text(encoding="utf-8").rstrip("\n")
-
-    def field_ref(variable: str, path: str) -> dict:
-        return {"name": variable, "valueFrom": {"fieldRef": {"fieldPath": path}}}
-
-    def container(title: str, image: str, script: str, environment: list[dict], limits: tuple, mounts: dict) -> dict:
-        requests, maximum = limits
-        return {
-            "name": title,
-            "image": image,
-            "command": ["sh", "-c", script],
-            "env": environment,
-            "securityContext": {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}},
-            "resources": {"requests": requests, "limits": maximum},
-            "volumeMounts": [
-                {"name": volume, "mountPath": path, **({"readOnly": True} if volume == "scenario" else {})}
-                for volume, path in mounts.items()
-            ],
-        }
+    uploader = _execution_script("k8s_s3_access.sh", "k8s_s3_uploader.sh").rstrip("\n")
 
     # The emulator makes this pod the owner of every pod and service it
     # creates, so Kubernetes removes them even when the controller is
     # killed before its own cleanup finishes.
     env: list[dict] = [
-        {"name": "NAMESPACE", "value": namespace},
-        {"name": "RUN_ID", "value": run_id},
-        {"name": "ENGINE", "value": engine},
-        {"name": "IMAGE_PREFIX", "value": image_prefix},
-        field_ref("COINJOIN_OWNER_POD_NAME", "metadata.name"),
-        field_ref("COINJOIN_OWNER_POD_UID", "metadata.uid"),
-        field_ref("COINJOIN_OWNER_POD_NAMESPACE", "metadata.namespace"),
+        _env("NAMESPACE", namespace),
+        _env("RUN_ID", run_id),
+        _env("ENGINE", engine),
+        _env("IMAGE_PREFIX", image_prefix),
+        _field_env("COINJOIN_OWNER_POD_NAME", "metadata.name"),
+        _field_env("COINJOIN_OWNER_POD_UID", "metadata.uid"),
+        _field_env("COINJOIN_OWNER_POD_NAMESPACE", "metadata.namespace"),
     ]
     # The controller runs in a separate container, so overrides set on the
     # frontend reach it only explicitly; the emulator validates each one.
@@ -373,25 +403,19 @@ def render_s3_emulation_resources(
         ("COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT", btc_node_initial_block_count),
     ):
         if value:
-            env.append({"name": variable, "value": value})
+            env.append(_env(variable, value))
     artifact_env: list[dict] = [
-        {"name": "RUN_ID", "value": run_id},
-        {"name": "ARTIFACT_URI", "value": artifact_uri},
-        {"name": "S3_ENDPOINT_URL", "value": endpoint_url},
-        *[
-            {
-                "name": key,
-                "valueFrom": {
-                    "secretKeyRef": {"name": secret_name, "key": key, "optional": key == "S3_DEFAULT_REGION"}
-                },
-            }
-            for key in ("S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "S3_DEFAULT_REGION")
-        ],
+        _env("RUN_ID", run_id),
+        _env("ARTIFACT_URI", artifact_uri),
+        _env("S3_ENDPOINT_URL", endpoint_url),
+        _secret_env(secret_name, "S3_ACCESS_KEY_ID"),
+        _secret_env(secret_name, "S3_SECRET_ACCESS_KEY"),
+        _secret_env(secret_name, "S3_DEFAULT_REGION", optional=True),
     ]
     uploader_env: list[dict] = [
-        {"name": "NAMESPACE", "value": namespace},
-        {"name": "EMULATION_TIMEOUT_SECONDS", "value": str(emulation_timeout_seconds)},
-        field_ref("POD_NAME", "metadata.name"),
+        _env("NAMESPACE", namespace),
+        _env("EMULATION_TIMEOUT_SECONDS", str(emulation_timeout_seconds)),
+        _field_env("POD_NAME", "metadata.name"),
         *artifact_env,
     ]
     small = (S3_UPLOADER_RESOURCE_REQUESTS, S3_UPLOADER_RESOURCE_LIMITS)
@@ -403,16 +427,7 @@ def render_s3_emulation_resources(
             "apiVersion": "rbac.authorization.k8s.io/v1",
             "kind": "Role",
             "metadata": {"name": name, "namespace": namespace},
-            "rules": [
-                {
-                    "apiGroups": [""],
-                    "resources": ["pods", "services"],
-                    "verbs": ["create", "get", "list", "watch", "delete"],
-                },
-                {"apiGroups": [""], "resources": ["pods/log", "pods/status"], "verbs": ["get"]},
-                {"apiGroups": [""], "resources": ["pods/exec"], "verbs": ["create", "get"]},
-                {"apiGroups": [""], "resources": ["events"], "verbs": ["get", "list", "watch"]},
-            ],
+            "rules": list(S3_EMULATION_ROLE_RULES),
         },
         {
             "apiVersion": "rbac.authorization.k8s.io/v1",
@@ -436,20 +451,14 @@ def render_s3_emulation_resources(
                     "spec": {
                         "serviceAccountName": name,
                         "restartPolicy": "Never",
-                        "securityContext": {
-                            "runAsNonRoot": True,
-                            "runAsUser": 1000,
-                            "runAsGroup": 1000,
-                            "fsGroup": 1000,
-                            "seccompProfile": {"type": "RuntimeDefault"},
-                        },
+                        "securityContext": S3_EMULATION_POD_SECURITY,
                         "volumes": [
                             {"name": "artifacts", "emptyDir": {}},
                             {"name": "credentials", "emptyDir": {"medium": "Memory"}},
                             {"name": "scenario", "configMap": {"name": name}},
                         ],
                         "initContainers": [
-                            container(
+                            _container(
                                 "prefix-preflight",
                                 uploader_image,
                                 prefix_preflight,
@@ -459,7 +468,7 @@ def render_s3_emulation_resources(
                             )
                         ],
                         "containers": [
-                            container(
+                            _container(
                                 "controller",
                                 emulator_image,
                                 controller,
@@ -467,7 +476,7 @@ def render_s3_emulation_resources(
                                 (S3_CONTROLLER_RESOURCE_REQUESTS, S3_CONTROLLER_RESOURCE_LIMITS),
                                 {"artifacts": "/app/logs", "scenario": "/config"},
                             ),
-                            container(
+                            _container(
                                 "uploader",
                                 uploader_image,
                                 uploader,
