@@ -256,6 +256,15 @@ def joinmarket_subset_result(
     return result, reason, depth
 
 
+def _most_frequent_value(counts: dict[int, int]) -> tuple[int | None, int]:
+    """The value with the most outputs (the first on a tie) and its count; ``(None, 0)`` without outputs."""
+    return max(counts.items(), key=lambda item: item[1]) if counts else (None, 0)
+
+
+def _value_times(value: int | None, count: int) -> str:
+    return f"{value} x {count}" if value is not None else "missing"
+
+
 def _subset_observation(input_values: list[int], bucket_goals: list[int], depth: int, reason: str) -> JsonObject:
     return {
         "input_values": sorted(input_values, reverse=True),
@@ -293,11 +302,9 @@ def explain_joinmarket_definite_heuristic(
     output_addresses = output_addresses_by_value(outputs)
     value_counts = output_value_counts(outputs)
     participant_count = (len(outputs) + 1) // 2
-    dominant_value = None
-    dominant_address_count = 0
-    if output_addresses:
-        dominant_value, dominant_addresses = max(output_addresses.items(), key=lambda item: len(item[1]))
-        dominant_address_count = len(dominant_addresses)
+    dominant_value, dominant_address_count = _most_frequent_value(
+        {value: len(addresses) for value, addresses in output_addresses.items()}
+    )
 
     max_possible_fee = None
     bucket_goals: list[int] = []
@@ -353,7 +360,7 @@ def explain_joinmarket_definite_heuristic(
         rule_result(
             "dominant_output_address_count",
             dominant_address_count == participant_count,
-            f"{dominant_value} x {dominant_address_count}" if dominant_value is not None else "missing",
+            _value_times(dominant_value, dominant_address_count),
             f"one output value with {participant_count} distinct addresses",
         ),
         rule_result(
@@ -403,17 +410,8 @@ def explain_joinmarket_possible_heuristic(
         for output in outputs
         if output.get("address") is not None and str(output.get("address")) not in input_addresses
     ]
-    all_output_counts = output_value_counts(outputs)
-    unknown_output_counts = output_value_counts(unknown_outputs)
-    dominant_value = None
-    dominant_count = 0
-    if all_output_counts:
-        dominant_value, dominant_count = max(all_output_counts.items(), key=lambda item: item[1])
-
-    unknown_dominant_value = None
-    unknown_dominant_count = 0
-    if unknown_output_counts:
-        unknown_dominant_value, unknown_dominant_count = max(unknown_output_counts.items(), key=lambda item: item[1])
+    dominant_value, dominant_count = _most_frequent_value(output_value_counts(outputs))
+    unknown_dominant_value, unknown_dominant_count = _most_frequent_value(output_value_counts(unknown_outputs))
 
     goal_value = None
     max_possible_fee = None
@@ -441,7 +439,7 @@ def explain_joinmarket_possible_heuristic(
         rule_result(
             "has_repeated_output_value",
             dominant_count > 1,
-            f"{dominant_value} x {dominant_count}" if dominant_value is not None else "missing",
+            _value_times(dominant_value, dominant_count),
             "at least two outputs with the same value",
         ),
         rule_result(
@@ -459,11 +457,7 @@ def explain_joinmarket_possible_heuristic(
         rule_result(
             "has_repeated_unknown_output_value",
             unknown_dominant_count > 1,
-            (
-                f"{unknown_dominant_value} x {unknown_dominant_count}"
-                if unknown_dominant_value is not None
-                else "missing"
-            ),
+            _value_times(unknown_dominant_value, unknown_dominant_count),
             "at least two unknown outputs with the same value",
         ),
         rule_result(

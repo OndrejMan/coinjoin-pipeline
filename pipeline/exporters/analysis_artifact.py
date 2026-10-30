@@ -40,22 +40,16 @@ def load_analysis(
         raise ValueError(f"BlockSci analysis run mismatch: expected {run_id!r}, got {artifact.get('run_id')!r}")
     if artifact.get("parameters") != expected_parameters:
         raise ValueError("BlockSci analysis detector parameters do not match the requested report parameters")
-    if not isinstance(artifact.get("records"), dict):
-        raise ValueError("BlockSci analysis artifact has invalid records")
-    if not isinstance(artifact.get("skipped_txids"), list):
-        raise ValueError("BlockSci analysis artifact has invalid skipped_txids")
-    if not isinstance(artifact.get("first_wasabi2_block"), int):
-        raise ValueError("BlockSci analysis artifact has invalid first_wasabi2_block")
+    for field, kind in (("records", dict), ("skipped_txids", list), ("first_wasabi2_block", int)):
+        if not isinstance(artifact.get(field), kind):
+            raise ValueError(f"BlockSci analysis artifact has invalid {field}")
     if artifact.get("mode", "emulator") != mode:
         raise ValueError("BlockSci analysis mode does not match the requested report mode")
     if mode == "emulator" and not isinstance(artifact.get("integration_diagnostics"), dict):
         raise ValueError("BlockSci analysis artifact has invalid integration_diagnostics")
-    clusters = artifact.get("predicted_address_clusters")
-    if clusters is not None and not isinstance(clusters, dict):
-        raise ValueError("BlockSci analysis artifact has invalid predicted_address_clusters")
-    mix_events = artifact.get("mix_events")
-    if mix_events is not None and not isinstance(mix_events, dict):
-        raise ValueError("BlockSci analysis artifact has invalid mix_events")
+    for field in ("predicted_address_clusters", "mix_events"):
+        if artifact.get(field) is not None and not isinstance(artifact[field], dict):
+            raise ValueError(f"BlockSci analysis artifact has invalid {field}")
     provenance = artifact.get("image_provenance")
     if provenance is not None:
         if not isinstance(provenance, dict):

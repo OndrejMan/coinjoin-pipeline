@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
 
 from exporters.artifact_paths import coinjoin_analysis_dir, emulator_dir
@@ -176,52 +177,51 @@ def verified_producer_label_sources(
 
 
 def load_wallet_address_mapping(run_dir: Path, coinjoin_analysis_data: JsonObject) -> dict[str, str]:
+    """Address → wallet; the analyzer's own mapping wins over the per-wallet emulator files."""
     mapping = {
         str(address): str(wallet)
         for address, wallet in (coinjoin_analysis_data.get("address_wallet_mapping") or {}).items()
         if address and wallet
     }
+    for address, wallet in _wallet_addresses(run_dir, coinjoin_analysis_data):
+        mapping.setdefault(str(address), str(wallet))
+    return mapping
 
+
+def _wallet_addresses(run_dir: Path, coinjoin_analysis_data: JsonObject) -> Iterator[tuple[object, object]]:
     for tx in (coinjoin_analysis_data.get("coinjoins") or {}).values():
         for side in ("inputs", "outputs"):
             for record in (tx.get(side) or {}).values():
-                address = record.get("address") if isinstance(record, dict) else None
-                record_wallet_name = record.get("wallet_name") if isinstance(record, dict) else None
-                if address and record_wallet_name:
-                    mapping.setdefault(str(address), str(record_wallet_name))
+                if isinstance(record, dict) and record.get("address") and record.get("wallet_name"):
+                    yield record["address"], record["wallet_name"]
 
-    wallets_info = coinjoin_analysis_data.get("wallets_info")
-    if not wallets_info:
-        wallets_info_path = run_dir / "wallets_info.json"
-        if wallets_info_path.exists():
-            wallets_info = load_json(wallets_info_path)
-
+    wallets_info = _analysis_or_run_file(run_dir, coinjoin_analysis_data, "wallets_info")
     if isinstance(wallets_info, dict):
-        for info_wallet_name, wallet_addresses in wallets_info.items():
-            if isinstance(wallet_addresses, dict):
-                for address in wallet_addresses:
-                    if address:
-                        mapping.setdefault(str(address), str(info_wallet_name))
-            elif isinstance(wallet_addresses, list):
-                for record in wallet_addresses:
-                    if isinstance(record, dict) and record.get("address"):
-                        mapping.setdefault(str(record["address"]), str(info_wallet_name))
+        for wallet, addresses in wallets_info.items():
+            if isinstance(addresses, dict):
+                yield from ((address, wallet) for address in addresses if address)
+            elif isinstance(addresses, list):
+                yield from _record_addresses(addresses, wallet)
 
-    wallets_coins = coinjoin_analysis_data.get("wallets_coins")
-    if not wallets_coins:
-        wallets_coins_path = run_dir / "wallets_coins.json"
-        if wallets_coins_path.exists():
-            wallets_coins = load_json(wallets_coins_path)
-
+    wallets_coins = _analysis_or_run_file(run_dir, coinjoin_analysis_data, "wallets_coins")
     if isinstance(wallets_coins, dict):
-        for coins_wallet_name, coins in wallets_coins.items():
-            if not isinstance(coins, list):
-                continue
-            for coin in coins:
-                if isinstance(coin, dict) and coin.get("address"):
-                    mapping.setdefault(str(coin["address"]), str(coins_wallet_name))
+        for wallet, coins in wallets_coins.items():
+            if isinstance(coins, list):
+                yield from _record_addresses(coins, wallet)
 
-    return mapping
+
+def _record_addresses(records: list[JsonValue], wallet: object) -> Iterator[tuple[object, object]]:
+    for record in records:
+        if isinstance(record, dict) and record.get("address"):
+            yield record["address"], wallet
+
+
+def _analysis_or_run_file(run_dir: Path, coinjoin_analysis_data: JsonObject, name: str) -> JsonValue:
+    """A section of the analyzer output, else the emulator's ``<name>.json`` in the run directory."""
+    value = coinjoin_analysis_data.get(name)
+    if not value and (run_dir / f"{name}.json").exists():
+        value = load_json(run_dir / f"{name}.json")
+    return value
 
 
 def normalize_emulator_io_record(
@@ -245,13 +245,17 @@ def normalize_emulator_io_record(
     return record
 
 
+def _revoke_label_independence(label_provenance: JsonObject, reason: str) -> None:
+    label_provenance["independent"] = False
+    label_provenance["unavailable_reason"] = reason
+
+
 def _mark_transaction_labels_unavailable(
     transactions: JsonObject,
     label_provenance: JsonObject,
     reason: str,
 ) -> None:
-    label_provenance["independent"] = False
-    label_provenance["unavailable_reason"] = reason
+    _revoke_label_independence(label_provenance, reason)
     for record in transactions.values():
         record["is_coinjoin"] = None
         record["protocol"] = None
@@ -283,15 +287,14 @@ def load_producer_labels(
         else:
             labels = {}
     except (OSError, ValueError, json.JSONDecodeError) as error:
-        label_provenance["independent"] = False
-        label_provenance["unavailable_reason"] = f"producer label source cannot be parsed: {error}"
+        _revoke_label_independence(label_provenance, f"producer label source cannot be parsed: {error}")
         return {}
     expected = label_provenance.get("producer_positive_count")
     if isinstance(expected, int) and len(labels) != expected:
-        label_provenance["independent"] = False
-        label_provenance["unavailable_reason"] = (
+        _revoke_label_independence(
+            label_provenance,
             "parsed producer-positive transaction count does not match manifest: "
-            f"parsed {len(labels)}, expected {expected}"
+            f"parsed {len(labels)}, expected {expected}",
         )
     return labels
 

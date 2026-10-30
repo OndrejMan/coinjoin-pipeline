@@ -170,6 +170,33 @@ def call_joinmarket_detector(
     return normalize_joinmarket_detector_result(value)
 
 
+def _count_problems(*checks: tuple[list[str], str]) -> list[str]:
+    """One "<count> <message>" problem per non-empty list of transaction IDs."""
+    return [f"{len(txids)} {message}" for txids, message in checks if txids]
+
+
+def _lookup_target(chain: Blockchain, target: JsonObject, detected: bool) -> tuple[JsonObject, object]:
+    """Whether BlockSci holds an exported target at its height; the transaction, else None."""
+    txid = str(target["txid"])
+    detail: JsonObject = {
+        "txid": txid,
+        "exported_block_height": target.get("exported_block_height"),
+        "present_in_blocksci": False,
+        "blocksci_block_height": None,
+        "detected_by_bulk_filter": detected,
+    }
+    tx = None
+    try:
+        tx = chain.tx_with_hash(txid)
+        blocksci_txid = to_json_text(safe_attr(tx, "hash"))
+        blocksci_height = safe_attr(tx, "block_height")
+        detail["blocksci_block_height"] = int(str(blocksci_height)) if blocksci_height is not None else None
+        detail["present_in_blocksci"] = blocksci_txid in {None, txid}
+    except Exception as exc:
+        detail["lookup_error"] = str(exc)
+    return detail, tx
+
+
 def build_target_diagnostics(
     chain: Blockchain,
     blocksci_module: BlocksciModule,
@@ -181,6 +208,10 @@ def build_target_diagnostics(
     joinmarket_percentage_fee: float,
     joinmarket_max_depth: int,
 ) -> tuple[JsonObject, JsonObject, list[str]]:
+    """Look up every exported target and, for JoinMarket, rerun the detector on it one by one.
+
+    The direct detector call must agree with the bulk filter that produced the analysis.
+    """
     details: list[JsonObject] = []
     missing = []
     height_mismatches = []
@@ -189,33 +220,18 @@ def build_target_diagnostics(
     detector_disagreements = []
     detector_timeouts = []
     detector_errors = []
+    detector_available = coinjoin_type == "joinmarket"
 
     for target in targets:
         txid = str(target["txid"])
-        exported_height = target.get("exported_block_height")
-        detail: JsonObject = {
-            "txid": txid,
-            "exported_block_height": exported_height,
-            "present_in_blocksci": False,
-            "blocksci_block_height": None,
-            "detected_by_bulk_filter": txid in blocksci_detected_txids,
-        }
-        tx = None
-        try:
-            tx = chain.tx_with_hash(txid)
-            blocksci_txid = to_json_text(safe_attr(tx, "hash"))
-            blocksci_height = safe_attr(tx, "block_height")
-            detail["blocksci_block_height"] = int(str(blocksci_height)) if blocksci_height is not None else None
-            detail["present_in_blocksci"] = blocksci_txid in {None, txid}
-        except Exception as exc:
-            detail["lookup_error"] = str(exc)
-
+        detail, tx = _lookup_target(chain, target, txid in blocksci_detected_txids)
+        exported_height = detail["exported_block_height"]
         if not detail["present_in_blocksci"]:
             missing.append(txid)
         elif exported_height is not None and detail.get("blocksci_block_height") != exported_height:
             height_mismatches.append(txid)
 
-        if tx is not None and coinjoin_type == "joinmarket":
+        if tx is not None and detector_available:
             detector_checked += 1
             try:
                 detector_result = call_joinmarket_detector(
@@ -241,27 +257,19 @@ def build_target_diagnostics(
 
         details.append(detail)
 
-    target_status = "ok" if not missing and not height_mismatches else "not_ok"
-    target_problems = []
-    if missing:
-        target_problems.append(f"{len(missing)} exported target txid(s) are missing from BlockSci")
-    if height_mismatches:
-        target_problems.append(f"{len(height_mismatches)} exported target txid(s) have BlockSci height mismatches")
-
-    detector_available = coinjoin_type == "joinmarket"
-    detector_status = "ok"
-    detector_problems = []
-    if detector_disagreements:
-        detector_status = "not_ok"
-        detector_problems.append(f"{len(detector_disagreements)} direct detector result(s) disagree with bulk filter")
-    if detector_errors:
-        detector_status = "not_ok"
-        detector_problems.append(f"{len(detector_errors)} direct detector check(s) failed")
-    if detector_timeouts:
-        detector_status = "not_ok"
-        detector_problems.append(f"{len(detector_timeouts)} direct detector check(s) timed out")
+    target_problems = _count_problems(
+        (missing, "exported target txid(s) are missing from BlockSci"),
+        (height_mismatches, "exported target txid(s) have BlockSci height mismatches"),
+    )
+    detector_problems = _count_problems(
+        (detector_disagreements, "direct detector result(s) disagree with bulk filter"),
+        (detector_errors, "direct detector check(s) failed"),
+        (detector_timeouts, "direct detector check(s) timed out"),
+    )
     if not detector_available:
         detector_status = "unavailable"
+    else:
+        detector_status = "not_ok" if detector_problems else "ok"
 
     return (
         {
@@ -269,7 +277,7 @@ def build_target_diagnostics(
             "present": len(targets) - len(missing),
             "missing": len(missing),
             "height_mismatches": len(height_mismatches),
-            "status": target_status,
+            "status": "not_ok" if target_problems else "ok",
             "problems": target_problems,
             "details": details,
         },

@@ -304,6 +304,43 @@ def is_disagreement(confusion_key: str) -> bool:
     return truth.partition(":")[2] != analyzer
 
 
+# Columns the large-wallet and wallet-group tables share, between the name and the lift.
+FIN_HEADERS = ["peak pool share", "first entry", "observed entry", "last leave", "descending window", "leave precision"]
+
+
+def fin_columns(holder: JsonObject, *, recall: bool) -> list[object]:
+    """When a large wallet or group entered and left, and how well its fin predicts its exit."""
+    fin = holder.get("fin") or {}
+    return [
+        metric_value(holder.get("peak_pool_share")),
+        holder.get("first_enter_index"),
+        fin.get("observed_entry_index"),
+        holder.get("last_leave_index"),
+        fin.get("descending_window"),
+        metric_value(fin.get("window_leave_precision")),
+        *([metric_value(fin.get("window_leave_recall"))] if recall else []),
+        metric_value(fin.get("lift")),
+    ]
+
+
+def render_large_holders(liquidity: JsonObject) -> list[str]:
+    lines: list[str] = []
+    large_wallets = liquidity.get("large_wallets") or []
+    if large_wallets:
+        rows = [[wallet.get("wallet"), *fin_columns(wallet, recall=False)] for wallet in large_wallets]
+        headers = ["wallet", *FIN_HEADERS, "lift"]
+        lines.extend(section("Large Wallets", *table(headers, rows), level=3))
+    large_groups = liquidity.get("large_groups") or []
+    if large_groups:
+        rows = [
+            [group.get("group"), ", ".join(group.get("wallets") or []), *fin_columns(group, recall=True)]
+            for group in large_groups
+        ]
+        headers = ["group", "wallets", *FIN_HEADERS, "leave recall", "lift"]
+        lines.extend(section("Wallet Groups", *table(headers, rows), level=3))
+    return lines
+
+
 def render_liquidity_evaluation(report: JsonObject) -> list[str]:
     liquidity = report.get("liquidity_evaluation")
     if not liquidity:
@@ -366,67 +403,7 @@ def render_liquidity_evaluation(report: JsonObject) -> list[str]:
         if disagreements:
             lines.extend(section(title, *table([f"ground truth -> {analyzer}", "count"], disagreements), level=3))
 
-    large_wallets = liquidity.get("large_wallets") or []
-    if large_wallets:
-        rows = []
-        for wallet in large_wallets:
-            fin = wallet.get("fin") or {}
-            rows.append(
-                [
-                    wallet.get("wallet"),
-                    metric_value(wallet.get("peak_pool_share")),
-                    wallet.get("first_enter_index"),
-                    fin.get("observed_entry_index"),
-                    wallet.get("last_leave_index"),
-                    fin.get("descending_window"),
-                    metric_value(fin.get("window_leave_precision")),
-                    metric_value(fin.get("lift")),
-                ]
-            )
-        headers = [
-            "wallet",
-            "peak pool share",
-            "first entry",
-            "observed entry",
-            "last leave",
-            "descending window",
-            "leave precision",
-            "lift",
-        ]
-        lines.extend(section("Large Wallets", *table(headers, rows), level=3))
-
-    large_groups = liquidity.get("large_groups") or []
-    if large_groups:
-        rows = []
-        for group in large_groups:
-            fin = group.get("fin") or {}
-            rows.append(
-                [
-                    group.get("group"),
-                    ", ".join(group.get("wallets") or []),
-                    metric_value(group.get("peak_pool_share")),
-                    group.get("first_enter_index"),
-                    fin.get("observed_entry_index"),
-                    group.get("last_leave_index"),
-                    fin.get("descending_window"),
-                    metric_value(fin.get("window_leave_precision")),
-                    metric_value(fin.get("window_leave_recall")),
-                    metric_value(fin.get("lift")),
-                ]
-            )
-        headers = [
-            "group",
-            "wallets",
-            "peak pool share",
-            "first entry",
-            "observed entry",
-            "last leave",
-            "descending window",
-            "leave precision",
-            "leave recall",
-            "lift",
-        ]
-        lines.extend(section("Wallet Groups", *table(headers, rows), level=3))
+    lines.extend(render_large_holders(liquidity))
 
     spends = liquidity.get("postmix_spends")
     if spends:
