@@ -32,6 +32,48 @@ from contextlib import contextmanager
 # pylint: disable=consider-using-with
 
 
+CHUNK = 8 * 1024 * 1024
+# The parser's resume point; its bytes tie an index to one Core block directory.
+RESUME_CHECKPOINT = "parsed/parser/blockList.dat.resume.json"
+
+
+def utc_now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def read_json(path):
+    return json.loads(path.read_text())
+
+
+def is_count(value):
+    """A plain non-negative integer; JSON booleans do not count."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def is_sha256(value):
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def file_sizes(root):
+    """Relative path -> size of every regular file below root."""
+    return {str(path.relative_to(root)): path.stat().st_size for path in sorted(root.rglob("*")) if path.is_file()}
+
+
+def terminate(processes):
+    for process in processes:
+        if process.poll() is None:
+            process.terminate()
+            process.wait()
+
+
+def new_staging(destination):
+    """An empty directory next to destination, which must not exist yet."""
+    if destination.exists():
+        raise ValueError("Restore destination must not exist")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=destination.name + ".restoring-", dir=destination.parent))
+
+
 def atomic_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -47,12 +89,7 @@ def require_ready(ready, run_id):
     if ready.get("run_id") != run_id or ready.get("state") != "ready":
         raise ValueError("Missing ready checkpoint for this exact generation")
     height = ready.get("height")
-    if (
-        not isinstance(height, int)
-        or isinstance(height, bool)
-        or height < 0
-        or not re.fullmatch(r"[0-9a-f]{64}", ready.get("hash", ""))
-    ):
+    if not is_count(height) or not is_sha256(ready.get("hash")):
         raise ValueError("Invalid ready height/hash")
     if ready.get("dumplings_height") != height or not ready.get("dumplings_backup"):
         raise ValueError("Dumplings has not completed and backed up this generation")
@@ -82,8 +119,8 @@ def scanner_complete(scanner, height):
             raise ValueError("Dumplings checkpoint file length mismatch: " + name)
     if not {"Tx0Candidates.txt", "Tx0CandidateMisses.txt"} <= lengths.keys():
         raise ValueError("Dumplings checkpoint has no Tx0 recovery state")
-    anchor = json.loads((scanner / "ChainCheckpoint.json").read_text())
-    if anchor.get("height") != height or not re.fullmatch(r"[0-9a-f]{64}", anchor.get("hash", "")):
+    anchor = read_json(scanner / "ChainCheckpoint.json")
+    if anchor.get("height") != height or not is_sha256(anchor.get("hash")):
         raise ValueError("Dumplings checkpoint has no matching chain anchor")
 
 
@@ -114,21 +151,13 @@ def tree_bytes(root, members):
 
 
 def resume_file(index, blocks):
-    path = index / "parsed/parser/blockList.dat.resume.json"
-    checkpoint = json.loads(path.read_text())
+    checkpoint = read_json(index / RESUME_CHECKPOINT)
     number = checkpoint.get("file_number")
-    if checkpoint.get("schema_version") != 1 or not isinstance(number, int) or isinstance(number, bool) or number < 0:
+    if checkpoint.get("schema_version") != 1 or not is_count(number):
         raise ValueError("Invalid BlockSci parser resume checkpoint")
     source = blocks / f"blk{number:05d}.dat"
     offset, size = checkpoint.get("data_offset"), checkpoint.get("block_size")
-    if (
-        not isinstance(offset, int)
-        or isinstance(offset, bool)
-        or not isinstance(size, int)
-        or isinstance(size, bool)
-        or offset < 8
-        or size < 80
-    ):
+    if not is_count(offset) or not is_count(size) or offset < 8 or size < 80:
         raise ValueError("Invalid BlockSci parser resume offset")
     if not source.is_file() or source.stat().st_size < offset + size:
         raise ValueError("BlockSci parser resume file is missing or truncated")
@@ -154,12 +183,12 @@ SIGNATURE_KEYS = ("resume_file_number", "resume_file_prefix_size", "resume_file_
 
 def resume_signature(index, blocks):
     number = resume_file(index, blocks)
-    checkpoint = json.loads((index / "parsed/parser/blockList.dat.resume.json").read_text())
+    checkpoint = read_json(index / RESUME_CHECKPOINT)
     end = checkpoint["data_offset"] + checkpoint["block_size"]
     remaining, digest = end, hashlib.sha256()
     with (blocks / f"blk{number:05d}.dat").open("rb") as handle:
         while remaining:
-            chunk = handle.read(min(remaining, 8 * 1024 * 1024))
+            chunk = handle.read(min(remaining, CHUNK))
             if not chunk:
                 raise ValueError("Parser resume source was truncated while hashing")
             remaining -= len(chunk)
@@ -234,7 +263,7 @@ class Worker:
         listed = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
         metadata = next((item for item in listed if item.get("key") == uri), {})
         size = metadata.get("size")
-        if not isinstance(size, int) or isinstance(size, bool) or size != expected_size:
+        if not is_count(size) or size != expected_size:
             raise ValueError("Checkpoint S3 size/key mismatch: " + uri)
 
     def progress(self, phase, current=None, total=None, state="running", **extra):
@@ -247,7 +276,7 @@ class Worker:
             "current": current,
             "total": total,
             "percent": percent,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": utc_now(),
             **extra,
         }
         atomic_json(self.run / f"{self.stage}.json", value)
@@ -256,7 +285,7 @@ class Worker:
 
     def owns_dataset(self):
         try:
-            return json.loads((self.active / "owner.json").read_text()).get("run_id") == self.run_id
+            return read_json(self.active / "owner.json").get("run_id") == self.run_id
         except (OSError, ValueError):
             return False
 
@@ -269,6 +298,14 @@ class Worker:
     def release_dataset(self):
         if self.owns_dataset():
             shutil.rmtree(self.active)
+
+    def complete(self, value):
+        """Publish this job's .done marker, which releases its PBS dependents, and free the dataset."""
+        self.publish_json(f"{self.remote}/.pbs/mainnet-{self.stage}.done", value)
+        self.release_dataset()
+
+    def index_matches_inventory(self):
+        return (self.index / "files.txt").read_text() == index_inventory(self.index)
 
     def reset_state(self):
         """Clear the previous synchronization's state; its logs stay under logs/<run-id>/."""
@@ -492,7 +529,7 @@ class Worker:
             upload = subprocess.Popen(
                 [*self.s5, "pipe", archive], env=self.env, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL
             )
-            for chunk in iter(lambda: zstd.stdout.read(8 * 1024 * 1024), b""):
+            for chunk in iter(lambda: zstd.stdout.read(CHUNK), b""):
                 digest.update(chunk)
                 archive_size += len(chunk)
                 upload.stdin.write(chunk)
@@ -511,22 +548,19 @@ class Worker:
                 "members": members,
                 "member_bytes": member_bytes,
                 "upload_validation": "size-only",
-                "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                "uploaded_at": utc_now(),
             }
             self.publish_json(manifest_uri, manifest)
             self.uploaded[manifest_uri] = {"archive_size": archive_size, "member_bytes": member_bytes}
             return manifest_uri
         finally:
-            for process in [*producers, *([upload] if upload else [])]:
-                if process.poll() is None:
-                    process.terminate()
-                    process.wait()
+            terminate([*producers, *([upload] if upload else [])])
 
     def restore_checkpoint(self, manifest_uri, destination):
         """Explicit recovery into a new directory; never overwrite a working copy."""
-        manifest = json.loads(self.s3("cat", manifest_uri, stdout=subprocess.PIPE, text=True, timeout=60).stdout)
+        manifest = self.cat_json(manifest_uri)
         archive, expected = manifest["archive_uri"], manifest["archive_sha256"]
-        if not re.fullmatch(r"[0-9a-f]{64}", expected) or not archive.startswith(manifest_uri.rsplit("/", 1)[0] + "/"):
+        if not is_sha256(expected) or not archive.startswith(manifest_uri.rsplit("/", 1)[0] + "/"):
             raise ValueError("Invalid checkpoint reference")
         members = manifest["members"]
         if (
@@ -535,10 +569,7 @@ class Worker:
             or any(not isinstance(name, str) or name.startswith("/") or ".." in Path(name).parts for name in members)
         ):
             raise ValueError("Invalid checkpoint member roots")
-        if destination.exists():
-            raise ValueError("Restore destination must not exist")
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        staging = Path(tempfile.mkdtemp(prefix=destination.name + ".restoring-", dir=destination.parent))
+        staging = new_staging(destination)
         (staging / ".restoring").touch()
         digest = hashlib.sha256()
         errors = []
@@ -547,7 +578,7 @@ class Worker:
 
         def pump():
             try:
-                for chunk in iter(lambda: source.stdout.read(8 * 1024 * 1024), b""):
+                for chunk in iter(lambda: source.stdout.read(CHUNK), b""):
                     digest.update(chunk)
                     decompress.stdin.write(chunk)
             except Exception as error:
@@ -577,7 +608,7 @@ class Worker:
                     else:
                         raise ValueError("Checkpoint contains a link or special file")
             # Drain trailing tar padding, allowing the decompressor and pump to finish.
-            while decompress.stdout.read(8 * 1024 * 1024):
+            while decompress.stdout.read(CHUNK):
                 pass
             thread.join(timeout=30)
             if (
@@ -593,10 +624,7 @@ class Worker:
             (staging / ".restoring").unlink()
             staging.rename(destination)
         finally:
-            for process in (source, decompress):
-                if process.poll() is None:
-                    process.terminate()
-                    process.wait()
+            terminate((source, decompress))
             thread.join(timeout=5)
 
     def remote_sizes(self, prefix):
@@ -620,10 +648,12 @@ class Worker:
         scanner_complete(scanner, height)
         prefix = self.c["dumplings_uri"].rstrip("/")
         manifest_uri = prefix + "/manifest.json"
-        files = {str(path.relative_to(scanner)): path.stat().st_size for path in sorted(scanner.rglob("*")) if path.is_file()}
+        files = file_sizes(scanner)
         self.remove(manifest_uri)
         self.progress("dumplings-backup")
-        self.s3("sync", "--delete", str(scanner) + "/", prefix + "/Scanner/", stdout=subprocess.DEVNULL, timeout=6 * 3600)
+        self.s3(
+            "sync", "--delete", str(scanner) + "/", prefix + "/Scanner/", stdout=subprocess.DEVNULL, timeout=6 * 3600
+        )
         if self.remote_sizes(prefix + "/Scanner/") != files:
             raise ValueError("The Dumplings copy in S3 does not match Scanner/")
         manifest = {
@@ -631,29 +661,30 @@ class Worker:
             "last_processed_height": height,
             "files": files,
             "upload_validation": "size-only",
-            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            "uploaded_at": utc_now(),
         }
         self.publish_json(manifest_uri, manifest)
         return manifest_uri
 
     def restore_dumplings(self, manifest_uri, destination):
         """Explicit recovery of Scanner/ into a new directory, checked against the manifest."""
-        manifest = json.loads(self.s3("cat", manifest_uri, stdout=subprocess.PIPE, text=True, timeout=60).stdout)
-        files = manifest.get("files")
+        files = self.cat_json(manifest_uri).get("files")
         if (
             not isinstance(files, dict)
             or not files
             or any(name.startswith("/") or ".." in Path(name).parts for name in files)
         ):
             raise ValueError("Invalid Dumplings manifest")
-        if destination.exists():
-            raise ValueError("Restore destination must not exist")
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        staging = Path(tempfile.mkdtemp(prefix=destination.name + ".restoring-", dir=destination.parent))
+        staging = new_staging(destination)
         try:
-            self.s3("cp", manifest_uri.rsplit("/", 1)[0] + "/Scanner/*", str(staging) + "/", stdout=subprocess.DEVNULL, timeout=6 * 3600)
-            actual = {str(path.relative_to(staging)): path.stat().st_size for path in staging.rglob("*") if path.is_file()}
-            if actual != files:
+            self.s3(
+                "cp",
+                manifest_uri.rsplit("/", 1)[0] + "/Scanner/*",
+                str(staging) + "/",
+                stdout=subprocess.DEVNULL,
+                timeout=6 * 3600,
+            )
+            if file_sizes(staging) != files:
                 raise ValueError("The restored Scanner/ does not match its manifest")
             staging.rename(destination)
         finally:
@@ -736,11 +767,14 @@ class Worker:
             raise RuntimeError(f"S3 listing of {pattern} failed: {result.stderr.strip()}")
         return [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
 
+    def cat_json(self, uri, timeout=60):
+        return json.loads(self.s3("cat", uri, stdout=subprocess.PIPE, text=True, timeout=timeout).stdout)
+
     def remote_json(self, uri):
         """The JSON object at uri, or None when it does not exist."""
         if not any(item.get("key") == uri for item in self.remote_listing(uri)):
             return None
-        return json.loads(self.s3("cat", uri, stdout=subprocess.PIPE, text=True, timeout=120).stdout)
+        return self.cat_json(uri, timeout=120)
 
     def dataset_members(self):
         """Working data that exist; locks, synchronization state and logs do not count."""
@@ -765,9 +799,8 @@ class Worker:
             self.finish_restore("skipped-not-empty", present=[str(path) for path in present])
             return
         backups = {
-            "core": self.c["backup_uri"].rstrip("/") + "/manifest.json",
-            "index": self.c["index_backup_uri"].rstrip("/") + "/manifest.json",
-            "dumplings": self.c["dumplings_uri"].rstrip("/") + "/manifest.json",
+            name: self.c[key].rstrip("/") + "/manifest.json"
+            for name, key in (("core", "backup_uri"), ("index", "index_backup_uri"), ("dumplings", "dumplings_uri"))
         }
         self.progress("restore-check")
         manifests = {name: self.remote_json(uri) for name, uri in backups.items()}
@@ -817,7 +850,7 @@ class Worker:
         finally:
             shutil.rmtree(staging, ignore_errors=True)
             shutil.rmtree(index_staging, ignore_errors=True)
-        if (self.index / "files.txt").read_text() != index_inventory(self.index):
+        if not self.index_matches_inventory():
             raise ValueError("The restored index does not match its file inventory")
         if resume_signature(self.index, self.core_dir / "blocks") != {key: core[key] for key in SIGNATURE_KEYS}:
             raise ValueError("The restored index and Core blocks do not belong together")
@@ -826,8 +859,7 @@ class Worker:
     def finish_restore(self, action, **extra):
         value = {"action": action, **extra}
         self.progress("complete", state="done", **value)
-        self.publish_json(self.remote + "/.pbs/mainnet-restore.done", {"run_id": self.run_id, **value})
-        self.release_dataset()
+        self.complete({"run_id": self.run_id, **value})
 
     def require_complete_dataset(self):
         """Refuse a partly lost working dataset before Core starts.
@@ -844,7 +876,7 @@ class Worker:
         }
         if not any(present.values()):
             try:
-                restore = json.loads((self.run / "restore.json").read_text())
+                restore = read_json(self.run / "restore.json")
             except (OSError, ValueError):
                 restore = {}
             if restore.get("run_id") != self.run_id or restore.get("action") != "skipped-no-backup":
@@ -875,13 +907,9 @@ class Worker:
         scanner = self.dumps / "Scanner"
         anchor_path = scanner / "ChainCheckpoint.json"
         if scan_height.exists():
-            anchor = json.loads(anchor_path.read_text())
+            anchor = read_json(anchor_path)
             anchor_height = anchor.get("height")
-            if (
-                not isinstance(anchor_height, int)
-                or isinstance(anchor_height, bool)
-                or not start - 1 <= anchor_height <= height
-            ):
+            if not is_count(anchor_height) or not start - 1 <= anchor_height <= height:
                 raise ValueError("Dumplings chain anchor does not cover its saved progress")
             if self.rpc("getblockhash", str(anchor_height)) != anchor.get("hash"):
                 raise ValueError("Dumplings checkpoint is on a different fork; explicit recovery required")
@@ -892,7 +920,7 @@ class Worker:
 
         def scan_progress():
             try:
-                current = int((self.dumps / "Scanner/LastProcessedBlockHeight.txt").read_text())
+                current = int(scan_height.read_text())
             except (OSError, ValueError):
                 current = self.scan_start - 1
             self.progress(
@@ -921,7 +949,7 @@ class Worker:
             "dumplings",
             scan_progress,
         )
-        scanner_complete(self.dumps / "Scanner", height)
+        scanner_complete(scanner, height)
         self.progress("block-archive")
         self.archive()
         dumps_backup = self.publish_dumplings(height)
@@ -943,8 +971,7 @@ class Worker:
         atomic_json(self.root / "current-ready.json", ready)
         self.publish_json(self.remote + "/ready.json", ready)
         self.progress("ready-for-blocksci", state="done", height=height)
-        self.publish_json(self.remote + "/.pbs/mainnet-producer.done", ready)
-        self.release_dataset()
+        self.complete(ready)
 
     def parse_progress(self):
         path = self.logs / "blocksci.log"
@@ -964,11 +991,11 @@ class Worker:
     def blocksci(self):
         self.stage = "blocksci"
         self.acquire_dataset()
-        ready = json.loads((self.run / "ready.json").read_text())
+        ready = read_json(self.run / "ready.json")
         height = require_ready(ready, self.run_id)
         if ready.get("network", self.network) != self.network:
             raise ValueError("The ready generation uses a different network")
-        current = json.loads((self.root / "current-ready.json").read_text())
+        current = read_json(self.root / "current-ready.json")
         require_ready(current, self.run_id)
         if current != ready:
             raise ValueError("The working dataset no longer matches this ready generation")
@@ -981,9 +1008,9 @@ class Worker:
         config = self.index / "config.json"
         previous = None
         if config.exists():
-            if (self.index / "files.txt").read_text() != index_inventory(self.index):
+            if not self.index_matches_inventory():
                 raise ValueError("Persistent index does not match its file inventory; restore it before updating")
-            previous = json.loads((self.index / "manifest.json").read_text())
+            previous = read_json(self.index / "manifest.json")
             if (
                 previous.get("source_dir") != str(self.core_dir)
                 or previous.get("blocksci_image") != self.c["blocksci_image"]
@@ -1018,11 +1045,10 @@ class Worker:
                 "blocksci-config",
             )
         else:
-            value = json.loads(config.read_text())
+            value = read_json(config)
             value["parser"]["maxBlockNum"] = height + 1
             atomic_json(config, value)
-        resume = self.index / "parsed/parser/blockList.dat.resume.json"
-        resume.unlink(missing_ok=True)
+        (self.index / RESUME_CHECKPOINT).unlink(missing_ok=True)
         self.run_command(
             self.container_command(image, "blocksci_parser", config, "update", readonly=True, index_writable=True),
             "blocksci",
@@ -1056,7 +1082,7 @@ class Worker:
             ),
             "blocksci-verify",
         )
-        verified = json.loads(output.read_text())
+        verified = read_json(output)
         manifest = {
             "schema_version": "1.1",
             "storage": "persistent",
@@ -1068,7 +1094,7 @@ class Worker:
             "blocksci_image": image,
             "pbs_resources": self.c["pbs_resources"],
             **signature,
-            "published_at": datetime.now(timezone.utc).isoformat(),
+            "published_at": utc_now(),
             **verified,
         }
         atomic_json(self.index / "manifest.json", manifest)
@@ -1078,8 +1104,7 @@ class Worker:
         marker.unlink()
         self.publish_json(self.remote + "/blocksci-index-manifest.json", manifest)
         self.progress("indexed", state="done", height=height)
-        self.publish_json(self.remote + "/.pbs/mainnet-blocksci.done", manifest)
-        self.release_dataset()
+        self.complete(manifest)
 
     def checkpoint(self):
         """Job 3: back up the index, prune Core and back up its checkpoint, with little memory.
@@ -1088,16 +1113,16 @@ class Worker:
         """
         self.stage = "checkpoint"
         self.acquire_dataset()
-        ready = json.loads((self.run / "ready.json").read_text())
+        ready = read_json(self.run / "ready.json")
         height = require_ready(ready, self.run_id)
-        if json.loads((self.root / "current-ready.json").read_text()) != ready:
+        if read_json(self.root / "current-ready.json") != ready:
             raise ValueError("The working dataset no longer matches this ready generation")
-        manifest = json.loads((self.index / "manifest.json").read_text())
+        manifest = read_json(self.index / "manifest.json")
         if (
             (self.index / ".writing").exists()
             or manifest.get("run_id") != self.run_id
             or manifest.get("exported_max_block") != height
-            or (self.index / "files.txt").read_text() != index_inventory(self.index)
+            or not self.index_matches_inventory()
         ):
             raise ValueError("The index is not the one this synchronization's BlockSci job completed")
         number = resume_file(self.index, self.core_dir / "blocks")
@@ -1142,7 +1167,7 @@ class Worker:
             "index_backup": index_backup,
             # Measured while Core is stopped and no index job can write.
             "storage": {
-                "measured_at": datetime.now(timezone.utc).isoformat(),
+                "measured_at": utc_now(),
                 "multijob": {
                     "core": self.uploaded.get(checkpoint, {}).get("member_bytes"),
                     "index": self.uploaded.get(index_backup, {}).get("member_bytes"),
@@ -1154,9 +1179,8 @@ class Worker:
             },
         }
         self.progress("complete", state="done", height=height)
-        self.publish_json(self.remote + "/.pbs/mainnet-checkpoint.done", done)
         self.publish_json(self.remote + "/done.json", done)
-        self.release_dataset()
+        self.complete(done)
         atomic_json(self.run / "done.json", done)
 
     def cleanup(self):
