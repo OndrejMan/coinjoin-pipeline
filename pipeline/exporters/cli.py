@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 from exporters.analysis_artifact import ARTIFACT_NAME
-from exporters.analysis_artifact import detector_parameters as blocksci_detector_parameters
 from exporters.analysis_artifact import load_analysis as load_blocksci_analysis
 from exporters.artifact_paths import (
     BASELINE_FILE,
@@ -22,7 +21,6 @@ from exporters.artifact_paths import (
 )
 from exporters.common import (
     JsonObject,
-    digest_from_reference,
     load_json,
     save_json,
 )
@@ -38,7 +36,7 @@ from exporters.normalization import (
     normalize_coinjoin_analysis,
     restrict_baseline_to_window,
 )
-from exporters.parameters import add_detector_arguments, add_image_arguments
+from exporters.parameters import Detector, ReportImages, add_detector_arguments, add_image_arguments
 from exporters.report_builder import build_report
 from exporters.report_types import BlockSciAnalysisArtifact
 from exporters.scenario import load_scenario
@@ -120,7 +118,7 @@ def load_run_analysis(args: argparse.Namespace, run_dir: Path) -> BlockSciAnalys
     return load_blocksci_analysis(
         analysis_path,
         run_id=run_dir.name,
-        expected_parameters=blocksci_detector_parameters(args),
+        expected_parameters=Detector.from_args(args).artifact_parameters(),
         mode=args.mode,
     )
 
@@ -158,10 +156,6 @@ def assemble_report(args: argparse.Namespace) -> int:
         save_json(output_dir / "emulator_data.json", emulator_data)
 
     analysis = load_run_analysis(args, run_dir)
-    # Artifacts written before image_provenance existed kept it in the diagnostics.
-    provenance = analysis.get("image_provenance")
-    if provenance is None:
-        provenance = (analysis.get("integration_diagnostics") or {}).get("images", {})
     coverage = None
     if args.mode == "external":
         coinjoin_analysis, coverage = restrict_baseline_to_window(
@@ -179,9 +173,7 @@ def assemble_report(args: argparse.Namespace) -> int:
         emulator_data,
         coinjoin_analysis_data,
         analysis.get("mix_events"),
-        analysis.get("mix_events_error")
-        if "mix_events" in analysis
-        else "The BlockSci analysis artifact predates liquidity event classification; rerun the analysis.",
+        analysis.get("mix_events_error"),
         (scenario or {}).get("liquidity_groups"),
     )
     output_path = output_dir / args.output_name
@@ -189,38 +181,21 @@ def assemble_report(args: argparse.Namespace) -> int:
         run_dir,
         coinjoin_analysis,
         analysis["records"],
-        args.coinjoin_type,
+        Detector.from_args(args, analysis["first_wasabi2_block"]),
         scenario,
-        min_input_count=args.min_input_count,
-        first_wasabi2_block=analysis["first_wasabi2_block"],
         emulator_data=emulator_data,
         predicted_address_clusters=predicted_address_clusters,
         cluster_export_error=cluster_export_error,
         blocksci_skipped_txids=analysis["skipped_txids"],
-        joinmarket_detector=args.joinmarket_detector,
-        joinmarket_min_base_fee=args.joinmarket_min_base_fee,
-        joinmarket_percentage_fee=args.joinmarket_percentage_fee,
-        joinmarket_max_depth=args.joinmarket_max_depth,
         engine=args.engine,
-        blocksci_image=args.blocksci_image,
-        coinjoin_analysis_image=args.coinjoin_analysis_image,
-        coinjoin_emulator_image=args.coinjoin_emulator_image,
-        uploader_image=args.uploader_image,
-        unified_report_image=args.unified_report_image,
-        blocksci_image_digest=args.blocksci_image_digest,
-        coinjoin_analysis_image_digest=args.coinjoin_analysis_image_digest,
-        coinjoin_emulator_image_digest=args.coinjoin_emulator_image_digest,
-        # The uploader and report images have no digest option; a pinned
-        # reference carries its own.
-        uploader_image_digest=digest_from_reference(args.uploader_image),
-        unified_report_image_digest=digest_from_reference(args.unified_report_image),
+        images=ReportImages.from_args(args),
         emulator_git_commit=args.emulator_git_commit,
         previous_run_manifest=load_previous_run_manifest(output_path),
         integration_diagnostics=analysis["integration_diagnostics"],
         mode=args.mode,
         network=args.network,
         coinjoin_mappings=mapping_data,
-        image_provenance=provenance,
+        image_provenance=analysis.get("image_provenance"),
         coverage=coverage,
         baseline_filter=baseline_filter_summary(false_positive_sources, false_positive_txids, filtered_txids),
         liquidity_evaluation=liquidity_evaluation,

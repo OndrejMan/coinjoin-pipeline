@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from exporters.common import (
     DEFAULT_FIRST_WASABI2_BLOCK,
-    DEFAULT_JOINMARKET_DETECTOR,
     DEFAULT_JOINMARKET_MAX_DEPTH,
     DEFAULT_JOINMARKET_MIN_BASE_FEE,
     DEFAULT_JOINMARKET_PERCENTAGE_FEE,
@@ -17,6 +16,7 @@ from exporters.common import (
     rule_result,
 )
 from exporters.report_types import IORecord, TransactionRecord
+from exporters.parameters import Detector
 
 
 def values_descending(records: list[IORecord]) -> bool:
@@ -486,36 +486,28 @@ def explain_joinmarket_possible_heuristic(
     )
 
 
-def add_blocksci_heuristic_explanations(
-    records: dict[str, TransactionRecord],
-    coinjoin_type: str,
-    min_input_count: int | None = None,
-    first_wasabi2_block: int = DEFAULT_FIRST_WASABI2_BLOCK,
-    joinmarket_detector: str = DEFAULT_JOINMARKET_DETECTOR,
-    joinmarket_min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE,
-    joinmarket_percentage_fee: float = DEFAULT_JOINMARKET_PERCENTAGE_FEE,
-    joinmarket_max_depth: int = DEFAULT_JOINMARKET_MAX_DEPTH,
-) -> None:
-    if coinjoin_type == "wasabi2":
+def add_blocksci_heuristic_explanations(records: dict[str, TransactionRecord], detector: Detector) -> None:
+    """Explain, rule by rule, why the selected BlockSci heuristic accepts or rejects each record."""
+    if detector.coinjoin_type == "wasabi2":
         for record in records.values():
             record["blocksci_heuristic_explanation"] = explain_wasabi2_heuristic(
                 record,
-                min_input_count=min_input_count,
-                first_wasabi2_block=first_wasabi2_block,
+                min_input_count=detector.min_input_count,
+                first_wasabi2_block=detector.first_wasabi2_block,
             )
-    elif coinjoin_type == "joinmarket" and joinmarket_detector == "definite":
-        for record in records.values():
-            record["blocksci_heuristic_explanation"] = explain_joinmarket_definite_heuristic(
-                record,
-                min_base_fee=joinmarket_min_base_fee,
-                percentage_fee=joinmarket_percentage_fee,
-                max_depth=joinmarket_max_depth,
-            )
-    elif coinjoin_type == "joinmarket" and joinmarket_detector == "possible":
-        for record in records.values():
-            record["blocksci_heuristic_explanation"] = explain_joinmarket_possible_heuristic(
-                record,
-                min_base_fee=joinmarket_min_base_fee,
-                percentage_fee=joinmarket_percentage_fee,
-                max_depth=joinmarket_max_depth,
-            )
+        return
+    if detector.coinjoin_type != "joinmarket":
+        return
+    explain = {
+        "definite": explain_joinmarket_definite_heuristic,
+        "possible": explain_joinmarket_possible_heuristic,
+    }.get(detector.joinmarket_detector)
+    if explain is None:
+        return
+    for record in records.values():
+        record["blocksci_heuristic_explanation"] = explain(
+            record,
+            min_base_fee=detector.joinmarket_min_base_fee,
+            percentage_fee=detector.joinmarket_percentage_fee,
+            max_depth=detector.joinmarket_max_depth,
+        )

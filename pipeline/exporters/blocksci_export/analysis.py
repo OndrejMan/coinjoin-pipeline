@@ -14,7 +14,7 @@ if not hasattr(builtins, "xrange"):
 if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from exporters.analysis_artifact import ARTIFACT_NAME, SCHEMA_VERSION, detector_parameters
+from exporters.analysis_artifact import ARTIFACT_NAME, SCHEMA_VERSION
 from exporters.artifact_paths import BASELINE_FILE, blocksci_analysis_dir
 from exporters.blocksci_export.detector import (
     BLOCKSCI_IMPORT_ERROR,
@@ -27,19 +27,24 @@ from exporters.blocksci_export.detector import (
     scan_window,
 )
 from exporters.common import (
-    digest_from_reference,
     load_json,
     save_json,
 )
 from exporters.integration_diagnostics import build_integration_diagnostics
 from exporters.normalization import iter_exported_blocks, load_first_wasabi2_block, output_address
-from exporters.parameters import add_detector_arguments, add_image_arguments, add_window_arguments
+from exporters.parameters import (
+    IMAGE_COMPONENTS,
+    Detector,
+    ReportImages,
+    add_detector_arguments,
+    add_image_arguments,
+    add_window_arguments,
+)
 from exporters.report_types import BlockSciAnalysisArtifact
 
-IMAGE_NAMES = ("blocksci", "coinjoin_analysis", "coinjoin_emulator", "uploader", "unified_report")
-INSPECTED_IMAGE_NAMES = IMAGE_NAMES[:3]
+INSPECTED_IMAGE_NAMES = IMAGE_COMPONENTS[:3]
 # The report stage resolves its own image (manifest.resolve_manifest_images).
-PROVENANCE_IMAGE_NAMES = IMAGE_NAMES[:4]
+PROVENANCE_IMAGE_NAMES = IMAGE_COMPONENTS[:4]
 
 
 def exported_addresses(run_dir: Path) -> set[str]:
@@ -67,14 +72,10 @@ def write_analysis(args: argparse.Namespace) -> Path:
     max_block = None if pin_height is None else pin_height + 1
     start_height = getattr(args, "scan_start_height", None)
     end_height = getattr(args, "scan_end_height", None)
+    detector = Detector.from_args(args, load_first_wasabi2_block(config_path))
     records, skipped_txids = export_blocksci_records(
         config_path,
-        args.coinjoin_type,
-        args.min_input_count,
-        joinmarket_detector=args.joinmarket_detector,
-        joinmarket_min_base_fee=args.joinmarket_min_base_fee,
-        joinmarket_percentage_fee=args.joinmarket_percentage_fee,
-        joinmarket_max_depth=args.joinmarket_max_depth,
+        detector,
         max_block=max_block,
         start_height=start_height,
         end_height=end_height,
@@ -95,28 +96,10 @@ def write_analysis(args: argparse.Namespace) -> Path:
         baseline_path = run_dir / BASELINE_FILE
         if baseline_path.is_file():
             baseline_heights = baseline_block_heights(chain, load_json(baseline_path).get("coinjoins", {}))
-    # The uploader and report images carry at most the digest of a pinned reference.
-    references = {name: getattr(args, name + "_image", None) for name in IMAGE_NAMES}
+    images = ReportImages.from_args(args)
     image_ids = {name: getattr(args, name + "_image_id", None) for name in INSPECTED_IMAGE_NAMES}
-    image_digests = {
-        name: getattr(args, name + "_image_digest", None) or digest_from_reference(references[name])
-        for name in IMAGE_NAMES
-    }
     diagnostics = (
-        build_integration_diagnostics(
-            run_dir,
-            config_path,
-            blocksci,
-            records,
-            args.coinjoin_type,
-            references,
-            image_ids=image_ids,
-            image_digests=image_digests,
-            joinmarket_detector=args.joinmarket_detector,
-            joinmarket_min_base_fee=args.joinmarket_min_base_fee,
-            joinmarket_percentage_fee=args.joinmarket_percentage_fee,
-            joinmarket_max_depth=args.joinmarket_max_depth,
-        )
+        build_integration_diagnostics(run_dir, config_path, blocksci, records, detector, images, image_ids=image_ids)
         if getattr(args, "mode", "emulator") == "emulator"
         else None
     )
@@ -140,13 +123,13 @@ def write_analysis(args: argparse.Namespace) -> Path:
         "schema_version": SCHEMA_VERSION,
         "mode": getattr(args, "mode", "emulator"),
         "run_id": run_dir.name,
-        "parameters": detector_parameters(args),
-        "first_wasabi2_block": load_first_wasabi2_block(config_path),
+        "parameters": detector.artifact_parameters(),
+        "first_wasabi2_block": detector.first_wasabi2_block,
         "image_provenance": {
             name: {
-                "reference": references[name],
+                "reference": images.references[name],
                 "image_id": getattr(args, name + "_image_id", None),
-                "repo_digest": image_digests[name],
+                "repo_digest": images.digests[name],
                 **((diagnostics or {}).get("images", {}).get(name) or {}),
             }
             for name in PROVENANCE_IMAGE_NAMES

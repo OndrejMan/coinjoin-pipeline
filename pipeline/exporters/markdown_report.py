@@ -175,9 +175,6 @@ def render_emulator_detection(report: JsonObject, explorer_base_url: str) -> lis
     emulator_summary = emulator_data.get("summary") or {}
     detector_evaluations = report.get("detector_evaluations")
     if not detector_evaluations:
-        legacy_matrix = report.get("detection_confusion_matrix")
-        detector_evaluations = {"blocksci": legacy_matrix} if legacy_matrix else None
-    if not detector_evaluations:
         return []
 
     detector_labels = {

@@ -6,7 +6,7 @@ from unittest import mock
 import pytest
 from exporters import cli as report_cli
 from exporters import worker
-from exporters.analysis_artifact import detector_parameters
+from exporters.parameters import Detector
 
 from coinjoin_pipeline import cli
 from coinjoin_pipeline.arguments import load_configuration
@@ -30,7 +30,7 @@ def report_inputs(run_dir: Path) -> None:
                 "schema_version": "1.1",
                 "mode": "emulator",
                 "run_id": run_dir.name,
-                "parameters": detector_parameters(args),
+                "parameters": Detector.from_args(args).artifact_parameters(),
                 "first_wasabi2_block": 0,
                 "records": {},
                 "skipped_txids": [],
@@ -314,7 +314,7 @@ def test_external_detector_overrides_reach_worker(tmp_path, monkeypatch, dry_run
     monkeypatch.setenv("BLOCKSCI_MIN_INPUT_COUNT", "99")
     monkeypatch.setenv("BLOCKSCI_JOINMARKET_DETECTOR", "definite")
     args = worker.parse_args(shlex.split(command)[2:])
-    assert detector_parameters(args) == {
+    assert Detector.from_args(args).artifact_parameters() == {
         "coinjoin_type": "joinmarket",
         "min_input_count": 7,
         "joinmarket_detector": "possible",

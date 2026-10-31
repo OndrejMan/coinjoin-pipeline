@@ -14,10 +14,10 @@ from exporters import cli as report_cli  # noqa: E402
 from exporters.analysis_artifact import load_analysis
 from exporters.blocksci_export.analysis import (  # noqa: E402
     SCHEMA_VERSION,
-    detector_parameters,
     exported_addresses,
     write_analysis,
 )
+from exporters.parameters import Detector  # noqa: E402
 from exporters.blocksci_export.detector import (
     assert_real_blocksci,  # noqa: E402
     import_blocksci_bindings,  # noqa: E402
@@ -25,7 +25,7 @@ from exporters.blocksci_export.detector import (
 
 
 def parameters() -> dict:
-    return detector_parameters(
+    return Detector.from_args(
         argparse.Namespace(
             coinjoin_type="wasabi2",
             min_input_count=None,
@@ -34,7 +34,7 @@ def parameters() -> dict:
             joinmarket_percentage_fee=0.00004,
             joinmarket_max_depth=200000,
         )
-    )
+    ).artifact_parameters()
 
 
 def test_exported_addresses_reads_all_exported_block_outputs(tmp_path: Path) -> None:
@@ -65,6 +65,7 @@ def test_load_analysis_rejects_parameter_mismatch(tmp_path: Path) -> None:
         json.dumps(
             {
                 "schema_version": SCHEMA_VERSION,
+                "mode": "emulator",
                 "run_id": "run-1",
                 "parameters": parameters(),
                 "first_wasabi2_block": 0,
@@ -163,6 +164,7 @@ def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:
         json.dumps(
             {
                 "schema_version": SCHEMA_VERSION,
+                "mode": "emulator",
                 "run_id": "run-1",
                 "parameters": parameters(),
                 "first_wasabi2_block": 0,

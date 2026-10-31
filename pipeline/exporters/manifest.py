@@ -19,7 +19,8 @@ from exporters.common import (
     to_json_text,
     tree_sha256,
 )
-from exporters.report_types import DetectorManifest, ImageFields, RunManifest
+from exporters.parameters import Detector, ReportImages
+from exporters.report_types import ImageFields, RunManifest
 
 MANIFEST_COMPARE_FIELDS = (
     ("scenario.sha256", ("scenario", "sha256")),
@@ -46,33 +47,6 @@ MANIFEST_COMPARE_FIELDS = (
 )
 
 
-def build_detector_manifest(
-    coinjoin_type: str,
-    min_input_count: int | None,
-    first_wasabi2_block: int,
-    joinmarket_detector: str,
-    joinmarket_min_base_fee: int,
-    joinmarket_percentage_fee: float,
-    joinmarket_max_depth: int,
-) -> DetectorManifest:
-    detector: DetectorManifest = {
-        "coinjoin_type": coinjoin_type,
-        "blocksci_min_input_count": min_input_count,
-    }
-    if coinjoin_type == "wasabi2":
-        detector["first_wasabi2_block"] = first_wasabi2_block
-    if coinjoin_type == "joinmarket":
-        detector.update(
-            {
-                "joinmarket_detector": joinmarket_detector,
-                "joinmarket_min_base_fee": joinmarket_min_base_fee,
-                "joinmarket_percentage_fee": joinmarket_percentage_fee,
-                "joinmarket_max_depth": joinmarket_max_depth,
-            }
-        )
-    return detector
-
-
 def resolve_manifest_images(
     images: ImageFields,
     supplied_digests: ImageFields,
@@ -81,8 +55,14 @@ def resolve_manifest_images(
     """Keep each recorded producer identity together, including unknown digests."""
     references = images.copy()
     digests = supplied_digests.copy()
-    components: tuple[Literal["blocksci", "coinjoin_analysis", "coinjoin_emulator", "uploader", "unified_report"], ...] = (
-        "blocksci", "coinjoin_analysis", "coinjoin_emulator", "uploader", "unified_report",
+    components: tuple[
+        Literal["blocksci", "coinjoin_analysis", "coinjoin_emulator", "uploader", "unified_report"], ...
+    ] = (
+        "blocksci",
+        "coinjoin_analysis",
+        "coinjoin_emulator",
+        "uploader",
+        "unified_report",
     )
     for component in components:
         reference = images[component]
@@ -93,7 +73,9 @@ def resolve_manifest_images(
             reference = to_json_text(recorded.get("reference"))
             digest = to_json_text(recorded.get("repo_digest")) or digest_from_reference(reference)
         else:
-            digest = supplied_digests.get(component) or digest_from_reference(reference) or docker_image_digest(reference)
+            digest = (
+                supplied_digests.get(component) or digest_from_reference(reference) or docker_image_digest(reference)
+            )
         references[component] = reference
         digests[component] = digest
     return references, digests
@@ -102,62 +84,20 @@ def resolve_manifest_images(
 def build_run_manifest(
     run_dir: Path,
     scenario: JsonObject | None,
-    coinjoin_type: str,
-    engine: str | None,
-    min_input_count: int | None,
-    first_wasabi2_block: int,
-    joinmarket_detector: str,
-    joinmarket_min_base_fee: int,
-    joinmarket_percentage_fee: float,
-    joinmarket_max_depth: int,
-    blocksci_image: str | None = None,
-    coinjoin_analysis_image: str | None = None,
-    coinjoin_emulator_image: str | None = None,
-    uploader_image: str | None = None,
-    unified_report_image: str | None = None,
-    blocksci_image_digest: str | None = None,
-    coinjoin_analysis_image_digest: str | None = None,
-    coinjoin_emulator_image_digest: str | None = None,
-    uploader_image_digest: str | None = None,
-    unified_report_image_digest: str | None = None,
+    detector: Detector,
+    engine: str | None = None,
+    images: ReportImages | None = None,
     emulator_git_commit: str | None = None,
     image_provenance: JsonObject | None = None,
 ) -> RunManifest:
     exporters_root = Path(__file__).resolve().parent
+    coinjoin_type = detector.coinjoin_type
     inferred_engine = engine or os.environ.get("COINJOIN_ENGINE")
     if not inferred_engine:
         inferred_engine = "joinmarket" if coinjoin_type == "joinmarket" else "wasabi"
-
-    images: ImageFields = {
-        "blocksci": first_present(blocksci_image, os.environ.get("BLOCKSCI_IMAGE")),
-        "coinjoin_analysis": first_present(
-            coinjoin_analysis_image,
-            os.environ.get("COINJOIN_ANALYSIS_IMAGE"),
-        ),
-        "coinjoin_emulator": first_present(
-            coinjoin_emulator_image,
-            os.environ.get("COINJOIN_EMULATOR_IMAGE"),
-            os.environ.get("EMULATOR_IMAGE"),
-        ),
-        "uploader": first_present(uploader_image, os.environ.get("COINJOIN_UPLOADER_IMAGE")),
-        "unified_report": first_present(unified_report_image, os.environ.get("COINJOIN_UNIFIED_REPORT_IMAGE")),
-    }
-    images, image_digests = resolve_manifest_images(
-        images,
-        {
-            "blocksci": first_present(blocksci_image_digest, os.environ.get("BLOCKSCI_IMAGE_DIGEST")),
-            "coinjoin_analysis": first_present(
-                coinjoin_analysis_image_digest, os.environ.get("COINJOIN_ANALYSIS_IMAGE_DIGEST"),
-            ),
-            "coinjoin_emulator": first_present(
-                coinjoin_emulator_image_digest,
-                os.environ.get("COINJOIN_EMULATOR_IMAGE_DIGEST"),
-                os.environ.get("EMULATOR_IMAGE_DIGEST"),
-            ),
-            "uploader": uploader_image_digest,
-            "unified_report": unified_report_image_digest,
-        },
-        image_provenance,
+    images = images or ReportImages()
+    references, image_digests = resolve_manifest_images(
+        images.reference_fields(), images.digest_fields(), image_provenance
     )
     return {
         "run_id": run_dir.name,
@@ -170,16 +110,8 @@ def build_run_manifest(
             "coinjoin_type": coinjoin_type,
             "reproduction_command": os.environ.get("REPRODUCTION_COMMAND"),
         },
-        "detector": build_detector_manifest(
-            coinjoin_type,
-            min_input_count,
-            first_wasabi2_block,
-            joinmarket_detector,
-            joinmarket_min_base_fee,
-            joinmarket_percentage_fee,
-            joinmarket_max_depth,
-        ),
-        "images": images,
+        "detector": detector.manifest(),
+        "images": references,
         "image_digests": image_digests,
         "source_commits": {
             "coinjoin_emulator": first_present(

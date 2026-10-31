@@ -45,6 +45,7 @@ from exporters.integration_diagnostics import (
 )
 from exporters.manifest import build_run_manifest, compare_run_manifests
 from exporters.markdown_report import render_report
+from exporters.parameters import Detector, ReportImages  # noqa: E402
 from exporters.normalization import (
     fill_missing_block_heights,
     filter_coinjoin_analysis_false_positives,
@@ -442,7 +443,7 @@ class UnifiedReportTest(unittest.TestCase):
         chain = RawChain()
         fake_blocksci = types.SimpleNamespace(Blockchain=lambda _config: chain)
         with mock.patch.object(unified_report, "blocksci", fake_blocksci):
-            records, skipped = export_blocksci_records(Path("/tmp/config.json"), "wasabi2", None)
+            records, skipped = export_blocksci_records(Path("/tmp/config.json"), Detector("wasabi2", None))
 
         self.assertEqual(records, {})
         self.assertEqual(skipped, [])
@@ -453,7 +454,7 @@ class UnifiedReportTest(unittest.TestCase):
             Path("/tmp/external-run"),
             normalize_coinjoin_analysis(coinjoin_analysis_fixture()),
             blocksci_fixture(),
-            "wasabi2",
+            Detector("wasabi2"),
             mode="external",
             network="bitcoin",
         )
@@ -471,7 +472,7 @@ class UnifiedReportTest(unittest.TestCase):
             Path("/tmp/external-run"),
             normalize_coinjoin_analysis(coinjoin_analysis_fixture()),
             blocksci_fixture(),
-            "wasabi2",
+            Detector("wasabi2"),
             mode="external",
             network="bitcoin",
         )
@@ -490,14 +491,16 @@ class UnifiedReportTest(unittest.TestCase):
             manifest = build_run_manifest(
                 Path("/tmp/run"),
                 None,
+                Detector(
+                    "joinmarket",
+                    min_input_count=1,
+                    first_wasabi2_block=0,
+                    joinmarket_detector="definite",
+                    joinmarket_min_base_fee=5000,
+                    joinmarket_percentage_fee=0.00004,
+                    joinmarket_max_depth=200000,
+                ),
                 "joinmarket",
-                "joinmarket",
-                1,
-                0,
-                "definite",
-                5000,
-                0.00004,
-                200000,
             )
         self.assertEqual(
             manifest["execution"]["reproduction_command"],
@@ -576,36 +579,48 @@ class UnifiedReportTest(unittest.TestCase):
         previous = build_run_manifest(
             Path("/tmp/run"),
             {"name": "scenario-a", "sha256": "old-hash"},
+            Detector(
+                "joinmarket",
+                min_input_count=1,
+                first_wasabi2_block=0,
+                joinmarket_detector="definite",
+                joinmarket_min_base_fee=5000,
+                joinmarket_percentage_fee=0.00004,
+                joinmarket_max_depth=200000,
+            ),
             "joinmarket",
-            "joinmarket",
-            1,
-            0,
-            "definite",
-            5000,
-            0.00004,
-            200000,
-            blocksci_image="blocksci:old",
-            coinjoin_analysis_image="coinjoin-analysis:old",
-            coinjoin_emulator_image="coinjoin-emulator:old",
-            uploader_image="uploader:old",
             emulator_git_commit="old-commit",
+            images=ReportImages(
+                references={
+                    "blocksci": "blocksci:old",
+                    "coinjoin_analysis": "coinjoin-analysis:old",
+                    "coinjoin_emulator": "coinjoin-emulator:old",
+                    "uploader": "uploader:old",
+                }
+            ),
         )
         current = build_run_manifest(
             Path("/tmp/run"),
             {"name": "scenario-a", "sha256": "new-hash"},
+            Detector(
+                "joinmarket",
+                min_input_count=1,
+                first_wasabi2_block=0,
+                joinmarket_detector="possible",
+                joinmarket_min_base_fee=5000,
+                joinmarket_percentage_fee=0.00004,
+                joinmarket_max_depth=200000,
+            ),
             "joinmarket",
-            "joinmarket",
-            1,
-            0,
-            "possible",
-            5000,
-            0.00004,
-            200000,
-            blocksci_image="blocksci:new",
-            coinjoin_analysis_image="coinjoin-analysis:old",
-            coinjoin_emulator_image="coinjoin-emulator:old",
-            uploader_image="uploader:old",
             emulator_git_commit="old-commit",
+            images=ReportImages(
+                references={
+                    "blocksci": "blocksci:new",
+                    "coinjoin_analysis": "coinjoin-analysis:old",
+                    "coinjoin_emulator": "coinjoin-emulator:old",
+                    "uploader": "uploader:old",
+                }
+            ),
         )
 
         comparison = compare_run_manifests(previous, current)
@@ -623,22 +638,23 @@ class UnifiedReportTest(unittest.TestCase):
             previous_manifest = build_run_manifest(
                 run_dir,
                 {"name": "default", "sha256": "old-hash"},
-                "wasabi2",
+                Detector(
+                    "wasabi2",
+                    min_input_count=1,
+                    first_wasabi2_block=0,
+                    joinmarket_detector="definite",
+                    joinmarket_min_base_fee=5000,
+                    joinmarket_percentage_fee=0.00004,
+                    joinmarket_max_depth=200000,
+                ),
                 "wasabi",
-                1,
-                0,
-                "definite",
-                5000,
-                0.00004,
-                200000,
             )
             report = build_report(
                 run_dir,
                 coinjoin_analysis,
                 blocksci_fixture(),
-                "wasabi2",
+                Detector("wasabi2", min_input_count=1),
                 {"name": "default", "sha256": "new-hash"},
-                min_input_count=1,
                 previous_run_manifest=previous_manifest,
             )
 
@@ -661,7 +677,7 @@ class UnifiedReportTest(unittest.TestCase):
                 run_dir,
                 coinjoin_analysis,
                 blocksci_fixture(),
-                "wasabi2",
+                Detector("wasabi2"),
                 scenario,
                 emulator_data=emulator_data_fixture(),
             )
@@ -770,11 +786,15 @@ class UnifiedReportTest(unittest.TestCase):
                 run_dir,
                 normalize_coinjoin_analysis(coinjoin_analysis_fixture()),
                 {},
-                "joinmarket",
-                blocksci_image_digest="sha256:blocksci",
-                coinjoin_analysis_image_digest="sha256:analysis",
-                coinjoin_emulator_image_digest="sha256:emulator",
-                uploader_image_digest="sha256:uploader",
+                Detector("joinmarket"),
+                images=ReportImages(
+                    digests={
+                        "blocksci": "sha256:blocksci",
+                        "coinjoin_analysis": "sha256:analysis",
+                        "coinjoin_emulator": "sha256:emulator",
+                        "uploader": "sha256:uploader",
+                    }
+                ),
             )
 
         self.assertEqual(report["run_manifest"]["image_digests"]["blocksci"], "sha256:blocksci")
@@ -805,7 +825,7 @@ class UnifiedReportTest(unittest.TestCase):
                 run_dir,
                 normalize_coinjoin_analysis(coinjoin_analysis_fixture()),
                 blocksci_fixture(),
-                "wasabi2",
+                Detector("wasabi2"),
                 integration_diagnostics=diagnostics,
             )
 
@@ -949,7 +969,7 @@ class UnifiedReportTest(unittest.TestCase):
                 run_dir,
                 normalize_coinjoin_analysis(coinjoin_analysis_fixture()),
                 blocksci_fixture(),
-                "wasabi2",
+                Detector("wasabi2"),
                 emulator_data=emulator_data,
             )
 
@@ -1141,7 +1161,7 @@ class UnifiedReportTest(unittest.TestCase):
             )
 
             emulator_data = build_emulator_data(run_dir, coinjoin_analysis_fixture(), "wasabi2")
-            report = build_report(run_dir, {}, {}, "wasabi2", emulator_data=emulator_data)
+            report = build_report(run_dir, {}, {}, Detector("wasabi2"), emulator_data=emulator_data)
 
         self.assertFalse(emulator_data["label_provenance"]["independent"])
         self.assertEqual(emulator_data["summary"]["unmatched_positive_txids"], [missing_txid])
@@ -1252,10 +1272,9 @@ class UnifiedReportTest(unittest.TestCase):
                 Path("/tmp/config.json"),
                 FakeBlockSciModule({"funding": 0, "txA": 1}, 2, {"funding": 1, "txA": 0}),
                 {"txA": blocksci_fixture()["txA"]},
-                "joinmarket",
-                complete_image_refs(),
+                Detector("joinmarket"),
+                ReportImages(complete_image_refs(), complete_image_digests()),
                 image_ids=complete_image_ids(),
-                image_digests=complete_image_digests(),
             )
 
         self.assertEqual(diagnostics["status"], "ok")
@@ -1282,10 +1301,9 @@ class UnifiedReportTest(unittest.TestCase):
                 Path("/tmp/config.json"),
                 FakeBlockSciModule({}, 1),
                 {},
-                "wasabi2",
-                complete_image_refs(),
+                Detector("wasabi2"),
+                ReportImages(complete_image_refs(), digests),
                 image_ids=complete_image_ids(),
-                image_digests=digests,
             )
 
         self.assertEqual(diagnostics["status"], "not_ok")
@@ -1307,9 +1325,8 @@ class UnifiedReportTest(unittest.TestCase):
                 Path("/tmp/config.json"),
                 FakeBlockSciModule({}, 1),
                 {},
-                "wasabi2",
-                complete_image_refs(),
-                image_digests=complete_image_digests(),
+                Detector("wasabi2"),
+                ReportImages(complete_image_refs(), complete_image_digests()),
             )
 
         self.assertEqual(diagnostics["images"]["blocksci"]["status"], "ok")
@@ -1327,10 +1344,9 @@ class UnifiedReportTest(unittest.TestCase):
                 Path("/tmp/config.json"),
                 FakeBlockSciModule({}, 2),
                 {},
-                "wasabi2",
-                complete_image_refs(),
+                Detector("wasabi2"),
+                ReportImages(complete_image_refs(), complete_image_digests()),
                 image_ids=complete_image_ids(),
-                image_digests=complete_image_digests(),
             )
 
         self.assertEqual(diagnostics["status"], "not_ok")
@@ -1357,10 +1373,9 @@ class UnifiedReportTest(unittest.TestCase):
                 Path("/tmp/config.json"),
                 FakeBlockSciModule({}, 1),
                 {},
-                "wasabi2",
-                complete_image_refs(),
+                Detector("wasabi2"),
+                ReportImages(complete_image_refs(), complete_image_digests()),
                 image_ids=complete_image_ids(),
-                image_digests=complete_image_digests(),
             )
 
         self.assertEqual(diagnostics["status"], "not_ok")
@@ -1389,10 +1404,9 @@ class UnifiedReportTest(unittest.TestCase):
                 Path("/tmp/config.json"),
                 FakeBlockSciModule({"txA": 0}, 1, {"txA": 1}),
                 {"txA": blocksci_fixture()["txA"]},
-                "joinmarket",
-                complete_image_refs(),
+                Detector("joinmarket"),
+                ReportImages(complete_image_refs(), complete_image_digests()),
                 image_ids=complete_image_ids(),
-                image_digests=complete_image_digests(),
             )
 
         self.assertEqual(diagnostics["status"], "not_ok")
@@ -1624,7 +1638,7 @@ class UnifiedReportTest(unittest.TestCase):
                 run_dir,
                 coinjoin_analysis,
                 blocksci_fixture("txB"),
-                "wasabi2",
+                Detector("wasabi2"),
                 emulator_data=emulator_data_fixture(),
             )
 
@@ -1643,7 +1657,7 @@ class UnifiedReportTest(unittest.TestCase):
             Path("/tmp/run"),
             {**blocksci_fixture("txA"), **blocksci_fixture("txC")},
             blocksci_fixture("txB"),
-            "wasabi2",
+            Detector("wasabi2"),
             emulator_data=emulator_data_fixture(),
         )
 
@@ -1683,7 +1697,7 @@ class UnifiedReportTest(unittest.TestCase):
             Path("/tmp/run"),
             blocksci_fixture("baseline-outside"),
             blocksci_fixture("blocksci-outside"),
-            "wasabi2",
+            Detector("wasabi2"),
             emulator_data=emulator_data_fixture(),
         )
 
@@ -1719,11 +1733,7 @@ class UnifiedReportTest(unittest.TestCase):
         emulator_data["summary"]["non_coinjoin_transactions"] = 1
         emulator_data["summary"]["unknown_transactions"] = 1
         report = build_report(
-            Path("/tmp/run"),
-            blocksci_fixture("txC"),
-            {},
-            "wasabi2",
-            emulator_data=emulator_data,
+            Path("/tmp/run"), blocksci_fixture("txC"), {}, Detector("wasabi2"), emulator_data=emulator_data
         )
 
         matrix = report["detector_evaluations"]["coinjoin_analysis"]
@@ -1740,13 +1750,7 @@ class UnifiedReportTest(unittest.TestCase):
             transaction["is_coinjoin"] = False
         emulator_data["summary"]["coinjoin_transactions"] = 0
         emulator_data["summary"]["non_coinjoin_transactions"] = 3
-        report = build_report(
-            Path("/tmp/run"),
-            {},
-            {},
-            "wasabi2",
-            emulator_data=emulator_data,
-        )
+        report = build_report(Path("/tmp/run"), {}, {}, Detector("wasabi2"), emulator_data=emulator_data)
 
         matrix = report["detector_evaluations"]["coinjoin_analysis"]
         self.assertIsNone(matrix["precision"])
@@ -1759,13 +1763,7 @@ class UnifiedReportTest(unittest.TestCase):
         emulator_data = emulator_data_fixture()
         for transaction in emulator_data["transactions"].values():
             transaction["block_height"] = 100
-        report = build_report(
-            Path("/tmp/run"),
-            {},
-            {},
-            "wasabi2",
-            emulator_data=emulator_data,
-        )
+        report = build_report(Path("/tmp/run"), {}, {}, Detector("wasabi2"), emulator_data=emulator_data)
 
         self.assertEqual(
             report["warnings"][0]["code"],
@@ -1792,7 +1790,7 @@ class UnifiedReportTest(unittest.TestCase):
                 run_dir,
                 coinjoin_analysis,
                 blocksci_fixture(),
-                "wasabi2",
+                Detector("wasabi2"),
                 emulator_data=emulator_data_fixture(),
                 cluster_export_error="cluster export failed",
             )
@@ -2025,7 +2023,7 @@ class UnifiedReportTest(unittest.TestCase):
             run_dir.mkdir()
 
             coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_fixture())
-            report = build_report(run_dir, coinjoin_analysis, blocksci_fixture("txB"), "wasabi2")
+            report = build_report(run_dir, coinjoin_analysis, blocksci_fixture("txB"), Detector("wasabi2"))
 
         self.assertEqual(report["summary"]["matched_by_both"], 0)
         self.assertEqual(report["summary"]["blocksci_only"], 1)
@@ -2147,7 +2145,7 @@ class UnifiedReportTest(unittest.TestCase):
             run_dir.mkdir()
 
             coinjoin_analysis = normalize_coinjoin_analysis(joinmarket_passing_coinjoin_fixture())
-            report = build_report(run_dir, coinjoin_analysis, {}, "joinmarket")
+            report = build_report(run_dir, coinjoin_analysis, {}, Detector("joinmarket"))
 
         explanation = report["transactions"]["txA"]["coinjoin_analysis"]["blocksci_heuristic_explanation"]
         self.assertEqual(explanation["heuristic"], "joinmarket_definite")
@@ -2163,11 +2161,7 @@ class UnifiedReportTest(unittest.TestCase):
 
             coinjoin_analysis = normalize_coinjoin_analysis(joinmarket_passing_coinjoin_fixture())
             report = build_report(
-                run_dir,
-                coinjoin_analysis,
-                {},
-                "joinmarket",
-                joinmarket_detector="possible",
+                run_dir, coinjoin_analysis, {}, Detector("joinmarket", joinmarket_detector="possible")
             )
 
         explanation = report["transactions"]["txA"]["coinjoin_analysis"]["blocksci_heuristic_explanation"]
@@ -2197,7 +2191,7 @@ class UnifiedReportTest(unittest.TestCase):
 
             coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_fixture())
             fill_missing_block_heights(coinjoin_analysis, load_exported_block_tx_index(run_dir))
-            report = build_report(run_dir, coinjoin_analysis, blocksci_fixture("txB"), "wasabi2")
+            report = build_report(run_dir, coinjoin_analysis, blocksci_fixture("txB"), Detector("wasabi2"))
 
         tx_record = report["transactions"]["txA"]["coinjoin_analysis"]
         self.assertEqual(tx_record["block_height"], 226)
@@ -2232,7 +2226,7 @@ class UnifiedReportTest(unittest.TestCase):
 
             coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_fixture_with_block_height(12))
             fill_missing_block_heights(coinjoin_analysis, load_exported_block_tx_index(run_dir))
-            report = build_report(run_dir, coinjoin_analysis, blocksci_fixture("txB"), "wasabi2")
+            report = build_report(run_dir, coinjoin_analysis, blocksci_fixture("txB"), Detector("wasabi2"))
 
         tx_record = report["transactions"]["txA"]["coinjoin_analysis"]
         self.assertEqual(tx_record["block_height"], 12)
@@ -2308,11 +2302,7 @@ class UnifiedReportTest(unittest.TestCase):
 
             coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_fixture_with_block_height(226))
             report = build_report(
-                run_dir,
-                coinjoin_analysis,
-                blocksci_fixture("txB"),
-                "wasabi2",
-                min_input_count=1,
+                run_dir, coinjoin_analysis, blocksci_fixture("txB"), Detector("wasabi2", min_input_count=1)
             )
 
         tx_record = report["transactions"]["txA"]["coinjoin_analysis"]
@@ -2352,7 +2342,7 @@ class UnifiedReportTest(unittest.TestCase):
             blocksci_records["txA"]["outputs"][1]["value"] = 40000
 
             coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_fixture())
-            report = build_report(run_dir, coinjoin_analysis, blocksci_records, "wasabi2")
+            report = build_report(run_dir, coinjoin_analysis, blocksci_records, Detector("wasabi2"))
 
         mismatches = report["transactions"]["txA"]["comparison"]["field_mismatches"]
         self.assertIn("outputs[1].value: coinjoin_analysis=50000, blocksci=40000", mismatches)
@@ -2369,7 +2359,7 @@ class UnifiedReportTest(unittest.TestCase):
             run_dir.mkdir()
 
             coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_fixture())
-            report = build_report(run_dir, coinjoin_analysis, blocksci_fixture("txB"), "wasabi2")
+            report = build_report(run_dir, coinjoin_analysis, blocksci_fixture("txB"), Detector("wasabi2"))
 
         markdown = render_report(report)
 
@@ -2422,7 +2412,7 @@ class UnifiedReportTest(unittest.TestCase):
                 run_dir,
                 normalize_coinjoin_analysis(coinjoin_analysis_fixture()),
                 blocksci_fixture(),
-                "wasabi2",
+                Detector("wasabi2"),
                 integration_diagnostics=diagnostics,
             )
 
@@ -2466,7 +2456,7 @@ class UnifiedReportTest(unittest.TestCase):
                 run_dir,
                 normalize_coinjoin_analysis(coinjoin_analysis_fixture()),
                 blocksci_fixture(),
-                "wasabi2",
+                Detector("wasabi2"),
                 integration_diagnostics=diagnostics,
             )
 
@@ -2485,11 +2475,7 @@ class UnifiedReportTest(unittest.TestCase):
 
             coinjoin_analysis = normalize_coinjoin_analysis(wasabi2_passing_coinjoin_fixture())
             report = build_report(
-                run_dir,
-                coinjoin_analysis,
-                blocksci_fixture("txB"),
-                "wasabi2",
-                min_input_count=1,
+                run_dir, coinjoin_analysis, blocksci_fixture("txB"), Detector("wasabi2", min_input_count=1)
             )
 
         markdown = render_report(report)
@@ -2508,7 +2494,7 @@ class UnifiedReportTest(unittest.TestCase):
             run_dir.mkdir()
 
             coinjoin_analysis = normalize_coinjoin_analysis(joinmarket_passing_coinjoin_fixture())
-            report = build_report(run_dir, coinjoin_analysis, {}, "joinmarket")
+            report = build_report(run_dir, coinjoin_analysis, {}, Detector("joinmarket"))
 
         markdown = render_report(report)
 
@@ -2529,9 +2515,9 @@ class UnifiedReportTest(unittest.TestCase):
                 run_dir,
                 normalize_coinjoin_analysis(joinmarket_passing_coinjoin_fixture()),
                 {},
-                "joinmarket",
+                Detector("joinmarket"),
                 blocksci_skipped_txids=["skipped-tx"],
-                blocksci_image_digest="sha256:blocksci",
+                images=ReportImages(digests={"blocksci": "sha256:blocksci"}),
             )
 
         markdown = render_report(report)
@@ -2550,7 +2536,7 @@ class UnifiedReportTest(unittest.TestCase):
                 "4661b71b085395008966182375dd3b74d3b0c2f2617bfade403520da616bdb37"
             )
             coinjoin_analysis = normalize_coinjoin_analysis(fixture)
-            report = build_report(run_dir, coinjoin_analysis, blocksci_fixture("txB"), "wasabi2")
+            report = build_report(run_dir, coinjoin_analysis, blocksci_fixture("txB"), Detector("wasabi2"))
 
         markdown = render_report(report)
 
@@ -2674,7 +2660,7 @@ class UnifiedReportTest(unittest.TestCase):
                 Path(tmpdir) / "run",
                 normalize_coinjoin_analysis(filtered),
                 blocksci_fixture(),
-                "wasabi2",
+                Detector("wasabi2"),
                 emulator_data=emulator_data_fixture(),
             )
 
@@ -2721,7 +2707,7 @@ class UnifiedReportTest(unittest.TestCase):
             },
         }
         with tempfile.TemporaryDirectory() as tmpdir:
-            report = build_report(Path(tmpdir) / "run", {}, {}, "wasabi2", coinjoin_mappings=mappings)
+            report = build_report(Path(tmpdir) / "run", {}, {}, Detector("wasabi2"), coinjoin_mappings=mappings)
 
         self.assertEqual(report["coinjoin_mappings"]["status"], "partial")
         self.assertEqual(report["summary"]["mapping_timed_out"], 1)
@@ -2735,13 +2721,13 @@ class UnifiedReportTest(unittest.TestCase):
             "sake": {"summary": {"errors": 1}},
         }
         with tempfile.TemporaryDirectory() as tmpdir:
-            report = build_report(Path(tmpdir) / "run", {}, {}, "wasabi2", coinjoin_mappings=mappings)
+            report = build_report(Path(tmpdir) / "run", {}, {}, Detector("wasabi2"), coinjoin_mappings=mappings)
 
         self.assertEqual(report["coinjoin_mappings"]["status"], "partial")
 
     def test_report_without_mapping_artifact_keeps_mapping_section_absent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            report = build_report(Path(tmpdir) / "run", {}, {}, "wasabi2")
+            report = build_report(Path(tmpdir) / "run", {}, {}, Detector("wasabi2"))
         self.assertIsNone(report["coinjoin_mappings"])
         self.assertNotIn("mapping_transactions", report["summary"])
 

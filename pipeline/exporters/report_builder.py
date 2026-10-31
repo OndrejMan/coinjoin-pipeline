@@ -6,11 +6,6 @@ from collections import Counter
 from pathlib import Path
 
 from exporters.common import (
-    DEFAULT_FIRST_WASABI2_BLOCK,
-    DEFAULT_JOINMARKET_DETECTOR,
-    DEFAULT_JOINMARKET_MAX_DEPTH,
-    DEFAULT_JOINMARKET_MIN_BASE_FEE,
-    DEFAULT_JOINMARKET_PERCENTAGE_FEE,
     SCHEMA_VERSION,
     WASABI2_THRESHOLD_CHANGE_BLOCK,
     JsonObject,
@@ -26,6 +21,7 @@ from exporters.comparison import (
 from exporters.heuristics import add_blocksci_heuristic_explanations
 from exporters.manifest import apply_mapping_provenance, build_run_manifest, compare_run_manifests
 from exporters.normalization import baseline_filter_summary
+from exporters.parameters import Detector, ReportImages
 from exporters.report_types import TransactionRecord
 from exporters.scenario import build_scenario_checks
 from exporters.script_metadata import enrich_records_with_script_metadata, load_exported_block_script_metadata
@@ -173,29 +169,15 @@ def build_report(
     run_dir: Path,
     coinjoin_analysis: dict[str, TransactionRecord],
     blocksci_records: dict[str, TransactionRecord],
-    coinjoin_type: str,
+    detector: Detector,
     scenario: JsonObject | None = None,
-    min_input_count: int | None = None,
-    first_wasabi2_block: int = DEFAULT_FIRST_WASABI2_BLOCK,
+    *,
     emulator_data: JsonObject | None = None,
     predicted_address_clusters: dict[str, str] | None = None,
     cluster_export_error: str | None = None,
     blocksci_skipped_txids: list[str] | None = None,
-    joinmarket_detector: str = DEFAULT_JOINMARKET_DETECTOR,
-    joinmarket_min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE,
-    joinmarket_percentage_fee: float = DEFAULT_JOINMARKET_PERCENTAGE_FEE,
-    joinmarket_max_depth: int = DEFAULT_JOINMARKET_MAX_DEPTH,
     engine: str | None = None,
-    blocksci_image: str | None = None,
-    coinjoin_analysis_image: str | None = None,
-    coinjoin_emulator_image: str | None = None,
-    uploader_image: str | None = None,
-    unified_report_image: str | None = None,
-    blocksci_image_digest: str | None = None,
-    coinjoin_analysis_image_digest: str | None = None,
-    coinjoin_emulator_image_digest: str | None = None,
-    uploader_image_digest: str | None = None,
-    unified_report_image_digest: str | None = None,
+    images: ReportImages | None = None,
     emulator_git_commit: str | None = None,
     previous_run_manifest: JsonObject | None = None,
     integration_diagnostics: JsonObject | None = None,
@@ -208,22 +190,14 @@ def build_report(
     liquidity_evaluation: JsonObject | None = None,
 ) -> JsonObject:
     """The unified report. Every top-level key is always present, null when it does not apply."""
+    coinjoin_type, min_input_count = detector.coinjoin_type, detector.min_input_count
     coinjoin_mappings = with_effective_mapping_status(coinjoin_mappings)
     blocksci_skipped_txids = blocksci_skipped_txids or []
     # One read of the exported blocks serves both analyzers' records.
     script_index = load_exported_block_script_metadata(run_dir)
     enrich_records_with_script_metadata(coinjoin_analysis, run_dir, script_index)
     enrich_records_with_script_metadata(blocksci_records, run_dir, script_index)
-    add_blocksci_heuristic_explanations(
-        coinjoin_analysis,
-        coinjoin_type,
-        min_input_count=min_input_count,
-        first_wasabi2_block=first_wasabi2_block,
-        joinmarket_detector=joinmarket_detector,
-        joinmarket_min_base_fee=joinmarket_min_base_fee,
-        joinmarket_percentage_fee=joinmarket_percentage_fee,
-        joinmarket_max_depth=joinmarket_max_depth,
-    )
+    add_blocksci_heuristic_explanations(coinjoin_analysis, detector)
     transactions = compare_transactions(coinjoin_analysis, blocksci_records)
 
     blocksci_detection_confusion_matrix = build_detection_confusion_matrix(emulator_data, blocksci_records)
@@ -253,24 +227,9 @@ def build_report(
     run_manifest = build_run_manifest(
         run_dir,
         scenario,
-        coinjoin_type,
+        detector,
         engine,
-        min_input_count,
-        first_wasabi2_block,
-        joinmarket_detector,
-        joinmarket_min_base_fee,
-        joinmarket_percentage_fee,
-        joinmarket_max_depth,
-        blocksci_image=blocksci_image,
-        coinjoin_analysis_image=coinjoin_analysis_image,
-        coinjoin_emulator_image=coinjoin_emulator_image,
-        uploader_image=uploader_image,
-        unified_report_image=unified_report_image,
-        blocksci_image_digest=blocksci_image_digest,
-        coinjoin_analysis_image_digest=coinjoin_analysis_image_digest,
-        coinjoin_emulator_image_digest=coinjoin_emulator_image_digest,
-        uploader_image_digest=uploader_image_digest,
-        unified_report_image_digest=unified_report_image_digest,
+        images,
         emulator_git_commit=emulator_git_commit,
         image_provenance=image_provenance,
     )
@@ -279,7 +238,7 @@ def build_report(
     apply_mapping_provenance(run_manifest, coinjoin_mappings)
     # The detector manifest holds only the selected type's parameters; the run
     # block spells every parameter out and leaves the other type's as null.
-    detector = run_manifest["detector"]
+    detector_manifest = run_manifest["detector"]
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -289,11 +248,11 @@ def build_report(
             "scenario_name": scenario.get("name") if scenario else None,
             "coinjoin_type": coinjoin_type,
             "blocksci_min_input_count": min_input_count,
-            "first_wasabi2_block": detector.get("first_wasabi2_block"),
-            "joinmarket_detector": detector.get("joinmarket_detector"),
-            "joinmarket_min_base_fee": detector.get("joinmarket_min_base_fee"),
-            "joinmarket_percentage_fee": detector.get("joinmarket_percentage_fee"),
-            "joinmarket_max_depth": detector.get("joinmarket_max_depth"),
+            "first_wasabi2_block": detector_manifest.get("first_wasabi2_block"),
+            "joinmarket_detector": detector_manifest.get("joinmarket_detector"),
+            "joinmarket_min_base_fee": detector_manifest.get("joinmarket_min_base_fee"),
+            "joinmarket_percentage_fee": detector_manifest.get("joinmarket_percentage_fee"),
+            "joinmarket_max_depth": detector_manifest.get("joinmarket_max_depth"),
             "scenario_sha256": scenario.get("sha256") if scenario else None,
             "mode": mode,
             "network": network,

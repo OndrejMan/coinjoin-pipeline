@@ -4,13 +4,113 @@ from __future__ import annotations
 
 import argparse
 import os
+from dataclasses import dataclass, field
 
 from exporters.common import (
+    DEFAULT_FIRST_WASABI2_BLOCK,
     DEFAULT_JOINMARKET_DETECTOR,
     DEFAULT_JOINMARKET_MAX_DEPTH,
     DEFAULT_JOINMARKET_MIN_BASE_FEE,
     DEFAULT_JOINMARKET_PERCENTAGE_FEE,
+    digest_from_reference,
 )
+from exporters.report_types import DetectorManifest, DetectorParameters, ImageFields
+
+# Images whose reference and digest a report records.
+IMAGE_COMPONENTS = ("blocksci", "coinjoin_analysis", "coinjoin_emulator", "uploader", "unified_report")
+
+
+@dataclass(frozen=True)
+class Detector:
+    """The BlockSci detector one analysis ran with and its report explains."""
+
+    coinjoin_type: str = "wasabi2"
+    # None selects BlockSci's height-aware production threshold.
+    min_input_count: int | None = None
+    # Read from the parsed index, not an option.
+    first_wasabi2_block: int = DEFAULT_FIRST_WASABI2_BLOCK
+    joinmarket_detector: str = DEFAULT_JOINMARKET_DETECTOR
+    joinmarket_min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE
+    joinmarket_percentage_fee: float = DEFAULT_JOINMARKET_PERCENTAGE_FEE
+    joinmarket_max_depth: int = DEFAULT_JOINMARKET_MAX_DEPTH
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace, first_wasabi2_block: int = DEFAULT_FIRST_WASABI2_BLOCK) -> Detector:
+        return cls(
+            coinjoin_type=args.coinjoin_type,
+            min_input_count=args.min_input_count,
+            first_wasabi2_block=first_wasabi2_block,
+            joinmarket_detector=args.joinmarket_detector,
+            joinmarket_min_base_fee=args.joinmarket_min_base_fee,
+            joinmarket_percentage_fee=args.joinmarket_percentage_fee,
+            joinmarket_max_depth=args.joinmarket_max_depth,
+        )
+
+    def artifact_parameters(self) -> DetectorParameters:
+        """The options an analysis artifact records; a report must request the same ones."""
+        return {
+            "coinjoin_type": self.coinjoin_type,
+            "min_input_count": self.min_input_count,
+            "joinmarket_detector": self.joinmarket_detector,
+            "joinmarket_min_base_fee": self.joinmarket_min_base_fee,
+            "joinmarket_percentage_fee": self.joinmarket_percentage_fee,
+            "joinmarket_max_depth": self.joinmarket_max_depth,
+        }
+
+    def manifest(self) -> DetectorManifest:
+        """Only the selected CoinJoin type's parameters."""
+        detector: DetectorManifest = {
+            "coinjoin_type": self.coinjoin_type,
+            "blocksci_min_input_count": self.min_input_count,
+        }
+        if self.coinjoin_type == "wasabi2":
+            detector["first_wasabi2_block"] = self.first_wasabi2_block
+        if self.coinjoin_type == "joinmarket":
+            detector.update(
+                {
+                    "joinmarket_detector": self.joinmarket_detector,
+                    "joinmarket_min_base_fee": self.joinmarket_min_base_fee,
+                    "joinmarket_percentage_fee": self.joinmarket_percentage_fee,
+                    "joinmarket_max_depth": self.joinmarket_max_depth,
+                }
+            )
+        return detector
+
+
+@dataclass(frozen=True)
+class ReportImages:
+    """Image references by component, and the digest each one was pinned or inspected at."""
+
+    references: dict[str, str | None] = field(default_factory=dict)
+    digests: dict[str, str | None] = field(default_factory=dict)
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> ReportImages:
+        # The uploader and report images have no digest option; a pinned reference carries its own.
+        references = {name: getattr(args, name + "_image", None) for name in IMAGE_COMPONENTS}
+        return cls(
+            references,
+            {
+                name: getattr(args, name + "_image_digest", None) or digest_from_reference(references[name])
+                for name in IMAGE_COMPONENTS
+            },
+        )
+
+    def reference_fields(self) -> ImageFields:
+        return _image_fields(self.references)
+
+    def digest_fields(self) -> ImageFields:
+        return _image_fields(self.digests)
+
+
+def _image_fields(values: dict[str, str | None]) -> ImageFields:
+    return {
+        "blocksci": values.get("blocksci"),
+        "coinjoin_analysis": values.get("coinjoin_analysis"),
+        "coinjoin_emulator": values.get("coinjoin_emulator"),
+        "uploader": values.get("uploader"),
+        "unified_report": values.get("unified_report"),
+    }
 
 
 def parse_min_input_count(value: str | None) -> int | None:

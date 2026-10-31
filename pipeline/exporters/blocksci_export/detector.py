@@ -12,10 +12,6 @@ from typing import Protocol, cast
 
 from exporters.common import (
     DEFAULT_CLUSTER_MAX_DISTANCE,
-    DEFAULT_JOINMARKET_DETECTOR,
-    DEFAULT_JOINMARKET_MAX_DEPTH,
-    DEFAULT_JOINMARKET_MIN_BASE_FEE,
-    DEFAULT_JOINMARKET_PERCENTAGE_FEE,
     JsonObject,
     coerce_sats,
     safe_attr,
@@ -24,6 +20,7 @@ from exporters.common import (
 )
 from exporters.emulator_data import wallet_address_labels
 from exporters.integration_diagnostics import Blockchain
+from exporters.parameters import Detector
 from exporters.report_types import IORecord, TransactionRecord
 
 BLOCKSCI_REQUIRED_ATTRIBUTES = ("Blockchain", "heuristics")
@@ -265,35 +262,25 @@ def _require_binding(chain: object, method: str, hint: str) -> None:
 
 
 def _scan_coinjoins_by_subset_matching(
-    chain: BlocksciChain,
-    joinmarket_detector: str,
-    joinmarket_min_base_fee: int,
-    joinmarket_percentage_fee: float,
-    joinmarket_max_depth: int,
-    window: tuple[int, int],
+    chain: BlocksciChain, detector: Detector, window: tuple[int, int]
 ) -> tuple[Iterable[object], list[str]]:
     _require_binding(chain, "scan_coinjoins_by_subset_matching", "subset-matching scan binding")
     txes, skipped = chain.scan_coinjoins_by_subset_matching(
         *window,
-        joinmarket_detector,
-        joinmarket_min_base_fee,
-        joinmarket_percentage_fee,
-        joinmarket_max_depth,
+        detector.joinmarket_detector,
+        detector.joinmarket_min_base_fee,
+        detector.joinmarket_percentage_fee,
+        detector.joinmarket_max_depth,
     )
     skipped_txids = sorted(txid for txid in (to_json_text(safe_attr(tx, "hash")) for tx in skipped) if txid)
     return txes, skipped_txids
 
 
-def _filter_raw_coinjoin_txes(
-    chain: BlocksciChain,
-    coinjoin_type: str,
-    min_input_count: int | None,
-    window: tuple[int, int],
-) -> Iterable[object]:
+def _filter_raw_coinjoin_txes(chain: BlocksciChain, detector: Detector, window: tuple[int, int]) -> Iterable[object]:
     _require_binding(chain, "filter_coinjoin_txes_raw", "raw CoinJoin report binding")
-    if min_input_count is None:
-        return chain.filter_coinjoin_txes_raw(*window, coinjoin_type)
-    return chain.filter_coinjoin_txes_raw(*window, coinjoin_type, min_input_count)
+    if detector.min_input_count is None:
+        return chain.filter_coinjoin_txes_raw(*window, detector.coinjoin_type)
+    return chain.filter_coinjoin_txes_raw(*window, detector.coinjoin_type, detector.min_input_count)
 
 
 def open_chain(config_path: Path, max_block: int | None = None) -> BlocksciChain:
@@ -336,12 +323,7 @@ def _records_by_txid(txes: Iterable[object]) -> dict[str, TransactionRecord]:
 
 def export_blocksci_records(
     config_path: Path,
-    coinjoin_type: str,
-    min_input_count: int | None,
-    joinmarket_detector: str = DEFAULT_JOINMARKET_DETECTOR,
-    joinmarket_min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE,
-    joinmarket_percentage_fee: float = DEFAULT_JOINMARKET_PERCENTAGE_FEE,
-    joinmarket_max_depth: int = DEFAULT_JOINMARKET_MAX_DEPTH,
+    detector: Detector,
     *,
     max_block: int | None = None,
     start_height: int | None = None,
@@ -352,17 +334,10 @@ def export_blocksci_records(
     chain = open_chain(config_path, max_block)
     window = scan_window(chain, start_height, end_height)
 
-    if coinjoin_type == "joinmarket":
-        txes, skipped_txids = _scan_coinjoins_by_subset_matching(
-            chain,
-            joinmarket_detector,
-            joinmarket_min_base_fee,
-            joinmarket_percentage_fee,
-            joinmarket_max_depth,
-            window,
-        )
+    if detector.coinjoin_type == "joinmarket":
+        txes, skipped_txids = _scan_coinjoins_by_subset_matching(chain, detector, window)
     else:
-        txes = _filter_raw_coinjoin_txes(chain, coinjoin_type, min_input_count, window)
+        txes = _filter_raw_coinjoin_txes(chain, detector, window)
         skipped_txids = []
 
     return _records_by_txid(txes), skipped_txids

@@ -4,10 +4,10 @@ import json
 from pathlib import Path
 
 from exporters import cli as report_cli
-from exporters.analysis_artifact import detector_parameters
 from exporters.artifact_paths import DUMPLINGS_SNAPSHOT_FILE, EXPORTED_BLOCKS_DIR
 from exporters.common import f1_score, io_items, wallet_names
 from exporters.markdown_report import is_disagreement, render_run_manifest
+from exporters.parameters import Detector
 from exporters.normalization import iter_exported_blocks
 
 TXID = "a" * 64
@@ -29,7 +29,7 @@ def external_run(tmp_path: Path) -> Path:
             "schema_version": "1.1",
             "mode": "external",
             "run_id": run.name,
-            "parameters": detector_parameters(args),
+            "parameters": Detector.from_args(args).artifact_parameters(),
             "first_wasabi2_block": 0,
             "records": {},
             "skipped_txids": [],

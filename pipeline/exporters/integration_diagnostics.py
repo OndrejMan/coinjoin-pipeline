@@ -9,10 +9,6 @@ from typing import Callable, Protocol, cast
 
 from exporters.artifact_paths import EXPORTED_BLOCKS_DIR
 from exporters.common import (
-    DEFAULT_JOINMARKET_DETECTOR,
-    DEFAULT_JOINMARKET_MAX_DEPTH,
-    DEFAULT_JOINMARKET_MIN_BASE_FEE,
-    DEFAULT_JOINMARKET_PERCENTAGE_FEE,
     JsonObject,
     JsonValue,
     safe_attr,
@@ -20,6 +16,7 @@ from exporters.common import (
 )
 from exporters.image_provenance import inspect_image
 from exporters.normalization import is_coinbase_tx, iter_exported_blocks
+from exporters.parameters import Detector, ReportImages
 
 # Only the images the report can actually inspect. The uploader and the PBS
 # unified-report image are pulled by Kubernetes and Singularity, never by the
@@ -148,24 +145,19 @@ def normalize_joinmarket_detector_result(raw: JsonValue) -> str:
     return text
 
 
-def call_joinmarket_detector(
-    blocksci_module: BlocksciModule,
-    tx: object,
-    detector: str,
-    min_base_fee: int,
-    percentage_fee: float,
-    max_depth: int,
-) -> str:
+def call_joinmarket_detector(blocksci_module: BlocksciModule, tx: object, detector: Detector) -> str:
     heuristics = safe_attr(blocksci_module, "heuristics")
     coinjoin_heuristics = safe_attr(heuristics, "coinjoin", heuristics)
-    method_name = "is_possible_coinjoin" if detector == "possible" else "is_definite_coinjoin"
+    method_name = "is_possible_coinjoin" if detector.joinmarket_detector == "possible" else "is_definite_coinjoin"
     method = safe_attr(coinjoin_heuristics, method_name)
     if method is None:
         method = safe_attr(heuristics, method_name)
     if method is None:
         raise RuntimeError(f"BlockSci does not expose {method_name}")
     detector_factory = cast(Callable[[int, float, int], object], method)
-    proxy_or_value = detector_factory(min_base_fee, percentage_fee, max_depth)
+    proxy_or_value = detector_factory(
+        detector.joinmarket_min_base_fee, detector.joinmarket_percentage_fee, detector.joinmarket_max_depth
+    )
     value = proxy_or_value(tx) if callable(proxy_or_value) else proxy_or_value
     return normalize_joinmarket_detector_result(value)
 
@@ -202,11 +194,7 @@ def build_target_diagnostics(
     blocksci_module: BlocksciModule,
     targets: list[JsonObject],
     blocksci_detected_txids: set[str],
-    coinjoin_type: str,
-    joinmarket_detector: str,
-    joinmarket_min_base_fee: int,
-    joinmarket_percentage_fee: float,
-    joinmarket_max_depth: int,
+    detector: Detector,
 ) -> tuple[JsonObject, JsonObject, list[str]]:
     """Look up every exported target and, for JoinMarket, rerun the detector on it one by one.
 
@@ -220,7 +208,7 @@ def build_target_diagnostics(
     detector_disagreements = []
     detector_timeouts = []
     detector_errors = []
-    detector_available = coinjoin_type == "joinmarket"
+    detector_available = detector.coinjoin_type == "joinmarket"
 
     for target in targets:
         txid = str(target["txid"])
@@ -234,14 +222,7 @@ def build_target_diagnostics(
         if tx is not None and detector_available:
             detector_checked += 1
             try:
-                detector_result = call_joinmarket_detector(
-                    blocksci_module,
-                    tx,
-                    joinmarket_detector,
-                    joinmarket_min_base_fee,
-                    joinmarket_percentage_fee,
-                    joinmarket_max_depth,
-                )
+                detector_result = call_joinmarket_detector(blocksci_module, tx, detector)
                 detail["direct_detector_result"] = detector_result
                 direct_detected = detector_result == "true"
                 detail["direct_detector_detected"] = direct_detected
@@ -328,17 +309,12 @@ def build_integration_diagnostics(
     config_path: Path,
     blocksci_module: BlocksciModule,
     blocksci_records: Mapping[str, object],
-    coinjoin_type: str,
-    images: dict[str, str | None],
+    detector: Detector,
+    images: ReportImages,
     image_ids: dict[str, str | None] | None = None,
-    image_digests: dict[str, str | None] | None = None,
-    joinmarket_detector: str = DEFAULT_JOINMARKET_DETECTOR,
-    joinmarket_min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE,
-    joinmarket_percentage_fee: float = DEFAULT_JOINMARKET_PERCENTAGE_FEE,
-    joinmarket_max_depth: int = DEFAULT_JOINMARKET_MAX_DEPTH,
 ) -> JsonObject:
     problems: list[str] = []
-    image_diagnostics, image_problems = build_image_diagnostics(images, image_ids, image_digests)
+    image_diagnostics, image_problems = build_image_diagnostics(images.references, image_ids, images.digests)
     problems.extend(image_problems)
 
     targets, exported_summary = exported_block_targets(run_dir)
@@ -350,11 +326,7 @@ def build_integration_diagnostics(
             blocksci_module,
             targets,
             set(blocksci_records),
-            coinjoin_type,
-            joinmarket_detector,
-            joinmarket_min_base_fee,
-            joinmarket_percentage_fee,
-            joinmarket_max_depth,
+            detector,
         )
         problems.extend(chain_problems)
         problems.extend(target_problems)
@@ -376,7 +348,7 @@ def build_integration_diagnostics(
             "details": [],
         }
         detector_diagnostics = {
-            "available": coinjoin_type == "joinmarket",
+            "available": detector.coinjoin_type == "joinmarket",
             "checked": 0,
             "agreements": 0,
             "disagreements": 0,
