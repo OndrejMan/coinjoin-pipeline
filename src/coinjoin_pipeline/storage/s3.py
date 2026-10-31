@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 from exporters.common import tree_sha256
 
 from coinjoin_pipeline.configuration import required
+from coinjoin_pipeline.storage.s5client import S5Client, no_object_found
 
 if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import PipelineConfiguration
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
 PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
+# The variables the in-job shell s5 wrapper unsets; S5Client drops every AWS_* variable.
 AWS_SCRUB_VARIABLES = (
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
@@ -215,30 +217,13 @@ def shell_value(value: str) -> str:
     return shlex.quote(value)
 
 
-def scrubbed_s3_environment() -> dict[str, str]:
-    return {key: value for key, value in os.environ.items() if key not in AWS_SCRUB_VARIABLES}
+def s5_client(access: S3Access) -> S5Client:
+    return S5Client(access.endpoint_url, access.credentials_file, access.profile)
 
 
 def run_s5cmd(access: S3Access, *arguments: str) -> subprocess.CompletedProcess[str]:
-    command = [
-        "s5cmd",
-        "--credentials-file",
-        access.credentials_file,
-        "--profile",
-        access.profile,
-        "--endpoint-url",
-        access.endpoint_url,
-        *arguments,
-    ]
     try:
-        return subprocess.run(
-            command,
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=scrubbed_s3_environment(),
-        )
+        return s5_client(access).run(*arguments)
     except FileNotFoundError as error:
         raise ArtifactTransportError("s5cmd is required on the frontend for S3-compatible transfers") from error
 
@@ -263,16 +248,11 @@ def staged_exporters_uri(run_prefix: str) -> str:
     return f"{run_prefix}/.pipeline/exporters/"
 
 
-def _no_object_found(result: subprocess.CompletedProcess[str]) -> bool:
-    """s5cmd's way of answering an ``ls`` that matched nothing (exit status is nonzero)."""
-    return "no object found" in (result.stderr or "").lower()
-
-
 def s3_object_exists(access: S3Access, object_uri: str) -> bool:
     result = run_s5cmd(access, "ls", object_uri)
     if result.returncode == 0:
         return True
-    if _no_object_found(result):
+    if no_object_found(result):
         return False
     stderr = (result.stderr or "").strip()
     raise ArtifactTransportError(f"s5cmd ls {object_uri} failed (exit {result.returncode}): {stderr}")
@@ -343,7 +323,7 @@ def s3_access_preflight(access: S3Access, artifact_uri: str) -> None:
     if not Path(access.credentials_file).is_file():
         raise ArtifactTransportError(f"S3 credentials file not found: {access.credentials_file}")
     result = run_s5cmd(access, "ls", f"{artifact_uri}/*")
-    if result.returncode != 0 and not _no_object_found(result):
+    if result.returncode != 0 and not no_object_found(result):
         raise ArtifactTransportError(
             f"S3 access preflight failed for {artifact_uri} (exit {result.returncode}): {(result.stderr or '').strip()}"
         )

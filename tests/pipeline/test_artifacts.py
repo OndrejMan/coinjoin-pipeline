@@ -21,8 +21,8 @@ from coinjoin_pipeline.storage.s3 import (  # noqa: E402
     ensure_empty_run_prefix,
     AWS_SCRUB_VARIABLES,
     run_s5cmd,
+    s5_client,
     s3_object_exists,
-    scrubbed_s3_environment,
     validate_artifact_uri,
     validate_credentials_file,
     validate_run_id,
@@ -57,10 +57,10 @@ def test_rejects_unsafe_run_ids(run_id: str) -> None:
         validate_run_id(run_id)
 
 
-def test_job_s5_wrapper_uses_only_s5cmd_and_scrubs_every_aws_variable() -> None:
-    header = (EXECUTION_ROOT / "pbs/templates/s3_stage.sh").read_text(encoding="utf-8")
+def test_kubernetes_s5_wrapper_uses_only_s5cmd_and_scrubs_every_aws_variable() -> None:
+    header = (EXECUTION_ROOT / "k8s_s3_access.sh").read_text(encoding="utf-8")
     wrapper = header[header.index("s5() {") : header.index("}", header.index("s5() {"))]
-    assert 's5cmd --credentials-file "$S3_CREDENTIALS_FILE"' in wrapper
+    assert "s5cmd --credentials-file /credentials/credentials" in wrapper
     assert "--profile" in wrapper and "--endpoint-url" in wrapper
     for variable in AWS_SCRUB_VARIABLES:
         assert f"-u {variable}" in wrapper
@@ -77,21 +77,21 @@ def test_scrubbed_environment_drops_aws_variables_and_keeps_others() -> None:
         "AWS_DEFAULT_REGION": "r",
         "PATH": "/usr/bin",
     }
-    with mock.patch.dict(os.environ, environment, clear=True):
-        scrubbed = scrubbed_s3_environment()
+    with mock.patch.dict(os.environ, {**environment, "AWS_CA_BUNDLE": "/ca"}, clear=True):
+        scrubbed = s5_client(ACCESS).environment
     assert scrubbed == {"PATH": "/usr/bin"}
 
 
 def test_s3_object_exists_distinguishes_absent_from_errors() -> None:
-    with mock.patch("coinjoin_pipeline.storage.s3.subprocess.run", return_value=_completed(0)):
+    with mock.patch("coinjoin_pipeline.storage.s5client.subprocess.run", return_value=_completed(0)):
         assert s3_object_exists(ACCESS, "s3://bucket/runs/run-1/.k8s/upload.done") is True
     with mock.patch(
-        "coinjoin_pipeline.storage.s3.subprocess.run",
+        "coinjoin_pipeline.storage.s5client.subprocess.run",
         return_value=_completed(1, 'ERROR "ls s3://...": no object found'),
     ):
         assert s3_object_exists(ACCESS, "s3://bucket/runs/run-1/.k8s/upload.done") is False
     with mock.patch(
-        "coinjoin_pipeline.storage.s3.subprocess.run",
+        "coinjoin_pipeline.storage.s5client.subprocess.run",
         return_value=_completed(1, "InvalidAccessKeyId"),
     ):
         with pytest.raises(ArtifactTransportError, match="InvalidAccessKeyId"):
@@ -99,7 +99,7 @@ def test_s3_object_exists_distinguishes_absent_from_errors() -> None:
 
 
 def test_run_s5cmd_reports_missing_binary() -> None:
-    with mock.patch("coinjoin_pipeline.storage.s3.subprocess.run", side_effect=FileNotFoundError):
+    with mock.patch("coinjoin_pipeline.storage.s5client.subprocess.run", side_effect=FileNotFoundError):
         with pytest.raises(ArtifactTransportError, match="s5cmd is required"):
             run_s5cmd(ACCESS, "ls", "s3://bucket/key")
 
