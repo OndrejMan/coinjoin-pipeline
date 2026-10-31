@@ -19,14 +19,21 @@ from coinjoin_pipeline.execution.run_catalog import (  # noqa: E402
 )
 
 
+def write_report(run_dir: Path, **fields: object) -> Path:
+    """A report that recorded the hashes of the inputs present now."""
+    report = run_dir / "coinjoinPipeline_data" / "unified_report.json"
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(json.dumps({"run_manifest": {"inputs": report_input_hashes(run_dir)}, **fields}))
+    return report
+
+
 class RunCatalogTests(unittest.TestCase):
     def test_discovers_emulator_and_external_runs_with_stages(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             emulator = root / "emulator-run"
             (emulator / "coinjoin_emulator_data").mkdir(parents=True)
-            (emulator / "coinjoinPipeline_data").mkdir()
-            (emulator / "coinjoinPipeline_data" / "unified_report.json").write_text("{}")
+            write_report(emulator)
             external = root / "external-run"
             external.mkdir()
             write_manifest(external, {"mode": "external", "run_id": "external-run"})
@@ -43,52 +50,34 @@ class RunCatalogTests(unittest.TestCase):
     def test_report_status_surfaces_failed_diagnostics(self):
         with tempfile.TemporaryDirectory() as temp:
             run_dir = Path(temp)
-            report_dir = run_dir / "coinjoinPipeline_data"
-            report_dir.mkdir()
-            (report_dir / "unified_report.json").write_text(
-                json.dumps({"integration_diagnostics": {"status": "not_ok"}})
-            )
+            write_report(run_dir, integration_diagnostics={"status": "not_ok"})
             self.assertEqual(report_status(run_dir), "diagnostics_not_ok")
 
     def test_report_status_surfaces_unavailable_emulator_labels(self):
         with tempfile.TemporaryDirectory() as temp:
             run_dir = Path(temp)
-            report_dir = run_dir / "coinjoinPipeline_data"
-            report_dir.mkdir()
-            (report_dir / "unified_report.json").write_text(
-                json.dumps(
-                    {
-                        "evaluation_scope": "emulator_labels_unavailable",
-                        "integration_diagnostics": {"status": "ok"},
-                    }
-                )
+            write_report(
+                run_dir,
+                evaluation_scope="emulator_labels_unavailable",
+                integration_diagnostics={"status": "ok"},
             )
             self.assertEqual(report_status(run_dir), "emulator_labels_unavailable")
 
     def test_report_status_fails_closed_on_unknown_diagnostics_status(self):
         with tempfile.TemporaryDirectory() as temp:
             run_dir = Path(temp)
-            report_dir = run_dir / "coinjoinPipeline_data"
-            report_dir.mkdir()
-            (report_dir / "unified_report.json").write_text(
-                json.dumps({"integration_diagnostics": {"status": "unavailable"}})
-            )
+            write_report(run_dir, integration_diagnostics={"status": "unavailable"})
             self.assertEqual(report_status(run_dir), "diagnostics_not_ok")
 
-    def test_report_status_flags_report_older_than_upstream_artifact(self):
+    def test_report_status_flags_report_without_recorded_inputs_as_stale(self):
         with tempfile.TemporaryDirectory() as temp:
             run_dir = Path(temp)
             report_dir = run_dir / "coinjoinPipeline_data"
             report_dir.mkdir()
-            report = report_dir / "unified_report.json"
-            report.write_text(json.dumps({"integration_diagnostics": {"status": "ok"}}))
-            import os
-
-            os.utime(report, (1000, 1000))
+            (report_dir / "unified_report.json").write_text(json.dumps({"integration_diagnostics": {"status": "ok"}}))
             baseline = run_dir / BASELINE_FILE
             baseline.parent.mkdir(parents=True)
             baseline.write_text("{}")
-            os.utime(baseline, (2000, 2000))
 
             self.assertEqual(report_status(run_dir), "stale")
             self.assertEqual(stage_state(run_dir)["report"], "stale")

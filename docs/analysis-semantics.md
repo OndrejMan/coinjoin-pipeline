@@ -200,8 +200,7 @@ run's `coinjoinPipeline_data/unified_report.json` into one of:
   events, baseline and its false-positive sidecars, BlockSci analysis artifact,
   mappings). An input that is rewritten or appears later marks the report
   stale; an input missing locally (an S3 run with only the report downloaded)
-  does not. Reports written before 2026-10 carry no hashes and fall back to
-  comparing modification times.
+  does not. A report without recorded hashes is stale.
 - `baseline_agreement_only` — external mode; the report compares BlockSci with
   `coinjoin-analysis` only and intentionally has no ground-truth metrics.
 - `emulator_labels_unavailable` — emulator mode, but independent producer

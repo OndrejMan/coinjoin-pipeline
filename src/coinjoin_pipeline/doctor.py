@@ -101,27 +101,6 @@ def validate_arguments(config: PipelineConfiguration, runs_root: Path) -> list[s
     return errors
 
 
-# Entries the wrapper itself opens for writing on every mutating run. A runs
-# root last used through the wrapper *image* owns them as root, because that
-# wrapper ran as root inside its container; the bare wrapper runs as the
-# invoking user and cannot reopen them.
-CONTAINER_ERA_ENTRIES = (".pipeline.lock", ".notebooks")
-
-
-def inherited_root_ownership_errors(runs_root: Path) -> list[str]:
-    """Report pre-existing runs-root entries this user can no longer write."""
-    errors: list[str] = []
-    for name in CONTAINER_ERA_ENTRIES:
-        entry = runs_root / name
-        if entry.exists() and not os.access(entry, os.W_OK):
-            errors.append(
-                f"{entry} is not writable by the current user; it was created by the "
-                "wrapper container running as root. Take the runs root over with "
-                f"`sudo chown -R $(id -u):$(id -g) {runs_root}` or use --runs-root"
-            )
-    return errors
-
-
 def _exit_status(command: list[str], timeout: int) -> int | None:
     """Exit status of a silent probe, or None when it timed out."""
     try:
@@ -189,8 +168,6 @@ def check(
     probe = runs_root if runs_root.exists() else runs_root.parent
     if not probe.exists() or not os.access(probe, os.W_OK):
         errors.append(f"output directory is not writable: {runs_root}")
-    else:
-        errors.extend(inherited_root_ownership_errors(runs_root))
     if executable and check_images and wants_runtime:
         selected = set(images.as_dict()) if image_components is None else image_components
         errors.extend(_image_errors(executable, images, selected))

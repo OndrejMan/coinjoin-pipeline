@@ -9,6 +9,7 @@ from unittest import mock
 PROJECT_ROOT = Path(__file__).resolve().parents[2] / "pipeline"
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from exporters.artifact_paths import report_input_hashes  # noqa: E402
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.pbs.commands import detector_arguments
 from coinjoin_pipeline.execution.research import (  # noqa: E402
@@ -103,7 +104,10 @@ class ResearchPreflightTests(unittest.TestCase):
             report.write_text(
                 json.dumps(
                     {
-                        "run_manifest": {"images": {"blocksci": "blocksci:test"}},
+                        "run_manifest": {
+                            "images": {"blocksci": "blocksci:test"},
+                            "inputs": report_input_hashes(run_dir),
+                        },
                         "integration_diagnostics": {"status": "ok"},
                     }
                 )

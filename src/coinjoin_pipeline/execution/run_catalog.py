@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Literal, TypedDict, cast
 
 from exporters.artifact_paths import (
-    ANALYSIS_ARTIFACT_FILE,
     BASELINE_FILE,
     BLOCKSCI_CONFIG_FILE,
     CATALOG_MARKERS,
@@ -38,14 +37,6 @@ ReportStatus = Literal[
     "diagnostics_not_ok",
     "complete",
 ]
-# Inputs compared by modification time for reports that predate recorded input hashes.
-LEGACY_REPORT_INPUTS = (
-    EMULATOR_DIR,
-    BASELINE_FILE,
-    BLOCKSCI_CONFIG_FILE,
-    ANALYSIS_ARTIFACT_FILE,
-    MAPPINGS_FILE,
-)
 
 
 class RunManifest(TypedDict, total=False):
@@ -90,11 +81,7 @@ def _report_is_stale(run_dir: Path, report: dict[str, object]) -> bool:
     """Whether the report's inputs changed after it was written."""
     recorded = _recorded_inputs(report)
     if recorded is None:
-        report_mtime = (run_dir / REPORT_FILE).stat().st_mtime
-        return any(
-            (run_dir / name).exists() and (run_dir / name).stat().st_mtime > report_mtime
-            for name in LEGACY_REPORT_INPUTS
-        )
+        return True
     # An input missing locally (an S3 run with only the report downloaded) is no
     # evidence of change; a new or rewritten one is.
     for name in report_input_files(run_dir):
