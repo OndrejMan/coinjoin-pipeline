@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from dataclasses import MISSING, Field
 from functools import lru_cache
 from pathlib import Path
@@ -189,9 +190,12 @@ HELP = {
 
 
 def option_flags(path: str, destination: str) -> list[str]:
+    """Every spelling of one option; the camelCase ones also take the usual kebab-case form."""
     flags = [cli_flag(destination)]
     if path == "blocksci.script":
         flags.append("--blocksciScript")
+    if destination != destination.lower():
+        flags.append("--" + re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "-", destination).lower())
     return flags
 
 

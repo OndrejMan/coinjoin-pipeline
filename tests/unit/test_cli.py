@@ -268,6 +268,14 @@ def test_run_id_is_safe_and_bounded(tmp_path):
     assert len(value) <= 63
 
 
+def test_camel_case_stage_flags_take_their_kebab_case_spelling_too() -> None:
+    from coinjoin_pipeline.arguments import load_configuration
+
+    config = load_configuration(["pbs-from-s3", "--analysis-pbs", "--blocksci-pbs", "--mappings-pbs"])
+
+    assert (config.stages.analysis, config.stages.blocksci, config.stages.mappings) == (True, True, True)
+
+
 def test_kubeconfig_defaults_to_the_first_file_of_the_environment(tmp_path, monkeypatch) -> None:
     from coinjoin_pipeline.execution.kubernetes import resolve_kubeconfig
 
