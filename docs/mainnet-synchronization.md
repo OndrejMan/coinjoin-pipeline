@@ -173,7 +173,10 @@ Celkové obsazení S3 včetně archivu bloků zjistí až listování prefixů.
 Stav synchronizace má pevné místo, nikoli složku podle run ID: lokálně
 `mainnet.root/sync/`, v S3 `mainnet.state_uri` (`ready.json`, `done.json`,
 `{restore,producer,blocksci,checkpoint}.json`, `blocksci-index-manifest.json`,
-`.pbs/mainnet-{restore,producer,blocksci,checkpoint}.{done,failed}`). Restore job
+`.pbs/mainnet-{restore,producer,blocksci,checkpoint}.{done,failed}`). Na rozdíl od
+markerů ostatních stage, které obsahují jen `done`/`failed`, nesou mainnet markery JSON:
+`.done` stejný obsah jako výsledek jobu (restore akci a zálohy, producer `ready.json`,
+blocksci manifest indexu, checkpoint `done.json`), `.failed` objekt s `run_id`. Restore job
 nového běhu je pod zámkem datasetu nejdřív smaže, takže prefix vždy popisuje poslední běh; `run_id`
 v každém JSON říká, ke kterému patří. Logy každého běhu zůstávají v
 `<state_uri>/logs/<run-id>/`. Konfigurace synchronizace proto nemá `artifacts.uri`;

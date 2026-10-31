@@ -183,8 +183,30 @@ stage tokens, and container-image characters. Invalid values raise `PBSError`
 and are not interpolated into PBS directives or shell assignments.
 
 Stage command bodies are generated internally by the pipeline
-(`execution/pbs/commands.py`) and remain the
-only deliberate shell fragments in the templates.
+(`execution/pbs/commands.py`) and are the only shell a job runs in its container;
+everything else reaches the PBS worker as `settings.json` values, never as shell.
+
+## Unified report top-level keys
+
+Every key is present in every report; one that does not apply is `null`.
+
+| Key | Content |
+|---|---|
+| `schema_version` | Report schema (`exporters/common.py` `SCHEMA_VERSION`). |
+| `run` | Run ID, start time, scenario, mode, network and the detector parameters it ran with. |
+| `run_manifest`, `run_manifest_comparison` | Provenance (images and digests, detector, source commits, exporter tree hash, input hashes) and its diff against the report it replaced. |
+| `warnings` | `[{code, message}]`; today only `wasabi_production_threshold_zero_detections`: no Wasabi detections at regtest heights under the production input threshold. |
+| `integration_diagnostics` | Image provenance, chain height and exported-target checks of the BlockSci analysis. |
+| `scenario`, `emulator_data` | The scenario and the producer-label summary and provenance. |
+| `detector_evaluations`, `evaluation_scope` | Confusion matrices of both analyzers against producer labels, and which comparison the metrics stand for. |
+| `detection_confusion_matrix` | Alias of `detector_evaluations.blocksci`, kept for scenario-lab. |
+| `clustering_evaluation` | Pairwise precision and recall of BlockSci clusters against wallet ground truth. |
+| `blocksci_skipped_txids` | Transactions the JoinMarket subset search gave up on. |
+| `coinjoin_mappings` | Wasabi mappings and Sake results, when the run computed them. |
+| `coverage` | External mode only: the BlockSci scan window and how much of the baseline falls in it. |
+| `baseline_filter` | The false-positive lists applied to the baseline and the transactions they removed. |
+| `liquidity_evaluation` | Pool liquidity from ground truth, coinjoin-analysis and BlockSci, and fin of large wallets and groups. |
+| `summary`, `divergences`, `transactions` | Counts, the analyzer disagreements and every compared transaction. |
 
 ## Run catalog report statuses
 
@@ -197,8 +219,9 @@ run's `coinjoinPipeline_data/unified_report.json` into one of:
   written, so it describes a previous analyzer run; re-export to refresh it.
   Reports record the SHA-256 of every input they read in
   `run_manifest.inputs` (scenario, producer-label manifest, JoinMarket round
-  events, baseline and its false-positive sidecars, BlockSci analysis artifact,
-  mappings). An input that is rewritten or appears later marks the report
+  events, the emulator's `postmix_spends.json`, baseline and its false-positive
+  sidecars, the external baseline's `dumplings-snapshot.json`, BlockSci analysis
+  artifact, mappings; `REPORT_INPUT_FILES` in `exporters/artifact_paths.py`). An input that is rewritten or appears later marks the report
   stale; an input missing locally (an S3 run with only the report downloaded)
   does not. A report without recorded hashes is stale.
 - `baseline_agreement_only` — external mode; the report compares BlockSci with

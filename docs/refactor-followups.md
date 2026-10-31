@@ -27,17 +27,17 @@ when done.
   should use `COINJOIN_ANALYSIS_DIR` / `EMULATOR_DIR`.
 - [x] `s3_submission.py`: drop the two `blocksci.notebook_port or 8888` fallbacks (the model
   defaults to 8888 now).
-- [ ] `execution/kubernetes.resolve_kubeconfig` ignores `$KUBECONFIG` while `watch` honours it;
+- [x] `execution/kubernetes.resolve_kubeconfig` ignores `$KUBECONFIG` while `watch` honours it;
   honour it in one place and reuse.
-- [ ] `execution/research.py`: `DEFAULT_RUNS_ROOT` differs from the CLI default (use
+- [x] `execution/research.py`: `DEFAULT_RUNS_ROOT` differs from the CLI default (use
   `paths.default_runs_root()`); parsers lack `prog="cjp"` and help for `runs …` / `scenarios …`.
 - [x] `option_rules._action_errors` is one long function; split per concern without changing
   messages.
 - [x] Unit test that the `AWS_*` scrub lists in `s3_stage.sh` and `k8s_s3_access.sh` match
   `AWS_SCRUB_VARIABLES`.
-- [ ] `docs/mainnet-synchronization.md`: say that `.pbs/mainnet-*` markers carry JSON bodies,
+- [x] `docs/mainnet-synchronization.md`: say that `.pbs/mainnet-*` markers carry JSON bodies,
   unlike other stages.
-- [ ] `docs/analysis-semantics.md`: list `postmix_spends.json` and `dumplings-snapshot.json` as
+- [x] `docs/analysis-semantics.md`: list `postmix_spends.json` and `dumplings-snapshot.json` as
   report inputs; add a top-level keys table (`coverage`, `baseline_filter`, `warnings[].code`).
 - [ ] Decide on `src/coinjoin_pipeline/resources/scenarios/`: execution never reads it; drop it or
   make it the single catalogue.
@@ -45,10 +45,10 @@ when done.
 
 ## Needs a decision (breaking)
 
-- [ ] `pipeline_logging.exit_with_error` exits 2 for every failure; use `console.EXIT_FAILURE` (5)
+- [x] `pipeline_logging.exit_with_error` exits 2 for every failure; use `console.EXIT_FAILURE` (5)
   so scripts tell bad input from a failed run. scenario-lab only checks `code == 0`.
-- [ ] kebab-case aliases for `--analysisPbs`, `--blocksciPbs`, `--mappingsPbs`, `--blocksciScript`,
-  `--fromConfiguration`; consider renaming `--version` (image tag).
+- [x] kebab-case aliases for `--analysisPbs`, `--blocksciPbs`, `--mappingsPbs`, `--blocksciScript`,
+  `--fromConfiguration`; consider renaming `--version` (image tag). `--version` stays: scripts use it.
 - [ ] Report schema 2: drop `detection_confusion_matrix` and the duplicated `run.joinmarket_*` /
   `run.first_wasabi2_block`; rename `transactions[*].blocksci.broadcast_time` (holds block time)
   to `block_time`. scenario-lab `src/domain/evaluation.ts` must read
