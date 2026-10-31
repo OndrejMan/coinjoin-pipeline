@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import queue
 import re
 import subprocess
@@ -20,6 +19,7 @@ from .configuration import KubernetesConfiguration
 from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, fail
 from .execution.pbs.defaults import PBS_TERMINAL_STATES
 from .execution.pbs.status import job_details
+from .execution.pbs.submission import read_pbs_job_id
 from .paths import default_runs_root
 from .storage.s3 import RUN_ID_RULE, is_valid_run_id
 
@@ -232,7 +232,7 @@ def _job_ids_from_run_dir(path: Path) -> dict[str, str]:
     if not marker_dir.is_dir():
         return jobs
     for jobid_path in sorted(marker_dir.glob("*.jobid")):
-        job_id = jobid_path.read_text(encoding="utf-8").strip()
+        job_id = read_pbs_job_id(path, jobid_path.stem)
         if job_id:
             jobs[jobid_path.stem] = job_id
     return jobs

@@ -12,7 +12,7 @@ import subprocess
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from exporters.artifact_paths import COINJOIN_ANALYSIS_TOOLS_DIR
+from exporters.artifact_paths import COINJOIN_ANALYSIS_DIR, COINJOIN_ANALYSIS_TOOLS_DIR, EMULATOR_DIR
 
 from coinjoin_pipeline.storage.s3 import validate_artifact_uri
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
@@ -316,7 +316,7 @@ def run_local(config: PipelineConfiguration, run_dir: Path) -> Path:
         (output / "input").mkdir(parents=True)
     else:
         experiment = output / "input" / run_dir.name
-        baseline, data = run_dir / "coinjoin-analysis_data", run_dir / "coinjoin_emulator_data" / "data"
+        baseline, data = run_dir / COINJOIN_ANALYSIS_DIR, run_dir / EMULATOR_DIR / "data"
         if not baseline.is_dir() and not data.is_dir():
             raise ValueError("The run has neither a coinjoin-analysis baseline nor emulator data")
         experiment.mkdir(parents=True)

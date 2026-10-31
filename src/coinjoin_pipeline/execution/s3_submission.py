@@ -227,7 +227,7 @@ class S3StageRunner:
             )
             self._submit(stage, script)
             return
-        notebook_port = blocksci.notebook_port or 8888
+        notebook_port = blocksci.notebook_port
         commands = {
             "detect": lambda: blocksci_analysis_pbs_command(self.target.run_id, self.args),
             "external": lambda: blocksci_external_report_pbs_command(self.target.run_id, self.args),

@@ -16,9 +16,11 @@ from .storage.s3 import (
     ArtifactTransportError,
     S3Access,
     add_s3_arguments,
+    run_prefix_uri,
     run_s5cmd,
     s3_arguments_access,
     s3_object_exists,
+    stage_marker_uri,
     validate_run_id,
 )
 
@@ -72,9 +74,9 @@ def download_report(
     run_id: str,
     output_dir: Path,
 ) -> tuple[Path, Path | None]:
-    run_prefix = f"{artifact_uri}/{run_id}"
-    failed_marker = f"{run_prefix}/.pbs/unified-report.failed"
-    done_marker = f"{run_prefix}/.pbs/unified-report.done"
+    run_prefix = run_prefix_uri(artifact_uri, run_id)
+    failed_marker = stage_marker_uri(run_prefix, "unified-report", "failed")
+    done_marker = stage_marker_uri(run_prefix, "unified-report", "done")
     if s3_object_exists(access, failed_marker):
         raise DownloadError("the unified-report PBS stage recorded failure: " + failed_marker)
     if not s3_object_exists(access, done_marker):

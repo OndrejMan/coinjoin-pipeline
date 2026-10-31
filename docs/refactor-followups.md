@@ -18,22 +18,22 @@ when done.
 
 ## Small, non-breaking
 
-- [ ] `download_report.py` builds `.pbs/unified-report.{done,failed}` keys by hand; use
+- [x] `download_report.py` builds `.pbs/unified-report.{done,failed}` keys by hand; use
   `storage.s3.stage_marker_uri` / `run_prefix_uri`.
-- [ ] `watch.py` globs `.pbs/*.jobid` itself; use `pbs.submission.read_pbs_job_id`.
-- [ ] `analysis_modes.py` and `templates/s3_coinjoin_analysis_dumplings.sh` spell out
+- [x] `watch.py` globs `.pbs/*.jobid` itself; use `pbs.submission.read_pbs_job_id`.
+- [x] `analysis_modes.py` and the Dumplings baseline job spell out
   `dumplings-snapshot.json`; import `DUMPLINGS_SNAPSHOT_FILE`.
-- [ ] `coinjoin_tools.py` literals `"coinjoin-analysis_data"` and `"coinjoin_emulator_data"/"data"`
+- [x] `coinjoin_tools.py` literals `"coinjoin-analysis_data"` and `"coinjoin_emulator_data"/"data"`
   should use `COINJOIN_ANALYSIS_DIR` / `EMULATOR_DIR`.
-- [ ] `s3_submission.py`: drop the two `blocksci.notebook_port or 8888` fallbacks (the model
+- [x] `s3_submission.py`: drop the two `blocksci.notebook_port or 8888` fallbacks (the model
   defaults to 8888 now).
 - [ ] `execution/kubernetes.resolve_kubeconfig` ignores `$KUBECONFIG` while `watch` honours it;
   honour it in one place and reuse.
 - [ ] `execution/research.py`: `DEFAULT_RUNS_ROOT` differs from the CLI default (use
   `paths.default_runs_root()`); parsers lack `prog="cjp"` and help for `runs …` / `scenarios …`.
-- [ ] `option_rules._action_errors` is one long function; split per concern without changing
+- [x] `option_rules._action_errors` is one long function; split per concern without changing
   messages.
-- [ ] Unit test that the `AWS_*` scrub lists in `s3_stage.sh` and `k8s_s3_access.sh` match
+- [x] Unit test that the `AWS_*` scrub lists in `s3_stage.sh` and `k8s_s3_access.sh` match
   `AWS_SCRUB_VARIABLES`.
 - [ ] `docs/mainnet-synchronization.md`: say that `.pbs/mainnet-*` markers carry JSON bodies,
   unlike other stages.
