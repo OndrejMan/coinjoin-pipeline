@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shlex
 import shutil
 import subprocess
@@ -37,11 +36,10 @@ from coinjoin_pipeline.execution.scenarios import (
     validate_scenario,
 )
 from coinjoin_pipeline.execution.settings import DEFAULT_BLOCKSCI_IMAGE
-from coinjoin_pipeline.paths import PIPELINE_ROOT
+from coinjoin_pipeline.paths import PIPELINE_ROOT, default_runs_root
 from coinjoin_pipeline.storage.s3 import validate_run_id
 
 ROOT = PIPELINE_ROOT
-DEFAULT_RUNS_ROOT = Path(os.environ.get("EMULATION_LOGS_DIR", ROOT.parent / "coinjoin-runs")).expanduser()
 
 
 class ExitError(ValueError):
@@ -292,25 +290,25 @@ def external_command(args: argparse.Namespace) -> str:
 
 
 def parser() -> argparse.ArgumentParser:
-    cli = argparse.ArgumentParser(description="Researcher-facing run catalog.")
-    cli.add_argument("--runs-root", type=Path, default=DEFAULT_RUNS_ROOT)
+    cli = argparse.ArgumentParser(prog="cjp", description="Researcher-facing run catalog.")
+    cli.add_argument("--runs-root", type=Path, default=default_runs_root(), help="Runs root (default: %(default)s).")
     cli.add_argument("--runtime", choices=get_args(ContainerRuntime), default="docker")
     subcommands = cli.add_subparsers(dest="command", required=True)
-    runs = subcommands.add_parser("runs")
+    runs = subcommands.add_parser("runs", help="List, inspect and validate run directories.")
     run_commands = runs.add_subparsers(dest="runs_command", required=True)
-    run_commands.add_parser("list")
-    inspect = run_commands.add_parser("inspect")
-    inspect.add_argument("--run-dir", required=True)
-    validate = run_commands.add_parser("validate")
-    validate.add_argument("--run-dir", required=True)
-    validate.add_argument("--blocksci-image")
-    scenarios = subcommands.add_parser("scenarios")
+    run_commands.add_parser("list", help="Every run with its mode, stages and report status.")
+    inspect = run_commands.add_parser("inspect", help="One run's manifest, stages and report status.")
+    inspect.add_argument("--run-dir", required=True, help="Run directory, absolute or below the runs root.")
+    validate = run_commands.add_parser("validate", help="Check one run's report inputs in the BlockSci image.")
+    validate.add_argument("--run-dir", required=True, help="Run directory, absolute or below the runs root.")
+    validate.add_argument("--blocksci-image", help="BlockSci image to validate with.")
+    scenarios = subcommands.add_parser("scenarios", help="List, show and validate emulator scenarios.")
     scenario_commands = scenarios.add_subparsers(dest="scenarios_command", required=True)
-    list_scenarios = scenario_commands.add_parser("list")
+    list_scenarios = scenario_commands.add_parser("list", help="The packaged scenarios.")
     list_scenarios.add_argument("--engine", choices=("wasabi", "joinmarket"))
-    for name in ("show", "validate"):
-        scenario_command = scenario_commands.add_parser(name)
-        scenario_command.add_argument("scenario")
+    for name, summary in (("show", "Print one scenario."), ("validate", "Check one scenario for an engine.")):
+        scenario_command = scenario_commands.add_parser(name, help=summary)
+        scenario_command.add_argument("scenario", help="Scenario name or path.")
         scenario_command.add_argument("--engine", choices=("wasabi", "joinmarket"), required=True)
     return cli
 

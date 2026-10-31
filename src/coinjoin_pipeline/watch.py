@@ -17,6 +17,7 @@ from typing import Iterator, TextIO
 
 from .configuration import KubernetesConfiguration
 from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, fail
+from .execution.kubernetes import resolve_kubeconfig
 from .execution.pbs.defaults import PBS_TERMINAL_STATES
 from .execution.pbs.status import job_details
 from .execution.pbs.submission import read_pbs_job_id
@@ -82,8 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--kubeconfig",
-        default=os.environ.get("KUBECONFIG", str(Path.home() / ".kube/config")),
-        help="kubeconfig file (default: $KUBECONFIG, else ~/.kube/config).",
+        help="kubeconfig file (default: the first file of $KUBECONFIG, else ~/.kube/config).",
     )
     parser.add_argument(
         "--components",
@@ -420,7 +420,7 @@ def _kubernetes_sources(
     args: argparse.Namespace, components: set[str], follow: bool
 ) -> tuple[str, dict[str, list[str]]]:
     """Return the outer pod and one ``kubectl logs`` command per selected component."""
-    kubeconfig = Path(args.kubeconfig).expanduser().resolve()
+    kubeconfig = resolve_kubeconfig(args.kubeconfig)
     if not kubeconfig.is_file():
         raise _SourceError(f"kubeconfig not found: {kubeconfig}; pass --kubeconfig, or --pbs-only for PBS output alone")
     kubectl = _kubectl_base(kubeconfig, args.namespace)

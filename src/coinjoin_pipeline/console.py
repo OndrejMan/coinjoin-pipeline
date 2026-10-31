@@ -10,14 +10,14 @@ EXIT_ABORTED = 3
 EXIT_FAILURE = 5
 EXIT_INTERRUPTED = 130
 
-# Execution reports its expected failures ("[ERROR] ...") with EXIT_USAGE too
+# Execution reports a failed run ("[ERROR] ...") with EXIT_FAILURE
 # (execution/pipeline_logging.exit_with_error), and a failed local container
 # may pass its own exit code through.
 EXIT_CODES = (
     (EXIT_OK, "success"),
-    (EXIT_USAGE, "invalid configuration or arguments, a failed preflight check, or a failure reported as [ERROR]"),
+    (EXIT_USAGE, "invalid configuration or arguments, or a failed preflight check"),
     (EXIT_ABORTED, "clean-s3 was not confirmed"),
-    (EXIT_FAILURE, "an unexpected runtime error, or a failed pull, S3 transfer or log source of a utility"),
+    (EXIT_FAILURE, "a failed run reported as [ERROR], a runtime error, or a failed pull, S3 transfer or log source"),
     (EXIT_INTERRUPTED, "interrupted"),
 )
 

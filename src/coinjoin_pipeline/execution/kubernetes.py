@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -40,7 +41,9 @@ CONTROLLER_FATAL_SUMMARY_MARKERS = (
 
 
 def resolve_kubeconfig(value: str | None) -> Path:
-    """Resolve an optional kubeconfig argument using the established default."""
+    """The kubeconfig option, else the first file of $KUBECONFIG, else ~/.kube/config, as kubectl reads them."""
+    if not value:
+        value = next((path for path in os.environ.get("KUBECONFIG", "").split(os.pathsep) if path), None)
     return Path(value).expanduser().resolve() if value else Path.home() / ".kube" / "config"
 
 

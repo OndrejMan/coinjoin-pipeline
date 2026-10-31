@@ -10,13 +10,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, NoReturn, TextIO
 
+from coinjoin_pipeline.console import EXIT_FAILURE
+
 STAGE_SEPARATOR_WIDTH = 88
 
 
 def exit_with_error(error: Exception) -> NoReturn:
-    """Report an expected execution failure and leave with the CLI usage code."""
+    """Report a failed run; options were already validated, so this is not a usage error."""
     print(f"[ERROR] {error}", file=sys.stderr)
-    raise SystemExit(2)
+    raise SystemExit(EXIT_FAILURE)
 
 
 class TerminalColor:

@@ -266,3 +266,24 @@ def test_run_id_is_safe_and_bounded(tmp_path):
     value = run_id_for(load_configuration(["emulate", "--scenario", str(scenario)]))
     assert validate_run_id(value) == value
     assert len(value) <= 63
+
+
+def test_kubeconfig_defaults_to_the_first_file_of_the_environment(tmp_path, monkeypatch) -> None:
+    from coinjoin_pipeline.execution.kubernetes import resolve_kubeconfig
+
+    monkeypatch.setenv("KUBECONFIG", f"{tmp_path / 'first'}:{tmp_path / 'second'}")
+    assert resolve_kubeconfig(None) == tmp_path / "first"
+    assert resolve_kubeconfig(str(tmp_path / "explicit")) == tmp_path / "explicit"
+    monkeypatch.delenv("KUBECONFIG")
+    assert resolve_kubeconfig(None).parts[-2:] == (".kube", "config")
+
+
+def test_a_failed_run_exits_with_the_failure_code_not_the_usage_code(capsys) -> None:
+    from coinjoin_pipeline.console import EXIT_FAILURE
+    from coinjoin_pipeline.execution.pipeline_logging import exit_with_error
+
+    with pytest.raises(SystemExit) as failure:
+        exit_with_error(RuntimeError("the run failed"))
+
+    assert failure.value.code == EXIT_FAILURE
+    assert "[ERROR] the run failed" in capsys.readouterr().err
