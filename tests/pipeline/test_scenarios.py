@@ -101,8 +101,6 @@ class ScenarioValidationTests(unittest.TestCase):
     def test_postmix_smoke_scenario_spends_and_keeps_mixing(self):
         root = Path(__file__).resolve().parents[2]
         path = root / "scenarios" / "liquidity-postmix-smoke.json"
-        packaged = root / "src" / "coinjoin_pipeline" / "resources" / "scenarios" / path.name
-        self.assertEqual(path.read_bytes(), packaged.read_bytes())
         self.assertEqual(validate_scenario(path, "wasabi")["rounds"], 6)
         spends = [
             spend

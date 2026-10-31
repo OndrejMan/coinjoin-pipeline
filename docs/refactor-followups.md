@@ -39,8 +39,8 @@ when done.
   unlike other stages.
 - [x] `docs/analysis-semantics.md`: list `postmix_spends.json` and `dumplings-snapshot.json` as
   report inputs; add a top-level keys table (`coverage`, `baseline_filter`, `warnings[].code`).
-- [ ] Decide on `src/coinjoin_pipeline/resources/scenarios/`: execution never reads it; drop it or
-  make it the single catalogue.
+- [x] Decide on `src/coinjoin_pipeline/resources/scenarios/`: execution never reads it; drop it or
+  make it the single catalogue. Dropped: `scenarios/` of the checkout is the only catalogue.
 - [ ] Optional: hash `wallets_info.json` and `wallets_coins.json` as report inputs.
 
 ## Needs a decision (breaking)
