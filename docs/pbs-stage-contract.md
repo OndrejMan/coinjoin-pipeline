@@ -5,17 +5,17 @@ lives in `src/coinjoin_pipeline/execution/pbs/`, with the job scripts in its
 `templates/`; this page documents the on-disk protocol so that changes on either
 side stay compatible.
 
-Every S3 job is `directives()` (`pbs/scripts.py`), the stage identity
-(`ARTIFACT_URI`, `RUN_ID`, credentials, `STAGE`, `IMAGE`), `templates/s3_stage.sh`
-and then its own template. `s3_stage.sh` defines the helpers every job uses: `s5`
-(s5cmd with the stage credentials and no `AWS_*` variable of the node),
-`require_file`, `download_optional` (sync a run directory only when it exists),
-`emulator_max_block`, `locate_emulator_bitcoin_datadir`, `require_zstd`,
-`canonicalize_index`, the marker publishers and a no-op `stage_finalize` that a
-template redefines when it publishes outputs even on failure. BlockSci templates
-also get `templates/index_archive.sh`. `{start}` installs `templates/stage_trap.sh` and
-runs `templates/s3_setup.sh`. Shared-storage jobs use `templates/local_preamble.sh`
-instead; both mappings jobs share `templates/mappings_run.sh`.
+Every S3 job is `directives()` (`pbs/scripts.py`) and a few lines of shell that
+`render_python_stage` (`pbs/templates_s3.py`) writes: they put the worker
+`pbs/stage_runtime.py`, `storage/s5client.py`, `pbs/index_store.py`, any helper the
+job needs (`execution/block_archive.py`, `templates/blocksci_notebook.py`) and a
+`settings.json` into `$SCRATCHDIR/.stage-runtime` and run `python3` on them (Python
+3.8 syntax, standard library only). The renderers validate the options and assemble
+the settings; the worker does the work. `settings.json` names the stage (its markers
+and logs) and the `job` function, since several jobs share a stage name. All s5cmd
+calls go through `S5Client`, which drops every `AWS_*` variable of the node.
+Shared-storage jobs keep `templates/local_preamble.sh`; both mappings jobs run the
+enumerator and Sake from `templates/mappings_run.sh`.
 
 ## Stages
 
@@ -25,14 +25,14 @@ instead; both mappings jobs share `templates/mappings_run.sh`.
 | `coinjoin-analysis` | `--analysisPbs`                       | `local_coinjoin_analysis.sh`      |
 | `coinjoin-mappings` | `--mappingsPbs`                       | `local_mappings.sh`               |
 | `unified-report`    | serial or parallel, after analyzers    | `local_blocksci.sh` (report-only command) |
-| S3 analyzer variants | `pbs-from-s3`, `full-run --artifact-backend s3` | `s3_coinjoin_analysis.sh`, `s3_blocksci.sh` |
-| S3 mainnet baseline | `pbs-from-s3 --analysisPbs --dumplings-uri` | `s3_coinjoin_analysis_dumplings.sh` |
-| S3 `coinjoin-mappings` | Wasabi `--mappingsPbs` | `s3_mappings.sh` |
-| S3 `blocksci-parse` | reusable BlockSci workflow | `s3_blocksci_parse.sh` |
-| S3 `blocksci-update` | versioned incremental cache update from a coin directory or the block archive | `s3_blocksci_update.sh` |
-| S3 cached work | `detect`, `script`, `external` or `notebook` over a reusable parse | `s3_blocksci_analyze.sh` |
-| S3 `blocksci-backup` | `--blocksci-task backup` of a persistent index | `s3_blocksci_backup.sh` |
-| S3 `unified-report` | BlockSci detect selected, after selected analyzers; a `full-run` also needs coinjoin-analysis | `s3_unified_report.sh` |
+| S3 analyzer variants | `pbs-from-s3`, `full-run --artifact-backend s3` | `stage_runtime.py` (`coinjoin_analysis`, `blocksci`) |
+| S3 mainnet baseline | `pbs-from-s3 --analysisPbs --dumplings-uri` | `stage_runtime.py` (`dumplings_baseline`) |
+| S3 `coinjoin-mappings` | Wasabi `--mappingsPbs` | `stage_runtime.py` (`coinjoin_mappings`) running `mappings_run.sh` |
+| S3 `blocksci-parse` | reusable BlockSci workflow | `stage_runtime.py` (`blocksci_parse`) |
+| S3 `blocksci-update` | versioned incremental cache update from a coin directory or the block archive | `stage_runtime.py` (`blocksci_update`) |
+| S3 cached work | `detect`, `script`, `external` or `notebook` over a reusable parse | `stage_runtime.py` (`blocksci_analysis`) |
+| S3 `blocksci-backup` | `--blocksci-task backup` of a persistent index | `stage_runtime.py` (`blocksci_backup`) |
+| S3 `unified-report` | BlockSci detect selected, after selected analyzers; a `full-run` also needs coinjoin-analysis | `stage_runtime.py` (`unified_report`) |
 
 ## Marker files
 
@@ -63,12 +63,13 @@ detector records, integration diagnostics, skipped txids, and address-cluster
 assignments. The report job consumes that artifact and does not load BlockSci,
 its parsed index, or raw Bitcoin data. A blocksci-only S3 submission also submits
 a report job after BlockSci, consuming the baseline already stored in that run.
-The artifact reader accepts schema 1.0 (emulator mode) and 1.1 (explicit mode).
+The artifact reader accepts only schema 1.1, which records its mode.
 Parse and update jobs now stage and mount the shared `exporters/worker.py` payload.
-The S3 exit trap is `templates/stage_trap.sh`; finalization, failed transfers
-and signals preserve a nonzero exit status, and terminal markers follow outputs.
-After the markers are published the trap empties `$SCRATCHDIR` with MetaCentrum's
-`clean_scratch`, or by deleting its contents where that tool is missing.
+The worker publishes outputs first (even after a failure), then the terminal marker:
+a failed output or marker upload turns success into that upload's exit status, TERM
+ends the job with 143, and any other failure keeps its own status. After the markers
+it empties `$SCRATCHDIR` with MetaCentrum's `clean_scratch`, or by deleting its
+contents where that tool is missing.
 
 For Wasabi 2 with `--mappingsPbs`, the S3 mappings job downloads
 `coinjoin-analysis_data/coinjoin_tx_info.json`, preserves the shared-storage
@@ -90,10 +91,10 @@ The dependent `blocksci-analyze` job never invokes `blocksci_parser`.
 The report job depends on `blocksci-analyze`, not on `blocksci-parse` directly.
 With `cached`, parsing is omitted and the saved index is restored.
 
-`index_archive.sh` is the shared transport used by both run-local indexes and
-the persistent mainnet backup. Upload hashes the compressed stream and uses
-`s5 pipe` when available, with a temporary scratch archive as the existing
-fallback. The checksum uploads after the archive and the manifest uploads last.
+`S5Client.upload_archive` and `restore_archive` are the shared transport of
+run-local indexes, the persistent index backup and the mainnet checkpoints. Upload
+hashes the compressed stream and uses `s5cmd pipe` when available, with a temporary
+scratch archive as the fallback. The checksum uploads after the archive and the manifest uploads last.
 Before replacing an index, the old completion manifest is removed. Restore
 fetches only metadata first, then streams the archive into scratch while hashing
 and extracting it. An incomplete marker remains until the complete stream and
@@ -144,7 +145,7 @@ parses straight into the directory and refuses one that already holds an index;
 `update` needs no `--blocksci-cache-source-run-id` and updates in place; `backup`,
 `script`, `external`, and `notebook` read it. Every job binds the directory at its own
 path, links `parsed/` into the run and keeps `config.json` run-local
-(`execution/pbs/templates/index_store.sh`).
+(`execution/pbs/index_store.py`, which the mainnet synchronization jobs use too).
 
 Writers (`parse`, `update`) take an exclusive lock and readers (`backup` and the
 analyses) a shared one,

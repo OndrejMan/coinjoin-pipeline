@@ -10,7 +10,10 @@ from types import SimpleNamespace
 import pytest
 
 from exporters import verify_chain
-from coinjoin_pipeline.execution.pbs.templates_s3 import _verify_block_archive_chain
+from coinjoin_pipeline.execution.pbs.defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND
+from coinjoin_pipeline.execution.pbs.stage_runtime import Stage
+from coinjoin_pipeline.execution.pbs.stage_runtime import verify_chain as verify_stage_chain
+from coinjoin_pipeline.execution.pbs.templates_s3 import _block_archive
 from coinjoin_pipeline.execution.pbs.validation import PBSError
 
 HASH = "a" * 64
@@ -110,7 +113,7 @@ def test_pbs_publication_barrier_runs_real_verifier_with_fake_binding(
     source_hash,
     accepted,
 ):
-    work = tmp_path / "runs" / "run-1"
+    work = tmp_path / "coinjoin-run" / "run-1"
     (work / "blocksci_data").mkdir(parents=True)
     source_dir = work / "source-blocksci-parse_data"
     source_dir.mkdir()
@@ -144,43 +147,31 @@ def test_pbs_publication_barrier_runs_real_verifier_with_fake_binding(
         "os.execv(sys.executable, [sys.executable, *arguments])\n"
     )
     (fake / "singularity").chmod(0o755)
-    script = (
-        "set -euo pipefail\n"
-        + _verify_block_archive_chain("bitcoin", HASH, update=True)
-        + """
-printf '{"exported_max_block": %s%s}\n' "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA" > "$RUN_WORK/published.json"
-"""
-    )
-    result = subprocess.run(
-        ["bash"],
-        input=script,
-        text=True,
-        capture_output=True,
-        timeout=3,
-        env={
-            **os.environ,
-            "RUNS_ROOT": str(work.parent),
-            "RUN_ID": work.name,
-            "RUN_WORK": str(work),
-            "EXPORTED_MAX_BLOCK": "3",
-            "MANIFEST_EXTRA": ', "block_archive_last_file": 0',
-            "IMAGE": "fake",
-            "PATH": f"{fake}:{os.environ['PATH']}",
-            "PYTHONPATH": str(fake),
+    stage = Stage(
+        {
+            "stage": "blocksci-update",
+            "run_id": "run-1",
+            "run_prefix": "s3://bucket/runs/run-1",
+            "endpoint": "http://unused",
+            "credentials": "unused",
+            "profile": "unused",
+            "image": "fake",
+            "python_command": BLOCKSCI_IMAGE_PYTHON_COMMAND,
+            "source": {"network": "bitcoin", "expected_hash": HASH},
         },
+        tmp_path,
     )
-    assert (result.returncode == 0) is accepted, result.stderr
-    published = work / "published.json"
-    assert published.exists() is accepted
-    if accepted:
-        assert json.loads(published.read_text()) == {
-            "exported_max_block": 3,
-            "exported_block_hash": HASH,
-            "block_archive_last_file": 0,
-        }
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("PATH", f"{fake}:{os.environ['PATH']}")
+        patch.setenv("PYTHONPATH", str(fake))
+        if not accepted:
+            with pytest.raises(subprocess.CalledProcessError):
+                verify_stage_chain(stage, 3, update=True, index_binds=())
+            return
+        assert verify_stage_chain(stage, 3, update=True, index_binds=()) == (3, HASH)
 
 
 @pytest.mark.parametrize("network,expected", [("bitcoin", None), ("bitcoin", "bad")])
 def test_renderer_refuses_missing_or_invalid_mainnet_checkpoint(network, expected):
     with pytest.raises(PBSError, match="hash"):
-        _verify_block_archive_chain(network, expected)
+        _block_archive("s3://bucket/blocks", network, expected)

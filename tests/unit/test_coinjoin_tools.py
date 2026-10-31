@@ -12,6 +12,7 @@ import pytest
 from coinjoin_pipeline.arguments import load_configuration
 from coinjoin_pipeline.configuration import ConfigurationError, PipelineConfiguration
 from coinjoin_pipeline.execution import coinjoin_tools
+from coinjoin_pipeline.execution.pbs.scripts import embedded_file
 from coinjoin_pipeline.execution.pbs.templates_s3 import render_coinjoin_tools_s3_pbs
 from coinjoin_pipeline.execution.s3_submission import S3StageRunner, s3_full_run_plan_from_args
 from coinjoin_pipeline.storage.s3 import S3Target
@@ -194,14 +195,12 @@ def test_s3_runner_dispatches_the_selected_program_and_retains_all_outputs(monke
     submitted = Mock()
     monkeypatch.setattr(runner, "_submit", submitted)
     runner.submit_all()
-    script = submitted.call_args.args[1]
-    assert "cj_process.parse_dumplings" in script
-    assert "--action plot_coinjoins --action detect_coordinators" in script
-    assert "s3://bucket/snapshots/*" in script
-    assert "coinjoin-analysis-tools_data/parse_dumplings/$RESULT_ID/" in script
-    assert 'tee "$OUTPUT/analysis.log"' in script
-    assert "stage_finalize()" in script
-    assert 'require_file "$RUN_WORK/coinjoin-analysis_data/coinjoin_tx_info.json"' not in script
+    settings = json.loads(embedded_file(submitted.call_args.args[1], "settings.json"))
+    assert settings["stage"] == "coinjoin-analysis" and settings["job"] == "coinjoin-tools"
+    assert "cj_process.parse_dumplings" in settings["command"]
+    assert "--action plot_coinjoins --action detect_coordinators" in settings["command"]
+    assert settings["input_uri"] == "s3://bucket/snapshots"
+    assert (settings["output_directory"], settings["program"]) == ("coinjoin-analysis-tools_data", "parse_dumplings")
 
 
 def test_local_uses_a_copy_logs_results_and_keeps_the_baseline(monkeypatch, tmp_path):

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from coinjoin_pipeline.execution.pbs.templates_s3 import _download_block_archive
+from coinjoin_pipeline.execution.pbs.stage_runtime import Stage, download_block_archive
 from coinjoin_pipeline.paths import EXECUTION_ROOT
 
 HELPER = EXECUTION_ROOT / "block_archive.py"
@@ -291,44 +291,37 @@ else:
 """
 
 
-def run_download(tmp_path: Path, max_block: int, manifest: Path | None = None) -> tuple[list[str], str]:
-    """Execute the PBS download fragment against a directory-backed fake S3."""
+def run_download(tmp_path: Path, max_block: int, manifest: Path | None = None) -> tuple[list[str], dict]:
+    """Run the worker's archive download against a directory-backed fake S3."""
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir(exist_ok=True)
     (fake_bin / "s5cmd").write_text(FAKE_S5CMD, encoding="utf-8")
     (fake_bin / "s5cmd").chmod(0o755)
     log = tmp_path / "downloads.log"
     log.unlink(missing_ok=True)
-    work = tmp_path / f"work-{max_block}"
-    script = (
-        "set -euo pipefail\n"
-        's5() { s5cmd "$@"; }\n'
-        f'RUN_WORK="{work}"\n'
-        "BITCOIN_BLOCKS_URI=s3://bucket/blocks\n"
-        f"EXPORTED_MAX_BLOCK={max_block}\n"
-        f'SOURCE_CACHE_DIR="{manifest.parent if manifest else ""}"\n'
-        f"{_download_block_archive('$SOURCE_CACHE_DIR/manifest.json' if manifest else None)}\n"
-        f'printf "%s" "$MANIFEST_EXTRA" >"{work}/fields"\n'
-    )
-    result = subprocess.run(
-        ["bash"],
-        input=script,
-        text=True,
-        capture_output=True,
-        env={
-            **os.environ,
-            "PATH": f"{fake_bin}:{os.environ['PATH']}",
-            "FAKE_S3_ROOT": str(tmp_path / "s3"),
-            "FAKE_S3_LOG": str(log),
-            "S3_CREDENTIALS_FILE": "unused",
-            "S3_PROFILE": "unused",
-            "S3_ENDPOINT_URL": "http://unused",
-        },
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
+    environment = {
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "FAKE_S3_ROOT": str(tmp_path / "s3"),
+        "FAKE_S3_LOG": str(log),
+    }
+    with pytest.MonkeyPatch.context() as patch:
+        for name, value in environment.items():
+            patch.setenv(name, value)
+        stage = Stage(
+            {
+                "stage": "blocksci-parse",
+                "run_id": f"run-{max_block}",
+                "run_prefix": "s3://bucket/runs/run",
+                "endpoint": "http://unused",
+                "credentials": "unused",
+                "profile": "unused",
+                "source": {"blocks_uri": "s3://bucket/blocks"},
+            },
+            tmp_path / f"scratch-{max_block}",
+        )
+        _, fields = download_block_archive(stage, max_block, manifest)
     downloaded = [name for name in log.read_text(encoding="utf-8").splitlines() if not name.endswith(".json")]
-    return downloaded, (work / "fields").read_text(encoding="utf-8")
+    return downloaded, fields
 
 
 def test_pbs_fragment_parses_then_updates_from_the_archive(tmp_path: Path) -> None:
@@ -337,7 +330,7 @@ def test_pbs_fragment_parses_then_updates_from_the_archive(tmp_path: Path) -> No
 
     downloaded, fields = run_download(tmp_path, 12)
     assert downloaded == ["blk00000.dat", "blk00001.dat"]
-    parse_manifest = json.loads('{"source_kind": "bitcoin-blocks-s3", "exported_max_block": 12' + fields + "}")
+    parse_manifest = {"source_kind": "bitcoin-blocks-s3", "exported_max_block": 12, **fields}
     # The post-parser verification, separate from this download fragment, adds this field.
     parse_manifest["exported_block_hash"] = "a" * 64
 
@@ -352,17 +345,16 @@ def test_pbs_fragment_parses_then_updates_from_the_archive(tmp_path: Path) -> No
 
     downloaded, fields = run_download(tmp_path, 44, cache / "manifest.json")
     assert downloaded == ["blk00001.dat", "blk00002.dat", "blk00003.dat", "blk00004.dat"]
-    assert '"block_archive_last_file": 4' in fields
+    assert fields["block_archive_last_file"] == 4
 
 
-def test_pbs_fragment_refuses_an_archive_rewritten_under_the_cache(tmp_path: Path) -> None:
+def test_pbs_fragment_refuses_an_archive_rewritten_under_the_cache(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
     archive_dir = archive(tmp_path / "s3" / "bucket" / "blocks", TEN_PER_FILE)
     _, fields = run_download(tmp_path, 12)
     cache = tmp_path / "source-cache"
     cache.mkdir()
     manifest = cache / "manifest.json"
-    manifest.write_text('{"source_kind": "bitcoin-blocks-s3", "exported_max_block": 12' + fields + "}", "utf-8")
-    recorded = json.loads(manifest.read_text())
+    recorded = {"source_kind": "bitcoin-blocks-s3", "exported_max_block": 12, **fields}
     recorded["exported_block_hash"] = "a" * 64
     manifest.write_text(json.dumps(recorded))
 
@@ -370,5 +362,6 @@ def test_pbs_fragment_refuses_an_archive_rewritten_under_the_cache(tmp_path: Pat
     (archive_dir / "blk00000.dat.json").write_text(
         json.dumps(sidecar("blk00000.dat", b"other node", [[0, 9]])), encoding="utf-8"
     )
-    with pytest.raises(AssertionError, match="have changed"):
+    with pytest.raises(subprocess.CalledProcessError):
         run_download(tmp_path, 44, manifest)
+    assert "have changed" in capfd.readouterr().err

@@ -1,3 +1,4 @@
+import json
 import io
 import urllib.error
 from email.message import Message
@@ -8,6 +9,7 @@ from coinjoin_pipeline import registry
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.pbs.commands import analysis_image_arguments
 from coinjoin_pipeline.execution.pbs.defaults import DEFAULT_RESOURCES
+from coinjoin_pipeline.execution.pbs.scripts import embedded_file
 from coinjoin_pipeline.execution.pbs.templates_s3 import render_blocksci_parse_s3_pbs
 from coinjoin_pipeline.execution.s3_emulation import pin_emulation_images
 from coinjoin_pipeline.storage.s3 import S3Target
@@ -108,9 +110,10 @@ def test_pbs_job_runs_the_digest_but_keeps_the_index_identity(registry_digests) 
         resources=DEFAULT_RESOURCES["blocksci"],
     )
 
-    assert f"IMAGE=docker://ghcr.io/x/blocksci@{DIGEST}\n" in script
-    assert "IMAGE_NAME=docker://ghcr.io/x/blocksci:latest\n" in script
-    assert '"$RUN_ID" "$IMAGE_NAME"' in script
+    settings = json.loads(embedded_file(script, "settings.json"))
+    # The job runs the pinned digest; the index manifest records the configured name.
+    assert settings["image"] == f"docker://ghcr.io/x/blocksci@{DIGEST}"
+    assert settings["image_name"] == "docker://ghcr.io/x/blocksci:latest"
 
 
 def test_analysis_records_the_pinned_images(registry_digests) -> None:

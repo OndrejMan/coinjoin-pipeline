@@ -6,74 +6,78 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from coinjoin_pipeline.execution.pbs.stage_runtime import Stage, publish_index, restore_index
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
-    _publish_cache,
-    _restore_cache,
     render_blocksci_analyze_s3_pbs,
     render_blocksci_parse_s3_pbs,
     render_blocksci_s3_pbs,
 )
-from coinjoin_pipeline.execution.pbs.scripts import template
+from coinjoin_pipeline.execution.pbs.scripts import embedded_file
+from coinjoin_pipeline.storage.s5client import S5Client
 from coinjoin_pipeline.storage.s3 import S3Target
 
 FAKE_S5CMD = Path(__file__).resolve().parents[1] / "support/persistent-index"
 pytestmark = pytest.mark.skipif(shutil.which("zstd") is None, reason="archive transport needs zstd")
 
 
-def shell(tmp_path, body, **settings):
-    script = (
-        "set -euo pipefail\n"
-        + template("s3_stage.sh")
-        + template("index_archive.sh")
-        + """
-CACHE_DIR="$RUN_WORK/blocksci-parse_data"
-mkdir -p "$CACHE_DIR"
-s5() { s5cmd "$@"; }
-"""
-        + body
-    )
-    return subprocess.run(
-        ["bash", "-c", script],
-        capture_output=True,
-        text=True,
-        timeout=3,
-        env={
-            **os.environ,
-            "SCRATCHDIR": str(tmp_path / "scratch"),
-            "RUN_ID": "source",
-            "STAGE": "blocksci",
-            "ARTIFACT_URI": "s3://bucket/runs",
-            "RUN_PREFIX": "s3://bucket/runs/source",
-            "LOG_PREFIX": "s3://bucket/runs/source/logs",
-            "IMAGE": "docker://blocksci",
-            "IMAGE_NAME": "docker://blocksci",
-            "FAKE_S3": str(tmp_path / "s3"),
-            "PATH": str(FAKE_S5CMD) + os.pathsep + os.environ["PATH"],
-            **settings,
+def stage(tmp_path, run_id):
+    return Stage(
+        {
+            "stage": "blocksci",
+            "run_id": run_id,
+            "run_prefix": f"s3://bucket/runs/{run_id}",
+            "endpoint": "https://s3.test",
+            "credentials": "/dev/null",
+            "profile": "test",
+            "image_name": "docker://blocksci",
+            "ncpus": 2,
         },
+        tmp_path / "scratch",
     )
+
+
+def attempt(tmp_path, environment, action):
+    """Run one worker step against the fake S3; a failure becomes a nonzero status."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("FAKE_S3", str(tmp_path / "s3"))
+        patch.setenv("PATH", str(FAKE_S5CMD) + os.pathsep + os.environ["PATH"])
+        for name, value in environment.items():
+            patch.setenv(name, value)
+        try:
+            action()
+        except Exception as error:
+            return SimpleNamespace(returncode=1, stdout="", stderr=str(error))
+    return SimpleNamespace(returncode=0, stdout="", stderr="")
 
 
 def publish(tmp_path, **settings):
-    body = """
-mkdir -p "$RUN_WORK/blocksci_data/parsed/chain"
-printf 'existing parsed blocks' > "$RUN_WORK/blocksci_data/parsed/chain/block.dat"
-printf '{"chainConfig":{"dataDirectory":"/old/source"}}' > "$RUN_WORK/blocksci_data/config.json"
-EXPORTED_MAX_BLOCK=42 MANIFEST_EXTRA=""
-""" + _publish_cache("blocksci", "emulator", "bitcoin_regtest", 2)
-    return shell(tmp_path, body, **settings)
+    job = stage(tmp_path, "source")
+
+    def run():
+        index = job.work / "blocksci_data"
+        (index / "parsed/chain").mkdir(parents=True, exist_ok=True)
+        (index / "parsed/chain/block.dat").write_text("existing parsed blocks")
+        (index / "config.json").write_text('{"chainConfig":{"dataDirectory":"/old/source"}}')
+        job.storage = S5Client("https://s3.test", "/dev/null", "test")
+        publish_index(job, "emulator", "bitcoin_regtest", 42, {})
+
+    return attempt(tmp_path, settings, run)
 
 
 def restore(tmp_path):
-    return shell(
-        tmp_path,
-        _restore_cache("$CACHE_DIR", "$ARTIFACT_URI/source/blocksci-parse_data", "source", "Source index")
-        + '\nprintf used > "$RUN_WORK/consumer-started"',
-        RUN_ID="target",
-    )
+    job = stage(tmp_path, "target")
+
+    def run():
+        job.storage = S5Client("https://s3.test", "/dev/null", "test")
+        prefix = "s3://bucket/runs/source/blocksci-parse_data"
+        restore_index(job, job.work / "blocksci-parse_data", prefix, "source", "Source index")
+        (job.work / "consumer-started").write_text("used")
+
+    return attempt(tmp_path, {}, run)
 
 
 def cache(tmp_path):
@@ -153,26 +157,11 @@ def test_notebook_source_is_archived_readonly_and_does_not_reparse():
         source_run_id="source",
     )
     subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert "CACHE_RUN_ID=source" in script
-    assert "/runs/emulation/logs/$RUN_ID/blocksci_data/parsed:ro" in script
-    assert '"$ARTIFACT_URI/$CACHE_RUN_ID/blocksci_data/*"' not in script
-    assert "worker.py parse" not in script
-    assert "blocksci_parser" not in script
-    assert "canonicalize_index\n" in script
-
-
-def test_combined_job_publishes_an_archive_without_downloading_the_previous_index():
-    target = S3Target("s3://bucket/runs", "target", "https://s3.test", "/storage/credentials", "test")
-    script = render_blocksci_s3_pbs(target, "docker://blocksci", "true", include_report=False)
-    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert (
-        'index_archive_upload "$RUN_WORK" "$RUN_PREFIX/blocksci-parse_data/blocksci_data.tar.zst"' in script
-    )
-    assert 's5 sync "$RUN_WORK/blocksci_data/"' not in script
-    assert 's5 sync "$RUN_PREFIX/*"' not in script
-    # The stage header only defines download helpers; the job's work starts after its trap.
-    work = script[script.index("trap on_exit EXIT") :]
-    assert work.index("require_zstd\n") < work.index('s5 sync "$RUN_PREFIX/')
+    settings = json.loads(embedded_file(script, "settings.json"))
+    assert (settings["stage"], settings["job"]) == ("blocksci-notebook", "blocksci-analysis")
+    assert settings["source_run_id"] == "source" and settings["persistent"] is None
+    assert settings["output"]["notebook"] is True
+    assert embedded_file(script, "blocksci_notebook.py")
 
 
 def test_combined_report_job_reads_a_nested_datadir_and_only_present_optional_inputs(tmp_path):

@@ -34,8 +34,9 @@ from coinjoin_pipeline.execution.pbs.commands import (
     blocksci_parse_pbs_command,
     blocksci_update_pbs_command,
 )
+from coinjoin_pipeline.execution.pbs.index_store import IndexStore
+from coinjoin_pipeline.execution.pbs.stage_runtime import Stage, publish_persistent
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
-    _index_publish,
     PersistentIndex,
     render_blocksci_analyze_s3_pbs,
     render_blocksci_index_backup_s3_pbs,
@@ -44,10 +45,10 @@ from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_blocksci_s3_pbs,
     render_blocksci_update_s3_pbs,
     render_coinjoin_analysis_s3_pbs,
-    render_mappings_s3_pbs,
     render_unified_report_s3_pbs,
 )
-from coinjoin_pipeline.execution.pbs.defaults import DEFAULT_RESOURCES
+from coinjoin_pipeline.execution.pbs.scripts import embedded_file
+from coinjoin_pipeline.execution.pbs.defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND, DEFAULT_RESOURCES
 from coinjoin_pipeline.execution.pbs.validation import PBSError
 from coinjoin_pipeline.execution.s3_emulation import run_s3_kubernetes_emulation
 from coinjoin_pipeline.execution.s3_markers import rollback_s3_pbs_submissions
@@ -56,6 +57,13 @@ from coinjoin_pipeline.storage.s3 import (  # noqa: E402
     ArtifactTransportError,
     S3Target,
 )
+
+
+def settings_of(script: str) -> dict:
+    """The settings.json a rendered job hands its worker."""
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    return json.loads(embedded_file(script, "settings.json"))
+
 
 S3_TARGET = S3Target(
     artifact_uri="s3://bucket/runs",
@@ -164,127 +172,60 @@ def test_s3_controller_can_use_an_imported_btc_node_image() -> None:
     assert '--btc-node-image "$BTC_NODE_IMAGE"' in controller["command"][-1]
 
 
-def test_s3_pbs_templates_use_scratch_s5cmd_and_markers() -> None:
-    coinjoin = render_coinjoin_analysis_s3_pbs(**COMMON, image="docker://coinjoin", command="analyze")
+def test_combined_blocksci_and_report_jobs_run_the_stage_worker() -> None:
     blocksci = render_blocksci_s3_pbs(**COMMON, image="docker://blocksci", command="analyze")
     report = render_unified_report_s3_pbs(**COMMON, image="docker://pipeline", command="report")
-    mappings = render_mappings_s3_pbs(
-        **COMMON,
-        enumerator_image="docker://enumerator",
-        sake_image="docker://sake",
-    )
-    for script in (coinjoin, blocksci, mappings, report):
-        assert 'RUNS_ROOT="$SCRATCHDIR/coinjoin-run"\nRUN_WORK="$RUNS_ROOT/$RUN_ID"' in script
-        assert "s5cmd --credentials-file" in script
-        assert '--profile "$S3_PROFILE"' in script
-        assert '--endpoint-url "$S3_ENDPOINT_URL"' in script
-        assert "/storage:/storage" not in script
-        assert ".failed" in script and ".done" in script
-        assert "aws s3" not in script and "s3cmd" not in script
-        # The marker upload runs in the EXIT trap; a transient s5cmd failure
-        # there must not abort the trap before the marker is written locally.
-        assert "trap - EXIT TERM\n  set +e" in script
+    for script in (blocksci, report):
         subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    # Stale markers are cleared strictly on the frontend before qsub, never by
-    # a PBS job that could race a newer submission.
-    assert "STAGE=coinjoin-analysis\n" in coinjoin
-    assert " rm " not in coinjoin
-    assert "STAGE=blocksci\n" in blocksci
-    assert "STAGE=unified-report\n" in report
-    assert " rm " not in report
-    assert '"$CONTAINER_WORK_ROOT:/runs/emulation/selected:rw"' in coinjoin
-    assert '"$RUN_WORK/coinjoin-analysis_data:/runs/emulation/selected/$RUN_ID:rw"' in coinjoin
-    assert '"$RUN_WORK/coinjoin_emulator_data/data:/runs/emulation/selected/$RUN_ID/data:ro"' in coinjoin
-    assert '"$RUN_WORK:/runs/emulation/selected/$RUN_ID:rw"' not in coinjoin
-    assert "did not produce coinjoin-analysis_data/coinjoin_tx_info.json" in coinjoin
-    assert 'BITCOIN_DATADIR="$RUN_WORK/bitcoin_data"' in blocksci
-    assert 'BITCOIN_DATADIR="$BITCOIN_DATADIR/data"' in blocksci
-    assert '"$BITCOIN_DATADIR:/mnt/data:ro"' in blocksci
-    assert "--cleanenv" in blocksci
-    assert "--env VIRTUAL_ENV=" not in blocksci
-    assert "--env PATH=" not in blocksci
-    assert "--env PYTHONPATH=" not in blocksci
-    assert "requires a Bitcoin datadir containing regtest/blocks" in blocksci
-    assert "requires coinjoin-analysis_data/coinjoin_tx_info.json" in blocksci
-    assert "Unified S3 report requires blocksci-analysis_data/blocksci_analysis.json" in report
-    assert "Unified S3 report requires coinjoin-analysis_data/coinjoin_tx_info.json" in report
+        assert script.rstrip().endswith('exec python3 "$JOB/stage_runtime.py" "$JOB/settings.json"')
+        # Stale markers are cleared strictly on the frontend before qsub, never by
+        # a PBS job that could race a newer submission.
+        assert " rm " not in script
     assert "#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=100gb" in blocksci
     assert "#PBS -l select=1:ncpus=2:mem=8gb:scratch_ssd=10gb" in report
-    for script in (blocksci, report):
-        assert 'REPORT_DIR="$RUN_WORK/coinjoinPipeline_data"' in script
-        assert 'sync "$REPORT_DIR/" "$RUN_PREFIX/coinjoinPipeline_data/"' in script
-        assert "blocksciEmulatorAnalysis_data" not in script
-    assert "/mnt/data" not in report
-    assert '"$RUN_PREFIX/*"' not in report
-    assert '"$RUN_PREFIX/blocksci_data/*"' not in report
-    assert '"$RUN_PREFIX/bitcoin_data/*"' not in report
-    assert '"$RUN_PREFIX/blocksci-analysis_data/*"' in report
-    assert '"$RUN_PREFIX/coinjoin-analysis_data/*"' in report
-    assert '"$RUN_PREFIX/coinjoin_emulator_data/*"' in report
-    assert '"$RUN_PREFIX/coinjoin-analysis_data/*"' in mappings
-    assert '"$RUN_PREFIX/coinjoin-mappings_data/"' in mappings
-    assert "STAGE=coinjoin-mappings\n" in mappings
-    assert "coinjoin_mappings.json" in mappings
+    settings = json.loads(embedded_file(blocksci, "settings.json"))
+    assert (settings["stage"], settings["job"], settings["command"]) == ("blocksci", "blocksci", "analyze")
+    assert settings["include_report"] is True and settings["export_analysis"] is False
+    assert (settings["ncpus"], settings["image_name"]) == (8, "docker://blocksci")
+    assert settings["log_prefix"] == "s3://bucket/runs/run-1/logs"
 
 
 def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
-    parse = render_blocksci_parse_s3_pbs(
-        **COMMON,
-        image="docker://blocksci",
-        command=blocksci_parse_pbs_command("run-1"),
+    parse = settings_of(
+        render_blocksci_parse_s3_pbs(**COMMON, image="docker://blocksci", command=blocksci_parse_pbs_command("run-1"))
     )
-    analyze = render_blocksci_analyze_s3_pbs(
-        **COMMON,
-        image="docker://blocksci",
-        command=blocksci_analysis_pbs_command(
-            "run-1",
-            PipelineConfiguration.from_flat(
-                {
-                    "coinjoin_type": "wasabi2",
-                    "min_input_count": 2,
-                    "joinmarket_detector": "definite",
-                    "joinmarket_min_base_fee": 5000,
-                    "joinmarket_percentage_fee": 4e-05,
-                    "joinmarket_max_depth": 200000,
-                }
-            ),
+    command = blocksci_analysis_pbs_command(
+        "run-1",
+        PipelineConfiguration.from_flat(
+            {
+                "coinjoin_type": "wasabi2",
+                "min_input_count": 2,
+                "joinmarket_detector": "definite",
+                "joinmarket_min_base_fee": 5000,
+                "joinmarket_percentage_fee": 4e-05,
+                "joinmarket_max_depth": 200000,
+            }
         ),
     )
+    analyze = settings_of(render_blocksci_analyze_s3_pbs(**COMMON, image="docker://blocksci", command=command))
 
-    subprocess.run(["bash", "-n"], input=parse, text=True, check=True)
-    subprocess.run(["bash", "-n"], input=analyze, text=True, check=True)
-    assert "/mnt/exporters/worker.py parse" in parse
-    assert "blocksci_data.tar.zst" in parse
-    assert 'sha256sum <"$fifo"' in parse
-    assert '"schema_version": "1.1"' in parse
-    assert "STAGE=blocksci-parse\n" in parse
-    assert "blocksci_parser" not in analyze
-    assert 'index_archive_restore "$RUN_PREFIX/blocksci-parse_data/blocksci_data.tar.zst"' in analyze
-    assert analyze.index("command -v zstd") < analyze.index(
-        's5 cp "$RUN_PREFIX/blocksci-parse_data/manifest.json"'
-    )
-    assert 'grep -Fq \'"schema_version": "1.1"\'' in analyze
-    unpacked = analyze.index('index_archive_restore "$RUN_PREFIX/')
-    assert unpacked < analyze.index('rm -f "$RUN_WORK/blocksci_data/.writing"') < analyze.index("singularity exec")
-    assert "worker.py analyze" in analyze
-    assert "--cleanenv" in analyze
-    assert "--env VIRTUAL_ENV=" not in analyze
-    assert "--env PATH=" not in analyze
-    assert "--env PYTHONPATH=" not in analyze
-    assert "STAGE=blocksci-analyze\n" in analyze
-    assert '"$RUN_PREFIX/bitcoin_data/*"' not in analyze
+    assert (parse["stage"], parse["job"]) == ("blocksci-parse", "blocksci-parse")
+    assert "/mnt/exporters/worker.py parse" in parse["command"]
+    assert parse["source"]["kind"] == "emulator" and parse["persistent"] is None
+    assert parse["job_log"] == "blocksci-parse.pbs.log"
+    assert (analyze["stage"], analyze["job"]) == ("blocksci-analyze", "blocksci-analysis")
+    assert "worker.py analyze" in analyze["command"] and "blocksci_parser" not in analyze["command"]
+    assert analyze["inputs"] == [{"run": ".pipeline/exporters"}, {"run": "coinjoin_emulator_data"}]
+    assert analyze["output_check"][0] == "blocksci-analysis_data/blocksci_analysis.json"
+    assert analyze["source_run_id"] is None and analyze["persistent"] is None
 
-    notebook = render_blocksci_analyze_s3_pbs(
-        **COMMON,
-        image="docker://blocksci",
-        command="uv run jupyter notebook",
-        mode="blocksci-notebook",
+    notebook = settings_of(
+        render_blocksci_analyze_s3_pbs(
+            **COMMON, image="docker://blocksci", command="uv run jupyter notebook", mode="blocksci-notebook"
+        )
     )
-    subprocess.run(["bash", "-n"], input=notebook, text=True, check=True)
-    assert "Open JupyterLab from Scenario Lab" in notebook
-    assert "STAGE=blocksci-notebook\n" in notebook
-    assert '"$RUN_PREFIX/.pipeline/exporters/*"' not in notebook
-    assert '"$RUN_PREFIX/coinjoin_emulator_data/*"' not in notebook
+    assert notebook["stage"] == "blocksci-notebook" and notebook["inputs"] == []
+    assert "Open JupyterLab from Scenario Lab" in notebook["connection_help"][1]
 
 
 def test_notebook_uses_image_python_and_keeps_control_files_outside_saved_notebooks() -> None:
@@ -292,20 +233,13 @@ def test_notebook_uses_image_python_and_keeps_control_files_outside_saved_notebo
     assert "/usr/bin/python3 /mnt/blocksci_notebook.py 8890" in command
     assert "uv run" not in command
     script = render_blocksci_analyze_s3_pbs(
-        **COMMON,
-        image="docker://blocksci",
-        command=command,
-        mode="blocksci-notebook",
-        notebook_port=8890,
+        **COMMON, image="docker://blocksci", command=command, mode="blocksci-notebook", notebook_port=8890
     )
-    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert 'OUTPUT_DIR="${PBS_O_HOME:-$HOME}/coinjoin-notebooks/$RUN_ID"' in script
-    assert 'NOTEBOOK_CONTROL="${PBS_O_HOME:-$HOME}/.local/share/coinjoin-pipeline/jupyter/$RUN_ID"' in script
-    assert '--bind "$NOTEBOOK_CONTROL:/mnt/notebook-control:rw"' in script
-    assert '--env "NOTEBOOK_JOB_ID=${PBS_JOBID:?}"' in script
-    assert "--ServerApp.port_retries=0" in script
-    assert "--ip=127.0.0.1" in script
-    assert "blocksci_parser" not in script
+    settings = settings_of(script)
+    assert settings["output"] == {"relative": "blocksci-notebooks_data", "notebook": True}
+    notebook = embedded_file(script, "blocksci_notebook.py")
+    assert "--ServerApp.port_retries=0" in notebook
+    assert "--ip=127.0.0.1" in notebook
 
 
 def test_cache_compression_threads_come_from_rendered_ncpus() -> None:
@@ -330,12 +264,7 @@ def test_cache_compression_threads_come_from_rendered_ncpus() -> None:
 
     for script, ncpus in ((parse, 7), (update, 5)):
         assert f"select=1:ncpus={ncpus}:" in script
-        assert (
-            f'index_archive_upload "$RUN_WORK" "$RUN_PREFIX/blocksci-parse_data/blocksci_data.tar.zst" '
-            f'"{ncpus}" blocksci_data' in script
-        )
-        for variable in ("$NCPUS", "${NCPUS", "$OMP_NUM_THREADS", "nproc"):
-            assert variable not in script
+        assert settings_of(script)["ncpus"] == ncpus
 
 
 def test_s3_parse_without_zstd_fails_through_the_exit_trap(tmp_path: Path) -> None:
@@ -343,7 +272,7 @@ def test_s3_parse_without_zstd_fails_through_the_exit_trap(tmp_path: Path) -> No
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     # Only the tools the script needs before the zstd check and inside the trap.
-    for tool in ("mkdir", "env", "find", "python3"):
+    for tool in ("mkdir", "cat", "env", "find", "python3"):
         (fake_bin / tool).symlink_to(shutil.which(tool))
     fake_s5cmd = fake_bin / "s5cmd"
     fake_s5cmd.write_text(
@@ -402,23 +331,23 @@ def test_external_bitcoin_parse_uses_shared_blocks_without_s3_emulator_inputs() 
             **COMMON,
             image="docker://blocksci",
             command=blocksci_parse_pbs_command(
-                "run-1",
-                coin_type="bitcoin",
-                disk_path="/mnt/data",
-                max_block_expression="850001",
+                "run-1", coin_type="bitcoin", disk_path="/mnt/data", max_block_expression="850001"
             ),
             external_bitcoin_datadir=Path("/storage/external/bitcoin"),
             external_network="bitcoin",
             external_max_block=850000,
         )
 
-    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert '--bind "$BITCOIN_DATADIR:/mnt/data:ro"' in script
-    assert "--network bitcoin " in script
-    assert "--disk /mnt/data --max-block 850001" in script
-    assert '"$RUN_PREFIX/bitcoin_data/*"' not in script
-    assert '"$RUN_PREFIX/coinjoin_emulator_data/' not in script
-    assert '"external-bitcoin" "bitcoin" "$EXPORTED_MAX_BLOCK"' in script
+    settings = settings_of(script)
+    assert settings["source"] == {
+        "kind": "external-bitcoin",
+        "network": "bitcoin",
+        "description": "external Bitcoin Core block directory",
+        "datadir": "/storage/external/bitcoin",
+        "max_block": 850000,
+    }
+    assert "--disk /mnt/data --max-block 850001" in settings["command"]
+    assert "COINJOIN_FILE_BLOCK_ARCHIVE_PY" not in script
 
 
 def test_s3_bitcoin_archive_parse_verifies_manifest_checksums_and_height() -> None:
@@ -426,28 +355,20 @@ def test_s3_bitcoin_archive_parse_verifies_manifest_checksums_and_height() -> No
         **COMMON,
         image="docker://blocksci",
         command=blocksci_parse_pbs_command(
-            "run-1",
-            coin_type="bitcoin",
-            disk_path="/mnt/data",
-            max_block_expression="900001",
+            "run-1", coin_type="bitcoin", disk_path="/mnt/data", max_block_expression="900001"
         ),
         bitcoin_blocks_uri="s3://bucket/bitcoin-mainnet/blocks",
         expected_block_hash="a" * 64,
         external_network="bitcoin",
         external_max_block=900000,
     )
-
-    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert 'sync "$BITCOIN_BLOCKS_URI/*"' not in script
-    assert 'cp "$BITCOIN_BLOCKS_URI/blk*.dat.json" "$ARCHIVE_WORK/sidecars/"' in script
-    assert 'run "$ARCHIVE_WORK/download.s5cmd"' in script
-    assert 'block_archive.py" verify "$BITCOIN_DATADIR/blocks" --max-block "$EXPORTED_MAX_BLOCK"\n' in script
-    assert "checksum mismatch" in script
-    assert "--source-manifest" not in script.split("<<'PY'")[0]
-    assert '"bitcoin-blocks-s3" "bitcoin" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA"' in script
-    assert script.index("bash -c") < script.index("/mnt/exporters/verify_chain.py")
-    assert script.index("/mnt/exporters/verify_chain.py") < script.index('index_archive_upload "$RUN_WORK"')
-    assert "--expected-block-hash " + "a" * 64 in script
+    settings = settings_of(script)
+    assert settings["source"]["kind"] == "bitcoin-blocks-s3"
+    assert settings["source"]["blocks_uri"] == "s3://bucket/bitcoin-mainnet/blocks"
+    assert settings["source"]["expected_hash"] == "a" * 64
+    assert settings["python_command"] == BLOCKSCI_IMAGE_PYTHON_COMMAND
+    # The archive helper that checks sidecar checksums ships with the job.
+    assert "checksum mismatch" in embedded_file(script, "block_archive.py")
 
 
 def test_s3_bitcoin_archive_parse_uploads_failure_log_before_marker(
@@ -526,20 +447,22 @@ def test_cached_external_task_downloads_dumplings_baseline_and_uploads_report() 
             }
         ),
     )
-    script = render_blocksci_analyze_s3_pbs(
-        **COMMON,
-        image="docker://blocksci",
-        command=command,
-        mode="blocksci-external",
-        external_baseline_uri="s3://bucket/dumplings/coinjoin_tx_info.json",
+    settings = settings_of(
+        render_blocksci_analyze_s3_pbs(
+            **COMMON,
+            image="docker://blocksci",
+            command=command,
+            mode="blocksci-external",
+            external_baseline_uri="s3://bucket/dumplings/coinjoin_tx_info.json",
+        )
     )
-
-    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert "--mode external --network bitcoin" in script
-    assert "coinjoin_tx_info.json" in script
-    assert 'OUTPUT_DIR="$RUN_WORK/coinjoinPipeline_data"' in script
-    assert 's5 sync "$OUTPUT_DIR/" "$RUN_PREFIX/coinjoinPipeline_data/"' in script
-    assert "STAGE=blocksci-external\n" in script
+    assert "--mode external --network bitcoin" in settings["command"]
+    assert {
+        "uri": "s3://bucket/dumplings/coinjoin_tx_info.json",
+        "to": "coinjoin-analysis_data/coinjoin_tx_info.json",
+    } in (settings["inputs"])
+    assert settings["output"] == {"relative": "coinjoinPipeline_data"}
+    assert settings["stage"] == "blocksci-external"
 
 
 def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target() -> None:
@@ -557,23 +480,17 @@ def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target(
             external_network="bitcoin",
             external_max_block=850100,
         )
-
-    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert "SOURCE_RUN_ID=run-0" in script
-    assert 's5 cp "$ARTIFACT_URI/$SOURCE_RUN_ID/blocksci-parse_data/manifest.json"' in script
-    assert '"$RUN_PREFIX/blocksci-parse_data/manifest.json"' in script
-    unpacked = script.index('index_archive_restore "$ARTIFACT_URI/$SOURCE_RUN_ID/')
-    assert script.index("command -v zstd") < unpacked
-    assert unpacked < script.index('rm -f "$RUN_WORK/blocksci_data/.writing"')
-    assert unpacked < script.index('index_archive_upload "$RUN_WORK"')
-    assert '"source_kind": "external-bitcoin"' in script
-    assert '"external-bitcoin" "$NETWORK" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA"' in script
-    assert '\\"cache_operation\\": \\"incremental-update\\"' in script
-    assert '\\"source_run_id\\": \\"$SOURCE_RUN_ID\\"' in script
-    assert "generate-config" not in script
-    assert "worker.py update --run-dir /runs/emulation/logs/run-1" in script
-    assert "Target maximum block" in script
-    assert "STAGE=blocksci-update\n" in script
+    settings = settings_of(script)
+    assert (settings["stage"], settings["source_run_id"]) == ("blocksci-update", "run-0")
+    assert settings["artifact_uri"] == "s3://bucket/runs"
+    assert settings["source"] == {
+        "network": "bitcoin",
+        "max_block": 850100,
+        "kind": "external-bitcoin",
+        "datadir": "/storage/external/bitcoin",
+    }
+    assert "worker.py update --run-dir /runs/emulation/logs/run-1" in settings["command"]
+    assert "generate-config" not in settings["command"]
 
 
 def test_incremental_blocksci_update_from_the_block_archive_downloads_only_new_files() -> None:
@@ -587,18 +504,9 @@ def test_incremental_blocksci_update_from_the_block_archive_downloads_only_new_f
         external_network="bitcoin",
         external_max_block=850100,
     )
-
-    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert "BITCOIN_BLOCKS_URI=s3://bucket/bitcoin-blocks\n" in script
-    assert 'grep -Fq \'"source_kind": "bitcoin-blocks-s3"\'' in script
-    assert '--source-manifest "$SOURCE_CACHE_DIR/manifest.json"' in script
-    assert '"bitcoin-blocks-s3" "$NETWORK" "$EXPORTED_MAX_BLOCK" "$MANIFEST_EXTRA"' in script
-    # The archive is read only after the source cache proved its maximum block.
-    assert script.index("SOURCE_MAX_BLOCK=") < script.index('run "$ARCHIVE_WORK/download.s5cmd"')
-    assert script.index('run "$ARCHIVE_WORK/download.s5cmd"') < script.index("singularity exec")
-    assert script.index("worker.py update") < script.index("/mnt/exporters/verify_chain.py")
-    assert script.index("/mnt/exporters/verify_chain.py") < script.index('index_archive_upload "$RUN_WORK"')
-    assert '--source-manifest "/runs/emulation/logs/$RUN_ID/source-blocksci-parse_data/manifest.json"' in script
+    source = settings_of(script)["source"]
+    assert source["kind"] == "bitcoin-blocks-s3" and source["blocks_uri"] == "s3://bucket/bitcoin-blocks"
+    assert embedded_file(script, "block_archive.py")
 
 
 @pytest.mark.parametrize(
@@ -629,13 +537,9 @@ def test_external_blocksci_import_repackages_index_without_parser() -> None:
             command=blocksci_parse_pbs_command("run-1"),
             external_blocksci_dir=Path("/storage/external/blocksci_data"),
         )
-
-    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert 'cp -a "$EXTERNAL_BLOCKSCI_DIR" "$RUN_WORK/blocksci_data"' in script
-    assert "blocksci_parser" not in script
-    assert '"external-blocksci" "from-config" "$EXPORTED_MAX_BLOCK"' in script
-    assert "canonicalize_index\n" in script
-    assert '"$RUN_PREFIX/bitcoin_data/*"' not in script
+    source = settings_of(script)["source"]
+    assert source["kind"] == "external-blocksci" and source["network"] == "from-config"
+    assert source["blocksci_dir"] == "/storage/external/blocksci_data"
 
 
 STUB_S5CMD = """#!/usr/bin/env bash
@@ -901,33 +805,18 @@ def test_s3_emulation_job_name_is_unique_and_dns_safe() -> None:
     assert long_name == long_name.lower()
 
 
-def test_blocksci_s3_parse_only_does_not_require_or_upload_report() -> None:
-    blocksci = render_blocksci_s3_pbs(
+@pytest.mark.parametrize("include_report,export_analysis", [(False, False), (False, True), (True, False)])
+def test_combined_blocksci_job_publishes_only_the_requested_outputs(include_report, export_analysis) -> None:
+    script = render_blocksci_s3_pbs(
         **COMMON,
         image="docker://blocksci",
         command="parse",
-        include_report=False,
+        include_report=include_report,
+        export_analysis=export_analysis,
     )
 
-    assert "requires coinjoin-analysis_data/coinjoin_tx_info.json" not in blocksci
-    assert "coinjoinPipeline_data/" not in blocksci
-    assert "blocksciEmulatorAnalysis_data/" not in blocksci
-    assert "REPORT_DIR=" not in blocksci
-    assert "blocksci_data/" in blocksci
-
-
-def test_blocksci_s3_analysis_mode_uploads_precomputed_artifact() -> None:
-    blocksci = render_blocksci_s3_pbs(
-        **COMMON,
-        image="docker://blocksci",
-        command="parse-and-analyze",
-        include_report=False,
-        export_analysis=True,
-    )
-
-    assert "blocksci-analysis_data/blocksci_analysis.json" in blocksci
-    assert ('sync "$RUN_WORK/blocksci-analysis_data/" "$RUN_PREFIX/blocksci-analysis_data/"') in blocksci
-    assert "coinjoinPipeline_data/" not in blocksci
+    settings = json.loads(embedded_file(script, "settings.json"))
+    assert (settings["include_report"], settings["export_analysis"]) == (include_report, export_analysis)
 
 
 def test_rollback_reports_jobs_it_could_not_cancel(
@@ -973,75 +862,6 @@ def test_acquire_lock_is_reentrant_for_the_same_process(tmp_path: Path) -> None:
     first = acquire_lock(lock_path)
     second = acquire_lock(lock_path)
     assert first is second
-
-
-def test_unified_report_downloads_mappings_only_when_requested() -> None:
-    without_mappings = render_unified_report_s3_pbs(**COMMON, image="docker://pipeline", command="report")
-    with_mappings = render_unified_report_s3_pbs(
-        **COMMON,
-        image="docker://pipeline",
-        command="report",
-        include_mappings=True,
-    )
-
-    assert '"$RUN_PREFIX/coinjoin-mappings_data/*"' not in without_mappings
-    assert '"$RUN_PREFIX/coinjoin-mappings_data/*"' in with_mappings
-
-
-def test_rendered_pbs_script_calls_fake_s5cmd_only_on_compute_path() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory)
-        bin_dir = root / "bin"
-        scratch = root / "scratch"
-        bin_dir.mkdir()
-        scratch.mkdir()
-        credentials = root / "credentials"
-        credentials.write_text("[coinjoin]\naws_access_key_id=x\naws_secret_access_key=y\n")
-        calls = root / "s5cmd.calls"
-        fake_s5cmd = bin_dir / "s5cmd"
-        fake_s5cmd.write_text(
-            "#!/bin/bash\n"
-            'printf "%s\\n" "$*" >> "$S5CMD_CALLS"\n'
-            'if [[ "$*" == *" sync s3://"* ]]; then '
-            'mkdir -p "${@: -1}/coinjoin_emulator_data/data"; fi\n'
-        )
-        fake_s5cmd.chmod(0o700)
-        fake_singularity = bin_dir / "singularity"
-        fake_singularity.write_text(
-            "#!/bin/bash\n"
-            'for argument in "$@"; do\n'
-            '  case "$argument" in\n'
-            "    *coinjoin-analysis_data:/runs/emulation/selected/*:rw)\n"
-            '      output_dir="${argument%%:*}"\n'
-            '      printf \'{"coinjoins": {}}\\n\' > "$output_dir/coinjoin_tx_info.json"\n'
-            "      ;;\n"
-            "  esac\n"
-            "done\n"
-        )
-        fake_singularity.chmod(0o700)
-        script = render_coinjoin_analysis_s3_pbs(
-            S3Target(
-                artifact_uri="s3://bucket/runs",
-                run_id="run-1",
-                endpoint_url="https://s3.cl4.du.cesnet.cz",
-                credentials_file=str(credentials),
-                profile="coinjoin",
-            ),
-            image="docker://coinjoin",
-            command="true",
-        )
-        script_path = root / "job.pbs"
-        script_path.write_text(script)
-        environment = os.environ | {
-            "PATH": f"{bin_dir}:{os.environ['PATH']}",
-            "SCRATCHDIR": str(scratch),
-            "S5CMD_CALLS": str(calls),
-        }
-        subprocess.run(["bash", str(script_path)], env=environment, check=True)
-        logged = calls.read_text()
-        assert "sync s3://bucket/runs/run-1/*" in logged
-        assert "sync " in logged and "coinjoin-analysis_data" in logged
-        assert "cp " in logged and "coinjoin-analysis.done" in logged
 
 
 @pytest.mark.parametrize("engine", ["wasabi", "joinmarket"])
@@ -1298,29 +1118,20 @@ def test_read_only_source_cache_feeds_an_analysis_of_another_run() -> None:
             }
         ),
     )
-    script = render_blocksci_analyze_s3_pbs(
-        **COMMON,
-        image="docker://blocksci",
-        command=command,
-        mode="blocksci-external",
-        source_run_id="mainnet-index",
-        external_baseline_uri="s3://bucket/dumplings/coinjoin_tx_info.json",
+    settings = settings_of(
+        render_blocksci_analyze_s3_pbs(
+            **COMMON,
+            image="docker://blocksci",
+            command=command,
+            mode="blocksci-external",
+            source_run_id="mainnet-index",
+            external_baseline_uri="s3://bucket/dumplings/coinjoin_tx_info.json",
+        )
     )
-
-    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert "CACHE_RUN_ID=mainnet-index" in script
-    assert 's5 cp "$ARTIFACT_URI/$CACHE_RUN_ID/blocksci-parse_data/manifest.json"' in script
-    assert '"$RUN_PREFIX/blocksci-parse_data/*"' not in script
-    assert 'grep -Fq "\\"run_id\\": \\"$CACHE_RUN_ID\\""' in script
-    # Outputs, markers and provenance stay with the analysis run.
-    assert '"$RUN_PREFIX/coinjoinPipeline_data/"' in script
-    assert "STAGE=blocksci-external\n" in script
-    provenance = script.index('cp "$CACHE_DIR/manifest.json" "$OUTPUT_DIR/blocksci-cache-manifest.json"')
-    assert (
-        script.index('index_archive_restore "$ARTIFACT_URI/$CACHE_RUN_ID/')
-        < provenance
-        < script.index("singularity exec")
-    )
+    # The index comes from the source run; outputs, markers and provenance stay with this run.
+    assert (settings["source_run_id"], settings["artifact_uri"]) == ("mainnet-index", "s3://bucket/runs")
+    assert settings["run_prefix"] == "s3://bucket/runs/run-1"
+    assert settings["output"] == {"relative": "coinjoinPipeline_data"}
 
 
 @pytest.mark.parametrize(
@@ -1348,33 +1159,36 @@ PERSISTENT = dict(
 
 
 def test_persistent_manifest_records_requested_cpu_and_memory(tmp_path) -> None:
-    index = tmp_path / "index 'with quotes"
-    index.mkdir()
-    resources = replace(DEFAULT_RESOURCES["blocksci"], ncpus=3, mem="1536mb")
-    script = "\n".join(
-        (
-            "set -euo pipefail",
-            f"RUN_WORK={shlex.quote(str(tmp_path))}",
-            f"INDEX_DIR={shlex.quote(str(index))}",
-            "RUN_ID=parse-example",
-            "IMAGE=docker://blocksci",
-            "IMAGE_NAME=docker://blocksci",
-            "ARTIFACT_URI=s3://bucket/runs",
-            "RUN_PREFIX=s3://bucket/runs/parse-example",
-            "EXPORTED_MAX_BLOCK=42",
-            "MANIFEST_EXTRA=''",
-            'index_publish() { cp "$1" "$INDEX_DIR/manifest.json"; }',
-            "index_unlock() { :; }",
-            "s5() { :; }",
-            _index_publish("blocksci-parse", "bitcoin-blocks-s3", "bitcoin", resources, str(index)),
-        )
+    index_dir = tmp_path / "index 'with quotes"
+    index_dir.mkdir()
+    stage = Stage(
+        {
+            "stage": "blocksci-parse",
+            "run_id": "parse-example",
+            "run_prefix": "s3://bucket/runs/parse-example",
+            "endpoint": "https://s3.test",
+            "credentials": "/dev/null",
+            "profile": "test",
+            "image_name": "docker://blocksci",
+            "pbs_resources": {"ncpus": 3, "mem": "1536mb"},
+        },
+        tmp_path / "scratch",
     )
-    subprocess.run(["bash", "-c", script], check=True, capture_output=True, text=True)
-    manifest = json.loads((index / "manifest.json").read_text())
-    assert manifest["index_dir"] == str(index)
+    stage.storage = mock.Mock()
+    (stage.work / "blocksci_data").mkdir(parents=True)
+    (stage.work / "blocksci_data/config.json").write_text("{}")
+    index = IndexStore(str(index_dir), None)
+
+    publish_persistent(stage, index, "bitcoin-blocks-s3", "bitcoin", 42, {})
+
+    manifest = json.loads((index_dir / "manifest.json").read_text())
+    assert manifest["index_dir"] == str(index_dir)
     assert manifest["pbs_resources"] == {"ncpus": 3, "mem": "1536mb"}
     assert manifest["published_at"].endswith("Z")
     assert manifest["exported_max_block"] == 42
+    stage.storage.copy.assert_called_once_with(
+        index_dir / "manifest.json", "s3://bucket/runs/parse-example/blocksci-index-manifest.json"
+    )
 
 
 def test_persistent_update_works_in_place_under_the_writer_lock() -> None:
@@ -1390,19 +1204,16 @@ def test_persistent_update_works_in_place_under_the_writer_lock() -> None:
             external_max_block=850100,
             **PERSISTENT,
         )
-
-    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
     assert "scratch_ssd=" in script and ":multijob=brno\n" in script
-    assert "blocksci_data.tar.zst" not in script
-    calls = [script.index(f"\n{call}\n") for call in ("index_lock_exclusive", "index_reconcile")]
-    assert calls[0] < calls[1] < script.index("worker.py update")
-    assert "\nindex_bind rw\n" in script
-    assert "INDEX_BACKUP=s3://bucket/blocksci-index" in script
-    # The backup is its own job, never part of the update.
-    assert "\nindex_backup\n" not in script
-    assert 'index_publish "$RUN_WORK/index-manifest.json"' in script
-    assert "index_unlock 2>/dev/null || :" in script
-    assert '"$RUN_PREFIX/blocksci-index-manifest.json"' in script
+    settings = settings_of(script)
+    assert settings["source_run_id"] is None
+    assert settings["persistent"] == {
+        "index_dir": "/scratch/multijob-brno/user/blocksci-mainnet",
+        "backup_uri": "s3://bucket/blocksci-index",
+        "lock_seconds": 24 * 3600 + 600,
+        "wait_seconds": 12 * 3600,
+        "poll_seconds": 60,
+    }
 
 
 def test_persistent_parse_refuses_an_existing_index() -> None:
@@ -1420,35 +1231,23 @@ def test_persistent_parse_refuses_an_existing_index() -> None:
             external_max_block=850000,
             **PERSISTENT,
         )
-
-    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert "use --blocksci-task update" in script
-    lock = script.index("\nindex_lock_exclusive\n")
-    assert (
-        lock
-        < script.index('rm -rf "$INDEX_DIR/parsed" "$INDEX_DIR/config.json" "$INDEX_DIR/files.txt"\n')
-        < script.index("worker.py parse")
-    )
-    # The index stays in place: no S3 cache archive and no backup.
-    assert "blocksci_data.tar.zst" not in script
-    assert "\nindex_backup\n" not in script
+    assert settings_of(script)["persistent"]["index_dir"] == "/scratch/multijob-brno/user/blocksci-mainnet"
+    with pytest.raises(PBSError, match="persistent index is parsed from"):
+        render_blocksci_parse_s3_pbs(**COMMON, image="docker://blocksci", command="parse", **PERSISTENT)
 
 
 def test_persistent_analysis_reads_under_the_shared_lock() -> None:
-    script = render_blocksci_analyze_s3_pbs(
-        **COMMON,
-        image="docker://blocksci",
-        command="uv run jupyter notebook",
-        mode="blocksci-notebook",
-        **PERSISTENT,
+    settings = settings_of(
+        render_blocksci_analyze_s3_pbs(
+            **COMMON,
+            image="docker://blocksci",
+            command="uv run jupyter notebook",
+            mode="blocksci-notebook",
+            **PERSISTENT,
+        )
     )
-
-    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert "\nindex_lock_shared\n" in script and "\nindex_lock_exclusive\n" not in script
-    assert "\nindex_bind ro\n" in script
-    assert '"${INDEX_BINDS[@]}"' in script
-    assert "blocksci-parse_data/*" not in script
-    assert 'cp "$INDEX_DIR/manifest.json" "$OUTPUT_DIR/blocksci-index-manifest.json"' in script
+    assert settings["persistent"]["index_dir"] == "/scratch/multijob-brno/user/blocksci-mainnet"
+    assert settings["source_run_id"] is None
 
 
 @pytest.mark.parametrize(
@@ -1475,15 +1274,11 @@ def test_index_backup_job_reads_under_the_shared_lock() -> None:
     script = render_blocksci_index_backup_s3_pbs(
         **COMMON, **PERSISTENT, resources=replace(DEFAULT_RESOURCES["blocksci"], ncpus=16, walltime="12:00:00")
     )
-
-    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
     assert ":multijob=brno\n" in script
-    calls = [script.index(f"\n{call}\n") for call in ("index_lock_shared", "index_backup", "index_unlock")]
-    assert calls == sorted(calls)
-    assert "\nindex_lock_exclusive\n" not in script
-    assert "INDEX_ZSTD_THREADS=16" in script
-    assert '"$RUN_PREFIX/blocksci-index-backup.json"' in script
-    assert "STAGE=blocksci-backup\n" in script
+    settings = settings_of(script)
+    assert (settings["stage"], settings["job"], settings["ncpus"]) == ("blocksci-backup", "blocksci-backup", 16)
+    assert settings["persistent"]["lock_seconds"] == 12 * 3600 + 600
+    assert "image" not in settings
 
 
 def test_a_fixed_state_prefix_replaces_the_run_prefix_and_keeps_logs_per_run() -> None:
@@ -1491,11 +1286,10 @@ def test_a_fixed_state_prefix_replaces_the_run_prefix_and_keeps_logs_per_run() -
     assert target.run_prefix == "s3://bucket/bitcoin-mainnet/index"
     assert target.log_prefix == "s3://bucket/bitcoin-mainnet/index/logs/run-1"
     assert (S3_TARGET.run_prefix, S3_TARGET.log_prefix) == ("s3://bucket/runs/run-1", "s3://bucket/runs/run-1/logs")
-    script = render_blocksci_index_backup_s3_pbs(target=target, **PERSISTENT)
-    assert "RUN_PREFIX=s3://bucket/bitcoin-mainnet/index\n" in script
-    assert "LOG_PREFIX=s3://bucket/bitcoin-mainnet/index/logs/run-1\n" in script
-    assert "RUN_ID=run-1\n" in script
-    assert '"$RUN_PREFIX/.pbs/$STAGE.done"' in script
+    settings = settings_of(render_blocksci_index_backup_s3_pbs(target=target, **PERSISTENT))
+    assert settings["run_prefix"] == "s3://bucket/bitcoin-mainnet/index"
+    assert settings["log_prefix"] == "s3://bucket/bitcoin-mainnet/index/logs/run-1"
+    assert settings["run_id"] == "run-1"
 
 
 def test_index_backup_job_needs_a_backup_prefix() -> None:
@@ -1506,18 +1300,19 @@ def test_index_backup_job_needs_a_backup_prefix() -> None:
 
 
 def test_external_report_downloads_the_curated_false_positives() -> None:
-    script = render_blocksci_analyze_s3_pbs(
-        **COMMON,
-        image="docker://blocksci",
-        command="true",
-        mode="blocksci-external",
-        external_baseline_uri="s3://bucket/dumplings/coinjoin_tx_info.json",
-        external_false_cjtxs_uri="s3://bucket/dumplings/false_cjtxs.json",
+    settings = settings_of(
+        render_blocksci_analyze_s3_pbs(
+            **COMMON,
+            image="docker://blocksci",
+            command="true",
+            mode="blocksci-external",
+            external_baseline_uri="s3://bucket/dumplings/coinjoin_tx_info.json",
+            external_false_cjtxs_uri="s3://bucket/dumplings/false_cjtxs.json",
+        )
     )
-
-    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert '"$RUN_WORK/coinjoin-analysis_data/false_cjtxs.json"' in script
-    assert "s3://bucket/dumplings/false_cjtxs.json" in script
+    assert {"uri": "s3://bucket/dumplings/false_cjtxs.json", "to": "coinjoin-analysis_data/false_cjtxs.json"} in (
+        settings["inputs"]
+    )
 
 
 def test_false_positives_belong_to_the_external_report() -> None:
@@ -1540,16 +1335,14 @@ def test_dumplings_baseline_reads_the_manifested_copy() -> None:
     )
 
     subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-    assert '"$DUMPLINGS_URI/manifest.json"' in script
-    assert '"$DUMPLINGS_URI/Scanner/*"' in script
-    assert "does not match its manifest" in script
-    assert "--cjtype ww2 --action process_dumplings --target-path /work/dumplings" in script
-    assert "MIX_ID=wasabi2" in script
-    # A stale coinjoin-analysis cache next to the Dumplings files would replace them.
-    assert "-name '*.txt.json' -delete" in script
-    assert script.index("-name '*.txt.json' -delete") < script.index("cj_process.parse_dumplings")
-    assert '"$RUN_PREFIX/coinjoin-analysis_data/"' in script
-    assert "STAGE=coinjoin-analysis\n" in script
+    settings = json.loads(embedded_file(script, "settings.json"))
+    assert (settings["stage"], settings["job"]) == ("coinjoin-analysis", "dumplings-baseline")
+    assert settings["dumplings_uri"] == "s3://bucket/dumplings"
+    assert (
+        settings["command"]
+        == "python -m cj_process.parse_dumplings --cjtype ww2 --action process_dumplings --target-path /work/dumplings"
+    )
+    assert (settings["mix_id"], settings["false_cjtxs"]) == ("wasabi2", "wasabi2")
 
 
 def test_dumplings_baseline_covers_only_wasabi2_and_joinmarket() -> None:
@@ -1560,13 +1353,17 @@ def test_dumplings_baseline_covers_only_wasabi2_and_joinmarket() -> None:
 
 
 def test_external_report_fetches_the_snapshot_record_next_to_a_dumplings_baseline() -> None:
-    script = render_blocksci_analyze_s3_pbs(
-        **COMMON,
-        image="docker://blocksci",
-        command="true",
-        mode="blocksci-external",
-        external_baseline_uri="s3://bucket/runs/baseline-1/coinjoin-analysis_data/coinjoin_tx_info.json",
+    settings = settings_of(
+        render_blocksci_analyze_s3_pbs(
+            **COMMON,
+            image="docker://blocksci",
+            command="true",
+            mode="blocksci-external",
+            external_baseline_uri="s3://bucket/runs/baseline-1/coinjoin-analysis_data/coinjoin_tx_info.json",
+        )
     )
-
-    assert "s3://bucket/runs/baseline-1/coinjoin-analysis_data/dumplings-snapshot.json" in script
-    assert "the baseline has no dumplings-snapshot.json" in script
+    assert {
+        "uri": "s3://bucket/runs/baseline-1/coinjoin-analysis_data/dumplings-snapshot.json",
+        "to": "coinjoin-analysis_data/dumplings-snapshot.json",
+        "optional": True,
+    } in settings["inputs"]

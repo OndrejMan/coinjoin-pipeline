@@ -18,6 +18,7 @@ from coinjoin_pipeline.arguments import load_configuration
 from coinjoin_pipeline.configuration import PipelineConfiguration, ConfigurationError
 from coinjoin_pipeline.execution.coinjoin_tools import command_argv
 from coinjoin_pipeline.execution.coinjoin_tools import run_local
+from coinjoin_pipeline.execution.pbs.scripts import embedded_file
 from coinjoin_pipeline.execution.pbs.templates_s3 import render_coinjoin_tools_s3_pbs
 from coinjoin_pipeline.storage.s3 import S3Target
 
@@ -321,10 +322,10 @@ def test_pbs_embeds_adapter_without_rebuilding_or_replacing_the_analyzer(tmp_pat
         }
     )
     script = render_coinjoin_tools_s3_pbs(S3Target.from_args(config), "docker://test/image", config.coinjoin_analysis)
-    assert "COINJOIN_RESEARCH_ADAPTER" in script
-    assert "def analyze_size(" in script
-    assert "python /work/coinjoin_research.py" in script
-    assert 's5 sync "$RUN_PREFIX/coinjoin_emulator_data/data/*"' not in script
+    settings = json.loads(embedded_file(script, "settings.json"))
+    assert "def analyze_size(" in settings["files"]["coinjoin_research.py"]
+    assert "python /work/coinjoin_research.py" in settings["command"]
+    assert settings["run_input"] is False
     # The adapter is valid on the analyzer image's Python 3.11 and exporters' 3.8 floor.
     ast.parse(Path(research.__file__).read_text(), feature_version=(3, 8))
     job = tmp_path / "job.sh"

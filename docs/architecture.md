@@ -59,13 +59,16 @@ runs the tag.
 | In-cluster prefix preflight and artifact uploader | `execution/k8s_s3_prefix_preflight.sh`, `k8s_s3_uploader.sh`, their shared `k8s_s3_access.sh` header |
 | Kubernetes resource generation and diagnosis | `execution/kubernetes.py` |
 | Graph definitions and dependency queries | `execution/stages.py`, `stage_executor.py` |
-| S3 index archive transport shared by emulation caches and persistent backups | `execution/pbs/templates/index_archive.sh` |
+| S3 index archive transport shared by emulation caches, persistent backups and mainnet checkpoints | `storage/s5client.py` (`upload_archive`, `restore_archive`) |
+| Persistent index lock, completeness, backup and restore | `execution/pbs/index_store.py` |
 | Run-directory layout (every run-relative path, marker sets, report inputs) | `pipeline/exporters/artifact_paths.py` |
 | Command locks and S3 PBS overlap detection | `execution/locks.py` |
 | PBS submit, qdel, state probes; S3 job scripts | `execution/pbs/submission.py`, `templates_s3.py`, `analysis_modes.py`, `scripts.py`, `templates/`, `commands.py` |
 | PBS resources and image references | `execution/pbs/defaults.py` (`DEFAULT_RESOURCES`), `execution/pbs_settings.py` |
 | Scenario lookup and host/container scenario paths | `execution/scenarios.py` |
 | S3 access for run, watch/download/cleanup consumers | `storage/s3.py` |
+| s5cmd calls shared by the frontend, the mainnet worker and the Python PBS stages | `storage/s5client.py` |
+| Every S3 PBS job (shell only writes and starts it) | `execution/pbs/stage_runtime.py` |
 | Container workload shared by Docker and Apptainer | `pipeline/exporters/worker.py` |
 | Parsed block-archive cache height, checkpoint and update continuity verification | `pipeline/exporters/verify_chain.py` |
 | Heavy BlockSci results | `pipeline/exporters/blocksci_export/analysis.py` |
@@ -96,16 +99,15 @@ output checks; `templates_s3.py` adds the shared cache/index access and job life
 `worker.py` supports parse, update, analyze, report, or parse+analyze (`run`).
 Docker and PBS choose mounts and interpreter, then invoke this same payload.
 The report always consumes `blocksci-analysis_data/blocksci_analysis.json`.
-It never performs an implicit detector scan. Old runs with only a parsed index
-need one analytical export before report assembly. The reader accepts artifact
-schema 1.0 for emulator runs; newly written schema 1.1 includes the mode and
-preserves detector parameters, skipped transactions, diagnostics and clustering.
+It never performs an implicit detector scan. The reader accepts only artifact
+schema 1.1, which records the mode and preserves detector parameters, skipped
+transactions, diagnostics and clustering; older runs are not supported.
 
 All S3 parsers publish `blocksci-parse_data/` as a zstd archive, manifest and
 SHA-256; `combined` and `reusable` differ only in job arrangement. The working
-`blocksci_data/` stays on job scratch. `index_archive.sh` shares streaming
-upload/restore with the persistent mainnet backup, retaining the scratch-file
-upload fallback when `s5 pipe` is absent. Consumers run only after verification.
+`blocksci_data/` stays on job scratch. `S5Client` shares the streaming
+upload/restore with the persistent index backup and the mainnet checkpoints,
+retaining the scratch-file upload fallback when `s5cmd pipe` is absent. Consumers run only after verification.
 Persistent mainnet indexes still stay in shared storage and are read/updated in
 place; emulations do not introduce a persistent working copy.
 

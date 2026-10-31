@@ -9,6 +9,7 @@ import pytest
 
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution import coinjoin_tools
+from coinjoin_pipeline.execution.pbs.scripts import embedded_file
 from coinjoin_pipeline.execution.pbs.templates_s3 import render_coinjoin_tools_s3_pbs
 from coinjoin_pipeline.storage.s3 import S3Target
 
@@ -180,10 +181,11 @@ def test_pbs_job_writes_the_script_next_to_the_input_and_runs_it(tmp_path):
     script = render_coinjoin_tools_s3_pbs(
         S3Target.from_args(model), "docker://test/image:latest", model.coinjoin_analysis
     )
-    assert f"cat > \"$OUTPUT/coinjoin_statistics.sh\" <<'COINJOIN_WORKFLOW'\n{SCRIPT.read_text()}" in script
-    assert "cd /work && bash /work/coinjoin_statistics.sh wasabi2 joinmarket" in script
-    assert "s3://bucket/dumplings/generations/g1/*" in script
-    assert "coinjoin-analysis-tools_data/coinjoin_statistics/$RESULT_ID/" in script
+    settings = json.loads(embedded_file(script, "settings.json"))
+    assert settings["files"] == {"coinjoin_statistics.sh": SCRIPT.read_text()}
+    assert settings["command"] == "cd /work && bash /work/coinjoin_statistics.sh wasabi2 joinmarket"
+    assert settings["input_uri"] == "s3://bucket/dumplings/generations/g1"
+    assert settings["program"] == "coinjoin_statistics"
     path = tmp_path / "job.sh"
     path.write_text(script)
     subprocess.run(["bash", "-n", str(path)], check=True)

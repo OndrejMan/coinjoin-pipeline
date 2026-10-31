@@ -1,9 +1,38 @@
-import shutil
+"""The stage worker's lifecycle: outputs, then the terminal marker, then an empty scratch."""
+
 import subprocess
 
 import pytest
 
-from coinjoin_pipeline.paths import EXECUTION_ROOT
+from coinjoin_pipeline.execution.pbs import stage_runtime
+from coinjoin_pipeline.execution.pbs.stage_runtime import Stage
+
+
+def stage(tmp_path, events, *, transfer_status=0, marker_status=0):
+    settings = {
+        "stage": "blocksci",
+        "job": "blocksci",
+        "run_id": "run-1",
+        "run_prefix": "s3://bucket/runs/run-1",
+        "endpoint": "https://s3.example.invalid",
+        "credentials": "/dev/null",
+        "profile": "test",
+    }
+    job = Stage(settings, tmp_path / "scratch")
+
+    def outputs():
+        events.append("outputs")
+        if transfer_status:
+            raise subprocess.CalledProcessError(transfer_status, "s5cmd sync")
+
+    def publish_marker(outcome):
+        events.append(outcome)
+        if outcome == "done" and marker_status:
+            raise subprocess.CalledProcessError(marker_status, "s5cmd cp")
+
+    job.finalizers.append(outputs)
+    job.publish_marker = publish_marker
+    return job
 
 
 @pytest.mark.parametrize(
@@ -19,83 +48,51 @@ from coinjoin_pipeline.paths import EXECUTION_ROOT
 def test_terminal_marker_follows_outputs_and_preserves_failure(
     tmp_path, payload_status, transfer_status, marker_status, expected
 ):
-    bootstrap = (EXECUTION_ROOT / "pbs/templates/stage_trap.sh").read_text()
-    script = f"""set -euo pipefail
-cd "$1"
-DONE_MARKER=done
-FAILED_MARKER=failed
-stage_finalize() {{ echo outputs >> events; upload_status={transfer_status}; }}
-publish_done() {{ echo done >> events; return {marker_status}; }}
-publish_failed() {{ echo failed >> events; }}
-{bootstrap}
-exit {payload_status}
-"""
-    result = subprocess.run(["bash", "-c", script, "test", str(tmp_path)], capture_output=True, text=True)
-    assert result.returncode == expected
-    events = (tmp_path / "events").read_text().splitlines()
+    events = []
+    job = stage(tmp_path, events, transfer_status=transfer_status, marker_status=marker_status)
+
+    assert job.finish(job.finalize(payload_status)) == expected
     assert events[0] == "outputs"
     assert events[-1] == ("done" if expected == 0 else "failed")
 
 
-def _run_stage(tmp_path, scratch_setup, preamble="", payload_status=0):
-    bootstrap = (EXECUTION_ROOT / "pbs/templates/stage_trap.sh").read_text()
-    script = f"""set -euo pipefail
-cd "$1"
-{scratch_setup}
-DONE_MARKER=done
-FAILED_MARKER=failed
-{preamble}
-stage_finalize() {{ echo outputs >> events; }}
-publish_done() {{ test -f "$SCRATCHDIR/work/index" && echo done-with-scratch >> events; }}
-publish_failed() {{ test -f "$SCRATCHDIR/work/index" && echo failed-with-scratch >> events; }}
-{bootstrap}
-exit {payload_status}
-"""
-    return subprocess.run(["bash", "-c", script, "test", str(tmp_path)], capture_output=True, text=True)
+def filled_scratch(tmp_path):
+    scratch = tmp_path / "scratch"
+    (scratch / "work").mkdir(parents=True)
+    (scratch / "work/index").touch()
+    (scratch / ".hidden").touch()
+    return scratch
 
 
-FILLED_SCRATCH = (
-    'SCRATCHDIR="$1/scratch"; mkdir -p "$SCRATCHDIR/work"; touch "$SCRATCHDIR/work/index" "$SCRATCHDIR/.hidden"'
-)
+def test_scratch_contents_are_removed_and_the_directory_stays(tmp_path, monkeypatch):
+    monkeypatch.setattr(stage_runtime.shutil, "which", lambda name: None)
+    scratch = filled_scratch(tmp_path)
+
+    stage_runtime.clean_scratch(scratch)
+
+    assert scratch.is_dir() and list(scratch.iterdir()) == []
 
 
-@pytest.mark.skipif(shutil.which("clean_scratch") is not None, reason="host provides clean_scratch")
-@pytest.mark.parametrize("payload_status", [0, 7])
-def test_scratch_contents_are_removed_after_markers_are_published(tmp_path, payload_status):
-    result = _run_stage(tmp_path, FILLED_SCRATCH, payload_status=payload_status)
+def test_scratch_cleanup_prefers_metacentrum_clean_scratch(tmp_path, monkeypatch):
+    scratch = filled_scratch(tmp_path)
+    calls = []
+    monkeypatch.setattr(stage_runtime.shutil, "which", lambda name: "/usr/bin/clean_scratch")
+    monkeypatch.setattr(stage_runtime.subprocess, "run", lambda command, check: calls.append(command))
 
-    assert result.returncode == payload_status, result.stderr
-    marker = "done" if payload_status == 0 else "failed"
-    assert (tmp_path / "events").read_text().splitlines() == ["outputs", f"{marker}-with-scratch"]
-    assert (tmp_path / "scratch").is_dir()
-    assert list((tmp_path / "scratch").iterdir()) == []
+    stage_runtime.clean_scratch(scratch)
 
-
-def test_scratch_cleanup_prefers_metacentrum_clean_scratch(tmp_path):
-    preamble = "clean_scratch() { echo clean_scratch >> events; return 3; }"
-    result = _run_stage(tmp_path, FILLED_SCRATCH, preamble=preamble)
-
-    assert result.returncode == 0, result.stderr
-    assert (tmp_path / "events").read_text().splitlines() == ["outputs", "done-with-scratch", "clean_scratch"]
-    assert (tmp_path / "scratch" / "work" / "index").exists()
+    assert calls == [["clean_scratch"]]
+    assert (scratch / "work/index").exists()
 
 
-@pytest.mark.parametrize("scratch_setup", ["unset SCRATCHDIR", 'SCRATCHDIR="$1/missing"'])
-def test_missing_scratch_does_not_change_the_exit_status(tmp_path, scratch_setup):
-    (tmp_path / "keep").touch()
-    bootstrap = (EXECUTION_ROOT / "pbs/templates/stage_trap.sh").read_text()
-    script = f"""set -euo pipefail
-cd "$1"
-{scratch_setup}
-DONE_MARKER=done
-FAILED_MARKER=failed
-stage_finalize() {{ :; }}
-publish_done() {{ :; }}
-publish_failed() {{ :; }}
-{bootstrap}
-exit 5
-"""
-    result = subprocess.run(["bash", "-c", script, "test", str(tmp_path)], capture_output=True, text=True)
+def test_a_missing_scratch_is_left_alone(tmp_path, monkeypatch):
+    monkeypatch.setattr(stage_runtime.shutil, "which", lambda name: None)
 
-    assert result.returncode == 5, result.stderr
-    assert (tmp_path / "keep").exists()
+    stage_runtime.clean_scratch(tmp_path / "missing")
+
+
+def test_a_job_without_scratch_fails_before_doing_anything(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("SCRATCHDIR", raising=False)
+
+    assert stage_runtime.main([str(tmp_path / "settings.json")]) == 1
+    assert "SCRATCHDIR is not set" in capsys.readouterr().err
