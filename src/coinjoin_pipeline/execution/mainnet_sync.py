@@ -11,7 +11,7 @@ from coinjoin_pipeline.configuration import required
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
 from coinjoin_pipeline.storage.s3 import shell_value, validate_artifact_uri, validate_run_id
 from .pbs.defaults import MAINNET_SYNC_RESOURCES, PBSResources
-from .pbs.scripts import directives, template
+from .pbs.scripts import INDEX_STORE, S5CLIENT, directives, runtime_source, write_files
 from .pbs.submission import PBSJobSpec, persist_pbs_job_id, submit_pbs_job
 from .pbs.validation import PBSError, require_safe_image, require_safe_pbs_resources, walltime_to_seconds
 from .pbs_settings import pbs_image, stage_pbs_resources, with_singularity_scheme
@@ -160,23 +160,19 @@ def render_sync(config: PipelineConfiguration, stage: str) -> str:
         "pbs_resources": {"ncpus": budget.ncpus, "mem": budget.mem},
         "core_image": with_singularity_scheme(config.mainnet.core_image),
         "dumplings_image": with_singularity_scheme(config.mainnet.dumplings_image),
+        # Restore and BlockSci write the index; the checkpoint only reads it, so readers stay.
+        "index_lock": {"restore": "exclusive", "blocksci": "exclusive", "checkpoint": "shared"}.get(stage),
+        # Past the walltime the job is gone, so its lock entry may be cleared.
+        "index_lock_seconds": walltime_to_seconds(budget.walltime) + 600,
     }
-    runtime = Path(__file__).with_name("mainnet_runtime.py").read_text(encoding="utf-8")
-    verifier = (EXPORTERS_ROOT / "verify_chain.py").read_text(encoding="utf-8")
+    files = {
+        "settings.json": json.dumps(settings),
+        "worker.py": runtime_source(Path(__file__).with_name("mainnet_runtime.py")),
+        "s5client.py": runtime_source(S5CLIENT),
+        "index_store.py": runtime_source(INDEX_STORE),
+        "verify_chain.py": runtime_source(EXPORTERS_ROOT / "verify_chain.py"),
+    }
     identity = f"STAGE=mainnet-{stage}\nRUN_ID={shell_value(run_id)}\n"
-    index_lock = ""
-    # Restore and BlockSci write the index; the checkpoint only reads it, so readers stay.
-    lock = {"restore": "index_lock_exclusive", "blocksci": "index_lock_exclusive", "checkpoint": "index_lock_shared"}
-    if stage in lock:
-        index_lock = f"""
-INDEX_DIR={shell_value(str(config.blocksci.index_dir))}
-INDEX_LOCK_EXPIRES=$(($(date +%s) + {walltime_to_seconds(budget.walltime)} + 600))
-# Fail immediately on an active notebook or index job instead of holding an allocation waiting.
-INDEX_LOCK_WAIT=0
-INDEX_LOCK_POLL=1
-{template("index_store.sh")}
-{lock[stage]}
-"""
     return f"""{directives("mainnet_" + stage, budget, getattr(config.pbs, stage).multijob)}
 set -euo pipefail
 umask 077
@@ -186,15 +182,7 @@ test -n "${{SCRATCHDIR:-}}" || {{ echo 'PBS SCRATCHDIR is required' >&2; exit 1;
 WORK=$(mktemp -d "$SCRATCHDIR/mainnet.XXXXXX")
 export TMPDIR="$WORK" SINGULARITY_CACHEDIR="$WORK/images" SINGULARITY_TMPDIR="$WORK"
 export APPTAINER_CACHEDIR="$WORK/images" APPTAINER_TMPDIR="$WORK"
-cat >"$WORK/settings.json" <<'MAINNET_SETTINGS'
-{json.dumps(settings)}
-MAINNET_SETTINGS
-cat >"$WORK/worker.py" <<'MAINNET_WORKER'
-{runtime}
-MAINNET_WORKER
-cat >"$WORK/verify_chain.py" <<'MAINNET_VERIFY'
-{verifier}
-MAINNET_VERIFY
+{write_files("$WORK", files)}
 STARTED=0
 finish() {{
   status=$?
@@ -202,7 +190,6 @@ finish() {{
   if [ "$status" -ne 0 ]; then
     python3 "$WORK/worker.py" "$WORK/settings.json" failed "$STAGE" "$STARTED" || true
   fi
-  if declare -F index_unlock >/dev/null; then index_unlock; fi
   # WORK is job-private; never clean the shared data directories.
   exit "$status"
 }}
@@ -212,7 +199,6 @@ trap 'exit 130' INT
 test -r {shell_value(credentials)} || {{ echo 'S3 credentials file is not readable' >&2; exit 1; }}
 for tool in s5cmd tar zstd; do command -v "$tool" >/dev/null || {{ echo "Required tool missing: $tool" >&2; exit 1; }}; done
 s5cmd pipe --help >/dev/null || {{ echo 's5cmd with pipe support is required' >&2; exit 1; }}
-{index_lock}
 STARTED=1
 python3 "$WORK/worker.py" "$WORK/settings.json" {stage}
 """

@@ -15,10 +15,39 @@ if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import MappingsConfiguration
 
 TEMPLATES = Path(__file__).parent / "templates"
+# Standalone runtime files a job ships to the node; each stays stdlib-only Python 3.8.
+S5CLIENT = Path(__file__).parents[2] / "storage" / "s5client.py"
+STAGE_RUNTIME = Path(__file__).with_name("stage_runtime.py")
+INDEX_STORE = Path(__file__).with_name("index_store.py")
 
 
 def template(name: str) -> str:
     return (TEMPLATES / name).read_text(encoding="utf-8")
+
+
+def _delimiter(name: str) -> str:
+    return "COINJOIN_FILE_" + name.upper().replace(".", "_").replace("-", "_")
+
+
+def write_files(directory: str, files: dict[str, str]) -> str:
+    """Shell that writes each file into directory from a quoted here-document."""
+    lines = []
+    for name, content in files.items():
+        delimiter = _delimiter(name)
+        if f"\n{delimiter}\n" in f"\n{content}\n":
+            raise PBSError(f"{name} contains its own here-document delimiter")
+        lines.append(f"cat >\"{directory}/{name}\" <<'{delimiter}'\n{content.rstrip(chr(10))}\n{delimiter}")
+    return "\n".join(lines)
+
+
+def embedded_file(script: str, name: str) -> str:
+    """The content write_files embedded for name, read back from a rendered script."""
+    delimiter = _delimiter(name)
+    return script.split(f"<<'{delimiter}'\n", 1)[1].split(f"\n{delimiter}\n", 1)[0]
+
+
+def runtime_source(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
 def directives(job_name: str, resources: PBSResources, multijob: str | None = None) -> str:

@@ -390,7 +390,7 @@ python -m coinjoin_pipeline.execution.mainnet_runtime recovery.json restore \
 
 Stejný helper obnoví index, pokud dostane manifest jeho zálohy a nový cílový
 adresář. Původní kopie se tím nepřepisuje. Zálohu indexu umí obnovit i
-`index_store.sh` (update nad neúplnou pracovní kopií).
+`index_store.py` (update nad neúplnou pracovní kopií).
 Index i Core zapisuje stejný běh, index dřív. Pokud běh selže až při záloze Core,
 manifest Core chybí a záloha indexu je o generaci novější než pracovní kopie Core;
 takovou dvojici nelze slepě spojit a je potřeba nejdřív doběhnout synchronizaci.

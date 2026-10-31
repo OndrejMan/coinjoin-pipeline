@@ -24,12 +24,65 @@ import tempfile
 import threading
 import shlex
 import time
-from datetime import datetime, timezone
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
+from datetime import datetime, timezone
+from typing import IO, TYPE_CHECKING, TypedDict
+
+if TYPE_CHECKING:  # TypeGuard needs Python 3.10; the PBS node only evaluates no annotation.
+    from typing import TypeGuard
+
+try:
+    from coinjoin_pipeline.execution.pbs.index_store import IndexStore
+    from coinjoin_pipeline.execution.pbs.index_store import inventory as index_inventory
+    from coinjoin_pipeline.storage.s5client import S5Client, S5Error
+except ImportError:  # the PBS job ships index_store.py and s5client.py next to this script
+    from index_store import IndexStore  # type: ignore[no-redef]
+    from index_store import inventory as index_inventory  # type: ignore[no-redef]
+    from s5client import S5Client, S5Error  # type: ignore[no-redef]
 
 # Processes span methods (Core) or concurrent pipe streams; cleanup/finally below
 # own their lifetimes rather than a single local with block.
 # pylint: disable=consider-using-with
+
+
+# Free-form JSON documents: manifests, progress records, Core RPC answers.
+JsonObject = dict
+
+
+class PbsResources(TypedDict):
+    ncpus: int
+    mem: str
+
+
+class Settings(TypedDict, total=False):
+    """settings.json, written by mainnet_sync.render_sync for one job."""
+
+    run_id: str
+    root: str
+    index_dir: str
+    log_root: str
+    network: str
+    scan_start_height: int | None
+    target_height: int | None
+    state_uri: str
+    backup_uri: str
+    blocks_uri: str
+    dumplings_uri: str
+    index_backup_uri: str
+    endpoint: str
+    credentials: str
+    profile: str
+    core_image: str
+    dumplings_image: str
+    blocksci_image: str
+    dbcache_mb: int
+    reorg_reserve: int
+    poll_seconds: float
+    pbs_resources: PbsResources
+    # restore and blocksci write the index, the checkpoint reads it; producer leaves it alone.
+    index_lock: str | None
+    index_lock_seconds: int
 
 
 CHUNK = 8 * 1024 * 1024
@@ -37,36 +90,43 @@ CHUNK = 8 * 1024 * 1024
 RESUME_CHECKPOINT = "parsed/parser/blockList.dat.resume.json"
 
 
-def utc_now():
+def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def read_json(path):
+def read_json(path: Path) -> JsonObject:
     return json.loads(path.read_text())
 
 
-def is_count(value):
+def is_count(value: object) -> TypeGuard[int]:
     """A plain non-negative integer; JSON booleans do not count."""
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
-def is_sha256(value):
+def is_sha256(value: object) -> bool:
     return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
 
 
-def file_sizes(root):
+def file_sizes(root: Path) -> dict[str, int]:
     """Relative path -> size of every regular file below root."""
     return {str(path.relative_to(root)): path.stat().st_size for path in sorted(root.rglob("*")) if path.is_file()}
 
 
-def terminate(processes):
+def pipe(stream: IO[bytes] | None) -> IO[bytes]:
+    """The pipe a process was started with; every caller asked for one."""
+    if stream is None:
+        raise RuntimeError("The process has no pipe to stream through")
+    return stream
+
+
+def terminate(processes: Iterable[subprocess.Popen]) -> None:
     for process in processes:
         if process.poll() is None:
             process.terminate()
             process.wait()
 
 
-def new_staging(destination):
+def new_staging(destination: Path) -> Path:
     """An empty directory next to destination, which must not exist yet."""
     if destination.exists():
         raise ValueError("Restore destination must not exist")
@@ -74,7 +134,7 @@ def new_staging(destination):
     return Path(tempfile.mkdtemp(prefix=destination.name + ".restoring-", dir=destination.parent))
 
 
-def atomic_json(path, value):
+def atomic_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     with temporary.open("w") as handle:
@@ -85,7 +145,7 @@ def atomic_json(path, value):
     temporary.replace(path)
 
 
-def require_ready(ready, run_id):
+def require_ready(ready: JsonObject, run_id: str) -> int:
     if ready.get("run_id") != run_id or ready.get("state") != "ready":
         raise ValueError("Missing ready checkpoint for this exact generation")
     height = ready.get("height")
@@ -96,7 +156,7 @@ def require_ready(ready, run_id):
     return height
 
 
-def scanner_complete(scanner, height):
+def scanner_complete(scanner: Path, height: int) -> None:
     if int((scanner / "LastProcessedBlockHeight.txt").read_text()) != height:
         raise ValueError("Dumplings did not reach the frozen Core height")
     # Missing evidence is a failure too, not an empty misses list.
@@ -125,7 +185,7 @@ def scanner_complete(scanner, height):
 
 
 @contextmanager
-def stopped_core(datadir):
+def stopped_core(datadir: Path) -> Iterator[None]:
     # Same POSIX record-lock handshake as the archive snapshot branch. This also
     # prevents an independently started Core from opening the datadir mid-backup.
     with (datadir / ".lock").open("rb") as handle:
@@ -135,7 +195,7 @@ def stopped_core(datadir):
         yield
 
 
-def tree_bytes(root, members):
+def tree_bytes(root: Path, members: Sequence[str]) -> dict[str, int]:
     """Apparent size of each backup member, as tar reads it; links are not followed."""
     sizes = {}
     for member in members:
@@ -150,7 +210,7 @@ def tree_bytes(root, members):
     return sizes
 
 
-def resume_file(index, blocks):
+def resume_file(index: Path, blocks: Path) -> int:
     checkpoint = read_json(index / RESUME_CHECKPOINT)
     number = checkpoint.get("file_number")
     if checkpoint.get("schema_version") != 1 or not is_count(number):
@@ -164,24 +224,11 @@ def resume_file(index, blocks):
     return number
 
 
-def index_inventory(index):
-    """Match index_store.sh's inventory so existing notebook readers accept it."""
-    rows = []
-    for path in index.rglob("*"):
-        relative = path.relative_to(index)
-        if relative.parts[0] in {".lock", ".writing"} or not path.is_file():
-            continue
-        if path.name in {"files.txt", "manifest.json"} or path.name.endswith(".tmp"):
-            continue
-        rows.append(f"{relative} {path.stat().st_size}")
-    return "\n".join(sorted(rows)) + "\n"
-
-
 # The resume bytes of the parser, recorded in the index manifest and the Core checkpoint.
 SIGNATURE_KEYS = ("resume_file_number", "resume_file_prefix_size", "resume_file_prefix_sha256")
 
 
-def resume_signature(index, blocks):
+def resume_signature(index: Path, blocks: Path) -> dict[str, object]:
     number = resume_file(index, blocks)
     checkpoint = read_json(index / RESUME_CHECKPOINT)
     end = checkpoint["data_offset"] + checkpoint["block_size"]
@@ -200,7 +247,7 @@ def resume_signature(index, blocks):
     }
 
 
-def container_bind(path, readonly=False):
+def container_bind(path: str | Path, readonly: bool = False) -> list[str]:
     path = Path(path)
     source = path.resolve()
     suffix = ":ro" if readonly else ""
@@ -211,7 +258,7 @@ def container_bind(path, readonly=False):
 
 
 class Worker:
-    def __init__(self, settings, work):
+    def __init__(self, settings: Settings, work: Path) -> None:
         self.c = settings
         self.work = work
         self.root = Path(settings["root"])
@@ -228,45 +275,33 @@ class Worker:
         self.run = self.root / "sync"
         self.active = self.root / ".sync-active"
         self.remote = settings["state_uri"].rstrip("/")
-        self.s5 = [
-            "s5cmd",
-            "--credentials-file",
-            settings["credentials"],
-            "--profile",
-            settings["profile"],
-            "--endpoint-url",
-            settings["endpoint"],
-        ]
-        self.env = {key: value for key, value in os.environ.items() if not key.startswith("AWS_")}
-        self.core = None
-        self.children = []
+        self.storage = S5Client(settings["endpoint"], settings["credentials"], settings["profile"])
+        self.core: subprocess.Popen | None = None
+        self.children: list[subprocess.Popen] = []
         # Manifest URI -> sizes of the backups this job uploaded, for done.json.
-        self.uploaded = {}
-        self.port = None
+        self.uploaded: dict[str, JsonObject] = {}
+        self.port: int | None = None
         self.stage = ""
         self.container = shutil.which("apptainer") or shutil.which("singularity")
 
-    def s3(self, *args, **kwargs):
-        return subprocess.run([*self.s5, *map(str, args)], env=self.env, check=True, **kwargs)
-
-    def upload(self, path, uri):
-        self.s3("cp", path, uri, stdout=subprocess.DEVNULL, timeout=3600)
-
-    def publish_json(self, uri, value):
+    def publish_json(self, uri: str, value: object) -> None:
         path = self.work / "publish.json"
         atomic_json(path, value)
-        self.upload(path, uri)
+        self.storage.copy(path, uri)
 
-    def verify_remote_size(self, uri, expected_size):
-        result = self.s3("--json", "ls", uri, stdout=subprocess.PIPE, text=True, timeout=60)
-        # ls matches a prefix, so other objects starting with the same key may be listed too.
-        listed = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
-        metadata = next((item for item in listed if item.get("key") == uri), {})
-        size = metadata.get("size")
+    def verify_remote_size(self, uri: str, expected_size: int) -> None:
+        size = self.storage.object_size(uri, timeout=60)
         if not is_count(size) or size != expected_size:
             raise ValueError("Checkpoint S3 size/key mismatch: " + uri)
 
-    def progress(self, phase, current=None, total=None, state="running", **extra):
+    def progress(
+        self,
+        phase: str,
+        current: float | None = None,
+        total: float | None = None,
+        state: str = "running",
+        **extra: object,
+    ) -> None:
         percent = None if total is None or current is None or total <= 0 else round(min(100, 100 * current / total), 2)
         value = {
             "run_id": self.run_id,
@@ -283,45 +318,52 @@ class Worker:
         self.publish_json(f"{self.remote}/{self.stage}.json", value)
         print(json.dumps(value), flush=True)
 
-    def owns_dataset(self):
+    def owns_dataset(self) -> bool:
         try:
             return read_json(self.active / "owner.json").get("run_id") == self.run_id
         except (OSError, ValueError):
             return False
 
-    def acquire_dataset(self):
+    def acquire_dataset(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         # mkdir is atomic on the shared filesystem. No expiry guesses across queue waits.
         self.active.mkdir()
         atomic_json(self.active / "owner.json", {"run_id": self.run_id, "job_id": os.environ.get("PBS_JOBID")})
 
-    def release_dataset(self):
+    def release_dataset(self) -> None:
         if self.owns_dataset():
             shutil.rmtree(self.active)
 
-    def complete(self, value):
+    def complete(self, value: JsonObject) -> None:
         """Publish this job's .done marker, which releases its PBS dependents, and free the dataset."""
         self.publish_json(f"{self.remote}/.pbs/mainnet-{self.stage}.done", value)
         self.release_dataset()
 
-    def index_matches_inventory(self):
+    def index_matches_inventory(self) -> bool:
         return (self.index / "files.txt").read_text() == index_inventory(self.index)
 
-    def reset_state(self):
+    def reset_state(self) -> None:
         """Clear the previous synchronization's state; its logs stay under logs/<run-id>/."""
         stages = ("restore", "producer", "blocksci", "checkpoint")
         # <stage>.json is each job's progress; restore.json also says what the restore did.
-        names = ("ready.json", "done.json", "blocksci-index-manifest.json")
-        names += tuple(f"{stage}.json" for stage in stages)
+        names = ("ready.json", "done.json", "blocksci-index-manifest.json", *(f"{stage}.json" for stage in stages))
         for name in (*names, *(f"{stage}.quiescent" for stage in stages if stage != self.stage)):
             (self.run / name).unlink(missing_ok=True)
         for name in names:
-            self.remove(f"{self.remote}/{name}")
+            self.storage.remove(f"{self.remote}/{name}")
         for stage in stages:
             for outcome in ("done", "failed"):
-                self.remove(f"{self.remote}/.pbs/mainnet-{stage}.{outcome}")
+                self.storage.remove(f"{self.remote}/.pbs/mainnet-{stage}.{outcome}")
 
-    def container_command(self, image, *args, cwd=None, readonly=False, index_writable=False, environment=None):
+    def container_command(
+        self,
+        image: str,
+        *args: object,
+        cwd: Path | None = None,
+        readonly: bool = False,
+        index_writable: bool = False,
+        environment: dict[str, str] | None = None,
+    ) -> list[str]:
         if self.container is None:
             raise RuntimeError("Apptainer or Singularity is required on the PBS node")
         command = [
@@ -339,7 +381,7 @@ class Worker:
             command += ["--env", f"{key}={value}"]
         return [*command, image, *map(str, args)]
 
-    def run_command(self, command, name, poll=None):
+    def run_command(self, command: list[str], name: str, poll: Callable[[], None] | None = None) -> subprocess.Popen:
         self.logs.mkdir(parents=True, exist_ok=True)
         with (self.logs / f"{name}.log").open("ab") as log:
             process = subprocess.Popen(
@@ -355,11 +397,11 @@ class Worker:
         return process
 
     @property
-    def logs(self):
+    def logs(self) -> Path:
         """Small component logs live on the filesystem shared with the frontend."""
         return Path(self.c["log_root"]) / f"mainnet-{self.stage}"
 
-    def rpc(self, method, *args):
+    def rpc(self, method: str, *args: str) -> object:
         command = self.container_command(
             self.c["core_image"],
             "bitcoin-cli",
@@ -379,7 +421,14 @@ class Worker:
         except ValueError:
             return output.strip()
 
-    def start_core(self, offline, dbcache_mb=None):
+    def rpc_info(self, method: str) -> JsonObject:
+        """An RPC that answers with an object, such as getblockchaininfo."""
+        value = self.rpc(method)
+        if not isinstance(value, dict):
+            raise ValueError(f"Core {method} did not return an object")
+        return value
+
+    def start_core(self, offline: bool, dbcache_mb: int | None = None) -> JsonObject:
         self.core_dir.mkdir(parents=True, exist_ok=True)
         xor = self.core_dir / "blocks/xor.dat"
         if xor.exists() and any(xor.read_bytes()):
@@ -415,7 +464,7 @@ class Worker:
             self.core = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         while self.core.poll() is None:
             try:
-                info = self.rpc("getblockchaininfo")
+                info = self.rpc_info("getblockchaininfo")
                 if info.get("chain") != self.chain or info.get("automatic_pruning") is not False:
                     raise ValueError("Core must use the configured network and manual pruning")
                 if self.rpc("getindexinfo"):
@@ -426,7 +475,7 @@ class Worker:
                 time.sleep(self.c["poll_seconds"])
         raise RuntimeError("Core failed to start; see its persistent log")
 
-    def stop_core(self, *, require_clean_exit=True):
+    def stop_core(self, *, require_clean_exit: bool = True) -> None:
         if self.core is None:
             return
         if self.core.poll() is None:
@@ -437,7 +486,7 @@ class Worker:
         if require_clean_exit and code != 0:
             raise RuntimeError("Core did not shut down cleanly")
 
-    def archive(self, prune=False, height=None, number=None):
+    def archive(self, prune: bool = False, height: int = 0, number: int = 0) -> None:
         # Bitcoin Core 29.1 refuses pruning before these network thresholds.
         # The regtest worker starts Core with -fastprune.
         if prune and height < (100 if self.chain == "regtest" else 100000):
@@ -486,18 +535,7 @@ class Worker:
             command += ["--prune-only", "--prune-ceiling-file", str(ceiling), "--prune-retain-from-file", str(number)]
         self.run_command(command, "pruning" if prune else "archiver")
 
-    def remove(self, *uris):
-        """Delete objects; a missing one is not an error."""
-        subprocess.run(
-            [*self.s5, "rm", *uris],
-            env=self.env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=600,
-        )
-
-    def backup(self, root, members, prefix, metadata, name):
+    def backup(self, root: Path, members: list[str], prefix: str, metadata: JsonObject, name: str) -> str:
         """Replace the backup under prefix with a tar/zstd stream, hashing locally.
 
         S3 never holds two copies: the manifest and the old archive go first, so until the
@@ -512,53 +550,33 @@ class Worker:
             if not path.exists() or path.is_symlink():
                 raise ValueError("Missing or linked checkpoint root: " + str(path))
         member_bytes = tree_bytes(root, members)
-        self.remove(manifest_uri)
-        self.remove(archive)
-        producers = []
-        digest = hashlib.sha256()
-        archive_size = 0
-        upload = None
+        self.storage.remove(manifest_uri)
+        self.storage.remove(archive)
         try:
-            tar = subprocess.Popen(["tar", "-C", str(root), "-cf", "-", *members], stdout=subprocess.PIPE)
-            producers.append(tar)
-            zstd = subprocess.Popen(
-                ["zstd", "-3", "-T" + str(self.c["pbs_resources"]["ncpus"])], stdin=tar.stdout, stdout=subprocess.PIPE
+            checksum, archive_size = self.storage.upload_archive(
+                root, members, archive, self.c["pbs_resources"]["ncpus"]
             )
-            tar.stdout.close()
-            producers.append(zstd)
-            upload = subprocess.Popen(
-                [*self.s5, "pipe", archive], env=self.env, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL
-            )
-            for chunk in iter(lambda: zstd.stdout.read(CHUNK), b""):
-                digest.update(chunk)
-                archive_size += len(chunk)
-                upload.stdin.write(chunk)
-            upload.stdin.close()
-            zstd.stdout.close()
-            if upload.wait() != 0 or any(process.wait() != 0 for process in producers):
-                raise RuntimeError("Checkpoint stream failed")
-            checksum = digest.hexdigest()
-            self.verify_remote_size(archive, archive_size)
-            manifest = {
-                **metadata,
-                "run_id": self.run_id,
-                "archive_uri": archive,
-                "archive_sha256": checksum,
-                "archive_size": archive_size,
-                "members": members,
-                "member_bytes": member_bytes,
-                "upload_validation": "size-only",
-                "uploaded_at": utc_now(),
-            }
-            self.publish_json(manifest_uri, manifest)
-            self.uploaded[manifest_uri] = {"archive_size": archive_size, "member_bytes": member_bytes}
-            return manifest_uri
-        finally:
-            terminate([*producers, *([upload] if upload else [])])
+        except S5Error as error:
+            raise RuntimeError("Checkpoint stream failed") from error
+        self.verify_remote_size(archive, archive_size)
+        manifest = {
+            **metadata,
+            "run_id": self.run_id,
+            "archive_uri": archive,
+            "archive_sha256": checksum,
+            "archive_size": archive_size,
+            "members": members,
+            "member_bytes": member_bytes,
+            "upload_validation": "size-only",
+            "uploaded_at": utc_now(),
+        }
+        self.publish_json(manifest_uri, manifest)
+        self.uploaded[manifest_uri] = {"archive_size": archive_size, "member_bytes": member_bytes}
+        return manifest_uri
 
-    def restore_checkpoint(self, manifest_uri, destination):
+    def restore_checkpoint(self, manifest_uri: str, destination: Path) -> None:
         """Explicit recovery into a new directory; never overwrite a working copy."""
-        manifest = self.cat_json(manifest_uri)
+        manifest = self.storage.cat_json(manifest_uri)
         archive, expected = manifest["archive_uri"], manifest["archive_sha256"]
         if not is_sha256(expected) or not archive.startswith(manifest_uri.rsplit("/", 1)[0] + "/"):
             raise ValueError("Invalid checkpoint reference")
@@ -572,24 +590,25 @@ class Worker:
         staging = new_staging(destination)
         (staging / ".restoring").touch()
         digest = hashlib.sha256()
-        errors = []
-        source = subprocess.Popen([*self.s5, "cat", archive], env=self.env, stdout=subprocess.PIPE)
+        errors: list[Exception] = []
+        source = self.storage.popen("cat", archive, stdout=subprocess.PIPE)
         decompress = subprocess.Popen(["zstd", "-d"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        downloaded, compressed, archive_stream = pipe(source.stdout), pipe(decompress.stdin), pipe(decompress.stdout)
 
-        def pump():
+        def pump() -> None:
             try:
-                for chunk in iter(lambda: source.stdout.read(CHUNK), b""):
+                for chunk in iter(lambda: downloaded.read(CHUNK), b""):
                     digest.update(chunk)
-                    decompress.stdin.write(chunk)
+                    compressed.write(chunk)
             except Exception as error:
                 errors.append(error)
             finally:
-                decompress.stdin.close()
+                compressed.close()
 
         thread = threading.Thread(target=pump, daemon=True)
         thread.start()
         try:
-            with tarfile.open(fileobj=decompress.stdout, mode="r|") as stream:
+            with tarfile.open(fileobj=archive_stream, mode="r|") as stream:
                 for member in stream:
                     relative = Path(member.name)
                     if (
@@ -603,12 +622,12 @@ class Worker:
                         output.mkdir(parents=True, exist_ok=True)
                     elif member.isfile():
                         output.parent.mkdir(parents=True, exist_ok=True)
-                        with stream.extractfile(member) as handle, output.open("wb") as target:
+                        with pipe(stream.extractfile(member)) as handle, output.open("wb") as target:
                             shutil.copyfileobj(handle, target)
                     else:
                         raise ValueError("Checkpoint contains a link or special file")
             # Drain trailing tar padding, allowing the decompressor and pump to finish.
-            while decompress.stdout.read(CHUNK):
+            while archive_stream.read(CHUNK):
                 pass
             thread.join(timeout=30)
             if (
@@ -627,19 +646,7 @@ class Worker:
             terminate((source, decompress))
             thread.join(timeout=5)
 
-    def remote_sizes(self, prefix):
-        """Relative key -> size of every object under prefix (which ends with a slash)."""
-        listing = self.s3("--json", "ls", prefix + "*", stdout=subprocess.PIPE, text=True, timeout=600).stdout
-        sizes = {}
-        for line in listing.splitlines():
-            entry = json.loads(line)
-            key = entry.get("key", "")
-            if entry.get("type", "file") == "file" and key.startswith(prefix):
-                # s5cmd leaves out the size of an empty object.
-                sizes[key.removeprefix(prefix)] = entry.get("size", 0)
-        return sizes
-
-    def publish_dumplings(self, height):
+    def publish_dumplings(self, height: int) -> str:
         """Mirror Scanner/ incrementally; manifest.json, written last, makes the copy readable.
 
         Only changed files travel. The copy is checked by object sizes, never read back.
@@ -649,12 +656,10 @@ class Worker:
         prefix = self.c["dumplings_uri"].rstrip("/")
         manifest_uri = prefix + "/manifest.json"
         files = file_sizes(scanner)
-        self.remove(manifest_uri)
+        self.storage.remove(manifest_uri)
         self.progress("dumplings-backup")
-        self.s3(
-            "sync", "--delete", str(scanner) + "/", prefix + "/Scanner/", stdout=subprocess.DEVNULL, timeout=6 * 3600
-        )
-        if self.remote_sizes(prefix + "/Scanner/") != files:
+        self.storage.run("sync", "--delete", str(scanner) + "/", prefix + "/Scanner/", check=True, timeout=6 * 3600)
+        if self.storage.sizes(prefix + "/Scanner/") != files:
             raise ValueError("The Dumplings copy in S3 does not match Scanner/")
         manifest = {
             "run_id": self.run_id,
@@ -666,9 +671,9 @@ class Worker:
         self.publish_json(manifest_uri, manifest)
         return manifest_uri
 
-    def restore_dumplings(self, manifest_uri, destination):
+    def restore_dumplings(self, manifest_uri: str, destination: Path) -> None:
         """Explicit recovery of Scanner/ into a new directory, checked against the manifest."""
-        files = self.cat_json(manifest_uri).get("files")
+        files = self.storage.cat_json(manifest_uri).get("files")
         if (
             not isinstance(files, dict)
             or not files
@@ -677,13 +682,7 @@ class Worker:
             raise ValueError("Invalid Dumplings manifest")
         staging = new_staging(destination)
         try:
-            self.s3(
-                "cp",
-                manifest_uri.rsplit("/", 1)[0] + "/Scanner/*",
-                str(staging) + "/",
-                stdout=subprocess.DEVNULL,
-                timeout=6 * 3600,
-            )
+            self.storage.copy(manifest_uri.rsplit("/", 1)[0] + "/Scanner/*", str(staging) + "/", timeout=6 * 3600)
             if file_sizes(staging) != files:
                 raise ValueError("The restored Scanner/ does not match its manifest")
             staging.rename(destination)
@@ -691,12 +690,12 @@ class Worker:
             if staging.exists():
                 shutil.rmtree(staging)
 
-    def synchronize_core(self):
+    def synchronize_core(self) -> JsonObject:
         target = self.c.get("target_height")
         last_report = None
         while True:
             try:
-                info = self.rpc("getblockchaininfo")
+                info = self.rpc_info("getblockchaininfo")
                 if target is not None:
                     if info["blocks"] >= target:
                         break
@@ -723,12 +722,12 @@ class Worker:
                     if (
                         not info.get("initialblockdownload", True)
                         and info["blocks"] == info["headers"]
-                        and (self.chain == "regtest" or self.rpc("getnetworkinfo")["connections"] > 0)
+                        and (self.chain == "regtest" or self.rpc_info("getnetworkinfo")["connections"] > 0)
                     ):
                         break
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
                 self.progress("core-rpc-wait")
-            if self.core.poll() is not None:
+            if self.core is None or self.core.poll() is not None:
                 raise RuntimeError("Core stopped during synchronization")
             # Bounded tests must not keep downloading for a full reporting interval.
             time.sleep(min(self.c["poll_seconds"], 1) if target is not None else self.c["poll_seconds"])
@@ -737,7 +736,7 @@ class Worker:
         # offline restart makes the height stable before Dumplings pins it.
         self.stop_core()
         self.start_core(True)
-        frozen = self.rpc("getblockchaininfo")
+        frozen = self.rpc_info("getblockchaininfo")
         if target is not None:
             if frozen["blocks"] < target:
                 raise ValueError("Core fell below the requested height while freezing the chain")
@@ -750,38 +749,12 @@ class Worker:
             )
         return frozen
 
-    def remote_listing(self, pattern):
-        """Objects matching pattern; empty when there are none, other S3 errors raise."""
-        result = subprocess.run(
-            [*self.s5, "--json", "ls", pattern],
-            env=self.env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=600,
-            check=False,
-        )
-        if result.returncode != 0:
-            if "no object found" in result.stderr + result.stdout:
-                return []
-            raise RuntimeError(f"S3 listing of {pattern} failed: {result.stderr.strip()}")
-        return [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
-
-    def cat_json(self, uri, timeout=60):
-        return json.loads(self.s3("cat", uri, stdout=subprocess.PIPE, text=True, timeout=timeout).stdout)
-
-    def remote_json(self, uri):
-        """The JSON object at uri, or None when it does not exist."""
-        if not any(item.get("key") == uri for item in self.remote_listing(uri)):
-            return None
-        return self.cat_json(uri, timeout=120)
-
-    def dataset_members(self):
+    def dataset_members(self) -> list[Path]:
         """Working data that exist; locks, synchronization state and logs do not count."""
         index = (self.index / name for name in ("config.json", "files.txt", "manifest.json", "parsed"))
         return [path for path in (self.datadir, self.dumps, self.archive_state, *index) if path.exists()]
 
-    def restore_dataset(self):
+    def restore_dataset(self) -> None:
         """Job 0: fill an empty working dataset from the S3 backups, otherwise do nothing.
 
         The working copy on multijob storage can expire. Only a completely empty one is
@@ -799,14 +772,22 @@ class Worker:
             self.finish_restore("skipped-not-empty", present=[str(path) for path in present])
             return
         backups = {
-            name: self.c[key].rstrip("/") + "/manifest.json"
-            for name, key in (("core", "backup_uri"), ("index", "index_backup_uri"), ("dumplings", "dumplings_uri"))
+            name: prefix.rstrip("/") + "/manifest.json"
+            for name, prefix in (
+                ("core", self.c["backup_uri"]),
+                ("index", self.c["index_backup_uri"]),
+                ("dumplings", self.c["dumplings_uri"]),
+            )
         }
         self.progress("restore-check")
-        manifests = {name: self.remote_json(uri) for name, uri in backups.items()}
-        missing = sorted(name for name, value in manifests.items() if value is None)
-        if len(missing) == len(backups):
-            if self.remote_listing(self.c["blocks_uri"].rstrip("/") + "/*"):
+        manifests = {
+            name: self.storage.cat_json(uri, timeout=120) if self.storage.exists(uri) else None
+            for name, uri in backups.items()
+        }
+        found = {name: value for name, value in manifests.items() if value is not None}
+        missing = sorted(backups.keys() - found.keys())
+        if not found:
+            if self.storage.listing(self.c["blocks_uri"].rstrip("/") + "/*"):
                 raise ValueError(
                     "S3 holds archived blocks but no backups; a new initial download would mix its block files "
                     "with the archived ones. Restore the backups or empty " + self.c["blocks_uri"]
@@ -815,7 +796,7 @@ class Worker:
             return
         if missing:
             raise ValueError("S3 lacks the backups " + ", ".join(missing) + "; the working dataset cannot be restored")
-        core, index, dumplings = manifests["core"], manifests["index"], manifests["dumplings"]
+        core, index, dumplings = found["core"], found["index"], found["dumplings"]
         mismatches = [
             label
             for label, matches in (
@@ -856,12 +837,11 @@ class Worker:
             raise ValueError("The restored index and Core blocks do not belong together")
         self.finish_restore("restored", height=core["height"], hash=core["hash"], backups=backups)
 
-    def finish_restore(self, action, **extra):
-        value = {"action": action, **extra}
-        self.progress("complete", state="done", **value)
-        self.complete({"run_id": self.run_id, **value})
+    def finish_restore(self, action: str, **extra: object) -> None:
+        self.progress("complete", None, None, "done", action=action, **extra)
+        self.complete({"run_id": self.run_id, "action": action, **extra})
 
-    def require_complete_dataset(self):
+    def require_complete_dataset(self) -> None:
         """Refuse a partly lost working dataset before Core starts.
 
         The restore job fills only an empty dataset. An unfinished first synchronization
@@ -890,7 +870,7 @@ class Worker:
                 f"{self.root} and {self.index} entirely; the next synchronization restores both from S3."
             )
 
-    def producer(self):
+    def producer(self) -> None:
         self.stage = "producer"
         self.acquire_dataset()
         self.require_complete_dataset()
@@ -918,7 +898,7 @@ class Worker:
         scanner.mkdir(parents=True, exist_ok=True)
         atomic_json(anchor_path, {"height": height, "hash": block_hash})
 
-        def scan_progress():
+        def scan_progress() -> None:
             try:
                 current = int(scan_height.read_text())
             except (OSError, ValueError):
@@ -973,7 +953,7 @@ class Worker:
         self.progress("ready-for-blocksci", state="done", height=height)
         self.complete(ready)
 
-    def parse_progress(self):
+    def parse_progress(self) -> None:
         path = self.logs / "blocksci.log"
         if not path.exists():
             return
@@ -988,7 +968,7 @@ class Worker:
             detail=matches[-1][1].strip() if matches else None,
         )
 
-    def blocksci(self):
+    def blocksci(self) -> None:
         self.stage = "blocksci"
         self.acquire_dataset()
         ready = read_json(self.run / "ready.json")
@@ -1106,7 +1086,7 @@ class Worker:
         self.progress("indexed", state="done", height=height)
         self.complete(manifest)
 
-    def checkpoint(self):
+    def checkpoint(self) -> None:
         """Job 3: back up the index, prune Core and back up its checkpoint, with little memory.
 
         Holds the index reader lock: notebooks keep reading, index jobs cannot write.
@@ -1183,7 +1163,7 @@ class Worker:
         self.complete(done)
         atomic_json(self.run / "done.json", done)
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         for process in self.children:
             if process.poll() is None:
                 os.killpg(process.pid, signal.SIGTERM)
@@ -1193,12 +1173,12 @@ class Worker:
             # additionally require a successful exit before publishing data.
             self.stop_core(require_clean_exit=False)
 
-    def publish_logs(self):
+    def publish_logs(self) -> None:
         for path in sorted(self.logs.glob("*.log")):
-            self.upload(path, f"{self.remote}/logs/{self.run_id}/{path.name}")
+            self.storage.copy(path, f"{self.remote}/logs/{self.run_id}/{path.name}")
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> None:
     args = argv or sys.argv[1:]
     settings = Path(args[0])
     worker = Worker(json.loads(settings.read_text(encoding="utf-8")), settings.parent)
@@ -1221,14 +1201,24 @@ def main(argv=None):
     # The fixed state directory may hold the marker of an earlier run of this stage.
     (worker.run / f"{worker.stage}.quiescent").unlink(missing_ok=True)
 
-    def interrupted(_signum, _frame):
+    def interrupted(_signum: int, _frame: object) -> None:
         raise InterruptedError("PBS job interrupted")
 
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
+    # Fail at once on an active notebook or index job instead of holding an allocation waiting.
+    index = IndexStore(
+        worker.c["index_dir"], None, lock_seconds=worker.c.get("index_lock_seconds", 0), poll_seconds=1
+    )
     try:
+        mode = worker.c.get("index_lock")
+        if mode == "exclusive":
+            index.lock_exclusive()
+        elif mode == "shared":
+            index.lock_shared()
         job()
     finally:
+        index.unlock()
         try:
             worker.cleanup()
             worker.run.mkdir(parents=True, exist_ok=True)

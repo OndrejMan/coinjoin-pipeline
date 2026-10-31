@@ -11,6 +11,7 @@ import pytest
 from coinjoin_pipeline.configuration import ConfigurationError, PipelineConfiguration
 from coinjoin_pipeline.context import resolve_configuration
 from coinjoin_pipeline.execution import mainnet_runtime, mainnet_sync, s3_markers
+from coinjoin_pipeline.execution.pbs.scripts import embedded_file
 from coinjoin_pipeline.execution.mainnet_runtime import (
     Worker,
     require_ready,
@@ -48,19 +49,30 @@ def config(tmp_path):
 
 
 def test_four_scripts_are_self_contained_and_syntactically_valid(config):
-    locks = {"restore": "index_lock_exclusive", "blocksci": "index_lock_exclusive", "checkpoint": "index_lock_shared"}
+    locks = {"restore": "exclusive", "blocksci": "exclusive", "checkpoint": "shared", "producer": None}
     for stage in mainnet_sync.SYNC_STAGES:
         script = mainnet_sync.render_sync(config, stage)
         subprocess.run(["bash", "-n"], input=script, text=True, check=True)
         assert "def scanner_complete" in script
-        if stage in locks:
-            assert "INDEX_LOCK_WAIT=0" in script and f"\n{locks[stage]}\n" in script
-        else:
-            assert "rm -rf" not in script
+        settings = json.loads(embedded_file(script, "settings.json"))
+        assert settings["index_lock"] == locks[stage]
+        assert "rm -rf" not in script
         assert script.rstrip().endswith(f'"$WORK/settings.json" {stage}')
         assert "clean_scratch" not in script
         assert '"log_root": ' + json.dumps(str(config.runs_path / config.run_id / "logs")) in script
     assert not config.stages.blocksci
+
+
+def test_shipped_worker_imports_the_shipped_s5_client_without_the_package(config, tmp_path):
+    script = mainnet_sync.render_sync(config, "producer")
+    for name in ("worker.py", "s5client.py", "index_store.py"):
+        (tmp_path / name).write_text(embedded_file(script, name))
+    # -S leaves out site-packages, where the development install of coinjoin_pipeline lives.
+    probe = "import sys; sys.path.insert(0, sys.argv[1]); import worker; print(worker.S5Client.__module__)"
+    result = subprocess.run(
+        [sys.executable, "-S", "-c", probe, str(tmp_path)], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() == "s5client"
 
 
 def test_checkpoint_job_defaults_to_little_memory(config):
@@ -395,7 +407,7 @@ def test_parser_progress_and_s3_upload_use_the_shared_component_logs(worker, mon
     (producer / "core-producer.log").write_text("other stage\n")
     progress, uploaded = [], []
     monkeypatch.setattr(worker, "progress", lambda *args, **kwargs: progress.append((args, kwargs)))
-    monkeypatch.setattr(worker, "upload", lambda *args: uploaded.append(args))
+    monkeypatch.setattr(worker.storage, "copy", lambda *args: uploaded.append(args))
     worker.parse_progress()
     worker.publish_logs()
     assert progress == [(("blocksci-parse", 50.0, 100), {"detail": "parsing blocks"})]
@@ -524,7 +536,7 @@ def test_backup_replaces_the_previous_one_without_readback(worker, tmp_path, mon
     source = tmp_path / "source"
     (source / "chainstate").mkdir(parents=True)
     (source / "chainstate/state.dat").write_bytes(b"a consistent Core snapshot")
-    worker.env["FAKE_S5CMD_FORBID_ARCHIVE_CAT"] = "1"
+    worker.storage.environment["FAKE_S5CMD_FORBID_ARCHIVE_CAT"] = "1"
     uri = worker.backup(source, ["chainstate"], "s3://local/core", {"height": 500}, "checkpoint.tar.zst")
     assert uri == "s3://local/core/manifest.json"
     manifest = json.loads((tmp_path / "s3" / uri.removeprefix("s3://")).read_text())
@@ -533,16 +545,19 @@ def test_backup_replaces_the_previous_one_without_readback(worker, tmp_path, mon
     assert manifest["member_bytes"] == {"chainstate": len(b"a consistent Core snapshot")}
     assert manifest["upload_validation"] == "size-only"
     assert "uploaded_at" in manifest and "verified_at" not in manifest
-    del worker.env["FAKE_S5CMD_FORBID_ARCHIVE_CAT"]
+    del worker.storage.environment["FAKE_S5CMD_FORBID_ARCHIVE_CAT"]
     destination = tmp_path / "restored"
     worker.restore_checkpoint(uri, destination)
     assert (destination / "chainstate/state.dat").read_bytes() == b"a consistent Core snapshot"
     worker.run_id = "next-run"
     worker.backup(source, ["chainstate"], "s3://local/core", {"height": 550}, "checkpoint.tar.zst")
-    assert sorted(path.name for path in (tmp_path / "s3/local/core").iterdir()) == ["checkpoint.tar.zst", "manifest.json"]
+    assert sorted(path.name for path in (tmp_path / "s3/local/core").iterdir()) == [
+        "checkpoint.tar.zst",
+        "manifest.json",
+    ]
     assert json.loads((tmp_path / "s3/local/core/manifest.json").read_text())["height"] == 550
     # A failed upload leaves no valid backup until the next run.
-    worker.env["FAKE_S5CMD_LS_SIZE_DELTA"] = "1"
+    worker.storage.environment["FAKE_S5CMD_LS_SIZE_DELTA"] = "1"
     with pytest.raises(ValueError, match="size/key mismatch"):
         worker.backup(source, ["chainstate"], "s3://local/core", {"height": 600}, "checkpoint.tar.zst")
     assert not (tmp_path / "s3/local/core/manifest.json").exists()
@@ -586,7 +601,7 @@ def test_dumplings_copy_is_incremental_and_mirrors_deletions(worker, tmp_path):
 def test_a_dumplings_size_mismatch_publishes_no_manifest(worker, tmp_path, monkeypatch):
     scanner_fixture(worker, 500)
     worker.publish_dumplings(500)
-    monkeypatch.setattr(worker, "remote_sizes", lambda prefix: {})
+    monkeypatch.setattr(worker.storage, "sizes", lambda prefix: {})
     with pytest.raises(ValueError, match="does not match Scanner"):
         worker.publish_dumplings(500)
     assert not (tmp_path / "s3/local/dumps/manifest.json").exists()
@@ -619,7 +634,7 @@ def test_restore_still_checks_stream_checksum(worker, tmp_path):
 )
 def test_backup_metadata_must_match_key_and_integer_size(worker, monkeypatch, metadata):
     monkeypatch.setattr(
-        worker, "s3", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, json.dumps(metadata))
+        worker.storage, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, json.dumps(metadata))
     )
     with pytest.raises(ValueError, match="size/key mismatch"):
         worker.verify_remote_size("s3://local/archive", 1)

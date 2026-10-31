@@ -1,80 +1,78 @@
-"""The persistent BlockSci index lock, backup and restore behave as the PBS jobs rely on (index_store.sh)."""
+"""The persistent BlockSci index lock, backup and restore behave as the PBS jobs rely on (index_store.py)."""
 
-import os
 import json
+import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 import pytest
 
-ARCHIVE = Path(__file__).resolve().parents[2] / "src/coinjoin_pipeline/execution/pbs/templates/index_archive.sh"
-STORE = Path(__file__).resolve().parents[2] / "src/coinjoin_pipeline/execution/pbs/templates/index_store.sh"
-FAKE_S5CMD = Path(__file__).resolve().parents[1] / "support/persistent-index"
+from coinjoin_pipeline.execution.pbs.index_store import IndexStore, IndexStoreError
+from coinjoin_pipeline.storage.s5client import S5Client, S5Error
+
+ROOT = Path(__file__).resolve().parents[2]
+FAKE_S5CMD = ROOT / "tests/support/persistent-index"
 BACKUP = "s3://bucket/blocksci-index"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("zstd") is None or shutil.which("mkfifo") is None, reason="index_store.sh needs zstd and mkfifo"
-)
+pytestmark = pytest.mark.skipif(shutil.which("zstd") is None, reason="the index archive needs zstd")
 
 
-def shell_script(tmp_path, body, *, index="index", backup=BACKUP, expires_in=3600, wait=2, job="job-1"):
-    """A bash script running `body` with the store functions loaded, as one PBS job would."""
-    return f"""set -euo pipefail
-export PATH={FAKE_S5CMD}:$PATH FAKE_S3={tmp_path}/s3
-S3_CREDENTIALS_FILE=/dev/null S3_PROFILE=test S3_ENDPOINT_URL=https://s3.example.invalid
-RUN_WORK={tmp_path}/run-{job}
-mkdir -p "$RUN_WORK"
-INDEX_DIR={tmp_path}/{index}
-INDEX_BACKUP={backup or ""}
-INDEX_LOCK_EXPIRES=$(($(date +%s) + {expires_in}))
-INDEX_LOCK_WAIT={wait}
-INDEX_LOCK_POLL=0.1
-PBS_JOBID={job}
-RUN_ID={job}
-# The stage header's s5 wrapper (templates/s3_stage.sh).
-s5() {{ s5cmd --credentials-file "$S3_CREDENTIALS_FILE" --profile "$S3_PROFILE" --endpoint-url "$S3_ENDPOINT_URL" "$@"; }}
-. {ARCHIVE}
-. {STORE}
-mkdir -p "$INDEX_DIR"
-{body}
-"""
+@pytest.fixture(autouse=True)
+def fake_s3(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", f"{FAKE_S5CMD}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_S3", str(tmp_path / "s3"))
 
 
-def shell(tmp_path, body, *, check=True, env=None, **settings):
-    return subprocess.run(
-        ["bash", "-c", shell_script(tmp_path, body, **settings)],
-        text=True,
-        capture_output=True,
-        check=check,
-        env={**os.environ, **(env or {})},
+def store(tmp_path, *, job="job-1", index="index", backup=BACKUP, lock_seconds=3600, wait=2, env=None):
+    """One job's view of the index, as a PBS job builds it from its settings."""
+    if env:
+        os.environ.update(env)
+    try:
+        storage = S5Client("https://s3.example.invalid", "/dev/null", "test")
+    finally:
+        for name in env or {}:
+            del os.environ[name]
+    return IndexStore(
+        str(tmp_path / index),
+        backup,
+        storage=storage,
+        job_id=job,
+        lock_seconds=lock_seconds,
+        wait_seconds=wait,
+        poll_seconds=0.1,
     )
 
 
 def parse_index(tmp_path, height=100, job="job-1"):
-    """Stand in for a parse: write files, then record the index as the template does."""
-    return shell(
-        tmp_path,
-        f"""index_lock_exclusive
-touch "$INDEX_DIR/.writing"
-index_link_into_run
-mkdir -p "$RUN_WORK/blocksci_data/parsed/chain"
-printf 'blocks-{height}' > "$RUN_WORK/blocksci_data/parsed/chain/block.dat"
-printf '{{"dataDirectory": "x"}}' > "$RUN_WORK/blocksci_data/config.json"
-printf '{{"exported_max_block": {height}}}' > "$RUN_WORK/manifest.json"
-index_publish "$RUN_WORK/manifest.json"
-index_unlock""",
-        job=job,
-    )
+    """Stand in for a parse: write files, then record the index as the parse job does."""
+    index = store(tmp_path, job=job)
+    index.lock_exclusive()
+    index.begin_write()
+    run = tmp_path / f"run-{job}"
+    index.link_into_run(run)
+    (run / "blocksci_data/parsed/chain").mkdir(parents=True, exist_ok=True)
+    (run / "blocksci_data/parsed/chain/block.dat").write_text(f"blocks-{height}")
+    (run / "blocksci_data/config.json").write_text('{"dataDirectory": "x"}')
+    index.publish(run / "blocksci_data/config.json", {"exported_max_block": height})
+    index.unlock()
 
 
 def backup(tmp_path, job="backup", **settings):
-    return shell(tmp_path, "index_lock_shared\nindex_backup\nindex_unlock", job=job, **settings)
+    index = store(tmp_path, job=job, **settings)
+    index.lock_shared()
+    try:
+        index.backup(threads=1)
+    finally:
+        index.unlock()
 
 
 def restore(tmp_path, **settings):
-    return shell(tmp_path, "index_lock_exclusive\nindex_reconcile", job="update", **settings)
+    index = store(tmp_path, job="update", **settings)
+    index.lock_exclusive()
+    index.reconcile()
 
 
 def s3(tmp_path):
@@ -88,9 +86,9 @@ def block(tmp_path):
 def test_published_index_is_complete(tmp_path):
     parse_index(tmp_path)
 
-    result = shell(tmp_path, 'index_complete "$INDEX_DIR" && index_height "$INDEX_DIR"')
+    index = store(tmp_path)
 
-    assert result.stdout.strip().endswith("100")
+    assert index.complete() and index.height() == 100
     assert block(tmp_path) == "blocks-100"
 
 
@@ -112,16 +110,16 @@ def test_backup_writes_one_archive_with_its_manifest(tmp_path):
     assert not (tmp_path / "index/.lock/readers/backup").exists()
 
 
-def test_an_interrupted_update_is_restored_from_the_backup(tmp_path):
+def test_an_interrupted_update_is_restored_from_the_backup(tmp_path, capsys):
     parse_index(tmp_path)
     backup(tmp_path)
     # An update died midway: its marker stays and a file changed.
     (tmp_path / "index/.writing").touch()
     (tmp_path / "index/parsed/chain/block.dat").write_text("half-written")
 
-    result = restore(tmp_path)
+    restore(tmp_path)
 
-    assert "restoring the working copy" in result.stdout
+    assert "restoring the working copy" in capsys.readouterr().out
     assert block(tmp_path) == "blocks-100"
 
 
@@ -147,14 +145,13 @@ def test_a_broken_upload_leaves_no_valid_backup(tmp_path):
     parse_index(tmp_path)
     backup(tmp_path)
 
-    failed = backup(tmp_path, job="backup-2", check=False, env={"FAKE_S5CMD_FAIL_PIPE": "1"})
+    with pytest.raises(S5Error):
+        backup(tmp_path, job="backup-2", env={"FAKE_S5CMD_FAIL_PIPE": "1"})
 
-    assert failed.returncode != 0
     assert not (s3(tmp_path) / "manifest.json").exists()
     shutil.rmtree(tmp_path / "index")
-    result = restore(tmp_path, check=False)
-    assert result.returncode == 1
-    assert "there is no S3 backup" in result.stderr
+    with pytest.raises(IndexStoreError, match="there is no S3 backup"):
+        restore(tmp_path)
 
 
 def test_without_s5cmd_pipe_the_archive_passes_through_scratch(tmp_path):
@@ -169,11 +166,10 @@ def test_without_s5cmd_pipe_the_archive_passes_through_scratch(tmp_path):
 
 def test_a_remote_size_mismatch_publishes_no_manifest(tmp_path):
     parse_index(tmp_path)
-    failed = backup(tmp_path, check=False, env={
-        "FAKE_S5CMD_LS_SIZE_DELTA": "1", "FAKE_S5CMD_FORBID_ARCHIVE_CAT": "1",
-    })
-    assert failed.returncode != 0
-    assert "size/key mismatch" in failed.stderr
+
+    with pytest.raises(IndexStoreError, match="size/key mismatch"):
+        backup(tmp_path, env={"FAKE_S5CMD_LS_SIZE_DELTA": "1", "FAKE_S5CMD_FORBID_ARCHIVE_CAT": "1"})
+
     assert not (s3(tmp_path) / "manifest.json").exists()
 
 
@@ -185,75 +181,79 @@ def test_a_corrupted_backup_is_refused(tmp_path):
     (s3(tmp_path) / "manifest.json").write_text(json.dumps(manifest))
     shutil.rmtree(tmp_path / "index")
 
-    result = restore(tmp_path, check=False)
-
-    assert result.returncode == 1
-    assert "does not match its SHA-256" in result.stderr
+    with pytest.raises(S5Error, match="does not match its SHA-256"):
+        restore(tmp_path)
+    assert (tmp_path / "index/.writing").exists()
 
 
 def test_without_a_backup_an_incomplete_index_stops_the_job(tmp_path):
     parse_index(tmp_path)
     (tmp_path / "index/.writing").touch()
 
-    result = restore(tmp_path, backup=None, check=False)
-
-    assert result.returncode == 1
-    assert "there is no S3 backup" in result.stderr
+    with pytest.raises(IndexStoreError, match="there is no S3 backup"):
+        restore(tmp_path, backup=None)
 
 
 def test_readers_share_and_a_writer_waits_for_them(tmp_path):
-    shell(tmp_path, "index_lock_shared", job="reader-1")
-    shell(tmp_path, "index_lock_shared", job="reader-2")
+    store(tmp_path, job="reader-1").lock_shared()
+    store(tmp_path, job="reader-2").lock_shared()
 
-    blocked = shell(tmp_path, "index_lock_exclusive", job="writer", check=False)
+    with pytest.raises(IndexStoreError, match="readers still hold"):
+        store(tmp_path, job="writer").lock_exclusive()
 
-    assert blocked.returncode == 1
-    assert "readers still hold" in blocked.stderr
     # The writer that gave up leaves no entry behind, so readers keep working.
     assert not (tmp_path / "index/.lock/writer").exists()
     assert sorted(p.name for p in (tmp_path / "index/.lock/readers").iterdir()) == ["reader-1", "reader-2"]
 
 
 def test_a_reader_waits_while_the_writer_holds_the_index(tmp_path):
-    shell(tmp_path, "index_lock_exclusive", job="writer")
+    store(tmp_path, job="writer").lock_exclusive()
 
-    blocked = shell(tmp_path, "index_lock_shared", job="reader", check=False)
+    with pytest.raises(IndexStoreError, match="is being updated"):
+        store(tmp_path, job="reader").lock_shared()
 
-    assert blocked.returncode == 1
-    assert "is being updated" in blocked.stderr
     assert not (tmp_path / "index/.lock/readers/reader").exists()
 
 
-def test_a_lock_left_by_a_killed_job_expires(tmp_path):
-    shell(tmp_path, "index_lock_exclusive", job="killed", expires_in=1)
+def test_a_lock_left_by_a_killed_job_expires(tmp_path, capsys):
+    store(tmp_path, job="killed", lock_seconds=1).lock_exclusive()
     time.sleep(1.2)
 
-    result = shell(tmp_path, "index_lock_shared && echo reading", job="reader")
+    reader = store(tmp_path, job="reader")
+    reader.lock_shared()
 
-    assert "clearing expired lock writer of job killed" in result.stdout
-    assert result.stdout.strip().endswith("reading")
+    assert "clearing expired lock writer of job killed" in capsys.readouterr().out
+    assert reader.held == tmp_path / "index/.lock/readers/reader"
 
 
 def test_a_purged_file_makes_the_working_copy_incomplete(tmp_path):
     parse_index(tmp_path)
     (tmp_path / "index/parsed/chain/block.dat").unlink()
 
-    result = shell(tmp_path, 'index_complete "$INDEX_DIR" || echo incomplete')
+    assert not store(tmp_path).complete()
 
-    assert result.stdout.strip() == "incomplete"
+
+def hold(tmp_path, job, mode, seconds):
+    """Another job, in its own process, that holds the lock for a while."""
+    program = (
+        "import sys, time\n"
+        f"sys.path.insert(0, {str(ROOT / 'src')!r})\n"
+        "from coinjoin_pipeline.execution.pbs.index_store import IndexStore\n"
+        f"store = IndexStore({str(tmp_path / 'index')!r}, None, job_id={job!r}, lock_seconds=3600, wait_seconds=10,"
+        " poll_seconds=0.1)\n"
+        f"store.lock_{mode}()\n"
+        f"time.sleep({seconds})\n"
+        "store.unlock()\n"
+    )
+    return subprocess.Popen([sys.executable, "-c", program])
 
 
 def test_a_writer_proceeds_once_the_readers_finish(tmp_path):
-    readers = [
-        subprocess.Popen(
-            ["bash", "-c", shell_script(tmp_path, "index_lock_shared\nsleep 1\nindex_unlock", job=f"reader-{n}")]
-        )
-        for n in (1, 2)
-    ]
+    readers = [hold(tmp_path, f"reader-{n}", "shared", 1) for n in (1, 2)]
     time.sleep(0.5)
     started = time.monotonic()
 
-    shell(tmp_path, "index_lock_exclusive\necho writing", job="writer", wait=10)
+    store(tmp_path, job="writer", wait=10).lock_exclusive()
 
     assert time.monotonic() - started >= 0.3
     assert [reader.wait() for reader in readers] == [0, 0]
@@ -265,14 +265,47 @@ def test_an_aliased_index_is_bound_at_its_target_too(tmp_path):
     (tmp_path / "alias").symlink_to(tmp_path / "beegfs")
     real = os.path.realpath(tmp_path / "beegfs")
 
-    result = shell(tmp_path, 'index_bind ro\nprintf "%s\\n" "${INDEX_BINDS[@]}"', index="alias")
-
-    assert result.stdout.split() == ["--bind", f"{real}:{real}:ro", "--bind", f"{real}:{tmp_path}/alias:ro"]
+    assert store(tmp_path, index="alias").binds("ro") == [f"{real}:{real}:ro", f"{real}:{tmp_path}/alias:ro"]
 
 
 def test_a_plain_index_is_bound_once(tmp_path):
     real = str(tmp_path / "index")
 
-    result = shell(tmp_path, 'index_bind rw\nprintf "%s\\n" "${INDEX_BINDS[@]}"')
+    assert store(tmp_path).binds("rw") == [f"{real}:{real}:rw"]
 
-    assert result.stdout.split() == ["--bind", f"{real}:{real}:rw"]
+
+def shell_lock(tmp_path, job, body):
+    """The shell library of earlier jobs, which can still run while new ones start."""
+    library = subprocess.run(
+        ["git", "show", "HEAD:src/coinjoin_pipeline/execution/pbs/templates/index_store.sh"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if library.returncode:
+        pytest.skip("the shell index library is no longer in HEAD")
+    script = (
+        f"set -euo pipefail\nINDEX_DIR={tmp_path}/index\nINDEX_BACKUP=\nPBS_JOBID={job}\n"
+        "INDEX_LOCK_EXPIRES=$(($(date +%s) + 3600))\nINDEX_LOCK_WAIT=1\nINDEX_LOCK_POLL=0.1\n"
+        f"{library.stdout}\nmkdir -p \"$INDEX_DIR\"\n{body}\n"
+    )
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+
+
+def test_python_and_shell_jobs_respect_each_others_locks(tmp_path):
+    writer = store(tmp_path, job="python-writer")
+    writer.lock_exclusive()
+    blocked = shell_lock(tmp_path, "shell-reader", "index_lock_shared")
+    assert blocked.returncode == 1 and "is being updated" in blocked.stderr
+    writer.unlock()
+
+    assert shell_lock(tmp_path, "shell-reader", "index_lock_shared").returncode == 0
+    with pytest.raises(IndexStoreError, match="readers still hold"):
+        store(tmp_path, job="python-writer", wait=0.5).lock_exclusive()
+    assert (tmp_path / "index/.lock/readers/shell-reader/job").read_text() == "shell-reader\n"
+    python_entry = store(tmp_path, job="python-reader")
+    python_entry.lock_shared()
+    assert sorted((tmp_path / "index/.lock/readers/python-reader").iterdir()) == [
+        tmp_path / "index/.lock/readers/python-reader/expires",
+        tmp_path / "index/.lock/readers/python-reader/job",
+    ]
