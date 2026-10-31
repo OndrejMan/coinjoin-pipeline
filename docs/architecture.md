@@ -100,8 +100,8 @@ output checks; `templates_s3.py` adds the shared cache/index access and job life
 Docker and PBS choose mounts and interpreter, then invoke this same payload.
 The report always consumes `blocksci-analysis_data/blocksci_analysis.json`.
 It never performs an implicit detector scan. The reader accepts only artifact
-schema 1.1, which records the mode and preserves detector parameters, skipped
-transactions, diagnostics and clustering; older runs are not supported.
+schema 1.2, which records the mode and preserves detector parameters, skipped
+transactions, diagnostics and clustering; older runs need `cjp analyze` again.
 
 All S3 parsers publish `blocksci-parse_data/` as a zstd archive, manifest and
 SHA-256; `combined` and `reusable` differ only in job arrangement. The working

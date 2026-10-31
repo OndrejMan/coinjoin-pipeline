@@ -7,6 +7,7 @@ from exporters import cli as report_cli
 from exporters.artifact_paths import DUMPLINGS_SNAPSHOT_FILE, EXPORTED_BLOCKS_DIR
 from exporters.common import f1_score, io_items, wallet_names
 from exporters.markdown_report import is_disagreement, render_run_manifest
+from exporters.analysis_artifact import SCHEMA_VERSION
 from exporters.parameters import Detector
 from exporters.normalization import iter_exported_blocks
 
@@ -26,7 +27,7 @@ def external_run(tmp_path: Path) -> Path:
     write(
         run / "blocksci-analysis_data/blocksci_analysis.json",
         {
-            "schema_version": "1.1",
+            "schema_version": SCHEMA_VERSION,
             "mode": "external",
             "run_id": run.name,
             "parameters": Detector.from_args(args).artifact_parameters(),

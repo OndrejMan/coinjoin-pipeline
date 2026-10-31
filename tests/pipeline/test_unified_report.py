@@ -462,7 +462,7 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(report["run"]["mode"], "external")
         self.assertEqual(report["run"]["network"], "bitcoin")
         self.assertEqual(report["evaluation_scope"], "baseline_agreement_only")
-        self.assertIsNone(report["detection_confusion_matrix"])
+        self.assertNotIn("detection_confusion_matrix", report)
         self.assertIsNone(report["detector_evaluations"])
         markdown = render_report(report)
         self.assertIn("precision, recall, and F1 are intentionally unavailable", markdown)
@@ -747,7 +747,7 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(report["summary"]["emulator_data_transactions"], 3)
         self.assertEqual(report["summary"]["emulator_data_coinjoins"], 1)
         self.assertEqual(
-            report["detection_confusion_matrix"],
+            report["detector_evaluations"]["blocksci"],
             {
                 "evaluated_transactions": 3,
                 "detected_transactions": 1,
@@ -769,12 +769,8 @@ class UnifiedReportTest(unittest.TestCase):
             },
         )
         self.assertEqual(
-            report["detector_evaluations"]["blocksci"],
-            report["detection_confusion_matrix"],
-        )
-        self.assertEqual(
             report["detector_evaluations"]["coinjoin_analysis"],
-            report["detection_confusion_matrix"],
+            report["detector_evaluations"]["blocksci"],
         )
 
     def test_build_report_includes_image_digests(self):
@@ -976,7 +972,7 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertIsNone(emulator_data["transactions"]["txA"]["is_coinjoin"])
         self.assertEqual(emulator_data["summary"]["unknown_transactions"], 1)
         self.assertFalse(emulator_data["label_provenance"]["independent"])
-        self.assertIsNone(report["detection_confusion_matrix"])
+        self.assertNotIn("detection_confusion_matrix", report)
         self.assertIsNone(report["detector_evaluations"])
         self.assertEqual(report["evaluation_scope"], "emulator_labels_unavailable")
         self.assertIn(
@@ -1642,7 +1638,7 @@ class UnifiedReportTest(unittest.TestCase):
                 emulator_data=emulator_data_fixture(),
             )
 
-        matrix = report["detection_confusion_matrix"]
+        matrix = report["detector_evaluations"]["blocksci"]
         self.assertEqual(matrix["true_positives"], 0)
         self.assertEqual(matrix["false_positives"], 1)
         self.assertEqual(matrix["false_negatives"], 1)
@@ -1685,7 +1681,7 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(blocksci_matrix["false_negative_txids"], ["txA"])
         self.assertEqual(baseline_matrix["false_positive_txids"], ["txC"])
         self.assertEqual(baseline_matrix["false_negative_txids"], [])
-        self.assertEqual(report["detection_confusion_matrix"], blocksci_matrix)
+        self.assertNotIn("detection_confusion_matrix", report)
 
         markdown = render_report(report)
         self.assertIn("| BlockSci | 0 | 1 | 1 | 1 |", markdown)

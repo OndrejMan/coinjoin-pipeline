@@ -200,13 +200,12 @@ def build_report(
     add_blocksci_heuristic_explanations(coinjoin_analysis, detector)
     transactions = compare_transactions(coinjoin_analysis, blocksci_records)
 
-    blocksci_detection_confusion_matrix = build_detection_confusion_matrix(emulator_data, blocksci_records)
     independent_emulator_labels = bool(
         emulator_data and (emulator_data.get("label_provenance") or {}).get("independent")
     )
     detector_evaluations = (
         {
-            "blocksci": blocksci_detection_confusion_matrix,
+            "blocksci": build_detection_confusion_matrix(emulator_data, blocksci_records),
             "coinjoin_analysis": build_detection_confusion_matrix(emulator_data, coinjoin_analysis),
         }
         if independent_emulator_labels
@@ -236,10 +235,6 @@ def build_report(
     run_manifest["mode"] = mode
     run_manifest["network"] = network
     apply_mapping_provenance(run_manifest, coinjoin_mappings)
-    # The detector manifest holds only the selected type's parameters; the run
-    # block spells every parameter out and leaves the other type's as null.
-    detector_manifest = run_manifest["detector"]
-
     return {
         "schema_version": SCHEMA_VERSION,
         "run": {
@@ -248,11 +243,6 @@ def build_report(
             "scenario_name": scenario.get("name") if scenario else None,
             "coinjoin_type": coinjoin_type,
             "blocksci_min_input_count": min_input_count,
-            "first_wasabi2_block": detector_manifest.get("first_wasabi2_block"),
-            "joinmarket_detector": detector_manifest.get("joinmarket_detector"),
-            "joinmarket_min_base_fee": detector_manifest.get("joinmarket_min_base_fee"),
-            "joinmarket_percentage_fee": detector_manifest.get("joinmarket_percentage_fee"),
-            "joinmarket_max_depth": detector_manifest.get("joinmarket_max_depth"),
             "scenario_sha256": scenario.get("sha256") if scenario else None,
             "mode": mode,
             "network": network,
@@ -269,9 +259,6 @@ def build_report(
         }
         if emulator_data
         else None,
-        # Compatibility alias retained for schema 1.x consumers. New consumers
-        # should read both analyzers from detector_evaluations.
-        "detection_confusion_matrix": blocksci_detection_confusion_matrix,
         "detector_evaluations": detector_evaluations,
         "evaluation_scope": evaluation_scope(mode, independent_emulator_labels),
         "clustering_evaluation": evaluate_cluster_assignments(

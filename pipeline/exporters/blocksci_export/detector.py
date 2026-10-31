@@ -239,7 +239,7 @@ def normalize_blocksci_tx(tx: object) -> TransactionRecord:
     )
     return {
         "txid": to_json_text(safe_attr(tx, "hash")),
-        "broadcast_time": to_json_text(safe_attr(tx, "block_time")),
+        "block_time": to_json_text(safe_attr(tx, "block_time")),
         "block_height": cast("int | None", safe_attr(tx, "block_height")),
         "inputs": inputs,
         "outputs": outputs,

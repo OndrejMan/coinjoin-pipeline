@@ -49,7 +49,7 @@ when done.
   so scripts tell bad input from a failed run. scenario-lab only checks `code == 0`.
 - [x] kebab-case aliases for `--analysisPbs`, `--blocksciPbs`, `--mappingsPbs`, `--blocksciScript`,
   `--fromConfiguration`; consider renaming `--version` (image tag). `--version` stays: scripts use it.
-- [ ] Report schema 2: drop `detection_confusion_matrix` and the duplicated `run.joinmarket_*` /
+- [x] Report schema 2: drop `detection_confusion_matrix` and the duplicated `run.joinmarket_*` /
   `run.first_wasabi2_block`; rename `transactions[*].blocksci.broadcast_time` (holds block time)
   to `block_time`. scenario-lab `src/domain/evaluation.ts` must read
   `detector_evaluations.blocksci` first.

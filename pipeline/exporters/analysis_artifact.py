@@ -9,7 +9,7 @@ from exporters.artifact_paths import ANALYSIS_ARTIFACT_NAME
 from exporters.common import load_json
 from exporters.report_types import BlockSciAnalysisArtifact, DetectorParameters
 
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "1.2"
 ARTIFACT_NAME = ANALYSIS_ARTIFACT_NAME
 
 

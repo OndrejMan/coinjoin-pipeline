@@ -53,7 +53,6 @@ class TransactionMetrics(TypedDict):
 
 class _TransactionFields(TypedDict):
     txid: str | None
-    broadcast_time: str | None
     block_height: int | None
     inputs: list[IORecord]
     outputs: list[IORecord]
@@ -61,6 +60,10 @@ class _TransactionFields(TypedDict):
 
 class TransactionRecord(_TransactionFields, TransactionMetrics, total=False):
     """One CoinJoin transaction normalized from coinjoin-analysis or BlockSci."""
+
+    # coinjoin-analysis records when the round broadcast it, BlockSci its block's time.
+    broadcast_time: str | None
+    block_time: str | None
 
     round_id: str | None
     block_height_inferred: bool

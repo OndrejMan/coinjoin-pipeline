@@ -48,9 +48,8 @@ When independent labels are available, schema-1.8 reports evaluate both
 BlockSci and `coinjoin-analysis` against the same set of exported non-coinbase
 transactions. The two confusion matrices are stored under
 `detector_evaluations.blocksci` and
-`detector_evaluations.coinjoin_analysis`. The legacy
-`detection_confusion_matrix` field remains an alias of the BlockSci matrix for
-schema-1.x consumers. `coinjoin-analysis` metrics use its normalized effective
+`detector_evaluations.coinjoin_analysis`; schema 2.0 dropped the old
+`detection_confusion_matrix` alias. `coinjoin-analysis` metrics use its normalized effective
 output after applying any `false_cjtxs.json*` sidecars recorded in
 `baseline_filter`; they do not describe the unfiltered raw detector output.
 
@@ -151,7 +150,7 @@ module lacks the raw binding; it never silently substitutes the linked subset.
 On every path (Docker and PBS, serial and parallel), these detector results and
 the associated integration diagnostics and clustering assignments are persisted
 by `exporters/worker.py` as `blocksci-analysis_data/blocksci_analysis.json`
-(schema 1.1; readers also accept 1.0). Report assembly reads only this artifact
+(schema 1.2, whose BlockSci records carry `block_time`; no other schema is read). Report assembly reads only this artifact
 and never scans BlockSci itself. It requires the artifact's run ID and detector parameters to exactly match the
 requested report; a mismatched or stale artifact fails rather than being
 silently combined with a different baseline.
@@ -193,20 +192,19 @@ Every key is present in every report; one that does not apply is `null`.
 | Key | Content |
 |---|---|
 | `schema_version` | Report schema (`exporters/common.py` `SCHEMA_VERSION`). |
-| `run` | Run ID, start time, scenario, mode, network and the detector parameters it ran with. |
+| `run` | Run ID, start time, scenario, CoinJoin type, BlockSci minimum input count, mode and network; the other detector parameters are in `run_manifest.detector`. |
 | `run_manifest`, `run_manifest_comparison` | Provenance (images and digests, detector, source commits, exporter tree hash, input hashes) and its diff against the report it replaced. |
 | `warnings` | `[{code, message}]`; today only `wasabi_production_threshold_zero_detections`: no Wasabi detections at regtest heights under the production input threshold. |
 | `integration_diagnostics` | Image provenance, chain height and exported-target checks of the BlockSci analysis. |
 | `scenario`, `emulator_data` | The scenario and the producer-label summary and provenance. |
 | `detector_evaluations`, `evaluation_scope` | Confusion matrices of both analyzers against producer labels, and which comparison the metrics stand for. |
-| `detection_confusion_matrix` | Alias of `detector_evaluations.blocksci`, kept for scenario-lab. |
 | `clustering_evaluation` | Pairwise precision and recall of BlockSci clusters against wallet ground truth. |
 | `blocksci_skipped_txids` | Transactions the JoinMarket subset search gave up on. |
 | `coinjoin_mappings` | Wasabi mappings and Sake results, when the run computed them. |
 | `coverage` | External mode only: the BlockSci scan window and how much of the baseline falls in it. |
 | `baseline_filter` | The false-positive lists applied to the baseline and the transactions they removed. |
 | `liquidity_evaluation` | Pool liquidity from ground truth, coinjoin-analysis and BlockSci, and fin of large wallets and groups. |
-| `summary`, `divergences`, `transactions` | Counts, the analyzer disagreements and every compared transaction. |
+| `summary`, `divergences`, `transactions` | Counts, the analyzer disagreements and every compared transaction; its `coinjoin_analysis` side has the round's `broadcast_time`, its `blocksci` side the block's `block_time`. |
 
 ## Run catalog report statuses
 
@@ -248,7 +246,7 @@ them with a rebuilt emulator image if ground-truth metrics are needed.
 
 ## Liquidity evaluation
 
-`liquidity_evaluation` in `unified_report.json` (schema 1.9) follows the
+`liquidity_evaluation` in `unified_report.json` (schema 2.0) follows the
 transaction-centric pool liquidity of Svenda et al., PETS 2026, section 4.3.2.
 `pipeline/exporters/liquidity.py` classifies every coinjoin input and output
 three times:

@@ -846,6 +846,8 @@ def render_header(report: JsonObject) -> list[str]:
 
 def render_run(report: JsonObject) -> list[str]:
     run = report.get("run") or {}
+    # Only the selected CoinJoin type's parameters are present.
+    detector = (report.get("run_manifest") or {}).get("detector") or {}
     scenario = report.get("scenario") or {}
     return section(
         "Run",
@@ -862,11 +864,11 @@ def render_run(report: JsonObject) -> list[str]:
                 ["scenario wallets", scenario.get("wallet_count")],
                 ["coinjoin type", run.get("coinjoin_type")],
                 ["BlockSci min input count", run.get("blocksci_min_input_count")],
-                ["FirstWasabi2Block", run.get("first_wasabi2_block")],
-                ["JoinMarket detector", run.get("joinmarket_detector")],
-                ["JoinMarket min base fee", run.get("joinmarket_min_base_fee")],
-                ["JoinMarket percentage fee", run.get("joinmarket_percentage_fee")],
-                ["JoinMarket max depth", run.get("joinmarket_max_depth")],
+                ["FirstWasabi2Block", detector.get("first_wasabi2_block")],
+                ["JoinMarket detector", detector.get("joinmarket_detector")],
+                ["JoinMarket min base fee", detector.get("joinmarket_min_base_fee")],
+                ["JoinMarket percentage fee", detector.get("joinmarket_percentage_fee")],
+                ["JoinMarket max depth", detector.get("joinmarket_max_depth")],
                 ["scenario sha256", run.get("scenario_sha256")],
             ],
             key="field",

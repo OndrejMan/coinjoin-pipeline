@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 from exporters import cli as report_cli
 from exporters import worker
+from exporters.analysis_artifact import SCHEMA_VERSION
 from exporters.parameters import Detector
 
 from coinjoin_pipeline import cli
@@ -27,7 +28,7 @@ def report_inputs(run_dir: Path) -> None:
     artifact.write_text(
         json.dumps(
             {
-                "schema_version": "1.1",
+                "schema_version": SCHEMA_VERSION,
                 "mode": "emulator",
                 "run_id": run_dir.name,
                 "parameters": Detector.from_args(args).artifact_parameters(),

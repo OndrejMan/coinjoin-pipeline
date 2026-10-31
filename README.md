@@ -96,10 +96,10 @@ warning.
 Independent emulator labels, raw detector metrics,
 and provenance rules are defined in
 [Analysis semantics](docs/analysis-semantics.md).
-When verified emulator labels are available, unified report schema 1.7 and
-later evaluate both BlockSci and the filtered, normalized `coinjoin-analysis`
-baseline against the same exported transaction universe while preserving the
-legacy BlockSci confusion-matrix field.
+When verified emulator labels are available, the unified report (schema 2.0)
+evaluates both BlockSci and the filtered, normalized `coinjoin-analysis`
+baseline against the same exported transaction universe under
+`detector_evaluations`.
 
 ### BlockSci multi-chain caveat
 
