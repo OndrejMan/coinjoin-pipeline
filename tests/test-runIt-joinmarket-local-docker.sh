@@ -264,8 +264,9 @@ if run.get("scenario_name") != "default-joinmarket":
     raise SystemExit(f"FAIL: expected report scenario_name default-joinmarket, got {run.get('scenario_name')!r}")
 if run.get("coinjoin_type") != "joinmarket":
     raise SystemExit(f"FAIL: expected report coinjoin_type joinmarket, got {run.get('coinjoin_type')!r}")
-if run.get("joinmarket_detector") != "definite":
-    raise SystemExit(f"FAIL: expected default JoinMarket detector definite, got {run.get('joinmarket_detector')!r}")
+detector = ((report.get("run_manifest") or {}).get("detector") or {})
+if detector.get("joinmarket_detector") != "definite":
+    raise SystemExit(f"FAIL: expected default JoinMarket detector definite, got {detector.get('joinmarket_detector')!r}")
 
 execution = ((report.get("run_manifest") or {}).get("execution") or {})
 if execution.get("engine") != "joinmarket":
