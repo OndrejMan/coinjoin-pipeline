@@ -671,17 +671,17 @@ def verify_chain(stage: Stage, max_block: int, *, update: bool, index_binds: Seq
     """Check the parsed chain against the block archive before anything publishes it."""
     source = stage.settings["source"]
     stage.log("[block-archive] verifying the parsed chain before cache publication")
-    run = container_run(stage)
+    run_directory = container_run(stage)
     arguments = [
-        f"{run}/blocksci_data/config.json",
+        f"{run_directory}/blocksci_data/config.json",
         "--max-block",
         str(max_block),
         "--network",
         str(source["network"]),
         *(["--expected-block-hash", str(source["expected_hash"])] if source.get("expected_hash") else []),
-        *(["--source-manifest", f"{run}/source-blocksci-parse_data/manifest.json"] if update else []),
+        *(["--source-manifest", f"{run_directory}/source-blocksci-parse_data/manifest.json"] if update else []),
         "--output",
-        f"{run}/blocksci_data/chain-verification.json",
+        f"{run_directory}/blocksci_data/chain-verification.json",
     ]
     command = ["singularity", "exec"]
     for bind in (
