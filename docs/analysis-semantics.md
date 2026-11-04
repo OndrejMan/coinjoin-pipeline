@@ -5,6 +5,13 @@ pipeline. It is the contract to use when interpreting a unified report.
 
 ## Emulator labels and detector metrics
 
+Producer-manifest validation belongs to coinjoin-pipeline. The standalone
+coinjoin-analysis parser reads source locations and protocol metadata, but does
+not validate manifest hashes, capture completeness or producer-positive counts.
+The pipeline validates those before using producer evidence as ground truth;
+missing analyzer detections remain visible as false negatives in that analyzer's
+evaluation rather than making its parser responsible for ground-truth integrity.
+
 Emulator-mode labels are independent of `coinjoin-analysis` detector output:
 
 - JoinMarket positives come from `joinmarket_round_events.json` records with
