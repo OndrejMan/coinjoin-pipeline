@@ -81,7 +81,8 @@ def _verify_label_source(data_dir: Path, record: JsonValue, expected_engine: str
     expected_size = record.get("size_bytes")
     expected_sha256 = record.get("sha256")
     if (
-        not isinstance(expected_size, int)
+        isinstance(expected_size, bool)
+        or not isinstance(expected_size, int)
         or expected_size < 0
         or not isinstance(expected_sha256, str)
         or not SHA256_HEX_RE.fullmatch(expected_sha256)
@@ -163,6 +164,8 @@ def verified_producer_label_sources(
         source_path, name_or_reason = _verify_label_source(data_dir, record, expected_engine)
         if source_path is None:
             return rejected(name_or_reason)
+        if source_path in source_paths:
+            return rejected("producer label manifest contains a duplicate source")
         source_paths.append(source_path)
         source_names.append(name_or_reason)
 
