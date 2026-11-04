@@ -6,13 +6,14 @@ worker script and runs it with the node's ``python3``.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import IO, Sequence
+from typing import IO, Iterator, Mapping, Sequence
 
 # Read size of the archive streams; large enough to keep s5cmd and zstd busy.
 CHUNK = 8 * 1024 * 1024
@@ -31,6 +32,22 @@ def _pipe(stream: IO[bytes] | None) -> IO[bytes]:
     if stream is None:
         raise RuntimeError("The process has no pipe to stream through")
     return stream
+
+
+@contextlib.contextmanager
+def _stage(
+    command: Sequence[str],
+    stdin: int | IO[bytes] | None = None,
+    stdout: int | None = None,
+    env: Mapping[str, str] | None = None,
+) -> Iterator[subprocess.Popen]:
+    """One process of a stream; leaving the context terminates it if needed and reaps it."""
+    with subprocess.Popen(command, stdin=stdin, stdout=stdout, env=env) as process:
+        try:
+            yield process
+        finally:
+            if process.poll() is None:
+                process.terminate()
 
 
 class S5Client:
@@ -133,22 +150,24 @@ class S5Client:
         Hashed and measured on the way, so nothing is read back. Without ``pipe`` the
         archive is staged as a temporary file first.
         """
-        processes: list[subprocess.Popen] = []
         digest, size = hashlib.sha256(), 0
         staged = None
-        try:
-            tar = subprocess.Popen(["tar", "-C", str(root), "-cf", "-", *members], stdout=subprocess.PIPE)
-            processes.append(tar)
-            zstd = subprocess.Popen(["zstd", "-3", f"-T{threads}"], stdin=tar.stdout, stdout=subprocess.PIPE)
+        with contextlib.ExitStack() as stack:
+            tar = stack.enter_context(_stage(["tar", "-C", str(root), "-cf", "-", *members], stdout=subprocess.PIPE))
+            zstd = stack.enter_context(_stage(["zstd", "-3", f"-T{threads}"], stdin=tar.stdout, stdout=subprocess.PIPE))
             _pipe(tar.stdout).close()
-            processes.append(zstd)
+            processes = [tar, zstd]
             if self.supports_pipe():
-                upload = self.popen("pipe", uri, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL)
+                command = self.command("pipe", uri)
+                upload = stack.enter_context(
+                    _stage(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, env=self.environment)
+                )
                 processes.append(upload)
                 destination = _pipe(upload.stdin)
             else:
                 # In the job's temporary directory (its scratch), never in the tree being archived.
                 handle, staged = tempfile.mkstemp(prefix="archive-", suffix=".tar.zst")
+                stack.callback(Path(staged).unlink, missing_ok=True)
                 destination = os.fdopen(handle, "wb")
             compressed = _pipe(zstd.stdout)
             for chunk in iter(lambda: compressed.read(CHUNK), b""):
@@ -162,13 +181,6 @@ class S5Client:
             if staged is not None:
                 self.copy(staged, uri, timeout=None)
             return digest.hexdigest(), size
-        finally:
-            for process in processes:
-                if process.poll() is None:
-                    process.terminate()
-                    process.wait()
-            if staged is not None:
-                Path(staged).unlink(missing_ok=True)
 
     def restore_archive(self, uri: str, destination: Path, expected_sha256: str) -> None:
         """Stream ``uri`` through ``zstd -d | tar -x -C destination``, hashing it on the way.
@@ -176,24 +188,18 @@ class S5Client:
         The caller exposes what was extracted only after this returns.
         """
         digest = hashlib.sha256()
-        source = self.popen("cat", uri, stdout=subprocess.PIPE)
-        unpack = subprocess.Popen(["zstd", "-d"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-        extract = subprocess.Popen(["tar", "-C", str(destination), "-xf", "-"], stdin=unpack.stdout)
-        processes = [source, unpack, extract]
-        try:
+        with contextlib.ExitStack() as stack:
+            source = stack.enter_context(_stage(self.command("cat", uri), stdout=subprocess.PIPE, env=self.environment))
+            unpack = stack.enter_context(_stage(["zstd", "-d"], stdin=subprocess.PIPE, stdout=subprocess.PIPE))
+            extract = stack.enter_context(_stage(["tar", "-C", str(destination), "-xf", "-"], stdin=unpack.stdout))
             _pipe(unpack.stdout).close()
             downloaded, compressed = _pipe(source.stdout), _pipe(unpack.stdin)
             for chunk in iter(lambda: downloaded.read(CHUNK), b""):
                 digest.update(chunk)
                 compressed.write(chunk)
             compressed.close()
-            if any(process.wait() != 0 for process in processes):
+            if any(process.wait() != 0 for process in (source, unpack, extract)):
                 raise S5Error(f"Restoring {uri} failed")
-        finally:
-            for process in processes:
-                if process.poll() is None:
-                    process.terminate()
-                    process.wait()
         if digest.hexdigest() != expected_sha256:
             raise S5Error("The S3 archive does not match its SHA-256")
 
