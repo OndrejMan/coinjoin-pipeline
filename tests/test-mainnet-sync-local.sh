@@ -51,7 +51,7 @@ mkdir -p "$result"
 export PYTHONPATH="$repo/src:$repo/pipeline${PYTHONPATH:+:$PYTHONPATH}"
 python=${MAINNET_TEST_PYTHON:-$repo/.venv/bin/python}
 [[ -x "$python" ]] || { echo "Python environment missing: $python" >&2; exit 2; }
-mkdir -p "$work/bin" "$work/images" "$work/data/bitcoin" "$work/runs" "$work/minio"
+mkdir -p "$work/bin" "$work/images" "$work/data" "$work/runs" "$work/minio"
 chmod 0755 "$work"
 cp "$0" "$work/test-mainnet-sync-local.sh"
 pointer=/tmp/mainnet-sync-local-result
@@ -125,6 +125,8 @@ for name in core dumplings blocksci; do
     _ "$work/images/$name.sif" "$work/images/$name.tar" >"$work/convert-$name.log" 2>&1
 done
 seed_start() {
+  # Only the fixture Core needs it: an existing datadir makes job 0 skip the S3 check.
+  mkdir -p "$work/data/bitcoin"
   local chain_args=()
   if [[ "$mode" == regtest ]]; then
     chain_args=(-regtest -fastprune=1 -fallbackfee=0.0001)
