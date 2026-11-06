@@ -1263,14 +1263,13 @@ class Worker:
         # Whatever is left stays raw for the next run; a running file takes a few minutes.
         walltime = self.c["walltime_seconds"]
         deadline = started + walltime - min(PACK_RESERVE_SECONDS, walltime // 4)
-        stop = threading.Event()
         lock = threading.Lock()
         totals = {"packed": 0, "raw_bytes": 0, "packed_bytes": 0}
         failed: list[str] = []
         self.progress("packing", 0, len(pending))
 
         def work(name: str) -> None:
-            if stop.is_set() or time.monotonic() > deadline:
+            if time.monotonic() > deadline:
                 return
             directory = Path(tempfile.mkdtemp(dir=self.work))
             try:
@@ -1290,12 +1289,8 @@ class Worker:
             if done % 20 == 0:
                 self.progress("packing", done, len(pending))
 
-        try:
-            with ThreadPoolExecutor(self.c["pbs_resources"]["ncpus"]) as pool:
-                list(pool.map(work, pending))
-        except BaseException:
-            stop.set()
-            raise
+        with ThreadPoolExecutor(self.c["pbs_resources"]["ncpus"]) as pool:
+            list(pool.map(work, pending))
         summary = {
             **totals,
             "failed": failed,
