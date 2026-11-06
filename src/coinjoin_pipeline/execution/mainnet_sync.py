@@ -23,6 +23,11 @@ if TYPE_CHECKING:
 # Submission order; each job depends on the previous one.
 SYNC_STAGES = ("restore", "producer", "blocksci", "checkpoint")
 
+# Unpacks a whole dataset (about 143 GB at height 500027) into scratch; only streams otherwise.
+RESTORE_CHECK_RESOURCES = PBSResources(2, "4gb", "200gb", "12:00:00")
+# Stands for the job's scratch directory, known only when the job starts.
+WORK_TOKEN = "@WORK@"
+
 
 # Top-level settings mainnet-sync reads besides its mainnet.* and per-job pbs.<stage>.* groups.
 MAINNET_SYNC_OPTIONS = frozenset(
@@ -142,17 +147,15 @@ def resources(config: PipelineConfiguration, stage: str) -> PBSResources:
     return stage_pbs_resources(config, stage, default=MAINNET_SYNC_RESOURCES[stage])
 
 
-def render_sync(config: PipelineConfiguration, stage: str) -> str:
-    """Self-contained job: only small helpers/config are copied, data stay in place."""
-    budget = resources(config, stage)
+def sync_settings(config: PipelineConfiguration, stage: str, budget: PBSResources) -> dict[str, object]:
+    """The settings.json of one job; it holds the credentials path, never the keys."""
     run_id = required(config.run_id, "run_id")
-    credentials = required(config.artifacts.credentials_file, "artifacts.credentials_file")
-    settings = {
+    return {
         **asdict(config.mainnet),
         "run_id": run_id,
         "log_root": str(config.runs_path / run_id / "logs"),
         "endpoint": config.artifacts.endpoint_url,
-        "credentials": credentials,
+        "credentials": required(config.artifacts.credentials_file, "artifacts.credentials_file"),
         "profile": config.artifacts.profile,
         "index_dir": config.blocksci.index_dir,
         "index_backup_uri": config.blocksci.index_backup_uri,
@@ -165,6 +168,20 @@ def render_sync(config: PipelineConfiguration, stage: str) -> str:
         # Past the walltime the job is gone, so its lock entry may be cleared.
         "index_lock_seconds": walltime_to_seconds(budget.walltime) + 600,
     }
+
+
+def job_script(
+    config: PipelineConfiguration,
+    stage: str,
+    name: str,
+    budget: PBSResources,
+    settings: dict[str, object],
+    prepare: str = "",
+    cleanup: str = "",
+) -> str:
+    """Self-contained job: only small helpers/config are copied, data stay in place."""
+    run_id = required(config.run_id, "run_id")
+    credentials = required(config.artifacts.credentials_file, "artifacts.credentials_file")
     files = {
         "settings.json": json.dumps(settings),
         "worker.py": runtime_source(Path(__file__).with_name("mainnet_runtime.py")),
@@ -173,7 +190,7 @@ def render_sync(config: PipelineConfiguration, stage: str) -> str:
         "verify_chain.py": runtime_source(EXPORTERS_ROOT / "verify_chain.py"),
     }
     identity = f"STAGE=mainnet-{stage}\nRUN_ID={shell_value(run_id)}\n"
-    return f"""{directives("mainnet_" + stage, budget, getattr(config.pbs, stage).multijob)}
+    return f"""{directives(name, budget, getattr(config.pbs, stage).multijob)}
 set -euo pipefail
 umask 077
 export PATH="/usr/local/bin:$PATH"
@@ -183,6 +200,7 @@ WORK=$(mktemp -d "$SCRATCHDIR/mainnet.XXXXXX")
 export TMPDIR="$WORK" SINGULARITY_CACHEDIR="$WORK/images" SINGULARITY_TMPDIR="$WORK"
 export APPTAINER_CACHEDIR="$WORK/images" APPTAINER_TMPDIR="$WORK"
 {write_files("$WORK", files)}
+{prepare}
 STARTED=0
 finish() {{
   status=$?
@@ -190,6 +208,7 @@ finish() {{
   if [ "$status" -ne 0 ]; then
     python3 "$WORK/worker.py" "$WORK/settings.json" failed "$STAGE" "$STARTED" || true
   fi
+  {cleanup}
   # WORK is job-private; never clean the shared data directories.
   exit "$status"
 }}
@@ -202,6 +221,40 @@ s5cmd pipe --help >/dev/null || {{ echo 's5cmd with pipe support is required' >&
 STARTED=1
 python3 "$WORK/worker.py" "$WORK/settings.json" {stage}
 """
+
+
+def render_sync(config: PipelineConfiguration, stage: str) -> str:
+    budget = resources(config, stage)
+    return job_script(config, stage, "mainnet_" + stage, budget, sync_settings(config, stage, budget))
+
+
+def render_restore_check(config: PipelineConfiguration) -> str:
+    """The real restore job, run into the job's own scratch instead of the working dataset.
+
+    It reads the three backups and proves they restore; the multijob data, the backups and
+    the synchronization state stay untouched, because restore clears its state prefix.
+    restore.json reports duration and speed per part, for estimating a full-chain restore.
+    """
+    budget = RESTORE_CHECK_RESOURCES
+    run_id = required(config.run_id, "run_id")
+    settings = {
+        **sync_settings(config, "restore", budget),
+        "root": WORK_TOKEN + "/dataset/core",
+        "index_dir": WORK_TOKEN + "/dataset/index",
+        "log_root": WORK_TOKEN + "/logs",
+        "state_uri": f"{required(config.mainnet.state_uri, 'mainnet.state_uri').rstrip('/')}-restore-check/{run_id}",
+        "index_lock": None,
+        "measure_download": True,
+    }
+    return job_script(
+        config,
+        "restore",
+        "mainnet_restore_check",
+        budget,
+        settings,
+        prepare=f'sed -i "s#{WORK_TOKEN}#$WORK#g" "$WORK/settings.json"',
+        cleanup='du -sh "$WORK/dataset" || true\n  rm -rf "$WORK/dataset"',
+    )
 
 
 def submit_sync(config: PipelineConfiguration) -> None:

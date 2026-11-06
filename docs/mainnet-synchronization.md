@@ -364,6 +364,23 @@ cd /home/administrator/diplomka/coinjoin-pipeline
 ./runIt.sh run examples/mainnet-sync.yaml --dry-run > /tmp/mainnet-sync-plan.txt
 ```
 
+## Ověření záloh bez mazání
+
+`scripts/render-mainnet-restore-check.py [config.yaml]` vypíše samostatný PBS job,
+který spustí skutečný `mainnet-restore` do vlastního `$SCRATCHDIR` (2 CPU, 4 GB RAM,
+200 GB scratch). Ověří párování tří manifestů, SHA-256 archivů, velikosti Scanneru,
+inventář indexu a kurzor parseru. Multijob, zálohy ani `state_uri` nemění:
+stav jde do `<state_uri>-restore-check/<run-id>/` a rozbalená data job na konci smaže.
+Neověřuje, že obnovená data otevře Core nebo BlockSci. Výsledek je
+`restore.json: restored` a nulový návratový kód.
+
+`restore.json` má v `parts` pro Core, Dumplings a index trvání, CPU čas, stažené
+a rozbalené bajty, počet souborů a rychlosti; stejné řádky jsou v logu jobu. Stahování,
+rozbalování a kontroly běží současně, proto má každá část jediný čas. Job navíc nejdřív
+oba archivy přečte a zahodí (`raw_download_*`), takže porovnání ukáže, zda brzdí S3,
+nebo rozbalování. Archivy se tak stahují dvakrát. Ostrá obnova `parts` zapisuje taky,
+ale bez tohoto průchodu.
+
 ## Explicitní obnova checkpointu
 
 Běžnou obnovu prázdného datasetu dělá `mainnet-restore`. Tato kapitola popisuje

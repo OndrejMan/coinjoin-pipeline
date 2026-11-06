@@ -48,6 +48,17 @@ def config(tmp_path):
     )
 
 
+def test_restore_check_never_touches_the_working_dataset_or_sync_state(config):
+    script = mainnet_sync.render_restore_check(config)
+    settings = json.loads(embedded_file(script, "settings.json"))
+
+    assert settings["root"].startswith("@WORK@/") and settings["index_dir"].startswith("@WORK@/")
+    assert settings["state_uri"].startswith(config.mainnet.state_uri.rstrip("/") + "-restore-check/")
+    assert settings["index_lock"] is None and settings["measure_download"] is True
+    assert "select=1:ncpus=2:mem=4gb:scratch_ssd=200gb" in script
+    assert 'worker.py" "$WORK/settings.json" restore' in script
+
+
 def test_four_scripts_are_self_contained_and_syntactically_valid(config):
     locks = {"restore": "exclusive", "blocksci": "exclusive", "checkpoint": "shared", "producer": None}
     for stage in mainnet_sync.SYNC_STAGES:
