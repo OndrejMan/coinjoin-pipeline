@@ -79,12 +79,9 @@ Po dosynchronizování vypne síť, čistě restartuje Core bez sítě a zachyt�
 stabilní výšku H a hash. Spustí jeden průchod
 Dumplings, ověří shodu výšky a checkpointu včetně délek souborů a prázdného
 `Tx0CandidateMisses.txt`. Archivuje a ověří dokončené blk soubory; dva poslední
-archiver standardně ponechává jako otevřený konec. Přírůstkově zrcadlí Scanner
-včetně Tx0Candidates do `<dumplings_uri>/Scanner/` (`s5cmd sync --delete`, přenesou
-se jen změněné soubory), porovná velikosti objektů s lokálními soubory a nakonec
-zapíše `<dumplings_uri>/manifest.json` s výškou a velikostmi. Nová kopie nejdřív
-smaže manifest, takže baseline nikdy nečte napůl přepsaný Scanner. Čistě vypne
-Core a publikuje `ready.json`.
+archiver standardně ponechává jako otevřený konec. Zálohy Dumplings se nedotkne:
+pád produceru nebo BlockSci jobu tak nechá všechny tři zálohy v S3 z jednoho běhu.
+Čistě vypne Core a publikuje `ready.json`.
 Poslední soubory bloků zůstávají pro parser na sdíleném disku a ve výsledném
 checkpointu Core. Samotné `ready.json` neznamená dokončenou synchronizaci.
 Před skenem uloží i `Scanner/ChainCheckpoint.json` s hashem zmrazeného cíle.
@@ -104,9 +101,14 @@ takže notebooky mohou index dál číst a ruční indexový job jej změnit nem
    v manifestu, `files.txt`, žádný `.writing` a kurzor parseru proti Core.
 2. Zazálohuje index a ověří existenci a velikost odeslaného objektu. Archiv znovu
    nestahuje.
-3. Spustí Core offline s `dbcache` nejvýše 1024 MB, zkontroluje H/hash, provede
+3. Přírůstkově zrcadlí Scanner včetně Tx0Candidates do `<dumplings_uri>/Scanner/`
+   (`s5cmd sync --delete`, přenesou se jen změněné soubory), porovná velikosti objektů
+   s lokálními soubory a nakonec zapíše `<dumplings_uri>/manifest.json` s výškou
+   a velikostmi. Nová kopie nejdřív smaže manifest, takže baseline nikdy nečte napůl
+   přepsaný Scanner.
+4. Spustí Core offline s `dbcache` nejvýše 1024 MB, zkontroluje H/hash, provede
    `--prune-only` a Core čistě vypne.
-4. Až potom zálohuje jeho výsledný stav. Během kopírování drží POSIX zámek
+5. Až potom zálohuje jeho výsledný stav. Během kopírování drží POSIX zámek
    datadiru a odmítne přítomnou RPC cookie.
 
 Teprve dokončený upload checkpointu umožní publikovat závěrečné

@@ -149,7 +149,6 @@ def test_ready_marker_must_match_exact_generation():
         "height": 500,
         "hash": "a" * 64,
         "dumplings_height": 500,
-        "dumplings_backup": "s3://local/old",
     }
     with pytest.raises(ValueError, match="exact generation"):
         require_ready(ready, "new")
@@ -323,7 +322,6 @@ def test_producer_reports_core_height_separately_from_scanner_progress(worker, m
     monkeypatch.setattr(worker, "rpc", lambda method, *args: block_hash if method == "getblockhash" else height)
     monkeypatch.setattr(worker, "container_command", lambda *args, **kwargs: list(args))
     monkeypatch.setattr(worker, "archive", lambda: None)
-    monkeypatch.setattr(worker, "publish_dumplings", lambda _: "s3://local/dumps/manifest.json")
     monkeypatch.setattr(worker, "publish_json", lambda *args: None)
 
     def scan(command, name, poll):
@@ -1064,6 +1062,23 @@ def test_checkpoint_job_refuses_an_index_another_job_changed(worker, tmp_path, m
     with pytest.raises(ValueError, match="not the one this synchronization"):
         worker.checkpoint()
     assert not (tmp_path / "s3/local/index").exists()
+
+
+@pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
+def test_only_the_checkpoint_replaces_the_dumplings_backup(worker, tmp_path, monkeypatch):
+    events = []
+    fake_components(worker, monkeypatch, events)
+    real_publish = worker.publish_dumplings
+    monkeypatch.setattr(worker, "publish_dumplings", lambda height: events.append("dumplings") or real_publish(height))
+    synchronize(worker, "restore")
+    backup = tmp_path / "s3/local/dumps/manifest.json"
+    backup.parent.mkdir(parents=True)
+    backup.write_text("the previous synchronization")
+    synchronize(worker, "producer", "blocksci")
+    assert backup.read_text() == "the previous synchronization"
+    synchronize(worker, "checkpoint")
+    assert json.loads(backup.read_text())["last_processed_height"] == HEIGHT
+    assert events.index("dumplings") < events.index("prune")
 
 
 @pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")

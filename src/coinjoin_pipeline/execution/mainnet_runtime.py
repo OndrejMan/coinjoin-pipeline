@@ -145,8 +145,8 @@ def require_ready(ready: JsonObject, run_id: str) -> int:
     height = ready.get("height")
     if not is_count(height) or not is_sha256(ready.get("hash")):
         raise ValueError("Invalid ready height/hash")
-    if ready.get("dumplings_height") != height or not ready.get("dumplings_backup"):
-        raise ValueError("Dumplings has not completed and backed up this generation")
+    if ready.get("dumplings_height") != height:
+        raise ValueError("Dumplings has not completed this generation")
     return height
 
 
@@ -958,7 +958,6 @@ class Worker:
         scanner_complete(scanner, height)
         self.progress("block-archive")
         self.archive()
-        dumps_backup = self.publish_dumplings(height)
         if self.rpc("getblockhash", str(height)) != block_hash or self.rpc("getblockcount") != height:
             raise ValueError("Core changed while preparing the generation")
         self.stop_core()
@@ -968,7 +967,6 @@ class Worker:
             "height": height,
             "hash": block_hash,
             "dumplings_height": height,
-            "dumplings_backup": dumps_backup,
             "source_dir": str(self.core_dir),
             "network": self.network,
             "requested_target_height": self.c.get("target_height"),
@@ -1113,7 +1111,7 @@ class Worker:
         self.complete(manifest)
 
     def checkpoint(self) -> None:
-        """Job 3: back up the index, prune Core and back up its checkpoint, with little memory.
+        """Job 3: back up the index and Dumplings, prune Core and back up its checkpoint, with little memory.
 
         Holds the index reader lock: notebooks keep reading, index jobs cannot write.
         """
@@ -1143,6 +1141,8 @@ class Worker:
             manifest,
             "blocksci_index.tar.zst",
         )
+        # Here, not in the producer: a run that fails earlier must leave the S3 backups matching.
+        dumplings_backup = self.publish_dumplings(ready["dumplings_height"])
         self.progress("pruning")
         # Offline Core only loads its chain for pruning; a large cache would just cost memory.
         info = self.start_core(True, dbcache_mb=min(1024, self.c["dbcache_mb"]))
@@ -1171,6 +1171,7 @@ class Worker:
             "state": "done",
             "core_checkpoint": checkpoint,
             "index_backup": index_backup,
+            "dumplings_backup": dumplings_backup,
             # Measured while Core is stopped and no index job can write.
             "storage": {
                 "measured_at": utc_now(),
