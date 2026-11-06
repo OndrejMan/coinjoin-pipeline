@@ -125,7 +125,12 @@ class S3StageRunner:
         if not blocksci.index_dir:
             return {}
         return {
-            "persistent": PersistentIndex(index_dir=blocksci.index_dir, backup_uri=blocksci.index_backup_uri),
+            "persistent": PersistentIndex(
+                index_dir=blocksci.index_dir,
+                backup_uri=blocksci.index_backup_uri,
+                in_scratch=blocksci.index_in_scratch,
+                dumplings_uri=blocksci.scratch_dumplings_uri,
+            ),
             "multijob": self.args.pbs.blocksci.multijob,
         }
 

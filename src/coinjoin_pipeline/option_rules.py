@@ -87,6 +87,13 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
         errors.append("--blocksci-index-dir must not contain '..'")
     if blocksci.task == "backup" and not backup_uri:
         errors.append("--blocksci-task backup requires --blocksci-index-backup-uri")
+    if blocksci.index_in_scratch and (not backup_uri or blocksci.task not in {"script", "external", "notebook"}):
+        errors.append(
+            "--blocksci-index-in-scratch requires --blocksci-index-backup-uri and --blocksci-task "
+            "script, external or notebook"
+        )
+    if blocksci.scratch_dumplings_uri and not blocksci.index_in_scratch:
+        errors.append("--blocksci-scratch-dumplings-uri requires --blocksci-index-in-scratch")
     return errors
 
 
@@ -97,7 +104,9 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
 
         errors = configuration_errors(config)
     elif any(path.startswith(("mainnet.", *MAINNET_ONLY_PBS_GROUPS)) for path in config.provided):
-        errors = ["mainnet, pbs.producer, pbs.restore, pbs.checkpoint and pbs.pack settings require action: mainnet-sync"]
+        errors = [
+            "mainnet, pbs.producer, pbs.restore, pbs.checkpoint and pbs.pack settings require action: mainnet-sync"
+        ]
     else:
         errors = _action_errors(config)
     return errors + _general_errors(config)

@@ -89,11 +89,14 @@ class PersistentIndex:
 
     ``index_dir`` is the working copy jobs read and update in place; ``backup_uri`` is the
     S3 prefix of its single backup, written by the backup job and read to restore an
-    incomplete working copy.
+    incomplete working copy. With ``in_scratch`` a reading job restores that backup, and
+    the Dumplings copy at ``dumplings_uri``, into its own scratch and leaves index_dir alone.
     """
 
     index_dir: str
     backup_uri: str | None = None
+    in_scratch: bool = False
+    dumplings_uri: str | None = None
 
     def __post_init__(self) -> None:
         if not self.index_dir.startswith(INDEX_ROOTS) or ".." in Path(self.index_dir).parts:
@@ -102,6 +105,8 @@ class PersistentIndex:
             )
         if self.backup_uri is not None:
             validated_s3_uri(self.backup_uri, "index backup URI")
+        if self.dumplings_uri is not None:
+            validated_s3_uri(self.dumplings_uri, "Dumplings URI")
 
 
 def render_coinjoin_analysis_s3_pbs(
@@ -300,6 +305,8 @@ def _persistent_settings(index: PersistentIndex | None, walltime: str) -> dict[s
     return {
         "index_dir": index.index_dir,
         "backup_uri": index.backup_uri,
+        "in_scratch": index.in_scratch,
+        "dumplings_uri": index.dumplings_uri,
         # Past the walltime the job is gone, so its lock entry may be cleared.
         "lock_seconds": seconds + 600,
         "wait_seconds": max(60, seconds // 2),

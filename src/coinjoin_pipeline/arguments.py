@@ -161,6 +161,10 @@ HELP = {
         "Fixed S3 prefix of the persistent index's parse, update and backup jobs in place of the run prefix; "
         "each job replaces its markers and manifest there and keeps its logs under logs/<run-id>/"
     ),
+    "blocksci.index_in_scratch": "script, external or notebook task: restore the index backup into the job's scratch",
+    "blocksci.scratch_dumplings_uri": (
+        "with --blocksci-index-in-scratch: S3 prefix of the Dumplings copy to place in scratch, seen at /mnt/dumplings"
+    ),
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
     "pbs.bitcoin_datadir": "Bitcoin datadir the PBS BlockSci stage reads (also $PBS_BITCOIN_DATADIR)",
     "coinjoin_analysis.actions": "program operation (repeatable)",

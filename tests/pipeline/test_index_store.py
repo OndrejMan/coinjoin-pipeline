@@ -7,10 +7,12 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore, IndexStoreError
+from coinjoin_pipeline.execution.pbs.stage_runtime import scratch_index
 from coinjoin_pipeline.storage.s5client import S5Client, S5Error
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -309,3 +311,19 @@ def test_python_and_shell_jobs_respect_each_others_locks(tmp_path):
         tmp_path / "index/.lock/readers/python-reader/expires",
         tmp_path / "index/.lock/readers/python-reader/job",
     ]
+
+
+def test_a_reading_job_restores_the_backup_into_its_own_scratch(tmp_path):
+    parse_index(tmp_path)
+    backup(tmp_path)
+    index = store(tmp_path)
+    shutil.rmtree(index.path)
+    stage = SimpleNamespace(
+        settings={"persistent": {"backup_uri": BACKUP}}, scratch=tmp_path / "scratch", storage=index.storage
+    )
+
+    copy = scratch_index(stage)
+
+    assert copy.path == tmp_path / "scratch/index"
+    assert copy.complete() and copy.height() == 100
+    assert not index.path.exists(), "The shared working copy stays untouched"

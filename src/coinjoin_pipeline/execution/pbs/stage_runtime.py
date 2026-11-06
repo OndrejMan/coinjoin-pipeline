@@ -613,9 +613,20 @@ def open_index(stage: Stage, *, writer: bool) -> IndexStore:
     return index
 
 
+def scratch_index(stage: Stage) -> IndexStore:
+    """A private copy of the backup in the job's scratch; nobody else reads it, so no lock."""
+    require_tools("zstd")
+    settings = stage.settings["persistent"]
+    index = IndexStore(str(stage.scratch / "index"), settings["backup_uri"], storage=stage.storage)
+    index.path.mkdir(parents=True, exist_ok=True)
+    index.restore()
+    return index
+
+
 def read_index(stage: Stage) -> IndexStore:
     """Read-only access for an analysis: shared lock, complete copy, run-local config."""
-    index = open_index(stage, writer=False)
+    in_scratch = stage.settings["persistent"].get("in_scratch")
+    index = scratch_index(stage) if in_scratch else open_index(stage, writer=False)
     if not index.complete():
         raise StageFailure(
             f"[index] working copy {index.path} is incomplete; a persistent update restores it from the S3 backup"
@@ -970,6 +981,12 @@ def blocksci_analysis(stage: Stage) -> None:
         index = read_index(stage)
         binds += index.binds("ro")
         shutil.copyfile(index.path / "manifest.json", output / "blocksci-index-manifest.json")
+        dumplings = settings["persistent"].get("dumplings_uri")
+        if dumplings:
+            scanner = stage.scratch / "dumplings/Scanner"
+            scanner.mkdir(parents=True, exist_ok=True)
+            stage.storage.copy(f"{dumplings}/Scanner/*", f"{scanner}/", timeout=None)
+            binds.append(f"{scanner}:/mnt/dumplings/Scanner:ro")
     else:
         cache_run = settings.get("source_run_id") or stage.run_id
         prefix = f"{settings['artifact_uri']}/{cache_run}/blocksci-parse_data"
