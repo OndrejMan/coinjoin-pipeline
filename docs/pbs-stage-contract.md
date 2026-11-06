@@ -166,7 +166,8 @@ The prefix holds one backup: `<index_backup_uri>/blocksci_index.tar.zst`
 `<index_backup_uri>/manifest.json`. A `backup` job first deletes the manifest
 and the old archive, so S3 never holds two copies and there is no valid backup
 until it finishes. The archive is streamed `tar | zstd` into `s5cmd pipe` (an
-s5cmd without `pipe` stages it in scratch); its S3 size must match the uploaded
+s5cmd without `pipe` stages it in scratch) in 256 MiB parts, since a stream cannot
+grow its parts and S3 allows 10,000 of them; its S3 size must match the uploaded
 stream before the manifest is written: the index manifest plus `archive_uri`,
 `archive_sha256`, `archive_size`, `upload_validation` and `uploaded_at`. The
 archive is not read back. A restore reads that manifest and verifies the

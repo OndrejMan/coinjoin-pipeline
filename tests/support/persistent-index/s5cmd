@@ -89,6 +89,8 @@ PY
         [ -n "${FAKE_S5CMD_NO_PIPE:-}" ] && { echo "unknown command pipe" >&2; exit 1; }
         [ "${1:-}" = --help ] && { echo "pipe <destination>"; exit 0; }
         [ -n "${FAKE_S5CMD_FAIL_PIPE:-}" ] && { cat >/dev/null; echo "upload failed" >&2; exit 1; }
+        [ -n "${FAKE_S5CMD_PIPE_ARGUMENTS:-}" ] && echo "$*" >"$FAKE_S5CMD_PIPE_ARGUMENTS"
+        [ "${1:-}" = --part-size ] && shift 2
         destination=$(local_path "$1")
         mkdir -p "$(dirname "$destination")"
         cat >"$destination"

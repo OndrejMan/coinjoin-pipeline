@@ -18,6 +18,9 @@ from typing import IO, Iterator, Mapping, Sequence
 
 # Read size of the archive streams; large enough to keep s5cmd and zstd busy.
 CHUNK = 8 * 1024 * 1024
+# s5cmd cannot size the parts of a stream and S3 allows 10,000 of them: its default of
+# 50 MiB ends at 488 GiB, within reach of the archived index of the whole chain.
+PIPE_PART_SIZE_MIB = 256
 
 
 class S5Error(RuntimeError):
@@ -164,7 +167,7 @@ class S5Client:
             pipe(tar.stdout).close()
             processes = [tar, zstd]
             if self.supports_pipe():
-                command = self.command("pipe", uri)
+                command = self.command("pipe", "--part-size", PIPE_PART_SIZE_MIB, uri)
                 upload = stack.enter_context(
                     _stage(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, env=self.environment)
                 )

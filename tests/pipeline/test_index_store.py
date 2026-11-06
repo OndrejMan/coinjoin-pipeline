@@ -174,6 +174,18 @@ def test_without_s5cmd_pipe_the_archive_passes_through_scratch(tmp_path):
     assert block(tmp_path) == "blocks-100"
 
 
+def test_the_upload_parts_can_hold_an_archive_of_the_whole_chain(tmp_path):
+    parse_index(tmp_path)
+    arguments = tmp_path / "pipe-arguments"
+
+    backup(tmp_path, env={"FAKE_S5CMD_PIPE_ARGUMENTS": str(arguments)})
+
+    option, part_size_mib, destination = arguments.read_text().split()
+    assert (option, destination) == ("--part-size", f"{BACKUP}/blocksci_index.tar.zst")
+    # S3 allows 10,000 parts; the default of 50 MiB would stop at 488 GiB.
+    assert int(part_size_mib) * 10_000 >= 2 * 1024 * 1024
+
+
 def test_a_remote_size_mismatch_publishes_no_manifest(tmp_path):
     parse_index(tmp_path)
 
