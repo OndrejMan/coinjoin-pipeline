@@ -713,7 +713,16 @@ def download_block_archive(stage: Stage, max_block: int, source_manifest: Path |
     shipped = Path(__file__).with_name("block_archive.py")
     helper = [sys.executable, str(shipped if shipped.is_file() else Path(__file__).parents[1] / "block_archive.py")]
     update = ["--source-manifest", str(source_manifest)] if source_manifest is not None else []
-    commands, fields = work / "download.s5cmd", work / "manifest-fields.json"
+    commands, fields, packed = work / "download.s5cmd", work / "manifest-fields.json", work / "packed.txt"
+    # A file with both forms is mid-packing: only the raw object is known to be verified.
+    stored = {str(entry["key"]).rsplit("/", 1)[-1] for entry in stage.storage.listing(f"{uri}/*", timeout=None)}
+    packed.write_text(
+        "".join(
+            name[: -len(".zst")] + "\n"
+            for name in sorted(stored)
+            if name.endswith(".dat.zst") and name[:-4] not in stored
+        )
+    )
     subprocess.run(
         [
             *helper,
@@ -725,6 +734,8 @@ def download_block_archive(stage: Stage, max_block: int, source_manifest: Path |
             "--max-block",
             str(max_block),
             *update,
+            "--packed",
+            str(packed),
             "--commands",
             str(commands),
             "--manifest-fields",
@@ -733,6 +744,7 @@ def download_block_archive(stage: Stage, max_block: int, source_manifest: Path |
         check=True,
     )
     stage.storage.run("run", str(commands), check=True, timeout=None)
+    subprocess.run([*helper, "unpack", str(datadir / "blocks")], check=True)
     subprocess.run([*helper, "verify", str(datadir / "blocks"), "--max-block", str(max_block), *update], check=True)
     # The helper writes the fields as they follow another manifest field.
     return datadir, json.loads("{" + fields.read_text().strip().lstrip(",") + "}")

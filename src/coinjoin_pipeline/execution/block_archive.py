@@ -3,7 +3,8 @@
 Every archived ``blkNNNNN.dat`` has a schema-1 sidecar ``blkNNNNN.dat.json``
 with its size, SHA-256 and the block heights it holds. A PBS job downloads all
 sidecars (a few kB each), lets ``select`` choose the block files BlockSci needs,
-downloads only those and runs ``verify`` on them before parsing.
+downloads only those, unpacks the ones stored as ``blkNNNNN.dat.zst`` and runs
+``verify`` on them before parsing. The sidecar always describes the unpacked file.
 
 BlockSci scans block files from its starting file upwards, stops at the first
 missing number and takes the highest block it has seen as the chain tip:
@@ -30,6 +31,7 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
 import sys
 from functools import partial
 from pathlib import Path
@@ -178,10 +180,12 @@ def select(arguments: argparse.Namespace) -> None:
     blocks: Path = arguments.blocks
     if any(character.isspace() for character in f"{arguments.uri}{blocks}"):
         raise ArchiveError("Block archive URI and block directory must not contain whitespace")
+    packed = set(arguments.packed.read_text(encoding="utf-8").split()) if arguments.packed else set()
     lines = []
     for sidecar in chosen:
         shutil.copyfile(arguments.sidecars / f"{sidecar.name}.json", blocks / f"{sidecar.name}.json")
-        lines.append(f"cp {arguments.uri}/{sidecar.name} {blocks}/\n")
+        stored = sidecar.name + ".zst" if sidecar.name in packed else sidecar.name
+        lines.append(f"cp {arguments.uri}/{stored} {blocks}/\n")
     arguments.commands.write_text("".join(lines), encoding="utf-8")
     arguments.manifest_fields.write_text(
         f',\n  "block_archive_last_file": {last},\n  "block_archive_index_sha256": "{index_sha256(sidecars, last)}"',
@@ -197,6 +201,12 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(partial(stream.read, CHUNK_SIZE), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def unpack(arguments: argparse.Namespace) -> None:
+    """Replace every downloaded blkNNNNN.dat.zst by its block file."""
+    for path in sorted(arguments.blocks.glob("blk*.dat.zst")):
+        subprocess.run(["zstd", "-q", "-d", "--rm", str(path)], check=True)
 
 
 def verify(arguments: argparse.Namespace) -> None:
@@ -244,9 +254,14 @@ def build_parser() -> argparse.ArgumentParser:
     chooser.add_argument("--uri", required=True, help="S3 prefix of the archive")
     chooser.add_argument("--max-block", type=height, required=True)
     chooser.add_argument("--source-manifest", type=Path, help="cache manifest of the index being updated")
+    chooser.add_argument("--packed", type=Path, help="file naming the block files stored only as .zst")
     chooser.add_argument("--commands", type=Path, required=True, help="s5cmd run file to write")
     chooser.add_argument("--manifest-fields", type=Path, required=True, help="JSON fields for the new cache")
     chooser.set_defaults(handler=select)
+
+    unpacker = commands.add_parser("unpack", help="unpack the downloaded .zst block files")
+    unpacker.add_argument("blocks", type=Path)
+    unpacker.set_defaults(handler=unpack)
 
     checker = commands.add_parser("verify", help="check downloaded files before parsing")
     checker.add_argument("blocks", type=Path)

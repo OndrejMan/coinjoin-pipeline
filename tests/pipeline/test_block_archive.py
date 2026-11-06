@@ -260,12 +260,12 @@ def test_update_verification_needs_new_heights_and_the_resume_file(tmp_path: Pat
 
 
 FAKE_S5CMD = r"""#!/usr/bin/env python3
-import glob, os, shlex, shutil, sys
+import glob, json, os, shlex, shutil, sys
 
 root = os.environ["FAKE_S3_ROOT"]
 arguments = sys.argv[1:]
 while arguments[0].startswith("--"):
-    arguments = arguments[2:]
+    arguments = arguments[1 if arguments[0] == "--json" else 2:]
 
 def local(uri):
     return os.path.join(root, uri[len("s3://"):])
@@ -279,7 +279,10 @@ def copy(source, destination):
         with open(os.environ["FAKE_S3_LOG"], "a") as log:
             log.write(os.path.basename(path) + "\n")
 
-if arguments[0] == "cp":
+if arguments[0] == "ls":
+    for path in sorted(glob.glob(local(arguments[1]))):
+        print(json.dumps({"key": "s3://" + os.path.relpath(path, root), "size": os.path.getsize(path)}))
+elif arguments[0] == "cp":
     copy(*arguments[1:])
 elif arguments[0] == "run":
     for line in open(arguments[1]):
@@ -365,3 +368,32 @@ def test_pbs_fragment_refuses_an_archive_rewritten_under_the_cache(tmp_path: Pat
     with pytest.raises(subprocess.CalledProcessError):
         run_download(tmp_path, 44, manifest)
     assert "have changed" in capfd.readouterr().err
+
+
+def test_a_packed_block_file_is_downloaded_unpacked_and_verified(tmp_path: Path) -> None:
+    files = dict(list(TEN_PER_FILE.items())[:3])
+    directory = archive(tmp_path / "s3" / "bucket" / "blocks", files)
+    subprocess.run(["zstd", "-q", "--rm", str(directory / "blk00000.dat")], check=True)
+
+    downloaded, _ = run_download(tmp_path, 12)
+    assert downloaded == ["blk00000.dat.zst", "blk00001.dat"]
+
+
+def test_a_file_stored_in_both_forms_is_read_raw(tmp_path: Path) -> None:
+    files = dict(list(TEN_PER_FILE.items())[:3])
+    directory = archive(tmp_path / "s3" / "bucket" / "blocks", files)
+    (directory / "blk00000.dat.zst").write_bytes(b"not yet verified")
+
+    downloaded, _ = run_download(tmp_path, 12)
+    assert downloaded == ["blk00000.dat", "blk00001.dat"]
+
+
+def test_a_damaged_packed_block_file_is_rejected(tmp_path: Path) -> None:
+    files = dict(list(TEN_PER_FILE.items())[:1])
+    blocks = archive(tmp_path / "blocks", files)
+    (blocks / "blk00000.dat").write_bytes(b"other content")
+    subprocess.run(["zstd", "-q", "--rm", str(blocks / "blk00000.dat")], check=True)
+
+    assert helper("unpack", blocks).returncode == 0
+    result = verify(blocks, 5)
+    assert result.returncode == 1 and "blk00000.dat" in result.stderr
