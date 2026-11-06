@@ -784,6 +784,8 @@ def test_restore_job_refills_an_emptied_dataset_for_the_next_synchronization(wor
     synchronize(worker, "restore")
     restore = json.loads((worker.run / "restore.json").read_text())
     assert (restore["action"], restore["height"]) == ("restored", HEIGHT)
+    assert set(restore["parts"]) == {"core", "dumplings", "index"}
+    assert restore["parts"]["index"]["unpacked_bytes"] > 0 and restore["total_seconds"] >= 0
     assert (worker.core_dir / "chainstate/state.dat").read_text() == "verified chainstate"
     assert not (worker.core_dir / "blocks/blk00000.dat").exists()
     assert (worker.archive_state / "verified.json").is_file()

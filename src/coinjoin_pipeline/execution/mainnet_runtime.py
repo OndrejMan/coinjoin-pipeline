@@ -80,6 +80,7 @@ class Settings(TypedDict, total=False):
     reorg_reserve: int
     poll_seconds: float
     pbs_resources: PbsResources
+    measure_download: bool
     # restore and blocksci write the index, the checkpoint reads it; producer leaves it alone.
     index_lock: str | None
     index_lock_seconds: int
@@ -110,6 +111,10 @@ def is_sha256(value: object) -> bool:
 def file_sizes(root: Path) -> dict[str, int]:
     """Relative path -> size of every regular file below root."""
     return {str(path.relative_to(root)): path.stat().st_size for path in sorted(root.rglob("*")) if path.is_file()}
+
+
+def megabytes_per_second(size: int, seconds: float) -> float:
+    return round(size / 1e6 / max(seconds, 0.001), 1)
 
 
 def pipe(stream: IO[bytes] | None) -> IO[bytes]:
@@ -754,6 +759,39 @@ class Worker:
         index = (self.index / name for name in ("config.json", "files.txt", "manifest.json", "parsed"))
         return [path for path in (self.datadir, self.dumps, self.archive_state, *index) if path.exists()]
 
+    def measured(self, name: str, action: Callable[[], None], downloaded: int, target: Path) -> JsonObject:
+        """Run one restore step; download, unpacking and checks overlap, so it has one duration."""
+        started, cpu = time.monotonic(), sum(os.times()[:4])
+        action()
+        seconds = time.monotonic() - started
+        sizes = file_sizes(target)
+        unpacked = sum(sizes.values())
+        part = {
+            "seconds": round(seconds, 1),
+            "cpu_seconds": round(sum(os.times()[:4]) - cpu, 1),
+            "downloaded_bytes": downloaded,
+            "unpacked_bytes": unpacked,
+            "files": len(sizes),
+            "downloaded_mb_per_s": megabytes_per_second(downloaded, seconds),
+            "unpacked_mb_per_s": megabytes_per_second(unpacked, seconds),
+        }
+        print(f"restore part {name}: {json.dumps(part)}", flush=True)
+        return part
+
+    def raw_download(self, name: str, uri: str, size: int) -> JsonObject:
+        """Read an archive and discard it: the S3 speed without unpacking or disk writes."""
+        started = time.monotonic()
+        process = self.storage.popen("cat", uri, stdout=subprocess.DEVNULL)
+        try:
+            if process.wait() != 0:
+                raise ValueError("Could not read the archive: " + uri)
+        finally:
+            terminate((process,))
+        seconds = time.monotonic() - started
+        raw = {"raw_download_seconds": round(seconds, 1), "raw_download_mb_per_s": megabytes_per_second(size, seconds)}
+        print(f"raw download {name}: {json.dumps(raw)}", flush=True)
+        return raw
+
     def restore_dataset(self) -> None:
         """Job 0: fill an empty working dataset from the S3 backups, otherwise do nothing.
 
@@ -812,15 +850,40 @@ class Worker:
         ]
         if mismatches:
             raise ValueError("The S3 backups do not belong together: " + "; ".join(mismatches))
+        started = time.monotonic()
+        raw = {}
+        if self.c.get("measure_download"):
+            self.progress("raw-download", height=core["height"])
+            raw = {
+                name: self.raw_download(name, value["archive_uri"], value["archive_size"])
+                for name, value in (("core", core), ("index", index))
+            }
         self.progress("restore-download", height=core["height"])
         staging = self.root / f".restore-{self.run_id}"
         index_staging = self.index / f".restore-{self.run_id}"
         try:
             staging.mkdir()
             index_staging.mkdir(parents=True)
-            self.restore_checkpoint(backups["core"], staging / "core")
-            self.restore_dumplings(backups["dumplings"], staging / "Scanner")
-            self.restore_checkpoint(backups["index"], index_staging / "index")
+            parts = {
+                "core": self.measured(
+                    "core",
+                    lambda: self.restore_checkpoint(backups["core"], staging / "core"),
+                    core["archive_size"],
+                    staging / "core",
+                ),
+                "dumplings": self.measured(
+                    "dumplings",
+                    lambda: self.restore_dumplings(backups["dumplings"], staging / "Scanner"),
+                    sum(dumplings["files"].values()),
+                    staging / "Scanner",
+                ),
+                "index": self.measured(
+                    "index",
+                    lambda: self.restore_checkpoint(backups["index"], index_staging / "index"),
+                    index["archive_size"],
+                    index_staging / "index",
+                ),
+            }
             # Every backup is downloaded and verified; only now does any of it take its place.
             for entry in (staging / "core").iterdir():
                 entry.rename(self.root / entry.name)
@@ -835,7 +898,15 @@ class Worker:
             raise ValueError("The restored index does not match its file inventory")
         if resume_signature(self.index, self.core_dir / "blocks") != {key: core[key] for key in SIGNATURE_KEYS}:
             raise ValueError("The restored index and Core blocks do not belong together")
-        self.finish_restore("restored", height=core["height"], hash=core["hash"], backups=backups)
+        self.finish_restore(
+            "restored",
+            height=core["height"],
+            hash=core["hash"],
+            backups=backups,
+            parts={name: {**part, **raw.get(name, {})} for name, part in parts.items()},
+            total_seconds=round(time.monotonic() - started, 1),
+            host=socket.gethostname(),
+        )
 
     def finish_restore(self, action: str, **extra: object) -> None:
         self.progress("complete", None, None, "done", action=action, **extra)
