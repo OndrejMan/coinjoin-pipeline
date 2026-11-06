@@ -1,4 +1,5 @@
 from dataclasses import asdict, replace
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -59,8 +60,8 @@ def test_restore_check_never_touches_the_working_dataset_or_sync_state(config):
     assert 'worker.py" "$WORK/settings.json" restore' in script
 
 
-def test_four_scripts_are_self_contained_and_syntactically_valid(config):
-    locks = {"restore": "exclusive", "blocksci": "exclusive", "checkpoint": "shared", "producer": None}
+def test_every_script_is_self_contained_and_syntactically_valid(config):
+    locks = {"restore": "exclusive", "blocksci": "exclusive", "checkpoint": "shared", "producer": None, "pack": None}
     for stage in mainnet_sync.SYNC_STAGES:
         script = mainnet_sync.render_sync(config, stage)
         subprocess.run(["bash", "-n"], input=script, text=True, check=True)
@@ -124,7 +125,13 @@ def test_jobs_are_chained_in_order(config, monkeypatch):
     )
     mainnet_sync.submit_sync(config)
     assert [job.stage for job in calls] == [f"mainnet-{stage}" for stage in mainnet_sync.SYNC_STAGES]
-    assert [job.dependencies for job in calls] == [(), ("101.local",), ("102.local",), ("103.local",)]
+    assert [job.dependencies for job in calls] == [
+        (),
+        ("101.local",),
+        ("102.local",),
+        ("103.local",),
+        ("104.local",),
+    ]
 
 
 def test_ready_marker_must_match_exact_generation():
@@ -725,6 +732,105 @@ def fake_components(worker, monkeypatch, events):
         "run_command": run,
     }.items():
         monkeypatch.setattr(worker, name, value)
+
+
+def archived_block(worker, tmp_path, name, payload):
+    """A raw block object and its sidecar in the fake S3."""
+    directory = tmp_path / "s3" / worker.c["blocks_uri"].removeprefix("s3://")
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / name).write_bytes(payload)
+    sidecar = {"size": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
+    (directory / f"{name}.json").write_text(json.dumps(sidecar))
+    return directory
+
+
+def ready_to_pack(worker, tmp_path):
+    """blk00000 was pruned and blk00001 stays on disk, after a finished checkpoint."""
+    payload = b"block data " * 500
+    directory = archived_block(worker, tmp_path, "blk00000.dat", payload)
+    archived_block(worker, tmp_path, "blk00001.dat", b"newest block")
+    (worker.core_dir / "blocks").mkdir(parents=True)
+    (worker.core_dir / "blocks/blk00001.dat").write_bytes(b"newest block")
+    worker.run.mkdir(parents=True)
+    atomic_json(worker.run / "done.json", {"run_id": worker.run_id})
+    worker.c["walltime_seconds"] = 3600
+    return directory, payload
+
+
+def unpacked(path):
+    return subprocess.run(["zstd", "-q", "-d", "-c", str(path)], check=True, stdout=subprocess.PIPE).stdout
+
+
+def test_pack_replaces_only_pruned_block_files(worker, tmp_path):
+    directory, payload = ready_to_pack(worker, tmp_path)
+    worker.pack()
+    assert unpacked(directory / "blk00000.dat.zst") == payload
+    assert not (directory / "blk00000.dat").exists()
+    assert (directory / "blk00000.dat.json").exists()
+    assert (directory / "blk00001.dat").exists() and not (directory / "blk00001.dat.zst").exists()
+    summary = json.loads((worker.run / "pack.json").read_text())
+    assert (summary["state"], summary["packed"], summary["remaining"]) == ("done", 1, 0)
+    assert summary["packed_bytes"] < summary["raw_bytes"]
+
+
+def test_pack_keeps_a_raw_file_that_does_not_match_its_sidecar(worker, tmp_path):
+    directory, _ = ready_to_pack(worker, tmp_path)
+    (directory / "blk00000.dat").write_bytes(b"damaged")
+    with pytest.raises(ValueError, match="could not be packed"):
+        worker.pack()
+    assert (directory / "blk00000.dat").read_bytes() == b"damaged"
+    assert not (directory / "blk00000.dat.zst").exists()
+
+
+def test_pack_keeps_the_raw_file_when_the_upload_does_not_read_back(worker, tmp_path, monkeypatch):
+    directory, payload = ready_to_pack(worker, tmp_path)
+    copy = worker.storage.copy
+
+    def damaging(source, destination, **kwargs):
+        copy(source, destination, **kwargs)
+        if destination.endswith(".zst"):
+            path = directory / "blk00000.dat.zst"
+            data = bytearray(path.read_bytes())
+            data[len(data) // 2] ^= 0xFF
+            path.write_bytes(data)
+
+    monkeypatch.setattr(worker.storage, "copy", damaging)
+    with pytest.raises(ValueError, match="could not be packed"):
+        worker.pack()
+    assert (directory / "blk00000.dat").read_bytes() == payload
+
+
+def test_pack_finishes_a_file_interrupted_before_the_raw_object_was_removed(worker, tmp_path, monkeypatch):
+    directory, payload = ready_to_pack(worker, tmp_path)
+    remove = worker.storage.remove
+    monkeypatch.setattr(worker.storage, "remove", lambda *uris, **kwargs: False)
+    with pytest.raises(ValueError, match="could not be packed"):
+        worker.pack()
+    assert (directory / "blk00000.dat").exists() and (directory / "blk00000.dat.zst").exists()
+    monkeypatch.setattr(worker.storage, "remove", remove)
+    worker.pack()
+    assert not (directory / "blk00000.dat").exists()
+    assert unpacked(directory / "blk00000.dat.zst") == payload
+
+
+def test_pack_stops_at_its_time_budget_and_leaves_the_rest_raw(worker, tmp_path):
+    directory, _ = ready_to_pack(worker, tmp_path)
+    worker.c["walltime_seconds"] = 0
+    worker.pack()
+    assert (directory / "blk00000.dat").exists()
+    assert json.loads((worker.run / "pack.json").read_text())["remaining"] == 1
+
+
+def test_pack_refuses_without_this_runs_checkpoint_or_block_files(worker, tmp_path):
+    directory, _ = ready_to_pack(worker, tmp_path)
+    atomic_json(worker.run / "done.json", {"run_id": "another-run"})
+    with pytest.raises(ValueError, match="checkpoint did not finish"):
+        worker.pack()
+    atomic_json(worker.run / "done.json", {"run_id": worker.run_id})
+    (worker.core_dir / "blocks/blk00001.dat").unlink()
+    with pytest.raises(ValueError, match="no block files on disk"):
+        worker.pack()
+    assert (directory / "blk00000.dat").exists()
 
 
 def synchronize(worker, *stages):

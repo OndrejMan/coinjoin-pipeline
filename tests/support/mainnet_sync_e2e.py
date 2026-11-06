@@ -86,6 +86,13 @@ def configuration(work: Path, endpoint: str, run: str, mode: str, target: int) -
                 "scratch_type": "local",
                 "walltime": "01:00:00" if mode == "mainnet" else "00:20:00",
             },
+            "pack": {
+                "ncpus": 2,
+                "mem": "2gb",
+                "scratch": "2gb",
+                "scratch_type": "local",
+                "walltime": "00:20:00",
+            },
         },
     }
 
@@ -174,6 +181,8 @@ def check_final(work: Path, token: str, mode: str, target: int) -> dict:
     archive = next((item for item in listed if not item.get("key", "").endswith(".json")), listed[0])
     if archive_required:
         assert archive["size"] > 0
+        if mode == "regtest":
+            assert archive["key"].endswith(".dat.zst"), "A pruned block file must be packed in S3"
     else:
         assert archive["state"] == "pending", "The active block files must stay in the Core checkpoint"
         assert (work / "recovered" / chain / "blocks/blk00000.dat").stat().st_size > 0
@@ -220,7 +229,8 @@ def check_restored(work: Path, token: str, mode: str, target: int) -> dict:
     # Restored archive markers: no block file archived before the restore is uploaded again.
     before, after = s3_listing(work / "blocks-before-restore.txt"), s3_listing(work / "blocks-after-restore.txt")
     assert before, "The block archive must not be empty before the restore"
-    changed = sorted(key for key, value in before.items() if after.get(key) != value)
+    # A pruned file legitimately goes from raw to packed; only its content may not change.
+    changed = sorted(key for key, value in before.items() if after.get(key) != value and key + ".zst" not in after)
     assert not changed, f"Block files archived again after the restore: {changed}"
     assert not (work / "data/.sync-active").exists()
     return {"restored_from_height": restore["height"], "height_after_restore": done["height"]}

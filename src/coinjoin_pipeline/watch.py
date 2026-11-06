@@ -409,7 +409,9 @@ def stream_sources(
 
 
 # Mainnet synchronization jobs write their logs next to the run, not to PBS Output_Path.
-MAINNET_SYNC_JOBS = frozenset({"mainnet-restore", "mainnet-producer", "mainnet-blocksci", "mainnet-checkpoint"})
+MAINNET_SYNC_JOBS = frozenset(
+    {"mainnet-restore", "mainnet-producer", "mainnet-blocksci", "mainnet-checkpoint", "mainnet-pack"}
+)
 
 
 class _SourceError(Exception):

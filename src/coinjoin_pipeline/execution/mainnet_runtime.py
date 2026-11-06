@@ -1,6 +1,6 @@
 """Self-contained PBS worker. Embedded in qsub scripts; stdlib only on the host.
 
-One synchronization is four jobs: restore, producer, blocksci and checkpoint. Working
+One synchronization is five jobs: restore, producer, blocksci, checkpoint and pack. Working
 data are downloaded only by the restore job and only into an empty working dataset.
 Each backup has one place: the old archive is deleted, the new one streamed and its size
 checked, and manifest.json, written last, makes it valid again.
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import fcntl
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
@@ -81,6 +82,7 @@ class Settings(TypedDict, total=False):
     poll_seconds: float
     pbs_resources: PbsResources
     measure_download: bool
+    walltime_seconds: int
     # restore and blocksci write the index, the checkpoint reads it; producer leaves it alone.
     index_lock: str | None
     index_lock_seconds: int
@@ -89,6 +91,10 @@ class Settings(TypedDict, total=False):
 CHUNK = 8 * 1024 * 1024
 # The parser's resume point; its bytes tie an index to one Core block directory.
 RESUME_CHECKPOINT = "parsed/parser/blockList.dat.resume.json"
+BLOCK_FILE = re.compile(r"blk[0-9]{5}\.dat")
+# The archive is read rarely and packed once, so the level favours size over time.
+PACK_LEVEL = 19
+PACK_RESERVE_SECONDS = 1800  # at most a quarter of the walltime, for short test budgets
 
 
 def utc_now() -> str:
@@ -349,7 +355,7 @@ class Worker:
 
     def reset_state(self) -> None:
         """Clear the previous synchronization's state; its logs stay under logs/<run-id>/."""
-        stages = ("restore", "producer", "blocksci", "checkpoint")
+        stages = ("restore", "producer", "blocksci", "checkpoint", "pack")
         # <stage>.json is each job's progress; restore.json also says what the restore did.
         names = ("ready.json", "done.json", "blocksci-index-manifest.json", *(f"{stage}.json" for stage in stages))
         for name in (*names, *(f"{stage}.quiescent" for stage in stages if stage != self.stage)):
@@ -1233,6 +1239,117 @@ class Worker:
         self.publish_json(self.remote + "/done.json", done)
         self.complete(done)
         atomic_json(self.run / "done.json", done)
+
+    def pack_block(self, name: str, work: Path) -> tuple[int, int]:
+        """Replace one pruned raw block file in S3 by a verified .zst; safe to repeat.
+
+        The raw object goes only after the uploaded archive was read back and its content
+        matched the SHA-256 the archiver recorded in the sidecar, which stays unchanged.
+        """
+        raw = self.c["blocks_uri"].rstrip("/") + "/" + name
+        packed = raw + ".zst"
+        sidecar = self.storage.cat_json(raw + ".json")
+        expected, size = sidecar.get("sha256"), sidecar.get("size")
+        if not is_sha256(expected) or not is_count(size):
+            raise ValueError("Invalid block sidecar: " + name)
+        local = work / name
+        self.storage.copy(raw, str(local))
+        try:
+            digest = hashlib.sha256()
+            with local.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(CHUNK), b""):
+                    digest.update(chunk)
+            if digest.hexdigest() != expected or local.stat().st_size != size:
+                raise ValueError("Raw block object does not match its sidecar: " + name)
+            archive = work / (name + ".zst")
+            subprocess.run(["zstd", "-q", "-f", f"-{PACK_LEVEL}", "-T1", str(local), "-o", str(archive)], check=True)
+            compressed = archive.stat().st_size
+            self.storage.copy(str(archive), packed)
+        finally:
+            local.unlink(missing_ok=True)
+            (work / (name + ".zst")).unlink(missing_ok=True)
+        self.verify_remote_size(packed, compressed)
+        source = self.storage.popen("cat", packed, stdout=subprocess.PIPE)
+        unpack = subprocess.Popen(["zstd", "-q", "-d", "-c"], stdin=source.stdout, stdout=subprocess.PIPE)
+        pipe(source.stdout).close()
+        digest = hashlib.sha256()
+        try:
+            for chunk in iter(lambda: pipe(unpack.stdout).read(CHUNK), b""):
+                digest.update(chunk)
+            if unpack.wait() != 0 or source.wait() != 0 or digest.hexdigest() != expected:
+                raise ValueError("Packed block does not unpack to its sidecar checksum: " + name)
+        finally:
+            terminate((source, unpack))
+        if not self.storage.remove(raw) or self.storage.exists(raw):
+            raise ValueError("Raw block object was not removed: " + name)
+        return size, compressed
+
+    def pack(self) -> None:
+        """Job 4: compress the archive's block files that Core no longer keeps.
+
+        Takes no dataset lock, so the next synchronization may start. Only files already
+        pruned from disk qualify: pruning verifies the raw object of every file on disk.
+        S3 is listed first, so a file uploaded meanwhile is seen on disk and skipped.
+        """
+        self.stage = "pack"
+        started = time.monotonic()
+        if read_json(self.run / "done.json").get("run_id") != self.run_id:
+            raise ValueError("This synchronization's checkpoint did not finish; packing refused")
+        listed = self.storage.listing(self.c["blocks_uri"].rstrip("/") + "/*", timeout=None)
+        raw = sorted(
+            name for name in (str(entry["key"]).rsplit("/", 1)[-1] for entry in listed) if BLOCK_FILE.fullmatch(name)
+        )
+        on_disk = {path.name for path in (self.core_dir / "blocks").glob("blk*.dat")}
+        if not on_disk:
+            raise ValueError("Core has no block files on disk; packing refused")
+        pending = [name for name in raw if name not in on_disk]
+        # Whatever is left stays raw for the next run; a running file takes a few minutes.
+        walltime = self.c["walltime_seconds"]
+        deadline = started + walltime - min(PACK_RESERVE_SECONDS, walltime // 4)
+        stop = threading.Event()
+        lock = threading.Lock()
+        totals = {"packed": 0, "raw_bytes": 0, "packed_bytes": 0}
+        failed: list[str] = []
+        self.progress("packing", 0, len(pending))
+
+        def work(name: str) -> None:
+            if stop.is_set() or time.monotonic() > deadline:
+                return
+            directory = Path(tempfile.mkdtemp(dir=self.work))
+            try:
+                before, after = self.pack_block(name, directory)
+            except (ValueError, OSError, subprocess.SubprocessError, S5Error) as error:
+                print(f"Packing {name} failed: {error}", file=sys.stderr, flush=True)
+                with lock:
+                    failed.append(name)
+                return
+            finally:
+                shutil.rmtree(directory, ignore_errors=True)
+            with lock:
+                totals["packed"] += 1
+                totals["raw_bytes"] += before
+                totals["packed_bytes"] += after
+                done = totals["packed"]
+            if done % 20 == 0:
+                self.progress("packing", done, len(pending))
+
+        try:
+            with ThreadPoolExecutor(self.c["pbs_resources"]["ncpus"]) as pool:
+                list(pool.map(work, pending))
+        except BaseException:
+            stop.set()
+            raise
+        summary = {
+            **totals,
+            "failed": failed,
+            "remaining": len(pending) - totals["packed"],
+            "seconds": round(time.monotonic() - started, 1),
+        }
+        print("pack summary: " + json.dumps(summary), flush=True)
+        if failed:
+            raise ValueError(f"{len(failed)} block files could not be packed; they stay raw in S3")
+        self.progress("complete", totals["packed"], len(pending), "done", **summary)
+        self.complete({"run_id": self.run_id, **summary})
 
     def cleanup(self) -> None:
         for process in self.children:

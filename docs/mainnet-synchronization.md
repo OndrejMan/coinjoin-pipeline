@@ -36,11 +36,13 @@ U krátkého mainnetového testu pod výškou 100000 se pruning přeskočí, pro
 Core ještě nepovoluje; indexace a záloha pokračují se zachováním všech bloků.
 Tato možnost vyžaduje také nově sestavené Dumplings s `--frozen-height`.
 
-## Čtyři joby
+## Pět jobů
 
-Synchronizace odešle čtyři joby řetězené `afterok`: `mainnet-restore` →
-`mainnet-producer` → `mainnet-blocksci` → `mainnet-checkpoint`. Každý si sám vezme
-a pustí zámek datasetu. Když jeden spadne, PBS zruší ty, které na něm závisí.
+Synchronizace odešle pět jobů řetězených `afterok`: `mainnet-restore` →
+`mainnet-producer` → `mainnet-blocksci` → `mainnet-checkpoint` → `mainnet-pack`. První
+čtyři si samy vezmou a pustí zámek datasetu. Když jeden spadne, PBS zruší ty, které na
+něm závisí. Synchronizace je hotová už závěrečným `done.json` checkpointu; selhání
+`mainnet-pack` ji nezmění a v Labu se ukáže jen u balení.
 
 `mainnet-restore` (8 CPU / 8 GB) vymaže stav minulého běhu a podívá se, zda
 na multijobu existují pracovní data (`bitcoin/`, `dumplings/`, `archive-state/`,
@@ -123,6 +125,21 @@ Manifest indexu navíc obsahuje SHA-256 prefixu tohoto souboru až po kurzor.
 Další update ověří stejné bajty; nová data lze připojit za kurzor, ale jiný
 layout Core se nesmí zaměnit za stejný zdroj jen proto, že má stejnou cestu.
 
+`mainnet-pack` (4 CPU, 4 GB, 24 h) zkomprimuje archiv bloků. Zámek datasetu si nebere,
+takže může běžet současně s další synchronizací. Vypíše S3 a až potom disk a bere jen
+surové `blkNNNNN.dat`, které už Core na disku nemá: pruning totiž u souborů na disku
+ověřuje surový objekt. Odmítne běh bez `done.json` tohoto běhu i prázdný adresář bloků.
+Každý soubor zpracuje samostatně: ověří ho proti SHA-256 ze sidecaru, zabalí `zstd -19`,
+nahraje `blkNNNNN.dat.zst`, přečte ho zpět, rozbalený obsah znovu porovná se sidecarem
+a teprve potom smaže surový objekt. Sidecar se nemění, takže `block_archive_index_sha256`
+platí dál. Opakování je bezpečné: soubor ve stavu raw + `.zst` se zpracuje znovu a čtení
+bere raw. Půl hodiny před koncem walltime (nejvýš čtvrtina walltime) job přestane brát
+další soubory; zbytek zůstane surový do dalšího běhu. Souhrn je v `pack.json`
+(`packed`, `raw_bytes`, `packed_bytes`, `remaining`, `failed`, `seconds`). Stahování
+bloků pro parse a update čte obě podoby a `.zst` před `verify` rozbalí. Job běžící
+současně se stahováním může parse shodit, protože surový objekt zmizí mezi výpisem
+a stažením; opakovaný parse už uvidí `.zst`.
+
 ## Pracovní data a zálohy
 
 ```
@@ -141,7 +158,7 @@ blocksci.index_dir/
   .lock/
 ```
 
-Všechny čtyři joby musí mít stejné umístění multijob. Jeho adresář je oddělený od
+Všechny joby musí mít stejné umístění multijob. Jeho adresář je oddělený od
 `$SCRATCHDIR`, ale multijob storage je dočasný a může zmizet. Ze S3 stahuje jen
 `mainnet-restore`, a to jen do úplně prázdného datasetu. Počáteční parse potřebuje kompletní historii
 bloků. Prunovaný Core bez indexu nelze rovnou použít pro prvotní parse.

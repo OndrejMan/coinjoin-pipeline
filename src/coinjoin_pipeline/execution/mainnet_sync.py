@@ -1,4 +1,4 @@
-"""Manual restore → Core/Dumplings → BlockSci → checkpoint PBS chain over a shared working directory."""
+"""Manual restore → Core/Dumplings → BlockSci → checkpoint → pack PBS chain over a shared working directory."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import PipelineConfiguration
 
 # Submission order; each job depends on the previous one.
-SYNC_STAGES = ("restore", "producer", "blocksci", "checkpoint")
+SYNC_STAGES = ("restore", "producer", "blocksci", "checkpoint", "pack")
 
 # Unpacks a whole dataset (about 143 GB at height 500027) into scratch; only streams otherwise.
 RESTORE_CHECK_RESOURCES = PBSResources(2, "4gb", "200gb", "12:00:00")
@@ -167,6 +167,7 @@ def sync_settings(config: PipelineConfiguration, stage: str, budget: PBSResource
         "index_lock": {"restore": "exclusive", "blocksci": "exclusive", "checkpoint": "shared"}.get(stage),
         # Past the walltime the job is gone, so its lock entry may be cleared.
         "index_lock_seconds": walltime_to_seconds(budget.walltime) + 600,
+        "walltime_seconds": walltime_to_seconds(budget.walltime),
     }
 
 
