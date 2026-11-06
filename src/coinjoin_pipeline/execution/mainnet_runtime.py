@@ -27,18 +27,17 @@ import shlex
 import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:  # TypeGuard needs Python 3.10; the PBS node only evaluates no annotation.
     from typing import TypeGuard
 
 try:
-    from coinjoin_pipeline.execution.pbs.index_store import IndexStore
+    from coinjoin_pipeline.execution.pbs.index_store import IndexStore, usage_report, utc_now
     from coinjoin_pipeline.execution.pbs.index_store import inventory as index_inventory
     from coinjoin_pipeline.storage.s5client import S5Client, S5Error, pipe, stream_sha256
 except ImportError:  # the PBS job ships index_store.py and s5client.py next to this script
-    from index_store import IndexStore  # type: ignore[no-redef]
+    from index_store import IndexStore, usage_report, utc_now  # type: ignore[no-redef]
     from index_store import inventory as index_inventory  # type: ignore[no-redef]
     from s5client import S5Client, S5Error, pipe, stream_sha256  # type: ignore[no-redef]
 
@@ -99,10 +98,6 @@ PACK_LEVEL = 19
 PACK_RESERVE_SECONDS = 1800  # at most a quarter of the walltime, for short test budgets
 
 
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 def read_json(path: Path) -> JsonObject:
     return json.loads(path.read_text())
 
@@ -119,18 +114,6 @@ def is_sha256(value: object) -> bool:
 def file_sizes(root: Path) -> dict[str, int]:
     """Relative path -> size of every regular file below root."""
     return {str(path.relative_to(root)): path.stat().st_size for path in sorted(root.rglob("*")) if path.is_file()}
-
-
-def directory_usage(root: Path) -> dict[str, int]:
-    """Apparent size and file count of a tree; a missing directory is empty."""
-    size = files = 0
-    for directory, _, names in os.walk(root):
-        for name in names:
-            path = Path(directory) / name
-            if not path.is_symlink():
-                size += path.stat().st_size
-                files += 1
-    return {"bytes": size, "files": files}
 
 
 def megabytes_per_second(size: int, seconds: float) -> float:
@@ -1343,9 +1326,9 @@ class Worker:
         """
         roots = [self.root, self.index, *([Path(self.c["notebook_root"])] if self.c.get("notebook_root") else [])]
         try:
-            directories = {str(root): directory_usage(root) for root in roots}
-            report = {"run_id": self.run_id, "stage": self.stage, "measured_at": utc_now(), "directories": directories}
-            self.publish_json(self.remote + "/multijob-storage.json", report)
+            self.publish_json(
+                self.remote + "/multijob-storage.json", usage_report(self.stage, roots, run_id=self.run_id)
+            )
         except (OSError, subprocess.SubprocessError, S5Error) as error:
             print(f"Storage report failed: {error}", file=sys.stderr)
 

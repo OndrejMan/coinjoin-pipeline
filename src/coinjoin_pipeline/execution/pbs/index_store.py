@@ -27,7 +27,7 @@ import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterable
 
 if TYPE_CHECKING:
     from coinjoin_pipeline.storage.s5client import S5Client
@@ -39,6 +39,28 @@ MEMBERS = ("config.json", "files.txt", "manifest.json", "parsed")
 
 class IndexStoreError(RuntimeError):
     """The index cannot be locked, is incomplete, or its backup is unusable."""
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def directory_usage(root: Path) -> dict[str, int]:
+    """Apparent size and file count of a tree; a missing directory is empty."""
+    size = files = 0
+    for directory, _, names in os.walk(root):
+        for name in names:
+            path = Path(directory) / name
+            if not path.is_symlink():
+                size += path.stat().st_size
+                files += 1
+    return {"bytes": size, "files": files}
+
+
+def usage_report(stage: str, roots: Iterable[Path], **extra: object) -> dict[str, object]:
+    """What a job tells the lab about the directories it keeps on the multijob."""
+    directories = {str(root): directory_usage(root) for root in roots}
+    return {**extra, "stage": stage, "measured_at": utc_now(), "directories": directories}
 
 
 def inventory(index: Path) -> str:
@@ -255,7 +277,7 @@ class IndexStore:
             "archive_sha256": checksum,
             "archive_size": size,
             "upload_validation": "size-only",
-            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            "uploaded_at": utc_now(),
         }
         storage.copy_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", f"{self.backup_uri}/manifest.json")
         print("[index] S3 backup complete", flush=True)
