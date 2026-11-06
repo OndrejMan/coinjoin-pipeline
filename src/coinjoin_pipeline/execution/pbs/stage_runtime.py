@@ -585,12 +585,17 @@ def restore_index(
     return manifest
 
 
-def open_index(stage: Stage, *, writer: bool) -> IndexStore:
-    """Lock the persistent index for reading or writing; finalization releases the lock."""
-    require_tools("zstd")
+def persistent_settings(stage: Stage) -> dict:
     settings = stage.settings.get("persistent")
     if not settings:
         raise StageFailure("This job has no persistent index")
+    return settings
+
+
+def open_index(stage: Stage, *, writer: bool) -> IndexStore:
+    """Lock the persistent index for reading or writing; finalization releases the lock."""
+    require_tools("zstd")
+    settings = persistent_settings(stage)
     index = IndexStore(
         str(settings["index_dir"]),
         settings.get("backup_uri"),
@@ -611,7 +616,7 @@ def open_index(stage: Stage, *, writer: bool) -> IndexStore:
 def scratch_index(stage: Stage) -> IndexStore:
     """A private copy of the backup in the job's scratch; nobody else reads it, so no lock."""
     require_tools("zstd")
-    settings = stage.settings["persistent"]
+    settings = persistent_settings(stage)
     index = IndexStore(str(stage.scratch / "index"), settings["backup_uri"], storage=stage.storage)
     index.path.mkdir(parents=True, exist_ok=True)
     index.restore()
@@ -663,7 +668,7 @@ def attach_dumplings(stage: Stage, index: IndexStore, uri: str) -> str:
 
 def read_index(stage: Stage) -> IndexStore:
     """Read-only access for an analysis: shared lock, complete copy, run-local config."""
-    settings = stage.settings["persistent"]
+    settings = persistent_settings(stage)
     if settings.get("in_scratch"):
         index = scratch_index(stage)
     else:
@@ -1018,14 +1023,15 @@ def blocksci_analysis(stage: Stage) -> None:
         f"BLOCKSCI_RUN_DIR={container_run(stage)}",
     ]
     output.mkdir(parents=True, exist_ok=True)
-    if settings.get("persistent"):
+    persistent = settings.get("persistent")
+    if persistent:
         index = read_index(stage)
         binds += index.binds("ro")
         shutil.copyfile(index.path / "manifest.json", output / "blocksci-index-manifest.json")
-        dumplings = settings["persistent"].get("dumplings_uri")
+        dumplings = persistent.get("dumplings_uri")
         if dumplings:
             binds.append(attach_dumplings(stage, index, dumplings))
-        report_uri = settings["persistent"].get("storage_report_uri")
+        report_uri = persistent.get("storage_report_uri")
         if report_uri:
             report_kept_copy(stage, index.path.parent, report_uri)
     else:

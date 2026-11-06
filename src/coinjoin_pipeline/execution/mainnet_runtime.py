@@ -1324,7 +1324,8 @@ class Worker:
 
         Only a report: a failure here never decides the outcome of the job.
         """
-        roots = [self.root, self.index, *([Path(self.c["notebook_root"])] if self.c.get("notebook_root") else [])]
+        notebook = self.c.get("notebook_root")
+        roots = [self.root, self.index, *([Path(notebook)] if notebook else [])]
         try:
             self.publish_json(
                 self.remote + "/multijob-storage.json", usage_report(self.stage, roots, run_id=self.run_id)
