@@ -149,6 +149,8 @@ class BlockSciConfiguration(ConfigurationModel):
     index_in_scratch: bool = option(False, name="blocksci_index_in_scratch")
     restore_index: bool = option(False, name="blocksci_restore_index")
     dumplings_uri: str | None = option(None, name="blocksci_dumplings_uri")
+    # With restore_index: S3 object where the job reports the size of the kept copy.
+    storage_report_uri: str | None = option(None, name="blocksci_storage_report_uri")
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,6 +250,8 @@ class MainnetSyncConfiguration(ConfigurationModel):
     poll_seconds: int = option(30, name="mainnet_poll_seconds", minimum=1)
     # Empty the working dataset after the last job; the next restore job refills it from S3.
     clear_after_sync: bool = option(True, name="mainnet_clear_after_sync")
+    # Kept notebook data beside the dataset; only measured, so the storage report covers it.
+    notebook_root: str | None = option(None, name="mainnet_notebook_root")
 
 
 @dataclass(frozen=True, slots=True)

@@ -29,10 +29,10 @@ from typing import IO, TypedDict
 
 try:
     from coinjoin_pipeline.execution.pbs.index_store import IndexStore
-    from coinjoin_pipeline.storage.s5client import S5Client
+    from coinjoin_pipeline.storage.s5client import S5Client, S5Error
 except ImportError:  # the PBS job ships index_store.py and s5client.py next to this script
     from index_store import IndexStore  # type: ignore[no-redef]
-    from s5client import S5Client  # type: ignore[no-redef]
+    from s5client import S5Client, S5Error  # type: ignore[no-redef]
 
 # Where the containers see the runs: exporters read runs below the first root, the
 # coinjoin-analysis collector scans every run below the second.
@@ -635,6 +635,20 @@ def kept_index(stage: Stage) -> IndexStore:
     return index
 
 
+def report_kept_copy(stage: Stage, directory: Path, uri: str) -> None:
+    """Tell the lab how large the kept copy is; a failed report must not stop the notebook."""
+    paths = [path for path in directory.rglob("*") if path.is_file() and not path.is_symlink()]
+    report = {
+        "stage": "notebook",
+        "measured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "directories": {str(directory): {"bytes": sum(path.stat().st_size for path in paths), "files": len(paths)}},
+    }
+    try:
+        stage.storage.copy_text(json.dumps(report), uri)
+    except (OSError, subprocess.SubprocessError, S5Error) as error:
+        stage.log(f"[index] the kept copy's size was not reported: {error}")
+
+
 def read_index(stage: Stage) -> IndexStore:
     """Read-only access for an analysis: shared lock, complete copy, run-local config."""
     settings = stage.settings["persistent"]
@@ -1004,6 +1018,9 @@ def blocksci_analysis(stage: Stage) -> None:
             if not any(scanner.iterdir()):
                 stage.storage.copy(f"{dumplings}/Scanner/*", f"{scanner}/", timeout=None)
             binds.append(f"{os.path.realpath(scanner)}:/mnt/dumplings/Scanner:ro")
+        report_uri = settings["persistent"].get("storage_report_uri")
+        if report_uri:
+            report_kept_copy(stage, index.path.parent, report_uri)
     else:
         cache_run = settings.get("source_run_id") or stage.run_id
         prefix = f"{settings['artifact_uri']}/{cache_run}/blocksci-parse_data"

@@ -100,6 +100,7 @@ class PersistentIndex:
     in_scratch: bool = False
     restore: bool = False
     dumplings_uri: str | None = None
+    storage_report_uri: str | None = None
 
     def __post_init__(self) -> None:
         if not self.index_dir.startswith(INDEX_ROOTS) or ".." in Path(self.index_dir).parts:
@@ -311,6 +312,7 @@ def _persistent_settings(index: PersistentIndex | None, walltime: str) -> dict[s
         "in_scratch": index.in_scratch,
         "restore": index.restore,
         "dumplings_uri": index.dumplings_uri,
+        "storage_report_uri": index.storage_report_uri,
         # Past the walltime the job is gone, so its lock entry may be cleared.
         "lock_seconds": seconds + 600,
         "wait_seconds": max(60, seconds // 2),

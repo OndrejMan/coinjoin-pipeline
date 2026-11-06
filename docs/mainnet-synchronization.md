@@ -163,6 +163,12 @@ synchronizace ani `mainnet-clear` nevidí; kopie v `index_dir` synchronizace by 
 považoval za neprázdný dataset a producer by ji odmítl. Kopie zůstává a další notebook ji
 použije beze stahování, i když mezitím vznikla novější záloha. Maže se jen ručně v Labu.
 
+Po každém jobu synchronizace, i neúspěšném, worker změří `mainnet.root`, `blocksci.index_dir`
+a `mainnet.notebook_root` a zapíše je do `<state_uri>/multijob-storage.json`. Notebook
+s ponechanou kopií zapíše její velikost do `blocksci.storage_report_uri`. Lab z těchto
+hlášení bere pro každou složku to nejnovější a smazání v Labu sám zaznamená jako nulu, takže
+běžný přehled nepotřebuje inspekční job. Selhání hlášení job neshodí.
+
 ## Pracovní data a zálohy
 
 ```

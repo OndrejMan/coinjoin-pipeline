@@ -167,6 +167,7 @@ HELP = {
         "with --blocksci-index-in-scratch or --blocksci-restore-index: S3 prefix of the Dumplings copy placed "
         "next to the index, seen at /mnt/dumplings"
     ),
+    "blocksci.storage_report_uri": "with --blocksci-restore-index: S3 object receiving the kept copy's size",
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
     "pbs.bitcoin_datadir": "Bitcoin datadir the PBS BlockSci stage reads (also $PBS_BITCOIN_DATADIR)",
     "coinjoin_analysis.actions": "program operation (repeatable)",

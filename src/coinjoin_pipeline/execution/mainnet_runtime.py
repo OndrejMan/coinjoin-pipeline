@@ -84,6 +84,7 @@ class Settings(TypedDict, total=False):
     measure_download: bool
     walltime_seconds: int
     clear_after_sync: bool
+    notebook_root: str | None
     # restore and blocksci write the index, the checkpoint reads it; producer leaves it alone.
     index_lock: str | None
     index_lock_seconds: int
@@ -118,6 +119,18 @@ def is_sha256(value: object) -> bool:
 def file_sizes(root: Path) -> dict[str, int]:
     """Relative path -> size of every regular file below root."""
     return {str(path.relative_to(root)): path.stat().st_size for path in sorted(root.rglob("*")) if path.is_file()}
+
+
+def directory_usage(root: Path) -> dict[str, int]:
+    """Apparent size and file count of a tree; a missing directory is empty."""
+    size = files = 0
+    for directory, _, names in os.walk(root):
+        for name in names:
+            path = Path(directory) / name
+            if not path.is_symlink():
+                size += path.stat().st_size
+                files += 1
+    return {"bytes": size, "files": files}
 
 
 def megabytes_per_second(size: int, seconds: float) -> float:
@@ -1386,6 +1399,19 @@ class Worker:
             # additionally require a successful exit before publishing data.
             self.stop_core(require_clean_exit=False)
 
+    def report_storage(self) -> None:
+        """Publish what the multijob now holds, so the lab needs no inspection job.
+
+        Only a report: a failure here never decides the outcome of the job.
+        """
+        roots = [self.root, self.index, *([Path(self.c["notebook_root"])] if self.c.get("notebook_root") else [])]
+        try:
+            directories = {str(root): directory_usage(root) for root in roots}
+            report = {"run_id": self.run_id, "stage": self.stage, "measured_at": utc_now(), "directories": directories}
+            self.publish_json(self.remote + "/multijob-storage.json", report)
+        except (OSError, subprocess.SubprocessError, S5Error) as error:
+            print(f"Storage report failed: {error}", file=sys.stderr)
+
     def publish_logs(self) -> None:
         for path in sorted(self.logs.glob("*.log")):
             self.storage.copy(path, f"{self.remote}/logs/{self.run_id}/{path.name}")
@@ -1408,6 +1434,7 @@ def main(argv: list[str] | None = None) -> None:
             worker.release_dataset()
         worker.progress("failed", state="failed", error="PBS stage failed; inspect the persistent job logs")
         worker.publish_json(worker.remote + f"/.pbs/mainnet-{worker.stage}.failed", {"run_id": worker.run_id})
+        worker.report_storage()
         return
     worker.stage = args[1]
     job = worker.restore_dataset if args[1] == "restore" else getattr(worker, args[1])
@@ -1420,9 +1447,7 @@ def main(argv: list[str] | None = None) -> None:
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
     # Fail at once on an active notebook or index job instead of holding an allocation waiting.
-    index = IndexStore(
-        worker.c["index_dir"], None, lock_seconds=worker.c.get("index_lock_seconds", 0), poll_seconds=1
-    )
+    index = IndexStore(worker.c["index_dir"], None, lock_seconds=worker.c.get("index_lock_seconds", 0), poll_seconds=1)
     try:
         mode = worker.c.get("index_lock")
         if mode == "exclusive":
@@ -1437,6 +1462,7 @@ def main(argv: list[str] | None = None) -> None:
             worker.run.mkdir(parents=True, exist_ok=True)
             (worker.run / f"{worker.stage}.quiescent").touch()
         finally:
+            worker.report_storage()
             try:
                 worker.publish_logs()
             except Exception as error:

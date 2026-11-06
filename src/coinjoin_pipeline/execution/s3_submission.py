@@ -131,6 +131,7 @@ class S3StageRunner:
                 in_scratch=blocksci.index_in_scratch,
                 restore=blocksci.restore_index,
                 dumplings_uri=blocksci.dumplings_uri,
+                storage_report_uri=blocksci.storage_report_uri,
             ),
             "multijob": self.args.pbs.blocksci.multijob,
         }

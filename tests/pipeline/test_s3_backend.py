@@ -1213,6 +1213,7 @@ def test_persistent_update_works_in_place_under_the_writer_lock() -> None:
         "in_scratch": False,
         "restore": False,
         "dumplings_uri": None,
+        "storage_report_uri": None,
         "lock_seconds": 24 * 3600 + 600,
         "wait_seconds": 12 * 3600,
         "poll_seconds": 60,

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore, IndexStoreError
-from coinjoin_pipeline.execution.pbs.stage_runtime import kept_index, scratch_index
+from coinjoin_pipeline.execution.pbs.stage_runtime import kept_index, report_kept_copy, scratch_index
 from coinjoin_pipeline.storage.s5client import S5Client, S5Error
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -355,3 +355,15 @@ def test_a_kept_copy_is_filled_once_and_stays_after_the_job(tmp_path):
     again = kept_index(keeping_stage(tmp_path, index))
     assert again.complete(), "A complete copy needs no backup"
     again.unlock()
+
+
+def test_a_kept_copy_reports_its_size(tmp_path):
+    parse_index(tmp_path)
+    index = store(tmp_path)
+    stage = SimpleNamespace(storage=index.storage, log=print)
+
+    report_kept_copy(stage, index.path, "s3://bucket/state/notebook-storage.json")
+
+    report = json.loads((tmp_path / "s3/bucket/state/notebook-storage.json").read_text())
+    usage = report["directories"][str(index.path)]
+    assert report["stage"] == "notebook" and usage["files"] > 0 and usage["bytes"] > 0

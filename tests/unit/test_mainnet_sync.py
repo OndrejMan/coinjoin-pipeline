@@ -874,6 +874,32 @@ def test_clear_refuses_a_dataset_of_another_synchronization(worker):
     assert (worker.index / "parsed").exists()
 
 
+def test_each_job_reports_the_multijob_sizes(worker, tmp_path):
+    filled_dataset(worker)
+    notebook = tmp_path / "mainnet-notebook"
+    (notebook / "index").mkdir(parents=True)
+    (notebook / "index/file").write_bytes(b"12345")
+    worker.c["notebook_root"] = str(notebook)
+    worker.stage = "pack"
+    worker.report_storage()
+    uri = worker.remote.removeprefix("s3://")
+    report = json.loads((tmp_path / "s3" / uri / "multijob-storage.json").read_text())
+    assert report["stage"] == "pack"
+    assert report["directories"][str(notebook)] == {"bytes": 5, "files": 1}
+    assert report["directories"][str(worker.index)]["files"] == 3
+
+
+def test_a_failed_storage_report_is_not_a_job_failure(worker, monkeypatch):
+    filled_dataset(worker)
+    worker.stage = "clear"
+
+    def refuse(*_args):
+        raise subprocess.CalledProcessError(1, "s5cmd")
+
+    monkeypatch.setattr(worker, "publish_json", refuse)
+    worker.report_storage()
+
+
 def test_the_clear_job_can_be_turned_off(config, monkeypatch):
     calls = []
     monkeypatch.setattr(mainnet_sync, "submit_pbs_job", lambda job, _dry: calls.append(job) or "1.local")
