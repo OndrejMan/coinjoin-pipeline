@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 from typing import IO, Iterator, Mapping, Sequence
 
@@ -28,10 +29,19 @@ def no_object_found(result: subprocess.CompletedProcess) -> bool:
     return "no object found" in ((result.stderr or "") + (result.stdout or "")).lower()
 
 
-def _pipe(stream: IO[bytes] | None) -> IO[bytes]:
+def pipe(stream: IO[bytes] | None) -> IO[bytes]:
+    """The pipe a process was started with; every caller asked for one."""
     if stream is None:
         raise RuntimeError("The process has no pipe to stream through")
     return stream
+
+
+def stream_sha256(stream: IO[bytes]) -> str:
+    """SHA-256 of everything left in stream."""
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: stream.read(CHUNK), b""):
+        digest.update(chunk)
+    return digest.hexdigest()
 
 
 @contextlib.contextmanager
@@ -83,10 +93,6 @@ class S5Client:
             stderr=subprocess.PIPE,
             timeout=timeout,
         )
-
-    def popen(self, *arguments: object, stdin: int | None = None, stdout: int | None = None) -> subprocess.Popen:
-        """Start a streaming command (``cat`` or ``pipe``); the caller owns its lifetime."""
-        return subprocess.Popen(self.command(*arguments), env=self.environment, stdin=stdin, stdout=stdout)
 
     def listing(self, pattern: str, timeout: float | None = 600) -> list[dict[str, object]]:
         """The JSON entries ``ls`` prints for pattern; empty when nothing matches.
@@ -155,7 +161,7 @@ class S5Client:
         with contextlib.ExitStack() as stack:
             tar = stack.enter_context(_stage(["tar", "-C", str(root), "-cf", "-", *members], stdout=subprocess.PIPE))
             zstd = stack.enter_context(_stage(["zstd", "-3", f"-T{threads}"], stdin=tar.stdout, stdout=subprocess.PIPE))
-            _pipe(tar.stdout).close()
+            pipe(tar.stdout).close()
             processes = [tar, zstd]
             if self.supports_pipe():
                 command = self.command("pipe", uri)
@@ -163,13 +169,13 @@ class S5Client:
                     _stage(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, env=self.environment)
                 )
                 processes.append(upload)
-                destination = _pipe(upload.stdin)
+                destination = pipe(upload.stdin)
             else:
                 # In the job's temporary directory (its scratch), never in the tree being archived.
                 handle, staged = tempfile.mkstemp(prefix="archive-", suffix=".tar.zst")
                 stack.callback(Path(staged).unlink, missing_ok=True)
                 destination = os.fdopen(handle, "wb")
-            compressed = _pipe(zstd.stdout)
+            compressed = pipe(zstd.stdout)
             for chunk in iter(lambda: compressed.read(CHUNK), b""):
                 digest.update(chunk)
                 size += len(chunk)
@@ -182,26 +188,63 @@ class S5Client:
                 self.copy(staged, uri, timeout=None)
             return digest.hexdigest(), size
 
+    def discard(self, uri: str) -> None:
+        """Read an object to its end and keep nothing: the speed of S3 alone."""
+        with _stage(self.command("cat", uri), stdout=subprocess.DEVNULL, env=self.environment) as source:
+            if source.wait() != 0:
+                raise S5Error(f"Reading {uri} failed")
+
+    @contextlib.contextmanager
+    def unpacked(self, uri: str, expected_sha256: str | None = None) -> Iterator[IO[bytes]]:
+        """The content of the zstd object ``uri`` as a stream.
+
+        The body reads the stream, or closes it after handing it to a process. Leaving the
+        context waits for the download and checks it, with expected_sha256 also the object's
+        hash, so the body's result counts only once the context ended without S5Error.
+        """
+        digest = hashlib.sha256()
+        failures: list[Exception] = []
+        with contextlib.ExitStack() as stack:
+            source = stack.enter_context(_stage(self.command("cat", uri), stdout=subprocess.PIPE, env=self.environment))
+            unpack = stack.enter_context(_stage(["zstd", "-q", "-d"], stdin=subprocess.PIPE, stdout=subprocess.PIPE))
+            downloaded, compressed, stream = pipe(source.stdout), pipe(unpack.stdin), pipe(unpack.stdout)
+
+            def pump() -> None:
+                try:
+                    for chunk in iter(lambda: downloaded.read(CHUNK), b""):
+                        digest.update(chunk)
+                        compressed.write(chunk)
+                except (OSError, ValueError) as error:
+                    failures.append(error)
+                finally:
+                    # A dead zstd fails the flush; its exit status reports that.
+                    with contextlib.suppress(OSError, ValueError):
+                        compressed.close()
+
+            # A thread, because the body reads the other end of this pipeline.
+            thread = threading.Thread(target=pump, daemon=True)
+            thread.start()
+            yield stream
+            if not stream.closed:
+                # Trailing tar padding: zstd and the download end only once it was read.
+                while stream.read(CHUNK):
+                    pass
+            thread.join(timeout=30)
+            if thread.is_alive() or failures or source.wait() != 0 or unpack.wait() != 0:
+                raise S5Error(f"Reading {uri} failed")
+        if expected_sha256 is not None and digest.hexdigest() != expected_sha256:
+            raise S5Error("The S3 archive does not match its SHA-256")
+
     def restore_archive(self, uri: str, destination: Path, expected_sha256: str) -> None:
         """Stream ``uri`` through ``zstd -d | tar -x -C destination``, hashing it on the way.
 
         The caller exposes what was extracted only after this returns.
         """
-        digest = hashlib.sha256()
-        with contextlib.ExitStack() as stack:
-            source = stack.enter_context(_stage(self.command("cat", uri), stdout=subprocess.PIPE, env=self.environment))
-            unpack = stack.enter_context(_stage(["zstd", "-d"], stdin=subprocess.PIPE, stdout=subprocess.PIPE))
-            extract = stack.enter_context(_stage(["tar", "-C", str(destination), "-xf", "-"], stdin=unpack.stdout))
-            _pipe(unpack.stdout).close()
-            downloaded, compressed = _pipe(source.stdout), _pipe(unpack.stdin)
-            for chunk in iter(lambda: downloaded.read(CHUNK), b""):
-                digest.update(chunk)
-                compressed.write(chunk)
-            compressed.close()
-            if any(process.wait() != 0 for process in (source, unpack, extract)):
-                raise S5Error(f"Restoring {uri} failed")
-        if digest.hexdigest() != expected_sha256:
-            raise S5Error("The S3 archive does not match its SHA-256")
+        with self.unpacked(uri, expected_sha256) as stream:
+            with _stage(["tar", "-C", str(destination), "-xf", "-"], stdin=stream) as extract:
+                stream.close()
+                if extract.wait() != 0:
+                    raise S5Error(f"Restoring {uri} failed")
 
     def copy_text(self, content: str, uri: str) -> None:
         """Upload a small text object."""

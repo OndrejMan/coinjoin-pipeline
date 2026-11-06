@@ -1,5 +1,6 @@
 """The persistent BlockSci index lock, backup and restore behave as the PBS jobs rely on (index_store.py)."""
 
+import hashlib
 import json
 import os
 import shutil
@@ -367,3 +368,43 @@ def test_a_kept_copy_reports_its_size(tmp_path):
     report = json.loads((tmp_path / "s3/bucket/state/notebook-storage.json").read_text())
     usage = report["directories"][str(index.path)]
     assert report["stage"] == "notebook" and usage["files"] > 0 and usage["bytes"] > 0
+
+
+def compressed_object(tmp_path, content=b"block data"):
+    source = tmp_path / "object"
+    source.write_bytes(content)
+    (tmp_path / "s3/bucket").mkdir(parents=True, exist_ok=True)
+    subprocess.run(["zstd", "-q", str(source), "-o", str(tmp_path / "s3/bucket/object.zst")], check=True)
+    return hashlib.sha256((tmp_path / "s3/bucket/object.zst").read_bytes()).hexdigest()
+
+
+def test_an_unpacked_stream_is_read_and_its_object_checked(tmp_path):
+    checksum = compressed_object(tmp_path)
+    storage = store(tmp_path).storage
+
+    with storage.unpacked("s3://bucket/object.zst", checksum) as stream:
+        assert stream.read() == b"block data"
+    with pytest.raises(S5Error, match="does not match its SHA-256"):
+        with storage.unpacked("s3://bucket/object.zst", "0" * 64) as stream:
+            stream.read()
+
+
+def test_an_unpacked_stream_of_a_missing_object_fails(tmp_path):
+    with pytest.raises(S5Error, match="Reading s3://bucket/missing.zst failed"):
+        with store(tmp_path).storage.unpacked("s3://bucket/missing.zst") as stream:
+            stream.read()
+
+
+def test_a_body_leaving_an_unpacked_stream_early_keeps_its_error(tmp_path):
+    compressed_object(tmp_path, os.urandom(1 << 20))
+    with pytest.raises(LookupError, match="stopped reading"):
+        with store(tmp_path).storage.unpacked("s3://bucket/object.zst"):
+            raise LookupError("stopped reading")
+
+
+def test_discard_reads_an_object_and_reports_a_missing_one(tmp_path):
+    compressed_object(tmp_path)
+    storage = store(tmp_path).storage
+    storage.discard("s3://bucket/object.zst")
+    with pytest.raises(S5Error, match="Reading s3://bucket/missing failed"):
+        storage.discard("s3://bucket/missing")

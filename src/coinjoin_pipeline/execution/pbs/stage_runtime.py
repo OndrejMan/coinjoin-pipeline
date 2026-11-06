@@ -25,14 +25,14 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import IO, TypedDict
+from typing import TypedDict
 
 try:
     from coinjoin_pipeline.execution.pbs.index_store import IndexStore
-    from coinjoin_pipeline.storage.s5client import S5Client, S5Error
+    from coinjoin_pipeline.storage.s5client import S5Client, S5Error, pipe
 except ImportError:  # the PBS job ships index_store.py and s5client.py next to this script
     from index_store import IndexStore  # type: ignore[no-redef]
-    from s5client import S5Client, S5Error  # type: ignore[no-redef]
+    from s5client import S5Client, S5Error, pipe  # type: ignore[no-redef]
 
 # Where the containers see the runs: exporters read runs below the first root, the
 # coinjoin-analysis collector scans every run below the second.
@@ -94,12 +94,6 @@ class StageSettings(TypedDict, total=False):
     false_cjtxs: str
     # Run-relative path of the manifest copy the external comparison reads.
     snapshot_file: str
-
-
-def pipe(stream: IO[bytes] | None) -> IO[bytes]:
-    if stream is None:
-        raise RuntimeError("The process has no pipe to stream through")
-    return stream
 
 
 def failure_status(error: BaseException) -> int:

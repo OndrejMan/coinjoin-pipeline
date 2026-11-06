@@ -25,10 +25,10 @@ import tempfile
 import threading
 import shlex
 import time
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import IO, TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:  # TypeGuard needs Python 3.10; the PBS node only evaluates no annotation.
     from typing import TypeGuard
@@ -36,14 +36,13 @@ if TYPE_CHECKING:  # TypeGuard needs Python 3.10; the PBS node only evaluates no
 try:
     from coinjoin_pipeline.execution.pbs.index_store import IndexStore
     from coinjoin_pipeline.execution.pbs.index_store import inventory as index_inventory
-    from coinjoin_pipeline.storage.s5client import S5Client, S5Error
+    from coinjoin_pipeline.storage.s5client import S5Client, S5Error, pipe, stream_sha256
 except ImportError:  # the PBS job ships index_store.py and s5client.py next to this script
     from index_store import IndexStore  # type: ignore[no-redef]
     from index_store import inventory as index_inventory  # type: ignore[no-redef]
-    from s5client import S5Client, S5Error  # type: ignore[no-redef]
+    from s5client import S5Client, S5Error, pipe, stream_sha256  # type: ignore[no-redef]
 
-# Processes span methods (Core) or concurrent pipe streams; cleanup/finally below
-# own their lifetimes rather than a single local with block.
+# Core spans methods; cleanup below owns its lifetime rather than a single local with block.
 # pylint: disable=consider-using-with
 
 
@@ -136,20 +135,6 @@ def directory_usage(root: Path) -> dict[str, int]:
 
 def megabytes_per_second(size: int, seconds: float) -> float:
     return round(size / 1e6 / max(seconds, 0.001), 1)
-
-
-def pipe(stream: IO[bytes] | None) -> IO[bytes]:
-    """The pipe a process was started with; every caller asked for one."""
-    if stream is None:
-        raise RuntimeError("The process has no pipe to stream through")
-    return stream
-
-
-def terminate(processes: Iterable[subprocess.Popen]) -> None:
-    for process in processes:
-        if process.poll() is None:
-            process.terminate()
-            process.wait()
 
 
 def new_staging(destination: Path) -> Path:
@@ -615,62 +600,32 @@ class Worker:
             raise ValueError("Invalid checkpoint member roots")
         staging = new_staging(destination)
         (staging / ".restoring").touch()
-        digest = hashlib.sha256()
-        errors: list[Exception] = []
-        source = self.storage.popen("cat", archive, stdout=subprocess.PIPE)
-        decompress = subprocess.Popen(["zstd", "-d"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-        downloaded, compressed, archive_stream = pipe(source.stdout), pipe(decompress.stdin), pipe(decompress.stdout)
-
-        def pump() -> None:
-            try:
-                for chunk in iter(lambda: downloaded.read(CHUNK), b""):
-                    digest.update(chunk)
-                    compressed.write(chunk)
-            except Exception as error:
-                errors.append(error)
-            finally:
-                compressed.close()
-
-        thread = threading.Thread(target=pump, daemon=True)
-        thread.start()
         try:
-            with tarfile.open(fileobj=archive_stream, mode="r|") as stream:
-                for member in stream:
-                    relative = Path(member.name)
-                    if (
-                        relative.is_absolute()
-                        or ".." in relative.parts
-                        or not any(relative == Path(root) or Path(root) in relative.parents for root in members)
-                    ):
-                        raise ValueError("Checkpoint contains a path outside its member roots")
-                    output = staging / relative
-                    if member.isdir():
-                        output.mkdir(parents=True, exist_ok=True)
-                    elif member.isfile():
-                        output.parent.mkdir(parents=True, exist_ok=True)
-                        with pipe(stream.extractfile(member)) as handle, output.open("wb") as target:
-                            shutil.copyfileobj(handle, target)
-                    else:
-                        raise ValueError("Checkpoint contains a link or special file")
-            # Drain trailing tar padding, allowing the decompressor and pump to finish.
-            while archive_stream.read(CHUNK):
-                pass
-            thread.join(timeout=30)
-            if (
-                thread.is_alive()
-                or source.wait() != 0
-                or decompress.wait() != 0
-                or errors
-                or digest.hexdigest() != expected
-            ):
-                raise ValueError("Checkpoint restore SHA-256/stream verification failed")
-            if any(not (staging / member).exists() for member in members):
-                raise ValueError("Checkpoint is missing a declared member")
-            (staging / ".restoring").unlink()
-            staging.rename(destination)
-        finally:
-            terminate((source, decompress))
-            thread.join(timeout=5)
+            with self.storage.unpacked(archive, expected) as archive_stream:
+                with tarfile.open(fileobj=archive_stream, mode="r|") as stream:
+                    for member in stream:
+                        relative = Path(member.name)
+                        if (
+                            relative.is_absolute()
+                            or ".." in relative.parts
+                            or not any(relative == Path(root) or Path(root) in relative.parents for root in members)
+                        ):
+                            raise ValueError("Checkpoint contains a path outside its member roots")
+                        output = staging / relative
+                        if member.isdir():
+                            output.mkdir(parents=True, exist_ok=True)
+                        elif member.isfile():
+                            output.parent.mkdir(parents=True, exist_ok=True)
+                            with pipe(stream.extractfile(member)) as handle, output.open("wb") as target:
+                                shutil.copyfileobj(handle, target)
+                        else:
+                            raise ValueError("Checkpoint contains a link or special file")
+        except S5Error as error:
+            raise ValueError("Checkpoint restore SHA-256/stream verification failed") from error
+        if any(not (staging / member).exists() for member in members):
+            raise ValueError("Checkpoint is missing a declared member")
+        (staging / ".restoring").unlink()
+        staging.rename(destination)
 
     def publish_dumplings(self, height: int) -> str:
         """Mirror Scanner/ incrementally; manifest.json, written last, makes the copy readable.
@@ -802,12 +757,7 @@ class Worker:
     def raw_download(self, name: str, uri: str, size: int) -> JsonObject:
         """Read an archive and discard it: the S3 speed without unpacking or disk writes."""
         started = time.monotonic()
-        process = self.storage.popen("cat", uri, stdout=subprocess.DEVNULL)
-        try:
-            if process.wait() != 0:
-                raise ValueError("Could not read the archive: " + uri)
-        finally:
-            terminate((process,))
+        self.storage.discard(uri)
         seconds = time.monotonic() - started
         raw = {"raw_download_seconds": round(seconds, 1), "raw_download_mb_per_s": megabytes_per_second(size, seconds)}
         print(f"raw download {name}: {json.dumps(raw)}", flush=True)
@@ -1271,11 +1221,9 @@ class Worker:
         local = work / name
         self.storage.copy(raw, str(local))
         try:
-            digest = hashlib.sha256()
             with local.open("rb") as stream:
-                for chunk in iter(lambda: stream.read(CHUNK), b""):
-                    digest.update(chunk)
-            if digest.hexdigest() != expected or local.stat().st_size != size:
+                digest = stream_sha256(stream)
+            if digest != expected or local.stat().st_size != size:
                 raise ValueError("Raw block object does not match its sidecar: " + name)
             archive = work / (name + ".zst")
             subprocess.run(["zstd", "-q", "-f", f"-{PACK_LEVEL}", "-T1", str(local), "-o", str(archive)], check=True)
@@ -1285,17 +1233,10 @@ class Worker:
             local.unlink(missing_ok=True)
             (work / (name + ".zst")).unlink(missing_ok=True)
         self.verify_remote_size(packed, compressed)
-        source = self.storage.popen("cat", packed, stdout=subprocess.PIPE)
-        unpack = subprocess.Popen(["zstd", "-q", "-d", "-c"], stdin=source.stdout, stdout=subprocess.PIPE)
-        pipe(source.stdout).close()
-        digest = hashlib.sha256()
-        try:
-            for chunk in iter(lambda: pipe(unpack.stdout).read(CHUNK), b""):
-                digest.update(chunk)
-            if unpack.wait() != 0 or source.wait() != 0 or digest.hexdigest() != expected:
-                raise ValueError("Packed block does not unpack to its sidecar checksum: " + name)
-        finally:
-            terminate((source, unpack))
+        with self.storage.unpacked(packed) as stream:
+            digest = stream_sha256(stream)
+        if digest != expected:
+            raise ValueError("Packed block does not unpack to its sidecar checksum: " + name)
         if not self.storage.remove(raw) or self.storage.exists(raw):
             raise ValueError("Raw block object was not removed: " + name)
         return size, compressed
