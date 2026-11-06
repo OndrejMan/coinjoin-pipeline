@@ -100,6 +100,7 @@ class PersistentIndex:
     in_scratch: bool = False
     restore: bool = False
     dumplings_uri: str | None = None
+    dumplings_dir: str | None = None
     storage_report_uri: str | None = None
 
     def __post_init__(self) -> None:
@@ -111,6 +112,12 @@ class PersistentIndex:
             validated_s3_uri(self.backup_uri, "index backup URI")
         if self.dumplings_uri is not None:
             validated_s3_uri(self.dumplings_uri, "Dumplings URI")
+        if self.dumplings_dir is not None and (
+            not self.dumplings_dir.startswith(INDEX_ROOTS) or ".." in Path(self.dumplings_dir).parts
+        ):
+            raise PBSError(
+                f"The Dumplings directory must be under /storage/ or /scratch/multijob-<location>/: {self.dumplings_dir}"
+            )
 
 
 def render_coinjoin_analysis_s3_pbs(
@@ -312,6 +319,7 @@ def _persistent_settings(index: PersistentIndex | None, walltime: str) -> dict[s
         "in_scratch": index.in_scratch,
         "restore": index.restore,
         "dumplings_uri": index.dumplings_uri,
+        "dumplings_dir": index.dumplings_dir,
         "storage_report_uri": index.storage_report_uri,
         # Past the walltime the job is gone, so its lock entry may be cleared.
         "lock_seconds": seconds + 600,

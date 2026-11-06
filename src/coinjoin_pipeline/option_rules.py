@@ -102,6 +102,16 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
         errors.append("--blocksci-storage-report-uri requires --blocksci-restore-index")
     if blocksci.dumplings_uri and not (blocksci.index_in_scratch or blocksci.restore_index):
         errors.append("--blocksci-dumplings-uri requires --blocksci-index-in-scratch or --blocksci-restore-index")
+    if blocksci.dumplings_dir and (
+        blocksci.task != "notebook"
+        or not blocksci.index_dir
+        or blocksci.index_in_scratch
+        or blocksci.restore_index
+    ):
+        errors.append(
+            "--blocksci-dumplings-dir requires --blocksci-task notebook and --blocksci-index-dir, "
+            "without --blocksci-index-in-scratch or --blocksci-restore-index"
+        )
     return errors
 
 

@@ -14,7 +14,9 @@ import pytest
 
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore, IndexStoreError
 from coinjoin_pipeline.execution.pbs.stage_runtime import (
+    StageFailure,
     attach_dumplings,
+    dumplings_in_place,
     kept_index,
     report_kept_copy,
     scratch_index,
@@ -380,6 +382,15 @@ def dumplings_stage(tmp_path):
     (tmp_path / "s3/bucket/dumps/Scanner/data.txt").write_text("rounds")
     index = store(tmp_path)
     return index, SimpleNamespace(storage=index.storage)
+
+
+def test_a_scanner_read_in_place_must_exist(tmp_path):
+    scanner = tmp_path / "dumplings/Scanner"
+    with pytest.raises(StageFailure, match="holds no Dumplings Scanner"):
+        dumplings_in_place(str(scanner))
+    scanner.mkdir(parents=True)
+    (scanner / "LastProcessedBlockHeight.txt").write_text("500027")
+    assert dumplings_in_place(str(scanner)) == f"{scanner.resolve()}:/mnt/dumplings/Scanner:ro"
 
 
 def test_dumplings_are_downloaded_once_beside_the_index(tmp_path):

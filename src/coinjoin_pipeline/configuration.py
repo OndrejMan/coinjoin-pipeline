@@ -149,6 +149,8 @@ class BlockSciConfiguration(ConfigurationModel):
     index_in_scratch: bool = option(False, name="blocksci_index_in_scratch")
     restore_index: bool = option(False, name="blocksci_restore_index")
     dumplings_uri: str | None = option(None, name="blocksci_dumplings_uri")
+    # A notebook over index_dir in place reads this Scanner/ in place too.
+    dumplings_dir: str | None = option(None, name="blocksci_dumplings_dir")
     # With restore_index: S3 object where the job reports the size of the kept copy.
     storage_report_uri: str | None = option(None, name="blocksci_storage_report_uri")
 

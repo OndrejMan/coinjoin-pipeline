@@ -169,6 +169,13 @@ synchronizace ani `mainnet-clear` nevidí; kopie v `index_dir` synchronizace by 
 považoval za neprázdný dataset a producer by ji odmítl. Kopie zůstává a další notebook ji
 použije beze stahování, i když mezitím vznikla novější záloha. Maže se jen ručně v Labu.
 
+Třetí možnost je číst přímo synchronizační složku, bez stahování: `blocksci.index_dir`
+synchronizace a `blocksci.dumplings_dir` na její `dumplings/Scanner`. Data tam jsou jen
+po synchronizaci s `mainnet.clear_after_sync: false` (v Labu vypnuté „Po synchronizaci
+vyprázdnit multijob“); jinak job skončí chybou. Notebook drží index pod sdíleným zámkem,
+takže další BlockSci job nebo `mainnet-clear` po dobu notebooku skončí chybou. Scanner
+zámek nemá: běžící `mainnet-producer` ho notebooku mění pod rukama.
+
 Po každém jobu synchronizace, i neúspěšném, worker změří `mainnet.root`, `blocksci.index_dir`
 a `mainnet.notebook_root` a zapíše je do `<state_uri>/multijob-storage.json`. Notebook
 s ponechanou kopií zapíše její velikost do `blocksci.storage_report_uri`. Lab z těchto

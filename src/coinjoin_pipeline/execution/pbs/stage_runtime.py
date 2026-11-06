@@ -666,6 +666,13 @@ def attach_dumplings(stage: Stage, index: IndexStore, uri: str) -> str:
     return f"{os.path.realpath(scanner)}:/mnt/dumplings/Scanner:ro"
 
 
+def dumplings_in_place(directory: str) -> str:
+    """The bind of a Scanner/ read where it is; a cleared synchronization leaves none."""
+    if not Path(directory, "LastProcessedBlockHeight.txt").is_file():
+        raise StageFailure(f"[index] {directory} holds no Dumplings Scanner")
+    return f"{os.path.realpath(directory)}:/mnt/dumplings/Scanner:ro"
+
+
 def read_index(stage: Stage) -> IndexStore:
     """Read-only access for an analysis: shared lock, complete copy, run-local config."""
     settings = persistent_settings(stage)
@@ -1031,6 +1038,8 @@ def blocksci_analysis(stage: Stage) -> None:
         dumplings = persistent.get("dumplings_uri")
         if dumplings:
             binds.append(attach_dumplings(stage, index, dumplings))
+        if persistent.get("dumplings_dir"):
+            binds.append(dumplings_in_place(persistent["dumplings_dir"]))
         report_uri = persistent.get("storage_report_uri")
         if report_uri:
             report_kept_copy(stage, index.path.parent, report_uri)
