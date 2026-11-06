@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from exporters.verify_chain import is_block_hash
 
 from .configuration import cli_flag, config_value, option_specs
+from .execution.pbs.defaults import MAINNET_SYNC_RESOURCES
 from .execution.stages import runs_unified_report
 from .storage.s3 import RUN_ID_RULE, is_valid_run_id
 
@@ -18,8 +19,8 @@ if TYPE_CHECKING:
 # Tasks that may read the index of another run (--blocksci-cache-source-run-id) without writing to it.
 READ_ONLY_CACHE_TASKS = frozenset({"script", "external", "notebook"})
 PERSISTENT_INDEX_TASKS = frozenset({"parse", "update", "backup"}) | READ_ONLY_CACHE_TASKS
-# Resource groups only the mainnet synchronization submits.
-MAINNET_ONLY_PBS_GROUPS = ("pbs.producer.", "pbs.restore.", "pbs.checkpoint.", "pbs.pack.", "pbs.clear.")
+# Resource groups only the mainnet synchronization submits; other actions use pbs.blocksci too.
+MAINNET_ONLY_PBS_GROUPS = tuple(f"pbs.{stage}." for stage in MAINNET_SYNC_RESOURCES if stage != "blocksci")
 SHARED_ROOTS = ("/storage/", "/auto/")
 # The jobs that only maintain the index; their state can live at one fixed S3 prefix.
 INDEX_STATE_TASKS = ("parse", "update", "backup")
@@ -111,9 +112,8 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
 
         errors = configuration_errors(config)
     elif any(path.startswith(("mainnet.", *MAINNET_ONLY_PBS_GROUPS)) for path in config.provided):
-        errors = [
-            "mainnet, pbs.producer, pbs.restore, pbs.checkpoint, pbs.pack and pbs.clear settings require action: mainnet-sync"
-        ]
+        groups = ", ".join(group.rstrip(".") for group in MAINNET_ONLY_PBS_GROUPS)
+        errors = [f"mainnet, {groups} settings require action: mainnet-sync"]
     else:
         errors = _action_errors(config)
     return errors + _general_errors(config)

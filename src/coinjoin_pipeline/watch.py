@@ -18,7 +18,7 @@ from typing import Iterator, TextIO
 from .configuration import KubernetesConfiguration
 from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, fail
 from .execution.kubernetes import resolve_kubeconfig
-from .execution.pbs.defaults import PBS_TERMINAL_STATES
+from .execution.pbs.defaults import MAINNET_SYNC_RESOURCES, PBS_TERMINAL_STATES
 from .execution.pbs.status import job_details
 from .execution.pbs.submission import read_pbs_job_id
 from .paths import default_runs_root
@@ -409,9 +409,7 @@ def stream_sources(
 
 
 # Mainnet synchronization jobs write their logs next to the run, not to PBS Output_Path.
-MAINNET_SYNC_JOBS = frozenset(
-    {"mainnet-restore", "mainnet-producer", "mainnet-blocksci", "mainnet-checkpoint", "mainnet-pack", "mainnet-clear"}
-)
+MAINNET_SYNC_JOBS = frozenset(f"mainnet-{stage}" for stage in MAINNET_SYNC_RESOURCES)
 
 
 class _SourceError(Exception):

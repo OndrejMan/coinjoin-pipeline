@@ -81,6 +81,7 @@ class Settings(TypedDict, total=False):
     reorg_reserve: int
     poll_seconds: float
     pbs_resources: PbsResources
+    sync_stages: list[str]
     measure_download: bool
     walltime_seconds: int
     clear_after_sync: bool
@@ -369,7 +370,7 @@ class Worker:
 
     def reset_state(self) -> None:
         """Clear the previous synchronization's state; its logs stay under logs/<run-id>/."""
-        stages = ("restore", "producer", "blocksci", "checkpoint", "pack", "clear")
+        stages = self.c["sync_stages"]
         # <stage>.json is each job's progress; restore.json also says what the restore did.
         names = ("ready.json", "done.json", "blocksci-index-manifest.json", *(f"{stage}.json" for stage in stages))
         for name in (*names, *(f"{stage}.quiescent" for stage in stages if stage != self.stage)):

@@ -374,6 +374,7 @@ def worker(config, tmp_path, monkeypatch):
             root=config.mainnet.root,
             index_dir=config.blocksci.index_dir,
             run_id=config.run_id,
+            sync_stages=mainnet_sync.SYNC_STAGES,
             log_root=str(config.runs_path / config.run_id / "logs"),
             endpoint=config.artifacts.endpoint_url,
             credentials=config.artifacts.credentials_file,

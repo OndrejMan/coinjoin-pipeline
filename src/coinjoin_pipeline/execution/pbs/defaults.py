@@ -30,8 +30,9 @@ DEFAULT_RESOURCES = {
     "unified_report": PBSResources(2, "8gb", "10gb", "01:00:00"),
 }
 
-# mainnet-sync's six jobs, resolved like a stage through `pbs.<job>`. The checkpoint job
-# compresses with one zstd thread per CPU but needs little memory.
+# mainnet-sync's jobs in submission order, resolved like a stage through `pbs.<job>`; every
+# list of the jobs derives from this one. The checkpoint job compresses with one zstd
+# thread per CPU but needs little memory.
 MAINNET_SYNC_RESOURCES = {
     "restore": PBSResources(8, "8gb", "20gb", "12:00:00"),
     "producer": PBSResources(4, "16gb", "20gb", "24:00:00"),

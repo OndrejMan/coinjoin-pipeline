@@ -20,8 +20,8 @@ from .s3_markers import rollback_s3_pbs_submissions
 if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import PipelineConfiguration
 
-# Submission order; each job depends on the previous one.
-SYNC_STAGES = ("restore", "producer", "blocksci", "checkpoint", "pack", "clear")
+# Each job depends on the previous one.
+SYNC_STAGES = tuple(MAINNET_SYNC_RESOURCES)
 
 # Unpacks a whole dataset (about 143 GB at height 500027) into scratch; only streams otherwise.
 RESTORE_CHECK_RESOURCES = PBSResources(2, "4gb", "200gb", "12:00:00")
@@ -153,6 +153,7 @@ def sync_settings(config: PipelineConfiguration, stage: str, budget: PBSResource
     return {
         **asdict(config.mainnet),
         "run_id": run_id,
+        "sync_stages": SYNC_STAGES,
         "log_root": str(config.runs_path / run_id / "logs"),
         "endpoint": config.artifacts.endpoint_url,
         "credentials": required(config.artifacts.credentials_file, "artifacts.credentials_file"),

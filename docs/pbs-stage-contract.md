@@ -303,12 +303,14 @@ scrubbed first):
   — uploaded by the S3 PBS job traps. A full run returns successfully only
   after the report marker is present.
 
-`mainnet-sync` jobs publish `.pbs/mainnet-{restore,producer,blocksci,checkpoint}.*`
+`mainnet-sync` jobs publish `.pbs/mainnet-{restore,producer,blocksci,checkpoint,pack,clear}.*`
 from their own worker (`mainnet_runtime.py`); their bodies are JSON state records,
-not the `done`/`failed` lines above. The four jobs are chained with `afterok`:
+not the `done`/`failed` lines above. The jobs are chained with `afterok`:
 restore (fills an empty working dataset from S3, otherwise ends at once), producer,
-blocksci (updates the index, no backups) and checkpoint (index backup, pruning,
-Core checkpoint, `done.json`). Nothing in
+blocksci (updates the index, no backups), checkpoint (index backup, pruning,
+Core checkpoint, `done.json`), pack (compresses pruned block files in S3) and,
+unless `mainnet.clear_after_sync` is off, clear (empties the working dataset).
+`MAINNET_SYNC_RESOURCES` in `pbs/defaults.py` is the one list of these jobs. Nothing in
 the frontend waits for them; scenario-lab reads them.
 
 Semantics mirror `wait_for_pbs_marker`: `failed` raises and `done` returns.
