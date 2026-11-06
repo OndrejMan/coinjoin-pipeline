@@ -22,6 +22,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -637,6 +638,29 @@ def report_kept_copy(stage: Stage, directory: Path, uri: str) -> None:
         stage.log(f"[index] the kept copy's size was not reported: {error}")
 
 
+def attach_dumplings(stage: Stage, index: IndexStore, uri: str) -> str:
+    """The bind of the Dumplings copy beside the index; inside it would break the index's file list.
+
+    Only a finished download takes the name, so an interrupted job leaves no partial copy
+    that later jobs would trust. Of two jobs downloading at once, the second drops its own.
+    """
+    root = index.path.parent / "dumplings"
+    scanner = root / "Scanner"
+    if not scanner.is_dir():
+        root.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=".Scanner-", dir=root))
+        try:
+            stage.storage.copy(f"{uri}/Scanner/*", f"{staging}/", timeout=None)
+            try:
+                staging.rename(scanner)
+            except OSError:
+                if not scanner.is_dir():
+                    raise
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+    return f"{os.path.realpath(scanner)}:/mnt/dumplings/Scanner:ro"
+
+
 def read_index(stage: Stage) -> IndexStore:
     """Read-only access for an analysis: shared lock, complete copy, run-local config."""
     settings = stage.settings["persistent"]
@@ -1000,12 +1024,7 @@ def blocksci_analysis(stage: Stage) -> None:
         shutil.copyfile(index.path / "manifest.json", output / "blocksci-index-manifest.json")
         dumplings = settings["persistent"].get("dumplings_uri")
         if dumplings:
-            # A kept copy sits beside the index: inside it would break the index's file list.
-            scanner = index.path.parent / "dumplings/Scanner"
-            scanner.mkdir(parents=True, exist_ok=True)
-            if not any(scanner.iterdir()):
-                stage.storage.copy(f"{dumplings}/Scanner/*", f"{scanner}/", timeout=None)
-            binds.append(f"{os.path.realpath(scanner)}:/mnt/dumplings/Scanner:ro")
+            binds.append(attach_dumplings(stage, index, dumplings))
         report_uri = settings["persistent"].get("storage_report_uri")
         if report_uri:
             report_kept_copy(stage, index.path.parent, report_uri)

@@ -13,7 +13,12 @@ from types import SimpleNamespace
 import pytest
 
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore, IndexStoreError
-from coinjoin_pipeline.execution.pbs.stage_runtime import kept_index, report_kept_copy, scratch_index
+from coinjoin_pipeline.execution.pbs.stage_runtime import (
+    attach_dumplings,
+    kept_index,
+    report_kept_copy,
+    scratch_index,
+)
 from coinjoin_pipeline.storage.s5client import S5Client, S5Error
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -368,6 +373,61 @@ def test_a_kept_copy_reports_its_size(tmp_path):
     report = json.loads((tmp_path / "s3/bucket/state/notebook-storage.json").read_text())
     usage = report["directories"][str(index.path)]
     assert report["stage"] == "notebook" and usage["files"] > 0 and usage["bytes"] > 0
+
+
+def dumplings_stage(tmp_path):
+    (tmp_path / "s3/bucket/dumps/Scanner").mkdir(parents=True)
+    (tmp_path / "s3/bucket/dumps/Scanner/data.txt").write_text("rounds")
+    index = store(tmp_path)
+    return index, SimpleNamespace(storage=index.storage)
+
+
+def test_dumplings_are_downloaded_once_beside_the_index(tmp_path):
+    index, stage = dumplings_stage(tmp_path)
+    scanner = index.path.parent / "dumplings/Scanner"
+
+    bind = attach_dumplings(stage, index, "s3://bucket/dumps")
+
+    assert bind == f"{scanner.resolve()}:/mnt/dumplings/Scanner:ro"
+    assert (scanner / "data.txt").read_text() == "rounds"
+    shutil.rmtree(tmp_path / "s3/bucket/dumps")
+    attach_dumplings(stage, index, "s3://bucket/dumps")
+    assert [path.name for path in scanner.parent.iterdir()] == ["Scanner"], "The second job reuses the copy"
+
+
+def test_an_interrupted_dumplings_download_leaves_no_copy_to_trust(tmp_path, monkeypatch):
+    index, stage = dumplings_stage(tmp_path)
+    copy = index.storage.copy
+
+    def interrupted(_source, destination, timeout=None):
+        (Path(destination) / "data.txt").write_text("rou")
+        raise S5Error("download interrupted")
+
+    monkeypatch.setattr(index.storage, "copy", interrupted)
+    with pytest.raises(S5Error):
+        attach_dumplings(stage, index, "s3://bucket/dumps")
+    assert list((index.path.parent / "dumplings").iterdir()) == []
+
+    monkeypatch.setattr(index.storage, "copy", copy)
+    attach_dumplings(stage, index, "s3://bucket/dumps")
+    assert (index.path.parent / "dumplings/Scanner/data.txt").read_text() == "rounds"
+
+
+def test_of_two_dumplings_downloads_the_finished_copy_stays(tmp_path, monkeypatch):
+    index, stage = dumplings_stage(tmp_path)
+    scanner = index.path.parent / "dumplings/Scanner"
+    copy = index.storage.copy
+
+    def overtaken(source, destination, timeout=None):
+        copy(source, destination, timeout)
+        scanner.mkdir()
+        (scanner / "data.txt").write_text("the other job")
+
+    monkeypatch.setattr(index.storage, "copy", overtaken)
+    attach_dumplings(stage, index, "s3://bucket/dumps")
+
+    assert (scanner / "data.txt").read_text() == "the other job"
+    assert [path.name for path in scanner.parent.iterdir()] == ["Scanner"]
 
 
 def compressed_object(tmp_path, content=b"block data"):
