@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import shutil
 
@@ -43,6 +44,7 @@ def configuration(work: Path, endpoint: str, run: str, mode: str, target: int) -
             **network,
             "target_height": target,
             "root": str(work / "data"),
+            "clear_after_sync": os.environ.get("MAINNET_TEST_CLEAR") == "1",
             "core_image": str(work / "images/core.sif"),
             "dumplings_image": str(work / "images/dumplings.sif"),
             "dbcache_mb": 1024 if mode == "mainnet" else 128,
@@ -92,6 +94,13 @@ def configuration(work: Path, endpoint: str, run: str, mode: str, target: int) -
                 "scratch": "2gb",
                 "scratch_type": "local",
                 "walltime": "00:20:00",
+            },
+            "clear": {
+                "ncpus": 1,
+                "mem": "2gb",
+                "scratch": "1gb",
+                "scratch_type": "local",
+                "walltime": "00:10:00",
             },
         },
     }
@@ -279,6 +288,15 @@ def diagnostics(work: Path, result: Path, mode: str, status: int) -> None:
                 shutil.copyfile(path, output)
 
 
+def check_cleared(work: Path, token: str) -> None:
+    """The last run's job emptied the working dataset and only state stayed behind."""
+    assert read_json(work / "data/sync/done.json")["run_id"] == f"local-sync-{token}-5"
+    assert read_json(work / "data/sync/clear.json")["state"] == "done"
+    left = [path.name for path in (work / "data").iterdir()] + [path.name for path in (work / "index").iterdir()]
+    assert not set(left) & {"bitcoin", "dumplings", "archive-state", "config.json", "parsed"}, left
+    assert not any(name.startswith(".clear-") for name in left), left
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
@@ -290,6 +308,7 @@ def main() -> None:
         "final": ("work", "token", "mode", "target"),
         "restored": ("work", "token", "mode", "target"),
         "refused": ("work", "token"),
+        "cleared": ("work", "token"),
         "diagnostics": ("work", "result", "mode", "status"),
     }.items():
         command = sub.add_parser(action)
@@ -308,6 +327,9 @@ def main() -> None:
         print("yes" if requires_block_archive(work, args.mode) else "no")
     elif args.action == "final":
         check_final(work, args.token, args.mode, args.target)
+    elif args.action == "cleared":
+        check_cleared(work, args.token)
+        print("PASS: the working dataset was cleared after the synchronization")
     elif args.action == "restored":
         record(work, check_restored(work, args.token, args.mode, args.target))
         print(f"PASS: {args.mode} emptied working dataset restored from S3 and synchronized again")

@@ -1,6 +1,6 @@
 """Self-contained PBS worker. Embedded in qsub scripts; stdlib only on the host.
 
-One synchronization is five jobs: restore, producer, blocksci, checkpoint and pack. Working
+One synchronization is six jobs: restore, producer, blocksci, checkpoint, pack and clear. Working
 data are downloaded only by the restore job and only into an empty working dataset.
 Each backup has one place: the old archive is deleted, the new one streamed and its size
 checked, and manifest.json, written last, makes it valid again.
@@ -83,6 +83,7 @@ class Settings(TypedDict, total=False):
     pbs_resources: PbsResources
     measure_download: bool
     walltime_seconds: int
+    clear_after_sync: bool
     # restore and blocksci write the index, the checkpoint reads it; producer leaves it alone.
     index_lock: str | None
     index_lock_seconds: int
@@ -355,7 +356,7 @@ class Worker:
 
     def reset_state(self) -> None:
         """Clear the previous synchronization's state; its logs stay under logs/<run-id>/."""
-        stages = ("restore", "producer", "blocksci", "checkpoint", "pack")
+        stages = ("restore", "producer", "blocksci", "checkpoint", "pack", "clear")
         # <stage>.json is each job's progress; restore.json also says what the restore did.
         names = ("ready.json", "done.json", "blocksci-index-manifest.json", *(f"{stage}.json" for stage in stages))
         for name in (*names, *(f"{stage}.quiescent" for stage in stages if stage != self.stage)):
@@ -809,7 +810,8 @@ class Worker:
         self.acquire_dataset()
         self.reset_state()
         # Only a killed restore leaves these; both locks are held, so none is in use.
-        for leftover in (*self.root.glob(".restore-*"), *self.index.glob(".restore-*")):
+        leftovers = (".restore-*", ".clear-*")
+        for leftover in (path for base in (self.root, self.index) for name in leftovers for path in base.glob(name)):
             shutil.rmtree(leftover)
         present = self.dataset_members()
         if present:
@@ -1350,6 +1352,29 @@ class Worker:
             raise ValueError(f"{len(failed)} block files could not be packed; they stay raw in S3")
         self.progress("complete", totals["packed"], len(pending), "done", **summary)
         self.complete({"run_id": self.run_id, **summary})
+
+    def clear(self) -> None:
+        """Job 5: empty the working dataset; the next restore job refills it from S3.
+
+        Everything moves aside first, so a killed job never leaves a partial dataset that
+        the producer would refuse; the restore job removes such leftovers.
+        """
+        self.stage = "clear"
+        self.acquire_dataset()
+        if read_json(self.run / "done.json").get("run_id") != self.run_id:
+            raise ValueError("This synchronization's checkpoint did not finish; clearing refused")
+        self.progress("clearing")
+        trash = self.root / f".clear-{self.run_id}"
+        index_trash = self.index / f".clear-{self.run_id}"
+        trash.mkdir()
+        index_trash.mkdir()
+        for path in self.dataset_members():
+            path.rename((index_trash if path.parent == self.index else trash) / path.name)
+        (self.root / "current-ready.json").unlink(missing_ok=True)
+        shutil.rmtree(trash)
+        shutil.rmtree(index_trash)
+        self.progress("complete", state="done")
+        self.complete({"run_id": self.run_id})
 
     def cleanup(self) -> None:
         for process in self.children:

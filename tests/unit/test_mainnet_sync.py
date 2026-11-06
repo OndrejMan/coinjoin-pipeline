@@ -61,7 +61,14 @@ def test_restore_check_never_touches_the_working_dataset_or_sync_state(config):
 
 
 def test_every_script_is_self_contained_and_syntactically_valid(config):
-    locks = {"restore": "exclusive", "blocksci": "exclusive", "checkpoint": "shared", "producer": None, "pack": None}
+    locks = {
+        "restore": "exclusive",
+        "blocksci": "exclusive",
+        "checkpoint": "shared",
+        "producer": None,
+        "pack": None,
+        "clear": "exclusive",
+    }
     for stage in mainnet_sync.SYNC_STAGES:
         script = mainnet_sync.render_sync(config, stage)
         subprocess.run(["bash", "-n"], input=script, text=True, check=True)
@@ -131,6 +138,7 @@ def test_jobs_are_chained_in_order(config, monkeypatch):
         ("102.local",),
         ("103.local",),
         ("104.local",),
+        ("105.local",),
     ]
 
 
@@ -831,6 +839,47 @@ def test_pack_refuses_without_this_runs_checkpoint_or_block_files(worker, tmp_pa
     with pytest.raises(ValueError, match="no block files on disk"):
         worker.pack()
     assert (directory / "blk00000.dat").exists()
+
+
+def filled_dataset(worker):
+    """Every working path of a finished synchronization of this run."""
+    (worker.core_dir / "blocks").mkdir(parents=True)
+    (worker.core_dir / "blocks/blk00000.dat").write_bytes(b"block")
+    (worker.dumps / "Scanner").mkdir(parents=True)
+    worker.archive_state.mkdir()
+    worker.index.mkdir(parents=True)
+    for name in ("config.json", "files.txt", "manifest.json"):
+        (worker.index / name).write_text("{}")
+    (worker.index / "parsed").mkdir()
+    worker.run.mkdir()
+    atomic_json(worker.run / "done.json", {"run_id": worker.run_id})
+    atomic_json(worker.root / "current-ready.json", {"run_id": worker.run_id})
+
+
+def test_clear_empties_the_working_dataset_and_keeps_the_state(worker):
+    filled_dataset(worker)
+    worker.clear()
+    assert worker.dataset_members() == []
+    assert not (worker.root / "current-ready.json").exists()
+    assert not list(worker.root.glob(".clear-*")) and not list(worker.index.glob(".clear-*"))
+    assert json.loads((worker.run / "clear.json").read_text())["state"] == "done"
+    assert not worker.active.exists()
+
+
+def test_clear_refuses_a_dataset_of_another_synchronization(worker):
+    filled_dataset(worker)
+    atomic_json(worker.run / "done.json", {"run_id": "another-run"})
+    with pytest.raises(ValueError, match="checkpoint did not finish"):
+        worker.clear()
+    assert (worker.index / "parsed").exists()
+
+
+def test_the_clear_job_can_be_turned_off(config, monkeypatch):
+    calls = []
+    monkeypatch.setattr(mainnet_sync, "submit_pbs_job", lambda job, _dry: calls.append(job) or "1.local")
+    kept = replace(config, mainnet=replace(config.mainnet, clear_after_sync=False))
+    mainnet_sync.submit_sync(kept)
+    assert "mainnet-clear" not in [job.stage for job in calls]
 
 
 def synchronize(worker, *stages):

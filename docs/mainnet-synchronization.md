@@ -36,13 +36,13 @@ U krátkého mainnetového testu pod výškou 100000 se pruning přeskočí, pro
 Core ještě nepovoluje; indexace a záloha pokračují se zachováním všech bloků.
 Tato možnost vyžaduje také nově sestavené Dumplings s `--frozen-height`.
 
-## Pět jobů
+## Šest jobů
 
-Synchronizace odešle pět jobů řetězených `afterok`: `mainnet-restore` →
-`mainnet-producer` → `mainnet-blocksci` → `mainnet-checkpoint` → `mainnet-pack`. První
-čtyři si samy vezmou a pustí zámek datasetu. Když jeden spadne, PBS zruší ty, které na
+Synchronizace odešle šest jobů řetězených `afterok`: `mainnet-restore` →
+`mainnet-producer` → `mainnet-blocksci` → `mainnet-checkpoint` → `mainnet-pack` →
+`mainnet-clear`. Všechny kromě `mainnet-pack` si samy vezmou a pustí zámek datasetu. Když jeden spadne, PBS zruší ty, které na
 něm závisí. Synchronizace je hotová už závěrečným `done.json` checkpointu; selhání
-`mainnet-pack` ji nezmění a v Labu se ukáže jen u balení.
+`mainnet-pack` nebo `mainnet-clear` ji nezmění a v Labu se ukáže jen u daného jobu.
 
 `mainnet-restore` (8 CPU / 8 GB) vymaže stav minulého běhu a podívá se, zda
 na multijobu existují pracovní data (`bitcoin/`, `dumplings/`, `archive-state/`,
@@ -139,6 +139,22 @@ další soubory; zbytek zůstane surový do dalšího běhu. Souhrn je v `pack.j
 bloků pro parse a update čte obě podoby a `.zst` před `verify` rozbalí. Job běžící
 současně se stahováním může parse shodit, protože surový objekt zmizí mezi výpisem
 a stažením; opakovaný parse už uvidí `.zst`.
+
+`mainnet-clear` (1 CPU, 2 GB, 2 h) vyprázdní multijob: Core, Dumplings, stav archivu
+i index. Běží po `mainnet-pack`, protože ten porovnává S3 s bloky na disku. Bere zámek
+datasetu i zapisovací zámek indexu a odmítne dataset, jehož `done.json` patří jinému
+běhu. Všechno nejdřív přesune stranou do `.clear-<run-id>/`, aby pád nezanechal částečný
+dataset; zbytky odstraní další restore job. Adresář `sync/` zůstává. Když `mainnet-pack`
+spadne, `mainnet-clear` se nespustí a data zůstanou do další synchronizace. Další běh
+je obnoví z S3. Vypíná se pomocí `mainnet.clear_after_sync: false`.
+
+Protože je multijob mezi synchronizacemi prázdný, joby čtoucí index (`script`, `external`,
+`notebook`) ho nečtou z `blocksci.index_dir`. S `blocksci.index_in_scratch: true` si
+stáhnou zálohu z `blocksci.index_backup_uri` do vlastního `$SCRATCHDIR`, kde ji nikdo
+jiný nečte, takže nepotřebují zámek. S `blocksci.scratch_dumplings_uri` přidají Scanner,
+který kontejner vidí v `/mnt/dumplings/Scanner`. Scratch musí stačit na rozbalený index
+(135 GB ve výšce 500 027), Lab proto žádá 200 GB. Ruční joby `index-update`
+a `index-backup` dál pracují s `index_dir` a na prázdném multijobu potřebují obnovu.
 
 ## Pracovní data a zálohy
 

@@ -24,7 +24,7 @@ fi
 # Independently bound a broken target-height implementation before it fills the runner.
 if [[ "$mode" == mainnet ]]; then
   max_data_mb=${MAINNET_TEST_MAX_DATA_MB:-262144}
-  generation_timeout=${MAINNET_TEST_GENERATION_TIMEOUT:-42600}
+  generation_timeout=${MAINNET_TEST_GENERATION_TIMEOUT:-43200}
 else
   max_data_mb=${MAINNET_TEST_MAX_DATA_MB:-8192}
   generation_timeout=${MAINNET_TEST_GENERATION_TIMEOUT:-1800}
@@ -299,3 +299,7 @@ s5 ls 's3://local-mainnet-sync/blocks/*' >"$work/blocks-after-restore.txt"
 rm -rf "$work/index"
 refused_generation "local-sync-$token-4" "$restore_target" "The working dataset is incomplete (missing: BlockSci index)"
 "$python" "$repo/tests/support/mainnet_sync_e2e.py" refused "$work" "$token"
+# The production chain ends by clearing the dataset; only this run keeps that job.
+rm -rf "$work/data" "$work/index"
+MAINNET_TEST_CLEAR=1 run_generation "local-sync-$token-5" "$restore_target"
+"$python" "$repo/tests/support/mainnet_sync_e2e.py" cleared "$work" "$token"

@@ -1,4 +1,4 @@
-"""Manual restore → Core/Dumplings → BlockSci → checkpoint → pack PBS chain over a shared working directory."""
+"""Manual restore → Core/Dumplings → BlockSci → checkpoint → pack → clear PBS chain over a shared working directory."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import PipelineConfiguration
 
 # Submission order; each job depends on the previous one.
-SYNC_STAGES = ("restore", "producer", "blocksci", "checkpoint", "pack")
+SYNC_STAGES = ("restore", "producer", "blocksci", "checkpoint", "pack", "clear")
 
 # Unpacks a whole dataset (about 143 GB at height 500027) into scratch; only streams otherwise.
 RESTORE_CHECK_RESOURCES = PBSResources(2, "4gb", "200gb", "12:00:00")
@@ -164,7 +164,12 @@ def sync_settings(config: PipelineConfiguration, stage: str, budget: PBSResource
         "core_image": with_singularity_scheme(config.mainnet.core_image),
         "dumplings_image": with_singularity_scheme(config.mainnet.dumplings_image),
         # Restore and BlockSci write the index; the checkpoint only reads it, so readers stay.
-        "index_lock": {"restore": "exclusive", "blocksci": "exclusive", "checkpoint": "shared"}.get(stage),
+        "index_lock": {
+            "restore": "exclusive",
+            "blocksci": "exclusive",
+            "checkpoint": "shared",
+            "clear": "exclusive",
+        }.get(stage),
         # Past the walltime the job is gone, so its lock entry may be cleared.
         "index_lock_seconds": walltime_to_seconds(budget.walltime) + 600,
         "walltime_seconds": walltime_to_seconds(budget.walltime),
@@ -265,7 +270,8 @@ def submit_sync(config: PipelineConfiguration) -> None:
     holds the dataset lock, so submission checks nothing there.
     """
     run_id = required(config.run_id, "run_id")
-    scripts = {stage: render_sync(config, stage) for stage in SYNC_STAGES}
+    stages = SYNC_STAGES if config.mainnet.clear_after_sync else SYNC_STAGES[:-1]
+    scripts = {stage: render_sync(config, stage) for stage in stages}
     submitted: list[tuple[str, str]] = []
     try:
         for stage, script in scripts.items():

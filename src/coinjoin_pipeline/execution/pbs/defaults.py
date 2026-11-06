@@ -30,7 +30,7 @@ DEFAULT_RESOURCES = {
     "unified_report": PBSResources(2, "8gb", "10gb", "01:00:00"),
 }
 
-# mainnet-sync's five jobs, resolved like a stage through `pbs.<job>`. The checkpoint job
+# mainnet-sync's six jobs, resolved like a stage through `pbs.<job>`. The checkpoint job
 # compresses with one zstd thread per CPU but needs little memory.
 MAINNET_SYNC_RESOURCES = {
     "restore": PBSResources(8, "8gb", "20gb", "12:00:00"),
@@ -39,6 +39,7 @@ MAINNET_SYNC_RESOURCES = {
     "checkpoint": PBSResources(16, "8gb", "20gb", "12:00:00"),
     # One file per CPU at zstd -19: slow, but each file needs well under 1 GB.
     "pack": PBSResources(4, "4gb", "20gb", "24:00:00"),
+    "clear": PBSResources(1, "2gb", "1gb", "02:00:00"),
 }
 
 DEFAULT_PBS_IMAGES = {
