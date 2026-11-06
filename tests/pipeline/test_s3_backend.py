@@ -1211,6 +1211,7 @@ def test_persistent_update_works_in_place_under_the_writer_lock() -> None:
         "index_dir": "/scratch/multijob-brno/user/blocksci-mainnet",
         "backup_uri": "s3://bucket/blocksci-index",
         "in_scratch": False,
+        "restore": False,
         "dumplings_uri": None,
         "lock_seconds": 24 * 3600 + 600,
         "wait_seconds": 12 * 3600,

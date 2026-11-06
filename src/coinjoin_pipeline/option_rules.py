@@ -92,8 +92,13 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
             "--blocksci-index-in-scratch requires --blocksci-index-backup-uri and --blocksci-task "
             "script, external or notebook"
         )
-    if blocksci.scratch_dumplings_uri and not blocksci.index_in_scratch:
-        errors.append("--blocksci-scratch-dumplings-uri requires --blocksci-index-in-scratch")
+    if blocksci.restore_index and (not backup_uri or blocksci.task != "notebook" or blocksci.index_in_scratch):
+        errors.append(
+            "--blocksci-restore-index requires --blocksci-index-backup-uri and --blocksci-task notebook, "
+            "without --blocksci-index-in-scratch"
+        )
+    if blocksci.dumplings_uri and not (blocksci.index_in_scratch or blocksci.restore_index):
+        errors.append("--blocksci-dumplings-uri requires --blocksci-index-in-scratch or --blocksci-restore-index")
     return errors
 
 

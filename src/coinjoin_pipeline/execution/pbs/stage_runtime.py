@@ -623,10 +623,25 @@ def scratch_index(stage: Stage) -> IndexStore:
     return index
 
 
+def kept_index(stage: Stage) -> IndexStore:
+    """A shared copy that stays after the job: filled from the backup when it is incomplete."""
+    index = open_index(stage, writer=False)
+    if not index.complete():
+        index.unlock()
+        index.lock_exclusive()
+        index.reconcile()
+        index.unlock()
+        index.lock_shared()
+    return index
+
+
 def read_index(stage: Stage) -> IndexStore:
     """Read-only access for an analysis: shared lock, complete copy, run-local config."""
-    in_scratch = stage.settings["persistent"].get("in_scratch")
-    index = scratch_index(stage) if in_scratch else open_index(stage, writer=False)
+    settings = stage.settings["persistent"]
+    if settings.get("in_scratch"):
+        index = scratch_index(stage)
+    else:
+        index = kept_index(stage) if settings.get("restore") else open_index(stage, writer=False)
     if not index.complete():
         raise StageFailure(
             f"[index] working copy {index.path} is incomplete; a persistent update restores it from the S3 backup"
@@ -983,10 +998,12 @@ def blocksci_analysis(stage: Stage) -> None:
         shutil.copyfile(index.path / "manifest.json", output / "blocksci-index-manifest.json")
         dumplings = settings["persistent"].get("dumplings_uri")
         if dumplings:
-            scanner = stage.scratch / "dumplings/Scanner"
+            # A kept copy sits beside the index: inside it would break the index's file list.
+            scanner = index.path.parent / "dumplings/Scanner"
             scanner.mkdir(parents=True, exist_ok=True)
-            stage.storage.copy(f"{dumplings}/Scanner/*", f"{scanner}/", timeout=None)
-            binds.append(f"{scanner}:/mnt/dumplings/Scanner:ro")
+            if not any(scanner.iterdir()):
+                stage.storage.copy(f"{dumplings}/Scanner/*", f"{scanner}/", timeout=None)
+            binds.append(f"{os.path.realpath(scanner)}:/mnt/dumplings/Scanner:ro")
     else:
         cache_run = settings.get("source_run_id") or stage.run_id
         prefix = f"{settings['artifact_uri']}/{cache_run}/blocksci-parse_data"

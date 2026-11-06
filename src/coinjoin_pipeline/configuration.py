@@ -143,10 +143,12 @@ class BlockSciConfiguration(ConfigurationModel):
     index_backup_uri: str | None = option(None, name="blocksci_index_backup_uri")
     # Fixed S3 prefix of the index jobs (parse, update, backup) in place of runs/<run-id>/.
     index_state_uri: str | None = option(None, name="blocksci_index_state_uri")
-    # A reading job restores the backup into its own scratch instead of reading index_dir,
-    # and optionally the Dumplings Scanner/ copy next to it.
+    # A reading job restores the backup into its own scratch instead of reading index_dir;
+    # with restore_index it fills an incomplete index_dir instead and leaves the copy there.
+    # dumplings_uri adds the Dumplings Scanner/ copy next to the index.
     index_in_scratch: bool = option(False, name="blocksci_index_in_scratch")
-    scratch_dumplings_uri: str | None = option(None, name="blocksci_scratch_dumplings_uri")
+    restore_index: bool = option(False, name="blocksci_restore_index")
+    dumplings_uri: str | None = option(None, name="blocksci_dumplings_uri")
 
 
 @dataclass(frozen=True, slots=True)

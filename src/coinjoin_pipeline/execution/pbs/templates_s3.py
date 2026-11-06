@@ -91,11 +91,14 @@ class PersistentIndex:
     S3 prefix of its single backup, written by the backup job and read to restore an
     incomplete working copy. With ``in_scratch`` a reading job restores that backup, and
     the Dumplings copy at ``dumplings_uri``, into its own scratch and leaves index_dir alone.
+    With ``restore`` it fills an incomplete index_dir from the backup and leaves it there,
+    with the Dumplings copy beside it, for later jobs until it is deleted explicitly.
     """
 
     index_dir: str
     backup_uri: str | None = None
     in_scratch: bool = False
+    restore: bool = False
     dumplings_uri: str | None = None
 
     def __post_init__(self) -> None:
@@ -306,6 +309,7 @@ def _persistent_settings(index: PersistentIndex | None, walltime: str) -> dict[s
         "index_dir": index.index_dir,
         "backup_uri": index.backup_uri,
         "in_scratch": index.in_scratch,
+        "restore": index.restore,
         "dumplings_uri": index.dumplings_uri,
         # Past the walltime the job is gone, so its lock entry may be cleared.
         "lock_seconds": seconds + 600,

@@ -151,10 +151,17 @@ je obnoví z S3. Vypíná se pomocí `mainnet.clear_after_sync: false`.
 Protože je multijob mezi synchronizacemi prázdný, joby čtoucí index (`script`, `external`,
 `notebook`) ho nečtou z `blocksci.index_dir`. S `blocksci.index_in_scratch: true` si
 stáhnou zálohu z `blocksci.index_backup_uri` do vlastního `$SCRATCHDIR`, kde ji nikdo
-jiný nečte, takže nepotřebují zámek. S `blocksci.scratch_dumplings_uri` přidají Scanner,
+jiný nečte, takže nepotřebují zámek. S `blocksci.dumplings_uri` přidají Scanner,
 který kontejner vidí v `/mnt/dumplings/Scanner`. Scratch musí stačit na rozbalený index
 (135 GB ve výšce 500 027), Lab proto žádá 200 GB. Ruční joby `index-update`
 a `index-backup` dál pracují s `index_dir` a na prázdném multijobu potřebují obnovu.
+
+Notebook může místo toho nechat data na multijobu: s `blocksci.restore_index: true`
+doplní neúplný `index_dir` ze zálohy pod zapisovacím zámkem a čte ho pod sdíleným.
+Lab k tomu používá vlastní složku `mainnet-notebook/{index,dumplings/Scanner}`, kterou
+synchronizace ani `mainnet-clear` nevidí; kopie v `index_dir` synchronizace by restore
+považoval za neprázdný dataset a producer by ji odmítl. Kopie zůstává a další notebook ji
+použije beze stahování, i když mezitím vznikla novější záloha. Maže se jen ručně v Labu.
 
 ## Pracovní data a zálohy
 

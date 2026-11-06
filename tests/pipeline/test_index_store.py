@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore, IndexStoreError
-from coinjoin_pipeline.execution.pbs.stage_runtime import scratch_index
+from coinjoin_pipeline.execution.pbs.stage_runtime import kept_index, scratch_index
 from coinjoin_pipeline.storage.s5client import S5Client, S5Error
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -327,3 +327,31 @@ def test_a_reading_job_restores_the_backup_into_its_own_scratch(tmp_path):
     assert copy.path == tmp_path / "scratch/index"
     assert copy.complete() and copy.height() == 100
     assert not index.path.exists(), "The shared working copy stays untouched"
+
+
+def keeping_stage(tmp_path, index):
+    persistent = {
+        "index_dir": str(index.path),
+        "backup_uri": BACKUP,
+        "lock_seconds": 3600,
+        "wait_seconds": 2,
+        "poll_seconds": 0.1,
+    }
+    return SimpleNamespace(settings={"persistent": persistent}, storage=index.storage, finalizers=[])
+
+
+def test_a_kept_copy_is_filled_once_and_stays_after_the_job(tmp_path):
+    parse_index(tmp_path)
+    backup(tmp_path)
+    index = store(tmp_path)
+    shutil.rmtree(index.path)
+
+    kept = kept_index(keeping_stage(tmp_path, index))
+    assert kept.complete() and kept.height() == 100 and kept.held is not None
+    kept.unlock()
+    assert kept.complete(), "The copy stays for the next job"
+
+    (tmp_path / "s3/bucket/blocksci-index/manifest.json").unlink()
+    again = kept_index(keeping_stage(tmp_path, index))
+    assert again.complete(), "A complete copy needs no backup"
+    again.unlock()
