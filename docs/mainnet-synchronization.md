@@ -50,6 +50,10 @@ na multijobu existují pracovní data (`bitcoin/`, `dumplings/`, `archive-state/
 a logy se nepočítají).
 
 - **Něco existuje:** skončí hned s `restore.json: skipped-not-empty`.
+- **Něco existuje, ale index má `.writing`:** BlockSci job spadl uprostřed zápisu, takže
+  pokračovat nelze. Pokud manifesty záloh v S3 projdou stejnými kontrolami jako níže,
+  smaže celý pracovní dataset a obnoví ho ze S3; práce nedokončeného běhu se ztratí.
+  Bez použitelných záloh skončí chybou a dataset nechá být.
 - **Nic neexistuje a v S3 nejsou žádné zálohy:** jde o první synchronizaci.
   Zapíše `skipped-no-backup` a producer staví od nuly. Neprázdné `blocks_uri`
   bez záloh je chyba, protože nový IBD by rozložil bloky do jiných `blk*.dat`.

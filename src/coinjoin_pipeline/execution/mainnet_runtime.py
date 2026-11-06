@@ -751,7 +751,8 @@ class Worker:
 
         The working copy on multijob storage can expire. Only a completely empty one is
         restored, from three backups of one synchronization; a partial one is never mixed
-        with backups, and the producer refuses it.
+        with backups, and the producer refuses it. A dataset whose index a failed job left
+        unfinished is emptied first, but only once the backups replacing it check out.
         """
         self.stage = "restore"
         self.acquire_dataset()
@@ -761,7 +762,8 @@ class Worker:
         for leftover in (path for base in (self.root, self.index) for name in leftovers for path in base.glob(name)):
             shutil.rmtree(leftover)
         present = self.dataset_members()
-        if present:
+        unfinished = (self.index / ".writing").exists()
+        if present and not unfinished:
             self.finish_restore("skipped-not-empty", present=[str(path) for path in present])
             return
         backups = {
@@ -780,6 +782,8 @@ class Worker:
         found = {name: value for name, value in manifests.items() if value is not None}
         missing = sorted(backups.keys() - found.keys())
         if not found:
+            if unfinished:
+                raise ValueError("The index is unfinished and S3 holds no backups to replace it")
             if self.storage.listing(self.c["blocks_uri"].rstrip("/") + "/*"):
                 raise ValueError(
                     "S3 holds archived blocks but no backups; a new initial download would mix its block files "
@@ -805,6 +809,8 @@ class Worker:
         ]
         if mismatches:
             raise ValueError("The S3 backups do not belong together: " + "; ".join(mismatches))
+        if unfinished:
+            self.discard_dataset()
         started = time.monotonic()
         raw = {}
         if self.c.get("measure_download"):
@@ -1288,15 +1294,21 @@ class Worker:
         self.complete({"run_id": self.run_id, **summary})
 
     def clear(self) -> None:
-        """Job 5: empty the working dataset; the next restore job refills it from S3.
-
-        Everything moves aside first, so a killed job never leaves a partial dataset that
-        the producer would refuse; the restore job removes such leftovers.
-        """
+        """Job 5: empty the working dataset; the next restore job refills it from S3."""
         self.stage = "clear"
         self.acquire_dataset()
         if read_json(self.run / "done.json").get("run_id") != self.run_id:
             raise ValueError("This synchronization's checkpoint did not finish; clearing refused")
+        self.discard_dataset()
+        self.progress("complete", state="done")
+        self.complete({"run_id": self.run_id})
+
+    def discard_dataset(self) -> None:
+        """Delete the working dataset.
+
+        Everything moves aside first, so a killed job never leaves a partial dataset that
+        the producer would refuse; the restore job removes such leftovers.
+        """
         self.progress("clearing")
         trash = self.root / f".clear-{self.run_id}"
         index_trash = self.index / f".clear-{self.run_id}"
@@ -1305,10 +1317,9 @@ class Worker:
         for path in self.dataset_members():
             path.rename((index_trash if path.parent == self.index else trash) / path.name)
         (self.root / "current-ready.json").unlink(missing_ok=True)
+        (self.index / ".writing").unlink(missing_ok=True)
         shutil.rmtree(trash)
         shutil.rmtree(index_trash)
-        self.progress("complete", state="done")
-        self.complete({"run_id": self.run_id})
 
     def cleanup(self) -> None:
         for process in self.children:

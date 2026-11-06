@@ -1022,6 +1022,47 @@ def test_restore_job_refuses_backups_that_do_not_belong_together(worker, tmp_pat
     assert worker.dataset_members() == []
 
 
+@pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
+def test_restore_job_replaces_a_dataset_with_an_unfinished_index(worker, monkeypatch):
+    events = []
+    fake_components(worker, monkeypatch, events)
+    synchronize(worker, "restore", "producer", "blocksci", "checkpoint")
+    (worker.index / ".writing").touch()
+    (worker.dumps / "Scanner/LastProcessedBlockHeight.txt").write_text("a later failed run")
+    worker.run_id = "mainnet-sync-local-2"
+    synchronize(worker, "restore")
+    assert json.loads((worker.run / "restore.json").read_text())["action"] == "restored"
+    assert not (worker.index / ".writing").exists()
+    assert (worker.dumps / "Scanner/LastProcessedBlockHeight.txt").read_text() == str(HEIGHT)
+    assert not [*worker.root.glob(".clear-*"), *worker.index.glob(".clear-*")]
+    worker.stage = "producer"
+    worker.require_complete_dataset()
+
+
+@pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
+@pytest.mark.parametrize("backups", ["no-backups", "missing-index-backup", "foreign-run"])
+def test_unfinished_index_stays_until_its_backups_check_out(worker, tmp_path, monkeypatch, backups):
+    events = []
+    fake_components(worker, monkeypatch, events)
+    synchronize(worker, "restore", "producer", "blocksci", "checkpoint")
+    (worker.index / ".writing").touch()
+    present = worker.dataset_members()
+    if backups == "no-backups":
+        shutil.rmtree(tmp_path / "s3/local")
+        message = "unfinished and S3 holds no backups"
+    elif backups == "missing-index-backup":
+        (tmp_path / "s3/local/index/manifest.json").unlink()
+        message = "lacks the backups index"
+    else:
+        manifest = tmp_path / "s3/local/dumps/manifest.json"
+        atomic_json(manifest, {**json.loads(manifest.read_text()), "run_id": "another-run"})
+        message = "do not belong together"
+    worker.stage = "restore"
+    with pytest.raises(ValueError, match=message):
+        worker.restore_dataset()
+    assert worker.dataset_members() == present and (worker.index / ".writing").exists()
+
+
 def test_restore_job_refuses_archived_blocks_without_backups(worker, tmp_path):
     (tmp_path / "s3/local/blocks").mkdir(parents=True)
     (tmp_path / "s3/local/blocks/blk00000.dat").write_bytes(bytes(88))
