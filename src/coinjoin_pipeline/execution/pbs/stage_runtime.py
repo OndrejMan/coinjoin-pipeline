@@ -23,6 +23,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -846,22 +847,40 @@ def parse_source(stage: Stage) -> tuple[Path | None, int, dict]:
 
 
 def with_job_log(stage: Stage, name: str) -> None:
-    """Send the job's output to a log the finalization uploads beside the run's other logs."""
+    """Copy the job's output into a log the finalization uploads beside the run's other logs.
+
+    The output still reaches the PBS output file too, so a job submitted from a host
+    PBS cannot copy that file back to loses nothing that S3 does not keep.
+    """
     log = stage.work / "logs" / name
     log.parent.mkdir(parents=True, exist_ok=True)
     sys.stdout.flush()
     sys.stderr.flush()
     saved = os.dup(1), os.dup(2)
     descriptor = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    os.dup2(descriptor, 1)
-    os.dup2(descriptor, 2)
-    os.close(descriptor)
+    reader, writer = os.pipe()
+    os.dup2(writer, 1)
+    os.dup2(writer, 2)
+    os.close(writer)
+
+    def copy() -> None:
+        while chunk := os.read(reader, 65536):
+            for target in (descriptor, saved[0]):
+                try:
+                    os.write(target, chunk)
+                except OSError:
+                    pass
+
+    copier = threading.Thread(target=copy, name="job-log", daemon=True)
+    copier.start()
 
     def restore_and_upload() -> None:
         sys.stdout.flush()
         sys.stderr.flush()
         os.dup2(saved[0], 1)
         os.dup2(saved[1], 2)
+        # A daemon a stage left running may still hold the pipe; upload what arrived.
+        copier.join(timeout=10)
         stage.storage.copy(log, f"{stage.settings['log_prefix']}/{name}")
 
     # Before every later finalizer, the index lock release included.

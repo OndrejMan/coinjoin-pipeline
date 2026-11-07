@@ -188,6 +188,9 @@ def test_combined_blocksci_and_report_jobs_run_the_stage_worker() -> None:
     assert settings["include_report"] is True and settings["export_analysis"] is False
     assert (settings["ncpus"], settings["image_name"]) == (8, "docker://blocksci")
     assert settings["log_prefix"] == "s3://bucket/runs/run-1/logs"
+    # Every stage uploads its whole output, so PBS need not copy the output file back.
+    assert settings["job_log"] == "blocksci.pbs.log"
+    assert settings_of(report)["job_log"] == "unified-report.pbs.log"
 
 
 def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
@@ -214,6 +217,7 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     assert parse["source"]["kind"] == "emulator" and parse["persistent"] is None
     assert parse["job_log"] == "blocksci-parse.pbs.log"
     assert (analyze["stage"], analyze["job"]) == ("blocksci-analyze", "blocksci-analysis")
+    assert analyze["job_log"] == "blocksci-analyze.pbs.log"
     assert "worker.py analyze" in analyze["command"] and "blocksci_parser" not in analyze["command"]
     assert analyze["inputs"] == [{"run": ".pipeline/exporters"}, {"run": "coinjoin_emulator_data"}]
     assert analyze["output_check"][0] == "blocksci-analysis_data/blocksci_analysis.json"

@@ -375,7 +375,6 @@ def render_blocksci_parse_s3_pbs(
             "command": command,
             "source": source,
             "persistent": _persistent_settings(persistent, resources.walltime),
-            "job_log": "blocksci-parse.pbs.log",
             **_index_job_settings(resources),
         },
         multijob=multijob,
@@ -553,6 +552,8 @@ def render_python_stage(
         "credentials": validate_credentials_file(target.credentials_file),
         "profile": validate_s3_profile(target.profile),
         "log_prefix": target.log_prefix,
+        # The whole output goes to S3, so no stage needs PBS to copy its output file back.
+        "job_log": f"{stage}.pbs.log",
         "ncpus": resources.ncpus,
         **settings,
     }

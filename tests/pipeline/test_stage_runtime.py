@@ -174,6 +174,9 @@ def test_report_job_without_an_analyzer_output_publishes_a_failed_marker(job: di
 
     assert process.returncode == 1
     assert "requires blocksci-analysis_data/blocksci_analysis.json" in output
+    # The same output reaches S3, for a host PBS cannot copy the output file back to.
+    uploaded = remote(job, "logs/unified-report.pbs.log").read_text()
+    assert "requires blocksci-analysis_data/blocksci_analysis.json" in uploaded
     assert remote(job, ".pbs/unified-report.failed").read_text() == "failed\n"
     assert not remote(job, ".pbs/unified-report.done").exists()
     assert not (job["scratch"].parent / "singularity.calls").exists()
