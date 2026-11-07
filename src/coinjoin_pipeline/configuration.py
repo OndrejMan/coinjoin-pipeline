@@ -247,7 +247,7 @@ class MainnetSyncConfiguration(ConfigurationModel):
     dumplings_uri: str | None = option(None, name="mainnet_dumplings_uri")
     core_image: str = option("ghcr.io/ondrejman/bitcoin-block-archive:latest", name="mainnet_core_image")
     dumplings_image: str = option("ghcr.io/ondrejman/dumplings:latest", name="mainnet_dumplings_image")
-    dbcache_mb: int = option(8192, name="mainnet_dbcache_mb", minimum=1)
+    dbcache_mb: int = option(4096, name="mainnet_dbcache_mb", minimum=1)
     reorg_reserve: int = option(2016, name="mainnet_reorg_reserve", minimum=288)
     poll_seconds: int = option(30, name="mainnet_poll_seconds", minimum=1)
     # Empty the working dataset after the last job; the next restore job refills it from S3.

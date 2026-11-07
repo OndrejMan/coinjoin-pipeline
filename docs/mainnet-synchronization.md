@@ -93,12 +93,12 @@ Další průchod ověří původní větev i při obnovení částečného skenu
 nebo import starého Scanner bez této vazby vyžadují explicitní ověření/obnovu;
 detekce se automaticky nepřenášejí mezi větvemi.
 
-`mainnet-blocksci` (256 GB) ověří přesnou generaci a pod výhradním zámkem
+`mainnet-blocksci` (64 GB) ověří přesnou generaci a pod výhradním zámkem
 aktualizuje index přímo nad stejnými blk soubory. Ověří počet bloků H+1 a hash H,
 zapíše `manifest.json` a `files.txt` a smaže `.writing`: index je hotový, i když
 ještě nemá zálohu. Core v tomto jobu neběží.
 
-`mainnet-checkpoint` (16 CPU kvůli `zstd -T`, 8 GB) drží zámek indexu jen pro čtení,
+`mainnet-checkpoint` (4 CPU kvůli `zstd -T`, 4 GB) drží zámek indexu jen pro čtení,
 takže notebooky mohou index dál číst a ruční indexový job jej změnit nemůže.
 
 1. Ověří, že index dokončil BlockSci job tohoto běhu: `run_id` a `exported_max_block`

@@ -96,9 +96,9 @@ def test_shipped_worker_imports_the_shipped_s5_client_without_the_package(config
 
 def test_checkpoint_job_defaults_to_little_memory(config):
     resources = {stage: mainnet_sync.resources(config, stage) for stage in mainnet_sync.SYNC_STAGES}
-    assert resources["blocksci"].mem == "256gb"
-    assert resources["checkpoint"].mem == resources["restore"].mem == "8gb"
-    assert resources["checkpoint"].ncpus == 16
+    assert resources["blocksci"].mem == "64gb"
+    assert resources["checkpoint"].mem == resources["restore"].mem == "4gb"
+    assert resources["checkpoint"].ncpus == 4
 
 
 def test_every_job_must_use_the_same_multijob(config):

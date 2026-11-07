@@ -20,7 +20,7 @@ mainnet:
   # Use rebuilt images containing the changes in this workspace; pin them before deployment.
   core_image: ghcr.io/ondrejman/bitcoin-block-archive:latest
   dumplings_image: ghcr.io/ondrejman/dumplings:latest
-  dbcache_mb: 8192
+  dbcache_mb: 4096
   reorg_reserve: 2016
 blocksci:
   index_dir: /scratch/multijob-brno/xman/blocksci-mainnet
@@ -31,32 +31,32 @@ blocksci:
 # and clear (empties the working dataset; set mainnet.clear_after_sync: false to keep it).
 pbs:
   restore:
-    ncpus: 8
-    mem: 8gb
+    ncpus: 2
+    mem: 4gb
     scratch: 20gb
     walltime: '12:00:00'
     multijob: brno
   producer:
-    ncpus: 4
-    mem: 16gb
+    ncpus: 2
+    mem: 8gb
     scratch: 20gb
     walltime: '24:00:00'
     multijob: brno
   blocksci:
-    ncpus: 16
-    mem: 256gb
+    ncpus: 4
+    mem: 64gb
     scratch: 20gb
     walltime: '24:00:00'
     multijob: brno
   checkpoint:
-    ncpus: 16
-    mem: 8gb
+    ncpus: 4
+    mem: 4gb
     scratch: 20gb
     walltime: '12:00:00'
     multijob: brno
   pack:
     ncpus: 4
-    mem: 4gb
+    mem: 3gb
     scratch: 20gb
     walltime: '24:00:00'
     multijob: brno

@@ -32,14 +32,15 @@ DEFAULT_RESOURCES = {
 
 # mainnet-sync's jobs in submission order, resolved like a stage through `pbs.<job>`; every
 # list of the jobs derives from this one. The checkpoint job compresses with one zstd
-# thread per CPU but needs little memory.
+# thread per CPU but needs little memory. The Scenario Lab keeps the same values.
 MAINNET_SYNC_RESOURCES = {
-    "restore": PBSResources(8, "8gb", "20gb", "12:00:00"),
-    "producer": PBSResources(4, "16gb", "20gb", "24:00:00"),
-    "blocksci": PBSResources(16, "256gb", "20gb", "24:00:00"),
-    "checkpoint": PBSResources(16, "8gb", "20gb", "12:00:00"),
+    "restore": PBSResources(2, "4gb", "20gb", "12:00:00"),
+    # mainnet.dbcache_mb is half of this memory; raise them together.
+    "producer": PBSResources(2, "8gb", "20gb", "24:00:00"),
+    "blocksci": PBSResources(4, "64gb", "20gb", "24:00:00"),
+    "checkpoint": PBSResources(4, "4gb", "20gb", "12:00:00"),
     # One file per CPU at zstd -19: slow, but each file needs well under 1 GB.
-    "pack": PBSResources(4, "4gb", "20gb", "24:00:00"),
+    "pack": PBSResources(4, "3gb", "20gb", "24:00:00"),
     "clear": PBSResources(1, "2gb", "1gb", "02:00:00"),
 }
 
