@@ -295,3 +295,30 @@ def test_a_failed_run_exits_with_the_failure_code_not_the_usage_code(capsys) -> 
 
     assert failure.value.code == EXIT_FAILURE
     assert "[ERROR] the run failed" in capsys.readouterr().err
+
+
+def test_image_registry_moves_every_default_image_but_not_explicit_ones(monkeypatch):
+    monkeypatch.delenv("COINJOIN_IMAGE_REGISTRY", raising=False)
+    config = load_configuration(
+        [
+            "full-run",
+            "--analysisPbs",
+            "--image-registry",
+            "ghcr.io/someone/",
+            "--blocksci-image",
+            "registry/blocksci:chosen",
+        ]
+    )
+    context = RunContext.prepare(config, "cjp")
+    assert context.config.images.emulator == "ghcr.io/someone/emulator-manager:latest"
+    assert context.config.pbs.coinjoin_analysis_image == "ghcr.io/someone/coinjoin-analysis:latest"
+    assert context.config.images.blocksci == "registry/blocksci:chosen"
+
+
+def test_image_registry_falls_back_to_the_environment_then_the_project(monkeypatch):
+    monkeypatch.setenv("COINJOIN_IMAGE_REGISTRY", "registry.example:5000/lab")
+    assert resolve_images(None, {}).sake == "registry.example:5000/lab/coinjoin-mappings-sake:latest"
+    monkeypatch.delenv("COINJOIN_IMAGE_REGISTRY")
+    assert resolve_images(None, {}).sake == "ghcr.io/ondrejman/coinjoin-mappings-sake:latest"
+    with pytest.raises(ValueError):
+        resolve_images(None, {}, registry="Bad Registry")

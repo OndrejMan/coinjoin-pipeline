@@ -128,6 +128,10 @@ HELP = {
     "artifacts.credentials_file": "absolute path of the s5cmd credentials file on the frontend",
     "artifacts.profile": "profile name inside the credentials file",
     "images.version": "release tag of every component image; `cjp version` prints the CLI version",
+    "images.registry": (
+        "registry and owner of the project's images, e.g. ghcr.io/you (also $COINJOIN_IMAGE_REGISTRY; "
+        "default: ghcr.io/ondrejman)"
+    ),
     "images.local_build": "use the images ./run-all.sh local builds (*:local)",
     "images.uploader": "S3 uploader image (also $COINJOIN_UPLOADER_IMAGE; default: container/uploader.image)",
     "images.unified_report": (

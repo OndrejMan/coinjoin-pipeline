@@ -6,13 +6,36 @@ import os
 import re
 from dataclasses import asdict, dataclass
 
-IMAGE_NAMES = {
-    "emulator": "ghcr.io/ondrejman/emulator-manager",
-    "coinjoin_analysis": "ghcr.io/ondrejman/coinjoin-analysis",
-    "blocksci": "ghcr.io/ondrejman/blocksci-complete",
-    "mappings": "ghcr.io/ondrejman/coinjoin-mappings-enumerator",
-    "sake": "ghcr.io/ondrejman/coinjoin-mappings-sake",
+# Where the project's images are published; a fork publishing its own sets
+# images.registry (--image-registry, $COINJOIN_IMAGE_REGISTRY).
+DEFAULT_REGISTRY = "ghcr.io/ondrejman"
+REGISTRY_ENVIRONMENT = "COINJOIN_IMAGE_REGISTRY"
+REPOSITORIES = {
+    "emulator": "emulator-manager",
+    "coinjoin_analysis": "coinjoin-analysis",
+    "blocksci": "blocksci-complete",
+    "mappings": "coinjoin-mappings-enumerator",
+    "sake": "coinjoin-mappings-sake",
 }
+
+
+def image_registry(configured: str | None = None) -> str:
+    """The configured registry, else ``$COINJOIN_IMAGE_REGISTRY``, else the project's own."""
+    registry = (configured or os.environ.get(REGISTRY_ENVIRONMENT) or DEFAULT_REGISTRY).rstrip("/")
+    validate_image(registry)
+    return registry
+
+
+def image_names(registry: str | None = None) -> dict[str, str]:
+    """Each component's image name, without a tag, in that registry."""
+    prefix = image_registry(registry)
+    return {component: f"{prefix}/{repository}" for component, repository in REPOSITORIES.items()}
+
+
+def in_registry(image: str, registry: str | None) -> str:
+    """A default image of the project's registry, moved to the configured one."""
+    prefix = f"{DEFAULT_REGISTRY}/"
+    return image_registry(registry) + "/" + image[len(prefix):] if image.startswith(prefix) else image
 # What ./run-all.sh local tags its images as.
 LOCAL_IMAGES = {
     "emulator": "coinjoin-emulator:local",
@@ -58,12 +81,18 @@ def validate_image(image: str) -> None:
         raise ValueError(f"invalid container image reference: {image!r}")
 
 
-def resolve_images(version: str | None, overrides: dict[str, str | None], *, local: bool = False) -> Images:
+def resolve_images(
+    version: str | None,
+    overrides: dict[str, str | None],
+    *,
+    local: bool = False,
+    registry: str | None = None,
+) -> Images:
     """Each component's configured image, else its environment variable, else the release or local tag."""
     effective_version = version or DEFAULT_VERSION
     validate_version(effective_version)
     resolved: dict[str, str] = {}
-    for component, name in IMAGE_NAMES.items():
+    for component, name in image_names(registry).items():
         override = overrides.get(component) or os.environ.get(IMAGE_ENVIRONMENT[component])
         if override:
             validate_image(override)
@@ -71,3 +100,8 @@ def resolve_images(version: str | None, overrides: dict[str, str | None], *, loc
         else:
             resolved[component] = LOCAL_IMAGES[component] if local else f"{name}:{effective_version}"
     return Images(**resolved)
+
+
+# The names in the registry $COINJOIN_IMAGE_REGISTRY names (else the project's own), for the
+# defaults that are read before a configuration exists; a run resolves images.registry.
+IMAGE_NAMES = image_names()

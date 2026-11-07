@@ -27,7 +27,7 @@ from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, fail
 from .context import RunContext
 from .doctor import check as doctor_check
 from .doctor import required_capabilities, required_image_components, validate_arguments
-from .images import DEFAULT_VERSION, IMAGE_NAMES, Images
+from .images import DEFAULT_VERSION, Images, image_names
 from .manifest import environment_snapshot, initial_manifest, mark_finished
 from .paths import PIPELINE_ROOT
 from .process import run
@@ -38,7 +38,7 @@ def print_version() -> None:
     print(f"coinjoin-pipeline {__version__}")
     print(f"manifest schema: {MANIFEST_SCHEMA_VERSION}")
     print(f"default image version: {DEFAULT_VERSION}")
-    for component, image in IMAGE_NAMES.items():
+    for component, image in image_names().items():
         print(f"{component}: {image}")
 
 

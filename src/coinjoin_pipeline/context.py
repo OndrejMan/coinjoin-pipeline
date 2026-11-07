@@ -91,6 +91,7 @@ def resolve_run_images(config: PipelineConfiguration) -> tuple[PipelineConfigura
         config.images.version,
         {item.name: getattr(config.images, item.name) for item in fields(Images)},
         local=config.images.local_build,
+        registry=config.images.registry,
     )
     pbs = config.pbs
     config = replace(

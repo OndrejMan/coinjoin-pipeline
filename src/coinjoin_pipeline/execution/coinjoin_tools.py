@@ -16,6 +16,7 @@ from exporters.artifact_paths import COINJOIN_ANALYSIS_DIR, COINJOIN_ANALYSIS_TO
 
 from coinjoin_pipeline.storage.s3 import validate_artifact_uri
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
+from coinjoin_pipeline.images import image_names
 
 if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import CoinjoinAnalysisConfiguration, PipelineConfiguration
@@ -281,7 +282,8 @@ def run_local(config: PipelineConfiguration, run_dir: Path) -> Path:
     options = config.coinjoin_analysis
     output = run_dir / COINJOIN_ANALYSIS_TOOLS_DIR / str(options.program) / uuid4().hex
     image = (
-        config.images.coinjoin_analysis or f"ghcr.io/ondrejman/coinjoin-analysis:{config.images.version or 'latest'}"
+        config.images.coinjoin_analysis
+        or f"{image_names(config.images.registry)['coinjoin_analysis']}:{config.images.version or 'latest'}"
     )
     analyzer = command_argv(options, run_dir.name)
     argv = [
