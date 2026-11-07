@@ -79,7 +79,7 @@ def configuration(work: Path, endpoint: str, run: str, mode: str, target: int) -
                 "mem": "16gb" if mode == "mainnet" else "8gb",
                 "scratch": "4gb",
                 "scratch_type": "local",
-                "walltime": "03:00:00" if mode == "mainnet" else "00:20:00",
+                "walltime": "08:00:00" if mode == "mainnet" else "00:20:00",
             },
             "checkpoint": {
                 "ncpus": 2,

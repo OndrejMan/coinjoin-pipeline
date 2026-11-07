@@ -230,6 +230,8 @@ def test_mainnet_timeouts_cover_every_job_of_a_generation_and_cleanup(tmp_path):
     walltimes = {stage: seconds(config["pbs"][stage]["walltime"]) for stage in mainnet_sync.SYNC_STAGES}
     # Core synchronization alone took 80 minutes in the failed 400000-block run.
     assert walltimes["producer"] >= 6 * 3600
+    # BlockSci reached only 88.8 % of the 400000-block parse in 3 hours.
+    assert walltimes["blocksci"] >= 8 * 3600
     generation = int(job["env"]["MAINNET_TEST_GENERATION_TIMEOUT"])
     assert generation >= sum(walltimes.values()) + 1800
     script = (ROOT / "tests/test-mainnet-sync-local.sh").read_text()
