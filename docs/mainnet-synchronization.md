@@ -160,7 +160,8 @@ Protože je multijob mezi synchronizacemi prázdný, joby čtoucí index (`scrip
 stáhnou zálohu z `blocksci.index_backup_uri` do vlastního `$SCRATCHDIR`, kde ji nikdo
 jiný nečte, takže nepotřebují zámek. S `blocksci.dumplings_uri` přidají Scanner,
 který kontejner vidí v `/mnt/dumplings/Scanner`. Scratch musí stačit na rozbalený index
-(135 GB ve výšce 500 027), Lab proto žádá 200 GB. Ruční joby `index-update`
+(135 GB ve výšce 500 027). Lab bere velikost z `storage.multijob.index` v `done.json`
+poslední synchronizace, přidá 10 % a 20 GB; bez měření žádá 200 GB. Ruční joby `index-update`
 a `index-backup` dál pracují s `index_dir` a na prázdném multijobu potřebují obnovu.
 
 Notebook může místo toho nechat data na multijobu: s `blocksci.restore_index: true`
