@@ -146,11 +146,12 @@ bloků pro parse a update čte obě podoby a `.zst` před `verify` rozbalí. Job
 současně se stahováním může parse shodit, protože surový objekt zmizí mezi výpisem
 a stažením; opakovaný parse už uvidí `.zst`.
 
-`mainnet-clear` (1 CPU, 2 GB, 2 h) vyprázdní multijob: Core, Dumplings, stav archivu
-i index. Běží po `mainnet-pack`, protože ten porovnává S3 s bloky na disku. Bere zámek
+`mainnet-clear` (1 CPU, 2 GB, 2 h) vyprázdní multijob: Core, Dumplings, stav archivu,
+index i vše ostatní v kořeni datasetu, například staré logy v `runs/`. Běží po
+`mainnet-pack`, protože ten porovnává S3 s bloky na disku. Bere zámek
 datasetu i zapisovací zámek indexu a odmítne dataset, jehož `done.json` patří jinému
 běhu. Všechno nejdřív přesune stranou do `.clear-<run-id>/`, aby pád nezanechal částečný
-dataset; zbytky odstraní další restore job. Adresář `sync/` zůstává. Když `mainnet-pack`
+dataset; zbytky odstraní další restore job. Zůstává jen adresář `sync/`. Když `mainnet-pack`
 spadne, `mainnet-clear` se nespustí a data zůstanou do další synchronizace. Další běh
 je obnoví z S3. Vypíná se pomocí `mainnet.clear_after_sync: false`.
 

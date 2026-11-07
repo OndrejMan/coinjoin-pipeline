@@ -865,6 +865,14 @@ def test_clear_empties_the_working_dataset_and_keeps_the_state(worker):
     assert not worker.active.exists()
 
 
+def test_clear_also_removes_what_the_dataset_does_not_list(worker):
+    filled_dataset(worker)
+    (worker.root / "runs/mainnet-old").mkdir(parents=True)
+    (worker.root / "runs/mainnet-old/core-producer.log").write_text("old log")
+    worker.clear()
+    assert sorted(path.name for path in worker.root.iterdir()) == ["sync"]
+
+
 def test_clear_refuses_a_dataset_of_another_synchronization(worker):
     filled_dataset(worker)
     atomic_json(worker.run / "done.json", {"run_id": "another-run"})

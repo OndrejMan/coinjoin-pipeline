@@ -1304,19 +1304,21 @@ class Worker:
         self.complete({"run_id": self.run_id})
 
     def discard_dataset(self) -> None:
-        """Delete the working dataset.
+        """Delete the working dataset and whatever else the root holds, such as old run logs.
 
-        Everything moves aside first, so a killed job never leaves a partial dataset that
-        the producer would refuse; the restore job removes such leftovers.
+        Only the synchronization state and its lock stay. Everything moves aside first, so a
+        killed job never leaves a partial dataset that the producer would refuse; the restore
+        job removes such leftovers.
         """
         self.progress("clearing")
         trash = self.root / f".clear-{self.run_id}"
         index_trash = self.index / f".clear-{self.run_id}"
         trash.mkdir()
         index_trash.mkdir()
-        for path in self.dataset_members():
-            path.rename((index_trash if path.parent == self.index else trash) / path.name)
-        (self.root / "current-ready.json").unlink(missing_ok=True)
+        kept = {self.run, self.active, trash}
+        for path in (*(path for path in self.root.iterdir() if path not in kept), *self.dataset_members()):
+            if path.exists():
+                path.rename((index_trash if path.parent == self.index else trash) / path.name)
         (self.index / ".writing").unlink(missing_ok=True)
         shutil.rmtree(trash)
         shutil.rmtree(index_trash)
