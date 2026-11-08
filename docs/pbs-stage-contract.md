@@ -247,6 +247,18 @@ script is bound read-only from shared
 independent PBS job; its termination marker describes notebook shutdown, not
 completion of the standard analysis graph.
 
+Notebook connection details are also published privately under
+`<run-prefix>/.notebook/connection.json` while the job runs. The worker checks
+the run ID and PBS job ID before publication and removes the object on shutdown;
+consumers must additionally verify the job state and compute host with `qstat`.
+This lets a submitting container discover Jupyter without a shared `/storage`
+mount or an SSH frontend. Optional `.notebook/initial.json` holds a validated
+initial `.py`/`.ipynb` file; the worker creates it exclusively in the output
+directory. Custom notebook output directories must exist on the compute node,
+where they are checked before Jupyter starts. The container's notebook proxy
+uses direct compute-node SSH; notebook HTTP/WebSocket traffic does not pass
+through a MetaCentrum frontend.
+
 PBS resources resolve independently for each stage. The
 `--pbs-{blocksci,analysis,mappings}-{ncpus,mem,scratch,scratch-type,walltime}`
 options take precedence for their stage, followed by the backward-compatible

@@ -83,9 +83,8 @@ def analysis_mode_settings(
         if notebooks_dir is not None:
             notebook_path = notebooks_dir.expanduser().resolve()
             require_storage_path(notebook_path)
-            require_existing_path(notebook_path, "BlockSci notebooks directory")
-            if not notebook_path.is_dir():
-                raise PBSError(f"BlockSci notebooks path is not a directory: {notebook_path}")
+            # A submitting container's /storage is not the compute node's shared disk.
+            # The worker validates existence there before starting Jupyter.
             output["notebooks_dir"] = str(notebook_path)
         settings["connection_help"] = [
             f"[blocksci-notebook] Preferred Jupyter port: {notebook_port}",

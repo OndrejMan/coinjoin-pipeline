@@ -25,7 +25,8 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Sequence
+from contextlib import contextmanager, nullcontext
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import TypedDict
 
@@ -1016,6 +1017,80 @@ def analysis_output(stage: Stage) -> Path:
     return stage.work / str(output["relative"])
 
 
+def seed_notebook(stage: Stage, output: Path) -> None:
+    """The submitting container stages an optional initial file in private S3 metadata."""
+    uri = f"{stage.run_prefix}/.notebook/initial.json"
+    if not stage.storage.exists(uri):
+        return
+    seed = stage.storage.cat_json(uri)
+    name, text = seed.get("name"), seed.get("text")
+    if (
+        not isinstance(name, str)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _.-]{0,119}\.(py|ipynb)", name)
+        or not isinstance(text, str)
+        or len(text.encode("utf-8")) > 256 * 1024
+        or "\0" in text
+    ):
+        raise StageFailure("Invalid initial notebook file in S3")
+    if name.endswith(".ipynb"):
+        document = json.loads(text)
+        if (
+            not isinstance(document, dict)
+            or document.get("nbformat") != 4
+            or not isinstance(document.get("cells"), list)
+        ):
+            raise StageFailure("Invalid version 4 initial notebook")
+    # Never overwrite an edited notebook, including when the same run is retried.
+    descriptor = os.open(str(output / name), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        stream.write(text)
+
+
+@contextmanager
+def notebook_connection(stage: Stage, control: Path) -> Iterator[None]:
+    """Publish the current job's private connection while Jupyter is running.
+
+    The frontend container has no shared /storage mount. Its only discovery path is
+    this S3 object, checked against qstat before opening a direct node SSH tunnel.
+    """
+    uri = f"{stage.run_prefix}/.notebook/connection.json"
+    stopping = threading.Event()
+
+    def publish() -> None:
+        warned = False
+        while not stopping.wait(0.2):
+            try:
+                path = control / "connection.json"
+                if not path.is_file():
+                    continue
+                info = json.loads(path.read_text())
+                if info.get("jobId") != os.environ.get("PBS_JOBID") or info.get("runId") != stage.run_id:
+                    continue
+                stage.storage.copy(path, uri, timeout=15)
+                return
+            except (OSError, ValueError, subprocess.SubprocessError, S5Error):
+                if not warned:
+                    stage.log("Notebook connection publication failed; retrying (connection token is not logged)")
+                    warned = True
+                stopping.wait(1)
+
+    thread = threading.Thread(target=publish, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stopping.set()
+        thread.join(timeout=16)
+        # Stale objects are also rejected by run ID, PBS job ID and terminal qstat state.
+        # Wait for an in-flight upload before deleting, so it cannot republish afterwards.
+        if not thread.is_alive():
+            try:
+                if not stage.storage.remove(uri, timeout=15):
+                    stage.log("Could not remove ended notebook connection metadata")
+            except (OSError, subprocess.SubprocessError, S5Error):
+                stage.log("Could not remove ended notebook connection metadata")
+
+
 def blocksci_analysis(stage: Stage) -> None:
     """Detection, an external comparison, a user script or a notebook over an existing index.
 
@@ -1048,6 +1123,8 @@ def blocksci_analysis(stage: Stage) -> None:
         f"BLOCKSCI_CONFIG={container_run(stage)}/blocksci_data/config.json",
         f"BLOCKSCI_RUN_DIR={container_run(stage)}",
     ]
+    if settings["output"].get("notebooks_dir") and not output.is_dir():
+        raise StageFailure(f"BlockSci notebooks directory does not exist on the compute node: {output}")
     output.mkdir(parents=True, exist_ok=True)
     persistent = settings.get("persistent")
     if persistent:
@@ -1080,7 +1157,9 @@ def blocksci_analysis(stage: Stage) -> None:
         digest = hashlib.sha256(script.read_bytes()).hexdigest()
         (output / "script.py.sha256").write_text(f"{digest}  {script}\n")
         binds.append(f"{script}:/mnt/user-analysis.py:ro")
+    control = None
     if settings["output"].get("notebook"):
+        seed_notebook(stage, output)
         control = notebook_control(stage)
         control.mkdir(parents=True, exist_ok=True)
         control.chmod(0o700)
@@ -1099,12 +1178,13 @@ def blocksci_analysis(stage: Stage) -> None:
     stage.log(f"[{mode}] starting on {socket.getfqdn()}")
     for line in settings.get("connection_help", ()):
         stage.log(line)
-    stage.singularity(
-        f'cd "{CONTAINER_RUNS_ROOT}/$PBS_RUN_ID" && {settings["command"]}',
-        binds=binds,
-        environment=environment,
-        cleanenv=True,
-    )
+    with notebook_connection(stage, control) if control is not None else nullcontext():
+        stage.singularity(
+            f'cd "{CONTAINER_RUNS_ROOT}/$PBS_RUN_ID" && {settings["command"]}',
+            binds=binds,
+            environment=environment,
+            cleanenv=True,
+        )
     check = settings.get("output_check")
     if check:
         stage.require_file(check[0], check[1])
