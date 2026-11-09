@@ -193,6 +193,13 @@ class DetectorParameters(TypedDict):
     joinmarket_max_depth: int
 
 
+class SubsetMatchingAnalysis(TypedDict):
+    """The deprecated input-subset-matching JoinMarket scan, kept for comparison."""
+
+    records: dict[str, TransactionRecord]
+    skipped_txids: list[str]
+
+
 class BlockSciAnalysisArtifact(TypedDict):
     """``blocksci_analysis.json``: BlockSci output persisted for report assembly."""
 
@@ -201,7 +208,8 @@ class BlockSciAnalysisArtifact(TypedDict):
     parameters: DetectorParameters
     first_wasabi2_block: int
     records: dict[str, TransactionRecord]
-    skipped_txids: list[str]
+    # JoinMarket emulator runs only; None otherwise.
+    subset_matching: SubsetMatchingAnalysis | None
     integration_diagnostics: JsonObject | None
     mode: str
     image_provenance: JsonObject

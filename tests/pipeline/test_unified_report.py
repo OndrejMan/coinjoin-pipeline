@@ -35,8 +35,7 @@ from exporters.comparison import evaluate_cluster_assignments
 from exporters.emulator_data import build_emulator_data, load_wasabi_round_labels
 from exporters.heuristics import (
     WASABI2_BLOCKSCI_DENOMINATIONS,
-    explain_joinmarket_definite_heuristic,
-    explain_joinmarket_possible_heuristic,
+    explain_joinmarket_heuristic,
     explain_wasabi2_heuristic,
 )
 from exporters.integration_diagnostics import (
@@ -379,22 +378,10 @@ class FakeBlockchain:
         return FakeTx(txid, self.tx_heights[txid])
 
 
-class FakeJoinMarketHeuristics:
-    def __init__(self, results):
-        self.results = results
-
-    def is_definite_coinjoin(self, _min_base_fee, _percentage_fee, _max_depth):
-        return lambda tx: self.results.get(str(tx.hash), 1)
-
-    def is_possible_coinjoin(self, _min_base_fee, _percentage_fee, _max_depth):
-        return lambda tx: self.results.get(str(tx.hash), 1)
-
-
 class FakeBlockSciModule:
-    def __init__(self, tx_heights, block_count, detector_results=None):
+    def __init__(self, tx_heights, block_count):
         self.tx_heights = tx_heights
         self.block_count = block_count
-        self.heuristics = types.SimpleNamespace(coinjoin=FakeJoinMarketHeuristics(detector_results or {}))
 
     def Blockchain(self, config):
         return FakeBlockchain(config, self.tx_heights, self.block_count)
@@ -443,10 +430,9 @@ class UnifiedReportTest(unittest.TestCase):
         chain = RawChain()
         fake_blocksci = types.SimpleNamespace(Blockchain=lambda _config: chain)
         with mock.patch.object(unified_report, "blocksci", fake_blocksci):
-            records, skipped = export_blocksci_records(Path("/tmp/config.json"), Detector("wasabi2", None))
+            records = export_blocksci_records(Path("/tmp/config.json"), Detector("wasabi2", None))
 
         self.assertEqual(records, {})
-        self.assertEqual(skipped, [])
         self.assertEqual(chain.calls, [(0, 10, "wasabi2")])
 
     def test_external_report_marks_metrics_as_baseline_agreement_only(self):
@@ -1239,7 +1225,7 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(summary["exported_block_count"], 2)
         self.assertEqual(summary["max_exported_block_height"], 2)
 
-    def test_integration_diagnostics_ok_when_provenance_chain_and_detector_match(self):
+    def test_integration_diagnostics_ok_when_provenance_and_chain_match(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)
             block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
@@ -1266,9 +1252,8 @@ class UnifiedReportTest(unittest.TestCase):
             diagnostics = build_integration_diagnostics(
                 run_dir,
                 Path("/tmp/config.json"),
-                FakeBlockSciModule({"funding": 0, "txA": 1}, 2, {"funding": 1, "txA": 0}),
+                FakeBlockSciModule({"funding": 0, "txA": 1}, 2),
                 {"txA": blocksci_fixture()["txA"]},
-                Detector("joinmarket"),
                 ReportImages(complete_image_refs(), complete_image_digests()),
                 image_ids=complete_image_ids(),
             )
@@ -1278,8 +1263,6 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(diagnostics["chain"]["max_exported_block_height"], 1)
         self.assertEqual(diagnostics["target_txids"]["total"], 2)
         self.assertEqual(diagnostics["target_txids"]["present"], 2)
-        self.assertEqual(diagnostics["detector"]["checked"], 2)
-        self.assertEqual(diagnostics["detector"]["disagreements"], 0)
 
     def test_integration_diagnostics_not_ok_when_image_digest_missing(self):
         digests = complete_image_digests()
@@ -1297,7 +1280,6 @@ class UnifiedReportTest(unittest.TestCase):
                 Path("/tmp/config.json"),
                 FakeBlockSciModule({}, 1),
                 {},
-                Detector("wasabi2"),
                 ReportImages(complete_image_refs(), digests),
                 image_ids=complete_image_ids(),
             )
@@ -1321,7 +1303,6 @@ class UnifiedReportTest(unittest.TestCase):
                 Path("/tmp/config.json"),
                 FakeBlockSciModule({}, 1),
                 {},
-                Detector("wasabi2"),
                 ReportImages(complete_image_refs(), complete_image_digests()),
             )
 
@@ -1340,7 +1321,6 @@ class UnifiedReportTest(unittest.TestCase):
                 Path("/tmp/config.json"),
                 FakeBlockSciModule({}, 2),
                 {},
-                Detector("wasabi2"),
                 ReportImages(complete_image_refs(), complete_image_digests()),
                 image_ids=complete_image_ids(),
             )
@@ -1369,7 +1349,6 @@ class UnifiedReportTest(unittest.TestCase):
                 Path("/tmp/config.json"),
                 FakeBlockSciModule({}, 1),
                 {},
-                Detector("wasabi2"),
                 ReportImages(complete_image_refs(), complete_image_digests()),
                 image_ids=complete_image_ids(),
             )
@@ -1377,36 +1356,6 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(diagnostics["status"], "not_ok")
         self.assertEqual(diagnostics["target_txids"]["missing"], 1)
         self.assertIn("missing from BlockSci", " ".join(diagnostics["problems"]))
-
-    def test_integration_diagnostics_not_ok_when_joinmarket_direct_detector_disagrees(
-        self,
-    ):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            run_dir = Path(tmpdir)
-            block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
-            block_dir.mkdir(parents=True)
-            save_json(
-                block_dir / "block_0.json",
-                {
-                    "height": 0,
-                    "tx": [
-                        {"txid": "txA", "vin": [{"txid": "funding", "vout": 0}]},
-                    ],
-                },
-            )
-
-            diagnostics = build_integration_diagnostics(
-                run_dir,
-                Path("/tmp/config.json"),
-                FakeBlockSciModule({"txA": 0}, 1, {"txA": 1}),
-                {"txA": blocksci_fixture()["txA"]},
-                Detector("joinmarket"),
-                ReportImages(complete_image_refs(), complete_image_digests()),
-                image_ids=complete_image_ids(),
-            )
-
-        self.assertEqual(diagnostics["status"], "not_ok")
-        self.assertEqual(diagnostics["detector"]["disagreements"], 1)
 
     def test_build_emulator_data_adds_joinmarket_round_labels(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2111,29 +2060,36 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertIn("unique_input_addresses", explanation["failed_rules"])
         self.assertIn("unique_output_addresses", explanation["failed_rules"])
 
-    def test_joinmarket_definite_explanation_records_subset_conditions(self):
+    def test_joinmarket_explanation_mirrors_the_protocol_heuristic(self):
         records = normalize_coinjoin_analysis(joinmarket_passing_coinjoin_fixture())
-        explanation = explain_joinmarket_definite_heuristic(records["txA"])
+        explanation = explain_joinmarket_heuristic(records["txA"])
 
-        self.assertEqual(explanation["heuristic"], "joinmarket_definite")
+        self.assertEqual(explanation["heuristic"], "joinmarket")
         self.assertTrue(explanation["would_pass_python_rules"])
         self.assertEqual(explanation["failed_rules"], [])
-        subset_rule = next(rule for rule in explanation["rules"] if rule["name"] == "subset_partition_after_fee")
-        self.assertTrue(subset_rule["passed"])
-        self.assertEqual(
-            subset_rule["observed"]["bucket_goals_after_fee"],
-            [195002, 455004, 46682, 2955004, 2915006],
-        )
 
-    def test_joinmarket_possible_explanation_records_subset_conditions(self):
-        records = normalize_coinjoin_analysis(joinmarket_passing_coinjoin_fixture())
-        explanation = explain_joinmarket_possible_heuristic(records["txA"])
+    def test_joinmarket_explanation_rejects_fewer_than_five_mix_outputs(self):
+        fixture = joinmarket_passing_coinjoin_fixture()
+        tx = fixture["coinjoins"]["txA"]
+        del tx["inputs"]["4"]
+        del tx["outputs"]["4"]
+        del tx["outputs"]["9"]
+        records = normalize_coinjoin_analysis(fixture)
 
-        self.assertEqual(explanation["heuristic"], "joinmarket_possible")
-        self.assertTrue(explanation["would_pass_python_rules"])
-        subset_rule = next(rule for rule in explanation["rules"] if rule["name"] == "two_bucket_subset_after_fee")
-        self.assertTrue(subset_rule["passed"])
-        self.assertEqual(subset_rule["observed"]["bucket_goals_after_fee"], [35000, 35000])
+        explanation = explain_joinmarket_heuristic(records["txA"])
+
+        self.assertEqual(explanation["failed_rules"], ["mix_output_count"])
+
+    def test_joinmarket_explanation_rejects_address_reuse_and_small_change(self):
+        fixture = joinmarket_passing_coinjoin_fixture()
+        tx = fixture["coinjoins"]["txA"]
+        tx["outputs"]["5"]["address"] = "input-a0"
+        tx["outputs"]["7"]["value"] = 4_999
+        records = normalize_coinjoin_analysis(fixture)
+
+        explanation = explain_joinmarket_heuristic(records["txA"])
+
+        self.assertEqual(explanation["failed_rules"], ["no_address_reuse", "change_values"])
 
     def test_build_report_adds_joinmarket_explanation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2144,28 +2100,8 @@ class UnifiedReportTest(unittest.TestCase):
             report = build_report(run_dir, coinjoin_analysis, {}, Detector("joinmarket"))
 
         explanation = report["transactions"]["txA"]["coinjoin_analysis"]["blocksci_heuristic_explanation"]
-        self.assertEqual(explanation["heuristic"], "joinmarket_definite")
-        self.assertIn(
-            "subset_partition_after_fee",
-            [rule["name"] for rule in explanation["rules"]],
-        )
-
-    def test_build_report_adds_possible_joinmarket_explanation(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            run_dir = Path(tmpdir) / "run"
-            run_dir.mkdir()
-
-            coinjoin_analysis = normalize_coinjoin_analysis(joinmarket_passing_coinjoin_fixture())
-            report = build_report(
-                run_dir, coinjoin_analysis, {}, Detector("joinmarket", joinmarket_detector="possible")
-            )
-
-        explanation = report["transactions"]["txA"]["coinjoin_analysis"]["blocksci_heuristic_explanation"]
-        self.assertEqual(explanation["heuristic"], "joinmarket_possible")
-        self.assertIn(
-            "two_bucket_subset_after_fee",
-            [rule["name"] for rule in explanation["rules"]],
-        )
+        self.assertEqual(explanation["heuristic"], "joinmarket")
+        self.assertIn("mix_output_count", [rule["name"] for rule in explanation["rules"]])
 
     def test_fill_missing_block_height_from_exported_blocks(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2495,14 +2431,13 @@ class UnifiedReportTest(unittest.TestCase):
         markdown = render_report(report)
 
         self.assertIn("#### BlockSci Heuristic Explanation", markdown)
-        self.assertIn("joinmarket_definite", json.dumps(report))
-        self.assertIn("subset_partition_after_fee", markdown)
+        self.assertIn("mix_output_count", markdown)
         self.assertIn(
             "Python mirror passes; likely difference is runtime BlockSci image/cache mismatch",
             markdown,
         )
 
-    def test_render_markdown_skipped_joinmarket_transactions_and_digests(self):
+    def test_report_compares_the_deprecated_subset_matching_scan(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir) / "run"
             run_dir.mkdir()
@@ -2510,17 +2445,35 @@ class UnifiedReportTest(unittest.TestCase):
             report = build_report(
                 run_dir,
                 normalize_coinjoin_analysis(joinmarket_passing_coinjoin_fixture()),
-                {},
+                blocksci_fixture("txB"),
                 Detector("joinmarket"),
-                blocksci_skipped_txids=["skipped-tx"],
+                subset_matching={"records": blocksci_fixture("txA"), "skipped_txids": ["skipped-tx"]},
                 images=ReportImages(digests={"blocksci": "sha256:blocksci"}),
             )
 
+        comparison = report["blocksci_subset_matching"]
+        self.assertTrue(comparison["deprecated"])
+        self.assertEqual(comparison["parameters"]["detector"], "definite")
+        self.assertEqual(comparison["summary"]["matched_by_both"], 1)
+        self.assertEqual(comparison["summary"]["missed_by_blocksci"], 0)
+        self.assertEqual(comparison["summary"]["skipped"], 1)
+        self.assertEqual(comparison["summary"]["subset_matching_only"], 1)
+        self.assertEqual(comparison["summary"]["blocksci_heuristic_only"], 1)
+        self.assertEqual(report["summary"]["matched_by_both"], 0)
         markdown = render_report(report)
-
-        self.assertIn("## BlockSci Skipped Transactions", markdown)
+        self.assertIn("## BlockSci Subset Matching (deprecated)", markdown)
         self.assertIn("[skipped-tx](http://localhost:3002/tx/skipped-tx)", markdown)
         self.assertIn("| BlockSci image digest | sha256:blocksci |", markdown)
+
+    def test_report_without_subset_matching_scan_has_no_comparison(self):
+        report = build_report(
+            Path("/tmp/run"),
+            normalize_coinjoin_analysis(coinjoin_analysis_fixture()),
+            blocksci_fixture(),
+            Detector("wasabi2"),
+        )
+
+        self.assertIsNone(report["blocksci_subset_matching"])
 
     def test_render_io_details_links_prev_txids(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -59,11 +59,11 @@ dependency on each other. The report-only job uses
 `afterok:<coinjoin-analysis-job>:<blocksci-job>` and therefore runs only after
 both analyzers have uploaded their S3 outputs successfully. The BlockSci job
 persists `blocksci-analysis_data/blocksci_analysis.json` containing normalized
-detector records, integration diagnostics, skipped txids, and address-cluster
+detector records, the deprecated JoinMarket subset-matching scan, integration diagnostics, and address-cluster
 assignments. The report job consumes that artifact and does not load BlockSci,
 its parsed index, or raw Bitcoin data. A blocksci-only S3 submission also submits
 a report job after BlockSci, consuming the baseline already stored in that run.
-The artifact reader accepts only schema 1.2, which records its mode.
+The artifact reader accepts only schema 1.3, which records its mode.
 Parse and update jobs now stage and mount the shared `exporters/worker.py` payload.
 The worker publishes outputs first (even after a failure), then the terminal marker:
 a failed output or marker upload turns success into that upload's exit status, TERM

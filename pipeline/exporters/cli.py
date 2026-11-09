@@ -186,7 +186,7 @@ def assemble_report(args: argparse.Namespace) -> int:
         emulator_data=emulator_data,
         predicted_address_clusters=predicted_address_clusters,
         cluster_export_error=cluster_export_error,
-        blocksci_skipped_txids=analysis["skipped_txids"],
+        subset_matching=analysis.get("subset_matching"),
         engine=args.engine,
         images=ReportImages.from_args(args),
         emulator_git_commit=args.emulator_git_commit,

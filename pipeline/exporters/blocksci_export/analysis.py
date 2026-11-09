@@ -23,6 +23,7 @@ from exporters.blocksci_export.detector import (
     export_blocksci_cluster_assignments_for_addresses,
     export_blocksci_mix_events,
     export_blocksci_records,
+    export_subset_matching_records,
     open_chain,
     scan_window,
 )
@@ -40,7 +41,7 @@ from exporters.parameters import (
     add_image_arguments,
     add_window_arguments,
 )
-from exporters.report_types import BlockSciAnalysisArtifact
+from exporters.report_types import BlockSciAnalysisArtifact, SubsetMatchingAnalysis
 
 INSPECTED_IMAGE_NAMES = IMAGE_COMPONENTS[:3]
 # The report stage resolves its own image (manifest.resolve_manifest_images).
@@ -73,13 +74,23 @@ def write_analysis(args: argparse.Namespace) -> Path:
     start_height = getattr(args, "scan_start_height", None)
     end_height = getattr(args, "scan_end_height", None)
     detector = Detector.from_args(args, load_first_wasabi2_block(config_path))
-    records, skipped_txids = export_blocksci_records(
+    records = export_blocksci_records(
         config_path,
         detector,
         max_block=max_block,
         start_height=start_height,
         end_height=end_height,
     )
+    subset_matching: SubsetMatchingAnalysis | None = None
+    if detector.coinjoin_type == "joinmarket" and getattr(args, "mode", "emulator") == "emulator":
+        subset_records, skipped_txids = export_subset_matching_records(
+            config_path,
+            detector,
+            max_block=max_block,
+            start_height=start_height,
+            end_height=end_height,
+        )
+        subset_matching = SubsetMatchingAnalysis(records=subset_records, skipped_txids=skipped_txids)
     window_record, baseline_heights = None, None
     if getattr(args, "mode", "emulator") == "external":
         # The comparison may only judge heights both analyzers saw.
@@ -99,7 +110,7 @@ def write_analysis(args: argparse.Namespace) -> Path:
     images = ReportImages.from_args(args)
     image_ids = {name: getattr(args, name + "_image_id", None) for name in INSPECTED_IMAGE_NAMES}
     diagnostics = (
-        build_integration_diagnostics(run_dir, config_path, blocksci, records, detector, images, image_ids=image_ids)
+        build_integration_diagnostics(run_dir, config_path, blocksci, records, images, image_ids=image_ids)
         if getattr(args, "mode", "emulator") == "emulator"
         else None
     )
@@ -135,7 +146,7 @@ def write_analysis(args: argparse.Namespace) -> Path:
             for name in PROVENANCE_IMAGE_NAMES
         },
         "records": records,
-        "skipped_txids": skipped_txids,
+        "subset_matching": subset_matching,
         "integration_diagnostics": diagnostics,
         "predicted_address_clusters": clusters,
         "cluster_export_error": cluster_error,

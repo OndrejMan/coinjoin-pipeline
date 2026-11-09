@@ -51,8 +51,10 @@ class FakeChain:
         first = datetime(2024, 1, 31, 12)
         return [FakeTx(index, first + timedelta(days=index)) for index in range(5)]
 
-    def scan_coinjoins_by_subset_matching(self, start, end, *settings):
-        return self.filter_coinjoin_txes(start, end, "joinmarket")[:2], [FakeTx(9, None)]
+    def filter_coinjoin_txes_raw(self, start, end, kind):
+        self.calls.append(("raw", start, end, kind))
+        first = datetime(2024, 1, 31, 12)
+        return [FakeTx(index, first + timedelta(days=index)) for index in range(2)]
 
 
 @pytest.fixture
@@ -121,13 +123,16 @@ def test_range_and_threshold_reach_the_detector(scanner, tmp_path, monkeypatch):
     assert calls == [(741213, 750000, "wasabi2", 15)]
 
 
-def test_skipped_joinmarket_candidates_make_the_scan_partial(scanner, tmp_path):
+def test_joinmarket_uses_the_unlinked_protocol_heuristic(scanner, tmp_path, monkeypatch):
+    chains = []
+    monkeypatch.setattr(scanner, "open_chain", lambda *args: chains.append(FakeChain(*args)) or chains[-1])
+
     status, report = run(scanner, tmp_path, "--coinjoin-type", "joinmarket")
 
     assert status == 0
-    assert report["status"] == "partial"
-    assert report["joinmarket"]["skipped_count"] == 1
+    assert report["status"] == "complete"
     assert report["detected_count"] == 2
+    assert chains[0].calls == [("raw", 0, 800_000, "joinmarket")]
 
 
 def test_a_range_past_the_index_fails_with_a_summary(scanner, tmp_path):

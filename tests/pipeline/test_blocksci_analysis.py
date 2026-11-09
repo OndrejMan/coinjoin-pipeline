@@ -70,7 +70,7 @@ def test_load_analysis_rejects_parameter_mismatch(tmp_path: Path) -> None:
                 "parameters": parameters(),
                 "first_wasabi2_block": 0,
                 "records": {},
-                "skipped_txids": [],
+                "subset_matching": None,
                 "integration_diagnostics": {"status": "ok"},
                 "predicted_address_clusters": {},
             }
@@ -115,7 +115,7 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
         mock.patch("exporters.blocksci_export.analysis.blocksci", fake_blocksci),
         mock.patch(
             "exporters.blocksci_export.analysis.export_blocksci_records",
-            return_value=({"tx": {"txid": "tx"}}, ["skipped"]),
+            return_value={"tx": {"txid": "tx"}},
         ),
         mock.patch(
             "exporters.blocksci_export.analysis.build_integration_diagnostics",
@@ -148,6 +148,49 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
     assert artifact["mix_events"] == {"tx": {"inputs": ["MIX_ENTER"], "outputs": ["MIX_STAY"]}}
     assert artifact["mix_events_error"] is None
     assert list(export_mix_events.call_args.args[1]) == ["tx"]
+    assert artifact["subset_matching"] is None
+
+
+def test_joinmarket_analysis_keeps_the_deprecated_subset_scan(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-1"
+    config = run_dir / "blocksci_data" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text("{}", encoding="utf-8")
+    args = argparse.Namespace(
+        run_dir=run_dir,
+        config=config,
+        coinjoin_type="joinmarket",
+        min_input_count=None,
+        joinmarket_detector="definite",
+        joinmarket_min_base_fee=5000,
+        joinmarket_percentage_fee=0.00004,
+        joinmarket_max_depth=200000,
+        skip_clustering=True,
+    )
+    with (
+        mock.patch("exporters.blocksci_export.analysis.blocksci", mock.Mock()),
+        mock.patch(
+            "exporters.blocksci_export.analysis.export_blocksci_records",
+            return_value={"heuristic-tx": {"txid": "heuristic-tx"}},
+        ),
+        mock.patch(
+            "exporters.blocksci_export.analysis.export_subset_matching_records",
+            return_value=({"subset-tx": {"txid": "subset-tx"}}, ["skipped-tx"]),
+        ),
+        mock.patch(
+            "exporters.blocksci_export.analysis.build_integration_diagnostics",
+            return_value={"status": "ok"},
+        ),
+        mock.patch("exporters.blocksci_export.analysis.export_blocksci_mix_events", return_value=({}, None)),
+        mock.patch("exporters.blocksci_export.analysis.load_first_wasabi2_block", return_value=850237),
+    ):
+        artifact = json.loads(write_analysis(args).read_text(encoding="utf-8"))
+
+    assert artifact["records"] == {"heuristic-tx": {"txid": "heuristic-tx"}}
+    assert artifact["subset_matching"] == {
+        "records": {"subset-tx": {"txid": "subset-tx"}},
+        "skipped_txids": ["skipped-tx"],
+    }
 
 
 def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:
@@ -169,7 +212,7 @@ def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:
                 "parameters": parameters(),
                 "first_wasabi2_block": 0,
                 "records": {},
-                "skipped_txids": [],
+                "subset_matching": None,
                 "integration_diagnostics": {"status": "ok"},
                 "predicted_address_clusters": {},
                 "cluster_export_error": None,

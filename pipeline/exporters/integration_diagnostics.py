@@ -5,18 +5,17 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Callable, Protocol, cast
+from typing import Protocol
 
 from exporters.artifact_paths import EXPORTED_BLOCKS_DIR
 from exporters.common import (
     JsonObject,
-    JsonValue,
     safe_attr,
     to_json_text,
 )
 from exporters.image_provenance import inspect_image
 from exporters.normalization import is_coinbase_tx, iter_exported_blocks
-from exporters.parameters import Detector, ReportImages
+from exporters.parameters import ReportImages
 
 # Only the images the report can actually inspect. The uploader and the PBS
 # unified-report image are pulled by Kubernetes and Singularity, never by the
@@ -37,9 +36,6 @@ class Blockchain(Protocol):
 
 class BlocksciModule(Protocol):
     """BlockSci module surface used by integration diagnostics."""
-
-    @property
-    def heuristics(self) -> object: ...
 
     def Blockchain(self, config_path: str) -> Blockchain: ...
 
@@ -127,48 +123,13 @@ def exported_block_targets(run_dir: Path) -> tuple[list[JsonObject], JsonObject]
     }
 
 
-def normalize_joinmarket_detector_result(raw: JsonValue) -> str:
-    if isinstance(raw, bool):
-        return "true" if raw else "false"
-    if isinstance(raw, int):
-        return {0: "true", 1: "false", 2: "timeout"}.get(raw, f"unknown:{raw}")
-    name = safe_attr(raw, "name")
-    if name is not None:
-        return str(name).lower()
-    text = str(raw).lower()
-    if text.endswith(".true") or text == "true":
-        return "true"
-    if text.endswith(".false") or text == "false":
-        return "false"
-    if text.endswith(".timeout") or text == "timeout":
-        return "timeout"
-    return text
-
-
-def call_joinmarket_detector(blocksci_module: BlocksciModule, tx: object, detector: Detector) -> str:
-    heuristics = safe_attr(blocksci_module, "heuristics")
-    coinjoin_heuristics = safe_attr(heuristics, "coinjoin", heuristics)
-    method_name = "is_possible_coinjoin" if detector.joinmarket_detector == "possible" else "is_definite_coinjoin"
-    method = safe_attr(coinjoin_heuristics, method_name)
-    if method is None:
-        method = safe_attr(heuristics, method_name)
-    if method is None:
-        raise RuntimeError(f"BlockSci does not expose {method_name}")
-    detector_factory = cast(Callable[[int, float, int], object], method)
-    proxy_or_value = detector_factory(
-        detector.joinmarket_min_base_fee, detector.joinmarket_percentage_fee, detector.joinmarket_max_depth
-    )
-    value = proxy_or_value(tx) if callable(proxy_or_value) else proxy_or_value
-    return normalize_joinmarket_detector_result(value)
-
-
 def _count_problems(*checks: tuple[list[str], str]) -> list[str]:
     """One "<count> <message>" problem per non-empty list of transaction IDs."""
     return [f"{len(txids)} {message}" for txids, message in checks if txids]
 
 
-def _lookup_target(chain: Blockchain, target: JsonObject, detected: bool) -> tuple[JsonObject, object]:
-    """Whether BlockSci holds an exported target at its height; the transaction, else None."""
+def _lookup_target(chain: Blockchain, target: JsonObject, detected: bool) -> JsonObject:
+    """Whether BlockSci holds an exported target at its height."""
     txid = str(target["txid"])
     detail: JsonObject = {
         "txid": txid,
@@ -177,7 +138,6 @@ def _lookup_target(chain: Blockchain, target: JsonObject, detected: bool) -> tup
         "blocksci_block_height": None,
         "detected_by_bulk_filter": detected,
     }
-    tx = None
     try:
         tx = chain.tx_with_hash(txid)
         blocksci_txid = to_json_text(safe_attr(tx, "hash"))
@@ -186,72 +146,33 @@ def _lookup_target(chain: Blockchain, target: JsonObject, detected: bool) -> tup
         detail["present_in_blocksci"] = blocksci_txid in {None, txid}
     except Exception as exc:
         detail["lookup_error"] = str(exc)
-    return detail, tx
+    return detail
 
 
 def build_target_diagnostics(
     chain: Blockchain,
-    blocksci_module: BlocksciModule,
     targets: list[JsonObject],
     blocksci_detected_txids: set[str],
-    detector: Detector,
-) -> tuple[JsonObject, JsonObject, list[str]]:
-    """Look up every exported target and, for JoinMarket, rerun the detector on it one by one.
-
-    The direct detector call must agree with the bulk filter that produced the analysis.
-    """
+) -> tuple[JsonObject, list[str]]:
+    """Look up every exported target in BlockSci at its exported height."""
     details: list[JsonObject] = []
     missing = []
     height_mismatches = []
-    detector_checked = 0
-    detector_agreements = 0
-    detector_disagreements = []
-    detector_timeouts = []
-    detector_errors = []
-    detector_available = detector.coinjoin_type == "joinmarket"
 
     for target in targets:
         txid = str(target["txid"])
-        detail, tx = _lookup_target(chain, target, txid in blocksci_detected_txids)
+        detail = _lookup_target(chain, target, txid in blocksci_detected_txids)
         exported_height = detail["exported_block_height"]
         if not detail["present_in_blocksci"]:
             missing.append(txid)
         elif exported_height is not None and detail.get("blocksci_block_height") != exported_height:
             height_mismatches.append(txid)
-
-        if tx is not None and detector_available:
-            detector_checked += 1
-            try:
-                detector_result = call_joinmarket_detector(blocksci_module, tx, detector)
-                detail["direct_detector_result"] = detector_result
-                direct_detected = detector_result == "true"
-                detail["direct_detector_detected"] = direct_detected
-                if detector_result == "timeout":
-                    detector_timeouts.append(txid)
-                if direct_detected == detail["detected_by_bulk_filter"]:
-                    detector_agreements += 1
-                else:
-                    detector_disagreements.append(txid)
-            except Exception as exc:
-                detail["direct_detector_error"] = str(exc)
-                detector_errors.append(txid)
-
         details.append(detail)
 
     target_problems = _count_problems(
         (missing, "exported target txid(s) are missing from BlockSci"),
         (height_mismatches, "exported target txid(s) have BlockSci height mismatches"),
     )
-    detector_problems = _count_problems(
-        (detector_disagreements, "direct detector result(s) disagree with bulk filter"),
-        (detector_errors, "direct detector check(s) failed"),
-        (detector_timeouts, "direct detector check(s) timed out"),
-    )
-    if not detector_available:
-        detector_status = "unavailable"
-    else:
-        detector_status = "not_ok" if detector_problems else "ok"
-
     return (
         {
             "total": len(targets),
@@ -262,20 +183,7 @@ def build_target_diagnostics(
             "problems": target_problems,
             "details": details,
         },
-        {
-            "available": detector_available,
-            "checked": detector_checked,
-            "agreements": detector_agreements,
-            "disagreements": len(detector_disagreements),
-            "timeouts": len(detector_timeouts),
-            "errors": len(detector_errors),
-            "status": detector_status,
-            "problems": detector_problems,
-            "disagreement_txids": detector_disagreements[:TARGET_DETAIL_LIMIT],
-            "timeout_txids": detector_timeouts[:TARGET_DETAIL_LIMIT],
-            "error_txids": detector_errors[:TARGET_DETAIL_LIMIT],
-        },
-        target_problems + detector_problems,
+        target_problems,
     )
 
 
@@ -309,7 +217,6 @@ def build_integration_diagnostics(
     config_path: Path,
     blocksci_module: BlocksciModule,
     blocksci_records: Mapping[str, object],
-    detector: Detector,
     images: ReportImages,
     image_ids: dict[str, str | None] | None = None,
 ) -> JsonObject:
@@ -321,13 +228,7 @@ def build_integration_diagnostics(
     try:
         chain = blocksci_module.Blockchain(str(config_path))
         chain_diagnostics, chain_problems = build_chain_diagnostics(chain, exported_summary)
-        target_diagnostics, detector_diagnostics, target_problems = build_target_diagnostics(
-            chain,
-            blocksci_module,
-            targets,
-            set(blocksci_records),
-            detector,
-        )
+        target_diagnostics, target_problems = build_target_diagnostics(chain, targets, set(blocksci_records))
         problems.extend(chain_problems)
         problems.extend(target_problems)
     except Exception as exc:
@@ -347,19 +248,6 @@ def build_integration_diagnostics(
             "problems": ["BlockSci chain could not be opened for target diagnostics"],
             "details": [],
         }
-        detector_diagnostics = {
-            "available": detector.coinjoin_type == "joinmarket",
-            "checked": 0,
-            "agreements": 0,
-            "disagreements": 0,
-            "timeouts": 0,
-            "errors": 0,
-            "status": "not_ok",
-            "problems": ["BlockSci chain could not be opened for detector diagnostics"],
-            "disagreement_txids": [],
-            "timeout_txids": [],
-            "error_txids": [],
-        }
         problems.append(f"BlockSci diagnostics failed: {exc}")
 
     status = "ok" if not problems else "not_ok"
@@ -369,5 +257,4 @@ def build_integration_diagnostics(
         "images": image_diagnostics,
         "chain": chain_diagnostics,
         "target_txids": target_diagnostics,
-        "detector": detector_diagnostics,
     }

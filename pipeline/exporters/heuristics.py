@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from exporters.common import (
     DEFAULT_FIRST_WASABI2_BLOCK,
-    DEFAULT_JOINMARKET_MAX_DEPTH,
-    DEFAULT_JOINMARKET_MIN_BASE_FEE,
-    DEFAULT_JOINMARKET_PERCENTAGE_FEE,
     WASABI2_ALLOWED_ADDRESS_TYPES,
     WASABI2_MAX_SATOSHIS,
     WASABI2_MIN_SATOSHIS,
@@ -166,26 +163,13 @@ def explain_wasabi2_heuristic(
     }
 
 
-def grouped_input_values_by_address(inputs: list[IORecord]) -> dict[str, int]:
-    grouped: dict[str, int] = {}
-    for input_record in inputs:
-        address = input_record.get("address")
-        value = input_record.get("value")
-        if address is None or value is None:
-            continue
-        grouped[str(address)] = grouped.get(str(address), 0) + int(value)
-    return grouped
-
-
-def output_addresses_by_value(outputs: list[IORecord]) -> dict[int, set[str]]:
-    grouped: dict[int, set[str]] = {}
-    for output_record in outputs:
-        value = output_record.get("value")
-        address = output_record.get("address")
-        if value is None or address is None:
-            continue
-        grouped.setdefault(int(value), set()).add(str(address))
-    return grouped
+# Mirror of BlockSci's isJoinMarketCoinJoin (src/heuristics/tx_identification.cpp).
+JOINMARKET_MIN_MIX_OUTPUTS = 5
+JOINMARKET_MAX_INPUTS_PER_MIX_OUTPUT = 5
+JOINMARKET_MIN_MIX_VALUE = 10_000
+JOINMARKET_MIN_CHANGE_VALUE = 5_000
+JOINMARKET_MIN_SEGWIT_INPUT_FRACTION = 0.3
+JOINMARKET_REJECTED_OUTPUT_SCRIPT_TYPES = frozenset({"nulldata", "nonstandard"})
 
 
 def output_value_counts(outputs: list[IORecord]) -> dict[int, int]:
@@ -198,147 +182,50 @@ def output_value_counts(outputs: list[IORecord]) -> dict[int, int]:
     return counts
 
 
-def joinmarket_subset_result(
-    values: list[int],
-    bucket_goals: list[int],
-    max_depth: int,
-) -> tuple[bool | None, str, int]:
-    values = sorted(values)
-    goals = sorted(bucket_goals, reverse=True)
-    depth = 0
-
-    def remaining(goal: int, current: int) -> int:
-        return goal - current if goal > current else 0
-
-    def search(
-        remaining_values: list[int],
-        buckets: list[tuple[int, int]],
-        total_remaining: int,
-        value_left: int,
-    ) -> tuple[bool | None, str]:
-        nonlocal depth
-        if total_remaining > value_left:
-            return False, "total bucket target exceeds remaining input value"
-
-        active_buckets = [(goal, current) for goal, current in buckets if current < goal]
-        if not active_buckets:
-            return True, "all buckets filled"
-
-        if not remaining_values:
-            return False, "inputs exhausted before buckets filled"
-
-        depth += 1
-        if max_depth != 0 and depth > max_depth:
-            return None, "max-depth timeout"
-
-        active_buckets.sort(key=lambda bucket: remaining(bucket[0], bucket[1]), reverse=True)
-        value = remaining_values[-1]
-        next_values = remaining_values[:-1]
-        next_value_left = value_left - value
-        for index, (goal, current) in enumerate(active_buckets):
-            old_remaining = remaining(goal, current)
-            next_buckets = list(active_buckets)
-            next_buckets[index] = (goal, current + value)
-            new_remaining = remaining(goal, current + value)
-            next_total_remaining = total_remaining - old_remaining + new_remaining
-            result, reason = search(
-                next_values,
-                next_buckets,
-                next_total_remaining,
-                next_value_left,
-            )
-            if result is not False:
-                return result, reason
-
-        return False, "no partition of grouped input values can fill bucket goals"
-
-    result, reason = search(values, [(goal, 0) for goal in goals], sum(goals), sum(values))
-    return result, reason, depth
-
-
-def _most_frequent_value(counts: dict[int, int]) -> tuple[int | None, int]:
-    """The value with the most outputs (the first on a tie) and its count; ``(None, 0)`` without outputs."""
-    return max(counts.items(), key=lambda item: item[1]) if counts else (None, 0)
-
-
-def _value_times(value: int | None, count: int) -> str:
-    return f"{value} x {count}" if value is not None else "missing"
-
-
-def _subset_observation(input_values: list[int], bucket_goals: list[int], depth: int, reason: str) -> JsonObject:
-    return {
-        "input_values": sorted(input_values, reverse=True),
-        "bucket_goals_after_fee": bucket_goals,
-        "search_depth": depth,
-        "reason": reason,
-    }
-
-
-def _joinmarket_explanation(
-    heuristic: str,
-    rules: list[JsonObject],
-    subset_passed: bool | None,
-    parameters: JsonObject,
-) -> JsonObject:
-    failed_rules = [rule["name"] for rule in rules if rule["passed"] is False]
-    return {
-        "heuristic": heuristic,
-        "would_pass_python_rules": not failed_rules and subset_passed is True,
-        "failed_rules": failed_rules,
-        "rules": rules,
-        "parameters": parameters,
-    }
-
-
-def explain_joinmarket_definite_heuristic(
-    record: TransactionRecord,
-    min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE,
-    percentage_fee: float = DEFAULT_JOINMARKET_PERCENTAGE_FEE,
-    max_depth: int = DEFAULT_JOINMARKET_MAX_DEPTH,
-) -> JsonObject:
+def explain_joinmarket_heuristic(record: TransactionRecord) -> JsonObject:
     inputs = record.get("inputs", [])
     outputs = record.get("outputs", [])
-    input_values_by_address = grouped_input_values_by_address(inputs)
-    output_addresses = output_addresses_by_value(outputs)
     value_counts = output_value_counts(outputs)
-    participant_count = (len(outputs) + 1) // 2
-    dominant_value, dominant_address_count = _most_frequent_value(
-        {value: len(addresses) for value, addresses in output_addresses.items()}
-    )
-
-    max_possible_fee = None
-    bucket_goals: list[int] = []
-    fee_adjusted_bucket_goals: list[int] = []
-    subset_passed: bool | None = None
-    subset_reason = "not evaluated"
-    subset_depth = 0
-
-    if dominant_value is not None:
-        max_possible_fee = max(min_base_fee, int(dominant_value * percentage_fee))
-        bucket_goals = [dominant_value] * participant_count
-        bucket_index = 0
-        for output in outputs:
-            value = output.get("value")
-            if value is None or int(value) == dominant_value:
-                continue
-            if bucket_index < len(bucket_goals):
-                bucket_goals[bucket_index] += int(value)
-            bucket_index += 1
-        fee_adjusted_bucket_goals = [0 if max_possible_fee > goal else goal - max_possible_fee for goal in bucket_goals]
-        subset_passed, subset_reason, subset_depth = joinmarket_subset_result(
-            list(input_values_by_address.values()),
-            fee_adjusted_bucket_goals,
-            max_depth,
-        )
-
-    repeated_other_values = {
-        value: count for value, count in sorted(value_counts.items()) if count > 1 and value != dominant_value
-    }
-    subset_observed = _subset_observation(
-        list(input_values_by_address.values()), fee_adjusted_bucket_goals, subset_depth, subset_reason
+    mix_count = max(value_counts.values(), default=0)
+    mix_values = [value for value, count in value_counts.items() if count == mix_count]
+    mix_value = mix_values[0] if len(mix_values) == 1 else None
+    other_repeated_values = sorted(value for value, count in value_counts.items() if 1 < count < mix_count)
+    output_script_types = [str(output["script_type"]) for output in outputs if output.get("script_type")]
+    rejected_script_types = sorted(set(output_script_types) & JOINMARKET_REJECTED_OUTPUT_SCRIPT_TYPES)
+    address_uses: dict[str, int] = {}
+    for io_record in [*inputs, *outputs]:
+        if io_record.get("address"):
+            address_uses[str(io_record["address"])] = address_uses.get(str(io_record["address"]), 0) + 1
+    reused_addresses = sorted(address for address, uses in address_uses.items() if uses > 1)
+    change_values = [
+        int(value) for output in outputs if (value := output.get("value")) is not None and value != mix_value
+    ]
+    input_script_types = [str(item["script_type"]) for item in inputs if item.get("script_type")]
+    segwit_fraction = (
+        sum(1 for script_type in input_script_types if script_type.startswith("witness_")) / len(inputs)
+        if inputs and len(input_script_types) == len(inputs)
+        else None
     )
 
     rules = [
+        rule_result(
+            "no_op_return_or_nonstandard_outputs",
+            not rejected_script_types if output_script_types else None,
+            ", ".join(rejected_script_types) or ("none" if output_script_types else "not available"),
+            "no nulldata or nonstandard output",
+        ),
+        rule_result(
+            "mix_output_count",
+            mix_count >= JOINMARKET_MIN_MIX_OUTPUTS,
+            mix_count,
+            f">= {JOINMARKET_MIN_MIX_OUTPUTS} outputs of the most common value",
+        ),
+        rule_result(
+            "single_repeated_value",
+            mix_value is not None and not other_repeated_values,
+            {"mix_values": sorted(mix_values), "other_repeated_values": other_repeated_values},
+            "exactly one output value repeats",
+        ),
         rule_result(
             "basic_size",
             len(inputs) >= 2 and len(outputs) >= 3,
@@ -346,144 +233,45 @@ def explain_joinmarket_definite_heuristic(
             ">= 2 inputs and >= 3 outputs",
         ),
         rule_result(
-            "participant_count_vs_inputs",
-            participant_count <= len(inputs),
-            participant_count,
-            f"<= input count ({len(inputs)})",
+            "inputs_per_mix_output",
+            mix_count <= len(inputs) <= JOINMARKET_MAX_INPUTS_PER_MIX_OUTPUT * mix_count,
+            len(inputs),
+            f"{mix_count} to {JOINMARKET_MAX_INPUTS_PER_MIX_OUTPUT * mix_count} inputs",
+        ),
+        rule_result("output_count", len(outputs) <= 2 * mix_count + 1, len(outputs), f"<= {2 * mix_count + 1}"),
+        rule_result(
+            "no_address_reuse",
+            not reused_addresses,
+            reused_addresses or "none",
+            "every input and output address appears once",
         ),
         rule_result(
-            "participant_count_vs_unique_input_addresses",
-            participant_count <= len(input_values_by_address),
-            len(input_values_by_address),
-            f">= participant count ({participant_count})",
+            "mix_value",
+            mix_value is not None and mix_value >= JOINMARKET_MIN_MIX_VALUE,
+            mix_value if mix_value is not None else "missing",
+            f">= {JOINMARKET_MIN_MIX_VALUE} sats",
         ),
         rule_result(
-            "dominant_output_address_count",
-            dominant_address_count == participant_count,
-            _value_times(dominant_value, dominant_address_count),
-            f"one output value with {participant_count} distinct addresses",
+            "change_values",
+            all(value >= JOINMARKET_MIN_CHANGE_VALUE for value in change_values),
+            min(change_values, default="none"),
+            f"every change output >= {JOINMARKET_MIN_CHANGE_VALUE} sats",
         ),
+        rule_result("change_output_count", len(change_values) <= mix_count, len(change_values), f"<= {mix_count}"),
         rule_result(
-            "dominant_output_value_not_dust_exclusion",
-            dominant_value not in (546, 2730) if dominant_value is not None else False,
-            dominant_value if dominant_value is not None else "missing",
-            "not 546 or 2730 sats",
-        ),
-        rule_result(
-            "subset_partition_after_fee",
-            subset_passed,
-            subset_observed,
-            (
-                "grouped input address values can fill participant buckets "
-                f"after max({min_base_fee}, dominant_value * {percentage_fee}) fee"
-            ),
+            "segwit_inputs",
+            segwit_fraction >= JOINMARKET_MIN_SEGWIT_INPUT_FRACTION if segwit_fraction is not None else None,
+            round(segwit_fraction, 3) if segwit_fraction is not None else "not available",
+            f">= {JOINMARKET_MIN_SEGWIT_INPUT_FRACTION} of inputs spend segwit outputs",
         ),
     ]
-    return _joinmarket_explanation(
-        "joinmarket_definite",
-        rules,
-        subset_passed,
-        {
-            "min_base_fee": min_base_fee,
-            "percentage_fee": percentage_fee,
-            "max_depth": max_depth,
-            "max_possible_fee": max_possible_fee,
-            "participant_count": participant_count,
-            "dominant_output_value": dominant_value,
-            "repeated_non_mix_output_values": repeated_other_values,
-        },
-    )
-
-
-def explain_joinmarket_possible_heuristic(
-    record: TransactionRecord,
-    min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE,
-    percentage_fee: float = DEFAULT_JOINMARKET_PERCENTAGE_FEE,
-    max_depth: int = DEFAULT_JOINMARKET_MAX_DEPTH,
-) -> JsonObject:
-    inputs = record.get("inputs", [])
-    outputs = record.get("outputs", [])
-    input_values_by_address = grouped_input_values_by_address(inputs)
-    input_addresses = set(input_values_by_address)
-    unknown_outputs = [
-        output
-        for output in outputs
-        if output.get("address") is not None and str(output.get("address")) not in input_addresses
-    ]
-    dominant_value, dominant_count = _most_frequent_value(output_value_counts(outputs))
-    unknown_dominant_value, unknown_dominant_count = _most_frequent_value(output_value_counts(unknown_outputs))
-
-    goal_value = None
-    max_possible_fee = None
-    bucket_goals: list[int] = []
-    subset_passed: bool | None = None
-    subset_reason = "not evaluated"
-    subset_depth = 0
-    if unknown_dominant_value is not None:
-        max_possible_fee = max(min_base_fee, int(unknown_dominant_value * percentage_fee))
-        goal_value = max(0, unknown_dominant_value - max_possible_fee)
-        bucket_goals = [goal_value, goal_value]
-        subset_passed, subset_reason, subset_depth = joinmarket_subset_result(
-            list(input_values_by_address.values()),
-            bucket_goals,
-            max_depth,
-        )
-
-    rules = [
-        rule_result(
-            "not_single_input_or_output",
-            len(inputs) != 1 and len(outputs) != 1,
-            f"{len(inputs)} inputs / {len(outputs)} outputs",
-            "input count != 1 and output count != 1",
-        ),
-        rule_result(
-            "has_repeated_output_value",
-            dominant_count > 1,
-            _value_times(dominant_value, dominant_count),
-            "at least two outputs with the same value",
-        ),
-        rule_result(
-            "multiple_input_addresses",
-            len(input_values_by_address) != 1,
-            len(input_values_by_address),
-            "not exactly one grouped input address",
-        ),
-        rule_result(
-            "multiple_unknown_outputs",
-            len(unknown_outputs) > 1,
-            len(unknown_outputs),
-            "> 1 output address not also present in inputs",
-        ),
-        rule_result(
-            "has_repeated_unknown_output_value",
-            unknown_dominant_count > 1,
-            _value_times(unknown_dominant_value, unknown_dominant_count),
-            "at least two unknown outputs with the same value",
-        ),
-        rule_result(
-            "two_bucket_subset_after_fee",
-            subset_passed,
-            _subset_observation(list(input_values_by_address.values()), bucket_goals, subset_depth, subset_reason),
-            (
-                "grouped input address values can fill two buckets after "
-                f"max({min_base_fee}, dominant_unknown_value * {percentage_fee}) fee"
-            ),
-        ),
-    ]
-    return _joinmarket_explanation(
-        "joinmarket_possible",
-        rules,
-        subset_passed,
-        {
-            "min_base_fee": min_base_fee,
-            "percentage_fee": percentage_fee,
-            "max_depth": max_depth,
-            "max_possible_fee": max_possible_fee,
-            "dominant_output_value": dominant_value,
-            "dominant_unknown_output_value": unknown_dominant_value,
-            "goal_value": goal_value,
-        },
-    )
+    failed_rules = [rule["name"] for rule in rules if rule["passed"] is False]
+    return {
+        "heuristic": "joinmarket",
+        "would_pass_python_rules": not failed_rules,
+        "failed_rules": failed_rules,
+        "rules": rules,
+    }
 
 
 def add_blocksci_heuristic_explanations(records: dict[str, TransactionRecord], detector: Detector) -> None:
@@ -496,18 +284,6 @@ def add_blocksci_heuristic_explanations(records: dict[str, TransactionRecord], d
                 first_wasabi2_block=detector.first_wasabi2_block,
             )
         return
-    if detector.coinjoin_type != "joinmarket":
-        return
-    explain = {
-        "definite": explain_joinmarket_definite_heuristic,
-        "possible": explain_joinmarket_possible_heuristic,
-    }.get(detector.joinmarket_detector)
-    if explain is None:
-        return
-    for record in records.values():
-        record["blocksci_heuristic_explanation"] = explain(
-            record,
-            min_base_fee=detector.joinmarket_min_base_fee,
-            percentage_fee=detector.joinmarket_percentage_fee,
-            max_depth=detector.joinmarket_max_depth,
-        )
+    if detector.coinjoin_type == "joinmarket":
+        for record in records.values():
+            record["blocksci_heuristic_explanation"] = explain_joinmarket_heuristic(record)

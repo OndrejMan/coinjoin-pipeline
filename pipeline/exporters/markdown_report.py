@@ -180,6 +180,7 @@ def render_emulator_detection(report: JsonObject, explorer_base_url: str) -> lis
     detector_labels = {
         "blocksci": "BlockSci",
         "coinjoin_analysis": "coinjoin-analysis",
+        "blocksci_subset_matching": "BlockSci subset matching (deprecated)",
     }
     evaluation_rows = []
     for detector, matrix in detector_evaluations.items():
@@ -416,18 +417,47 @@ def render_liquidity_evaluation(report: JsonObject) -> list[str]:
     return lines
 
 
-def render_skipped_transactions(report: JsonObject, explorer_base_url: str) -> list[str]:
-    skipped_txids = report.get("blocksci_skipped_txids") or []
-    if not skipped_txids:
+def render_subset_matching(report: JsonObject, explorer_base_url: str) -> list[str]:
+    comparison = report.get("blocksci_subset_matching") or {}
+    if not comparison:
         return []
-
-    return section(
-        "BlockSci Skipped Transactions",
-        "These transactions hit the JoinMarket detector timeout or max-depth limit and are not counted as "
-        "ordinary false negatives.",
+    summary = comparison.get("summary") or {}
+    parameters = comparison.get("parameters") or {}
+    lines = section(
+        "BlockSci Subset Matching (deprecated)",
+        str(comparison.get("reason")),
         "",
-        *table(["txid"], [[tx_value(txid, explorer_base_url)] for txid in skipped_txids]),
+        *key_values(
+            [
+                ["detector", parameters.get("detector")],
+                ["min base fee", parameters.get("min_base_fee")],
+                ["percentage fee", parameters.get("percentage_fee")],
+                ["max depth", parameters.get("max_depth")],
+                ["detected coinjoins", summary.get("detected_coinjoins")],
+                ["matched by both", summary.get("matched_by_both")],
+                ["subset matching only", summary.get("blocksci_only")],
+                ["missed by subset matching", summary.get("missed_by_blocksci")],
+                ["agreement rate", metric_value(summary.get("agreement_rate"))],
+                ["coinjoin-analysis coverage", metric_value(summary.get("coinjoin_analysis_coverage"))],
+                ["skipped (max depth)", summary.get("skipped")],
+                ["also detected by the BlockSci heuristic", summary.get("also_detected_by_blocksci_heuristic")],
+                ["detected only by subset matching", summary.get("subset_matching_only")],
+                ["detected only by the BlockSci heuristic", summary.get("blocksci_heuristic_only")],
+            ]
+        ),
     )
+    skipped_txids = comparison.get("skipped_txids") or []
+    if skipped_txids:
+        lines.extend(
+            section(
+                "Skipped Transactions",
+                "These transactions hit the max-depth limit and are not counted as ordinary false negatives.",
+                "",
+                *table(["txid"], [[tx_value(txid, explorer_base_url)] for txid in skipped_txids]),
+                level=3,
+            )
+        )
+    return lines
 
 
 def render_notable_divergences(divergences: dict[str, list[JsonObject]]) -> list[str]:
@@ -565,7 +595,7 @@ def render_heuristic_explanation(source: JsonObject, missed_by_blocksci: bool) -
         )
     if missed_by_blocksci and explanation.get("would_pass_python_rules"):
         heuristic = explanation.get("heuristic")
-        if heuristic in {"joinmarket_definite", "joinmarket_possible"}:
+        if heuristic == "joinmarket":
             lines.extend(
                 [
                     "Python mirror passes; likely difference is runtime BlockSci image/cache mismatch or "
@@ -722,7 +752,6 @@ def render_integration_diagnostics(report: JsonObject) -> list[str]:
     images = diagnostics.get("images") or {}
     chain = diagnostics.get("chain") or {}
     target_txids = diagnostics.get("target_txids") or {}
-    detector = diagnostics.get("detector") or {}
     complete_images = sum(1 for item in images.values() if (item or {}).get("status") == "ok")
     image_status = "ok" if images and complete_images == len(images) else "not_ok"
     problems = diagnostics.get("problems") or []
@@ -757,15 +786,6 @@ def render_integration_diagnostics(report: JsonObject) -> list[str]:
                     (
                         f"{target_txids.get('present')}/{target_txids.get('total')} present; "
                         f"{target_txids.get('height_mismatches')} height mismatches"
-                    ),
-                ],
-                [
-                    "detector check",
-                    status_text(detector.get("status")),
-                    (
-                        f"{detector.get('checked')} checked; "
-                        f"{detector.get('disagreements')} disagreements; "
-                        f"{detector.get('timeouts')} timeouts"
                     ),
                 ],
             ],
@@ -865,10 +885,10 @@ def render_run(report: JsonObject) -> list[str]:
                 ["coinjoin type", run.get("coinjoin_type")],
                 ["BlockSci min input count", run.get("blocksci_min_input_count")],
                 ["FirstWasabi2Block", detector.get("first_wasabi2_block")],
-                ["JoinMarket detector", detector.get("joinmarket_detector")],
-                ["JoinMarket min base fee", detector.get("joinmarket_min_base_fee")],
-                ["JoinMarket percentage fee", detector.get("joinmarket_percentage_fee")],
-                ["JoinMarket max depth", detector.get("joinmarket_max_depth")],
+                ["JoinMarket subset detector (deprecated)", detector.get("joinmarket_detector")],
+                ["JoinMarket subset min base fee", detector.get("joinmarket_min_base_fee")],
+                ["JoinMarket subset percentage fee", detector.get("joinmarket_percentage_fee")],
+                ["JoinMarket subset max depth", detector.get("joinmarket_max_depth")],
                 ["scenario sha256", run.get("scenario_sha256")],
             ],
             key="field",
@@ -889,7 +909,6 @@ def render_detection_summary(report: JsonObject) -> list[str]:
                     ["matched by both", summary.get("matched_by_both")],
                     ["missed by BlockSci", summary.get("missed_by_blocksci")],
                     ["BlockSci only", summary.get("blocksci_only")],
-                    ["BlockSci JoinMarket skipped", summary.get("blocksci_joinmarket_skipped")],
                     ["BlockSci agreement rate", summary.get("blocksci_agreement_rate")],
                     [
                         "coinjoin-analysis coverage by BlockSci",
@@ -1043,7 +1062,7 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
         *render_run_manifest(report),
         *render_coinjoin_mappings(report),
         *render_emulator_detection(report, explorer_base_url),
-        *render_skipped_transactions(report, explorer_base_url),
+        *render_subset_matching(report, explorer_base_url),
         *render_clustering_evaluation(report),
         *render_liquidity_evaluation(report),
         *render_analyzer_diagnostic(report, explorer_base_url),

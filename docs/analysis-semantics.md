@@ -126,9 +126,8 @@ negative, and non-numeric values are command-line errors.
 When supplied, the override is passed to the raw BlockSci detector. Clustering
 receives that detector's transaction set through
 `CoinjoinClusterManager.create_clustering_from_txes`, so it uses the same Wasabi 2
-input threshold without running detection again. For JoinMarket, clustering uses
-the subset-matching result, excluding skipped transactions, instead of the protocol
-detector's potentially different set. This requires a BlockSci build with the new
+input threshold without running detection again. JoinMarket clustering likewise
+uses the protocol heuristic's set. This requires a BlockSci build with the new
 binding; older builds report clustering as unavailable with a rebuild hint.
 
 Small regtest Wasabi rounds generally need an explicit
@@ -139,8 +138,10 @@ reports carry a `wasabi_production_threshold_zero_detections` warning.
 ## BlockSci bulk detector APIs
 
 - `filter_coinjoin_txes_raw` returns every transaction-level heuristic match
-  in the requested range. The report exporter requires this API for non-
-  JoinMarket detector counts.
+  in the requested range. The report exporter and the mainnet scan use it for
+  every CoinJoin type; for JoinMarket it runs `isJoinMarketCoinJoin`, which
+  needs at least five equal-value outputs and does not exclude Whirlpool or
+  Ashigaru transactions.
 - `filter_coinjoin_txes` is a separate linked-transaction API. It returns both
   endpoints of connections between matched transactions and excludes isolated
   matches. It is useful for linked-chain analysis, not detector metrics.
@@ -149,7 +150,11 @@ reports carry a `wasabi_production_threshold_zero_detections` warning.
   `(detected, skipped)`. `skipped` records searches that reached the
   configured depth limit. This detector is not protocol-specific: it matches
   equal-value outputs fundable by distinct input subsets and does not exclude
-  Wasabi, Whirlpool or Ashigaru.
+  Wasabi, Whirlpool or Ashigaru. BlockSci deprecates it because its
+  backtracking is exponential in the input count. The analysis still runs it
+  on JoinMarket emulator runs, never on an external chain, and the report keeps
+  its result only as the `blocksci_subset_matching` comparison; the
+  `--joinmarket-*` options configure that comparison alone.
 
 The exporter fails with a rebuild instruction when the installed BlockSci
 module lacks the raw binding; it never silently substitutes the linked subset.
@@ -157,7 +162,8 @@ module lacks the raw binding; it never silently substitutes the linked subset.
 On every path (Docker and PBS, serial and parallel), these detector results and
 the associated integration diagnostics and clustering assignments are persisted
 by `exporters/worker.py` as `blocksci-analysis_data/blocksci_analysis.json`
-(schema 1.2, whose BlockSci records carry `block_time`; no other schema is read). Report assembly reads only this artifact
+(schema 1.3, whose BlockSci records carry `block_time` and whose `subset_matching` holds the deprecated
+JoinMarket scan; no other schema is read). Report assembly reads only this artifact
 and never scans BlockSci itself. It requires the artifact's run ID and detector parameters to exactly match the
 requested report; a mismatched or stale artifact fails rather than being
 silently combined with a different baseline.
@@ -206,7 +212,7 @@ Every key is present in every report; one that does not apply is `null`.
 | `scenario`, `emulator_data` | The scenario and the producer-label summary and provenance. |
 | `detector_evaluations`, `evaluation_scope` | Confusion matrices of both analyzers against producer labels, and which comparison the metrics stand for. |
 | `clustering_evaluation` | Pairwise precision and recall of BlockSci clusters against wallet ground truth. |
-| `blocksci_skipped_txids` | Transactions the JoinMarket subset search gave up on. |
+| `blocksci_subset_matching` | JoinMarket emulator runs only: the deprecated subset-matching scan against coinjoin-analysis and the protocol heuristic, with the transactions its search gave up on. Its confusion matrix is `detector_evaluations.blocksci_subset_matching`. |
 | `coinjoin_mappings` | Wasabi mappings and Sake results, when the run computed them. |
 | `coverage` | External mode only: the BlockSci scan window and how much of the baseline falls in it. |
 | `baseline_filter` | The false-positive lists applied to the baseline and the transactions they removed. |
@@ -253,7 +259,7 @@ them with a rebuilt emulator image if ground-truth metrics are needed.
 
 ## Liquidity evaluation
 
-`liquidity_evaluation` in `unified_report.json` (schema 2.0) follows the
+`liquidity_evaluation` in `unified_report.json` (schema 3.0) follows the
 transaction-centric pool liquidity of Svenda et al., PETS 2026, section 4.3.2.
 `pipeline/exporters/liquidity.py` classifies every coinjoin input and output
 three times:

@@ -88,20 +88,10 @@ def scan(args: argparse.Namespace) -> dict[str, Any]:
     started_at = time.time()
 
     if args.coinjoin_type == "joinmarket":
-        if not hasattr(chain, "scan_coinjoins_by_subset_matching"):
-            raise RuntimeError("This BlockSci build does not expose scan_coinjoins_by_subset_matching.")
-        txes, skipped = chain.scan_coinjoins_by_subset_matching(
-            start_height,
-            end_height,
-            args.joinmarket_detector,
-            args.joinmarket_min_base_fee,
-            args.joinmarket_percentage_fee,
-            args.joinmarket_max_depth,
-        )
-        skipped_txids = sorted(str(tx.hash) for tx in skipped)
+        # JoinMarket CoinJoins need not spend one another, so the linked filter would drop the standalone ones.
+        txes = chain.filter_coinjoin_txes_raw(start_height, end_height, args.coinjoin_type)
     elif args.min_input_count is None:
         txes = chain.filter_coinjoin_txes(start_height, end_height, args.coinjoin_type)
-        skipped_txids = []
     else:
         txes = chain.filter_coinjoin_txes(
             start_height,
@@ -109,15 +99,12 @@ def scan(args: argparse.Namespace) -> dict[str, Any]:
             args.coinjoin_type,
             args.min_input_count,
         )
-        skipped_txids = []
 
     records = write_records(txes, records_path(args.output), args.max_records)
     elapsed_seconds = round(time.time() - started_at, 3)
 
     return {
-        # "partial": the JoinMarket search gave up on some candidates, so the
-        # count is a lower bound rather than a complete scan.
-        "status": "partial" if skipped_txids else "complete",
+        "status": "complete",
         "config": str(args.config),
         "index": {
             "blocks": blocks,
@@ -132,16 +119,6 @@ def scan(args: argparse.Namespace) -> dict[str, Any]:
         },
         "coinjoin_type": args.coinjoin_type,
         "min_input_count": args.min_input_count,
-        "joinmarket": {
-            "detector": args.joinmarket_detector,
-            "min_base_fee": args.joinmarket_min_base_fee,
-            "percentage_fee": args.joinmarket_percentage_fee,
-            "max_depth": args.joinmarket_max_depth,
-            "skipped_count": len(skipped_txids),
-            "skipped_txids": skipped_txids[: args.max_records],
-        }
-        if args.coinjoin_type == "joinmarket"
-        else None,
         "elapsed_seconds": elapsed_seconds,
         **records,
     }
@@ -156,17 +133,9 @@ def environment_int(name: str) -> int | None:
     return int(value) if value not in (None, "") else None
 
 
-def environment_float(name: str) -> float | None:
-    value = os.environ.get(name)
-    return float(value) if value not in (None, "") else None
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     config_value = os.environ.get("BLOCKSCI_CONFIG")
     output_directory = os.environ.get("BLOCKSCI_OUTPUT_DIR")
-    joinmarket_min_base_fee = environment_int("JOINMARKET_MIN_BASE_FEE")
-    joinmarket_percentage_fee = environment_float("JOINMARKET_PERCENTAGE_FEE")
-    joinmarket_max_depth = environment_int("JOINMARKET_MAX_DEPTH")
     start_height = environment_int("SCAN_START_HEIGHT")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -208,26 +177,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=10000,
         help="Records copied into the summary as a preview; the JSON Lines file holds all of them.",
-    )
-    parser.add_argument(
-        "--joinmarket-detector",
-        choices=("possible", "definite"),
-        default=os.environ.get("JOINMARKET_DETECTOR", "definite"),
-    )
-    parser.add_argument(
-        "--joinmarket-min-base-fee",
-        type=int,
-        default=5000 if joinmarket_min_base_fee is None else joinmarket_min_base_fee,
-    )
-    parser.add_argument(
-        "--joinmarket-percentage-fee",
-        type=float,
-        default=(0.00004 if joinmarket_percentage_fee is None else joinmarket_percentage_fee),
-    )
-    parser.add_argument(
-        "--joinmarket-max-depth",
-        type=int,
-        default=200000 if joinmarket_max_depth is None else joinmarket_max_depth,
     )
     return parser.parse_args(argv)
 

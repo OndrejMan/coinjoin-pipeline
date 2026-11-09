@@ -96,10 +96,12 @@ warning.
 Independent emulator labels, raw detector metrics,
 and provenance rules are defined in
 [Analysis semantics](docs/analysis-semantics.md).
-When verified emulator labels are available, the unified report (schema 2.0)
+When verified emulator labels are available, the unified report (schema 3.0)
 evaluates both BlockSci and the filtered, normalized `coinjoin-analysis`
 baseline against the same exported transaction universe under
-`detector_evaluations`.
+`detector_evaluations`. For JoinMarket, BlockSci detection uses the protocol
+heuristic; the deprecated subset-matching scan appears only as the
+`blocksci_subset_matching` comparison.
 
 ### BlockSci multi-chain caveat
 
