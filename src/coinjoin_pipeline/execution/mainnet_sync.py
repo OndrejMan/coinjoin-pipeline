@@ -11,7 +11,7 @@ from coinjoin_pipeline.configuration import required
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
 from coinjoin_pipeline.storage.s3 import shell_value, validate_artifact_uri, validate_run_id
 from .pbs.defaults import MAINNET_SYNC_RESOURCES, PBSResources
-from .pbs.scripts import INDEX_STORE, S5CLIENT, directives, runtime_source, write_files
+from .pbs.scripts import INDEX_STORE, S5CLIENT, directives, launcher, package_files, runtime_source, write_files
 from .pbs.submission import PBSJobSpec, persist_pbs_job_id, submit_pbs_job
 from .pbs.validation import PBSError, require_safe_image, require_safe_pbs_resources, walltime_to_seconds
 from .pbs_settings import pbs_image, stage_pbs_resources, with_singularity_scheme
@@ -27,6 +27,12 @@ SYNC_STAGES = tuple(MAINNET_SYNC_RESOURCES)
 RESTORE_CHECK_RESOURCES = PBSResources(2, "4gb", "200gb", "12:00:00")
 # Stands for the job's scratch directory, known only when the job starts.
 WORK_TOKEN = "@WORK@"
+# The mainnet worker: its entry point and every module it imports; each stays stdlib-only Python 3.8.
+MAINNET_RUNTIME_MODULES = (
+    *(Path(__file__).with_name(f"mainnet_{name}.py") for name in ("runtime", "jobs", "worker")),
+    INDEX_STORE,
+    S5CLIENT,
+)
 
 
 # Top-level settings mainnet-sync reads besides its mainnet.* and per-job pbs.<stage>.* groups.
@@ -191,9 +197,9 @@ def job_script(
     credentials = required(config.artifacts.credentials_file, "artifacts.credentials_file")
     files = {
         "settings.json": json.dumps(settings),
-        "worker.py": runtime_source(Path(__file__).with_name("mainnet_runtime.py")),
-        "s5client.py": runtime_source(S5CLIENT),
-        "index_store.py": runtime_source(INDEX_STORE),
+        "run.py": launcher("coinjoin_pipeline.execution.mainnet_runtime"),
+        **package_files(*MAINNET_RUNTIME_MODULES),
+        # Run by the BlockSci image's Python, from the bound job directory.
         "verify_chain.py": runtime_source(EXPORTERS_ROOT / "verify_chain.py"),
     }
     identity = f"STAGE=mainnet-{stage}\nRUN_ID={shell_value(run_id)}\n"
@@ -213,7 +219,7 @@ finish() {{
   status=$?
   trap - EXIT TERM INT
   if [ "$status" -ne 0 ]; then
-    python3 "$WORK/worker.py" "$WORK/settings.json" failed "$STAGE" "$STARTED" || true
+    python3 -s "$WORK/run.py" "$WORK/settings.json" failed "$STAGE" "$STARTED" || true
   fi
   {cleanup}
   # WORK is job-private; never clean the shared data directories.
@@ -226,7 +232,7 @@ test -r {shell_value(credentials)} || {{ echo 'S3 credentials file is not readab
 for tool in s5cmd tar zstd; do command -v "$tool" >/dev/null || {{ echo "Required tool missing: $tool" >&2; exit 1; }}; done
 s5cmd pipe --help >/dev/null || {{ echo 's5cmd with pipe support is required' >&2; exit 1; }}
 STARTED=1
-python3 "$WORK/worker.py" "$WORK/settings.json" {stage}
+python3 -s "$WORK/run.py" "$WORK/settings.json" {stage}
 """
 
 

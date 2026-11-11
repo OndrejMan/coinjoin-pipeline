@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import subprocess
 import os
+import re
 import shutil
 import sys
 
@@ -11,11 +12,11 @@ import pytest
 
 from coinjoin_pipeline.configuration import ConfigurationError, PipelineConfiguration
 from coinjoin_pipeline.context import resolve_configuration
-from coinjoin_pipeline.execution import mainnet_runtime, mainnet_sync, s3_markers
+from coinjoin_pipeline.execution import mainnet_jobs, mainnet_runtime, mainnet_sync, mainnet_worker, s3_markers
 from coinjoin_pipeline.execution.pbs.scripts import embedded_file
-from coinjoin_pipeline.execution.mainnet_runtime import (
+from coinjoin_pipeline.execution.mainnet_jobs import require_ready
+from coinjoin_pipeline.execution.mainnet_worker import (
     Worker,
-    require_ready,
     resume_file,
     scanner_complete,
     atomic_json,
@@ -57,7 +58,7 @@ def test_restore_check_never_touches_the_working_dataset_or_sync_state(config):
     assert settings["state_uri"].startswith(config.mainnet.state_uri.rstrip("/") + "-restore-check/")
     assert settings["index_lock"] is None and settings["measure_download"] is True
     assert "select=1:ncpus=2:mem=4gb:scratch_ssd=200gb" in script
-    assert 'worker.py" "$WORK/settings.json" restore' in script
+    assert 'run.py" "$WORK/settings.json" restore' in script
 
 
 def test_every_script_is_self_contained_and_syntactically_valid(config):
@@ -82,16 +83,23 @@ def test_every_script_is_self_contained_and_syntactically_valid(config):
     assert not config.stages.blocksci
 
 
-def test_shipped_worker_imports_the_shipped_s5_client_without_the_package(config, tmp_path):
+def test_shipped_worker_imports_only_the_shipped_package(config, tmp_path):
     script = mainnet_sync.render_sync(config, "producer")
-    for name in ("worker.py", "s5client.py", "index_store.py"):
+    for name in re.findall(r'^cat >"\$WORK/([^"]+)" <<', script, flags=re.MULTILINE):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text(embedded_file(script, name))
     # -S leaves out site-packages, where the development install of coinjoin_pipeline lives.
-    probe = "import sys; sys.path.insert(0, sys.argv[1]); import worker; print(worker.S5Client.__module__)"
+    probe = (
+        "import sys; sys.path.insert(0, sys.argv[1]); "
+        "from coinjoin_pipeline.execution import mainnet_runtime, mainnet_worker; "
+        "print(mainnet_runtime.__file__); print(mainnet_worker.S5Client.__module__)"
+    )
     result = subprocess.run(
         [sys.executable, "-S", "-c", probe, str(tmp_path)], capture_output=True, text=True, check=True
     )
-    assert result.stdout.strip() == "s5client"
+    shipped, client = result.stdout.split()
+    assert Path(shipped).is_relative_to(tmp_path)
+    assert client == "coinjoin_pipeline.storage.s5client"
 
 
 def test_checkpoint_job_defaults_to_little_memory(config):
@@ -235,7 +243,7 @@ def test_bounded_sync_freezes_actual_tip_during_initial_download(worker, monkeyp
     monkeypatch.setattr(worker, "stop_core", lambda: None)
     monkeypatch.setattr(worker, "start_core", lambda offline: None)
     monkeypatch.setattr(worker, "progress", lambda *args, **kw: progress.append((args, kw)))
-    monkeypatch.setattr("coinjoin_pipeline.execution.mainnet_runtime.time.sleep", sleeps.append)
+    monkeypatch.setattr("coinjoin_pipeline.execution.mainnet_worker.time.sleep", sleeps.append)
     assert worker.synchronize_core() == {"blocks": 102, "bestblockhash": "b" * 64}
     assert ("setnetworkactive", ("false",)) in calls
     assert not any(method == "getnetworkinfo" for method, _ in calls)
@@ -261,7 +269,7 @@ def test_unbounded_sync_still_waits_for_initial_download_and_headers(worker, mon
     monkeypatch.setattr(worker, "stop_core", lambda: None)
     monkeypatch.setattr(worker, "start_core", lambda offline: None)
     sleeps = []
-    monkeypatch.setattr("coinjoin_pipeline.execution.mainnet_runtime.time.sleep", sleeps.append)
+    monkeypatch.setattr("coinjoin_pipeline.execution.mainnet_worker.time.sleep", sleeps.append)
     assert worker.synchronize_core()["blocks"] == 101
     assert len(sleeps) == 2
 
@@ -340,7 +348,7 @@ def test_producer_reports_core_height_separately_from_scanner_progress(worker, m
 
     monkeypatch.setattr(worker, "run_command", scan)
     first_synchronization(worker)
-    worker.producer()
+    mainnet_jobs.producer(worker)
     assert [report["height"] for report in reports] == [height] * 4
     assert [report["scanner_height"] for report in reports] == [worker.scan_start - 1] * 3 + [height]
     assert [report["current"] for report in reports] == [0] * 3 + [max(0, height - worker.scan_start + 1)]
@@ -433,7 +441,7 @@ def test_parser_progress_and_s3_upload_use_the_shared_component_logs(worker, mon
     progress, uploaded = [], []
     monkeypatch.setattr(worker, "progress", lambda *args, **kwargs: progress.append((args, kwargs)))
     monkeypatch.setattr(worker.storage, "copy", lambda *args: uploaded.append(args))
-    worker.parse_progress()
+    mainnet_jobs.parse_progress(worker)
     worker.publish_logs()
     assert progress == [(("blocksci-parse", 50.0, 100), {"detail": "parsing blocks"})]
     assert uploaded == [(worker.logs / "blocksci.log", f"{worker.remote}/logs/{worker.run_id}/blocksci.log")]
@@ -476,7 +484,7 @@ def test_failed_worker_uploads_logs_even_when_cleanup_fails(worker, monkeypatch,
             raise RuntimeError("Core did not shut down cleanly")
 
     monkeypatch.setattr(mainnet_runtime, "Worker", lambda *_: worker)
-    monkeypatch.setattr(worker, "producer", producer)
+    monkeypatch.setitem(mainnet_runtime.JOBS, "producer", lambda _worker: producer())
     monkeypatch.setattr(worker, "cleanup", cleanup)
     monkeypatch.setattr(worker, "publish_logs", lambda: uploaded.append(True))
     message = "Core did not shut down cleanly" if cleanup_fails else "Core failed to start"
@@ -499,7 +507,7 @@ def test_failed_core_allows_failure_hook_to_release_only_its_dataset(worker, mon
         raise RuntimeError("Core failed to start")
 
     monkeypatch.setattr(mainnet_runtime, "Worker", lambda *_: worker)
-    monkeypatch.setattr(worker, "producer", producer)
+    monkeypatch.setitem(mainnet_runtime.JOBS, "producer", lambda _worker: producer())
     monkeypatch.setattr(worker, "publish_logs", lambda: uploaded.append(True))
     monkeypatch.setattr(worker, "progress", lambda *args, **kwargs: None)
     monkeypatch.setattr(worker, "publish_json", lambda *args: None)
@@ -542,7 +550,7 @@ def test_core_shutdown_timeout_keeps_dataset_locked(worker, monkeypatch):
         raise RuntimeError("producer failed")
 
     monkeypatch.setattr(mainnet_runtime, "Worker", lambda *_: worker)
-    monkeypatch.setattr(worker, "producer", producer)
+    monkeypatch.setitem(mainnet_runtime.JOBS, "producer", lambda _worker: producer())
     monkeypatch.setattr(worker, "rpc", lambda *args: None)
     monkeypatch.setattr(worker, "publish_logs", lambda: uploaded.append(True))
     monkeypatch.setattr(worker, "progress", lambda *args, **kwargs: None)
@@ -792,7 +800,7 @@ def unpacked(path):
 
 def test_pack_replaces_only_pruned_block_files(worker, tmp_path):
     directory, payload = ready_to_pack(worker, tmp_path)
-    worker.pack()
+    mainnet_jobs.pack(worker)
     assert unpacked(directory / "blk00000.dat.zst") == payload
     assert not (directory / "blk00000.dat").exists()
     assert (directory / "blk00000.dat.json").exists()
@@ -806,7 +814,7 @@ def test_pack_keeps_a_raw_file_that_does_not_match_its_sidecar(worker, tmp_path)
     directory, _ = ready_to_pack(worker, tmp_path)
     (directory / "blk00000.dat").write_bytes(b"damaged")
     with pytest.raises(ValueError, match="could not be packed"):
-        worker.pack()
+        mainnet_jobs.pack(worker)
     assert (directory / "blk00000.dat").read_bytes() == b"damaged"
     assert not (directory / "blk00000.dat.zst").exists()
 
@@ -825,7 +833,7 @@ def test_pack_keeps_the_raw_file_when_the_upload_does_not_read_back(worker, tmp_
 
     monkeypatch.setattr(worker.storage, "copy", damaging)
     with pytest.raises(ValueError, match="could not be packed"):
-        worker.pack()
+        mainnet_jobs.pack(worker)
     assert (directory / "blk00000.dat").read_bytes() == payload
 
 
@@ -834,10 +842,10 @@ def test_pack_finishes_a_file_interrupted_before_the_raw_object_was_removed(work
     remove = worker.storage.remove
     monkeypatch.setattr(worker.storage, "remove", lambda *uris, **kwargs: False)
     with pytest.raises(ValueError, match="could not be packed"):
-        worker.pack()
+        mainnet_jobs.pack(worker)
     assert (directory / "blk00000.dat").exists() and (directory / "blk00000.dat.zst").exists()
     monkeypatch.setattr(worker.storage, "remove", remove)
-    worker.pack()
+    mainnet_jobs.pack(worker)
     assert not (directory / "blk00000.dat").exists()
     assert unpacked(directory / "blk00000.dat.zst") == payload
 
@@ -845,7 +853,7 @@ def test_pack_finishes_a_file_interrupted_before_the_raw_object_was_removed(work
 def test_pack_stops_at_its_time_budget_and_leaves_the_rest_raw(worker, tmp_path):
     directory, _ = ready_to_pack(worker, tmp_path)
     worker.c["walltime_seconds"] = 0
-    worker.pack()
+    mainnet_jobs.pack(worker)
     assert (directory / "blk00000.dat").exists()
     assert json.loads((worker.run / "pack.json").read_text())["remaining"] == 1
 
@@ -854,11 +862,11 @@ def test_pack_refuses_without_this_runs_checkpoint_or_block_files(worker, tmp_pa
     directory, _ = ready_to_pack(worker, tmp_path)
     atomic_json(worker.run / "done.json", {"run_id": "another-run"})
     with pytest.raises(ValueError, match="checkpoint did not finish"):
-        worker.pack()
+        mainnet_jobs.pack(worker)
     atomic_json(worker.run / "done.json", {"run_id": worker.run_id})
     (worker.core_dir / "blocks/blk00001.dat").unlink()
     with pytest.raises(ValueError, match="no block files on disk"):
-        worker.pack()
+        mainnet_jobs.pack(worker)
     assert (directory / "blk00000.dat").exists()
 
 
@@ -879,7 +887,7 @@ def filled_dataset(worker):
 
 def test_clear_empties_the_working_dataset_and_keeps_the_state(worker):
     filled_dataset(worker)
-    worker.clear()
+    mainnet_jobs.clear(worker)
     assert worker.dataset_members() == []
     assert not (worker.root / "current-ready.json").exists()
     assert not list(worker.root.glob(".clear-*")) and not list(worker.index.glob(".clear-*"))
@@ -891,7 +899,7 @@ def test_clear_also_removes_what_the_dataset_does_not_list(worker):
     filled_dataset(worker)
     (worker.root / "runs/mainnet-old").mkdir(parents=True)
     (worker.root / "runs/mainnet-old/core-producer.log").write_text("old log")
-    worker.clear()
+    mainnet_jobs.clear(worker)
     assert sorted(path.name for path in worker.root.iterdir()) == ["sync"]
 
 
@@ -899,7 +907,7 @@ def test_clear_refuses_a_dataset_of_another_synchronization(worker):
     filled_dataset(worker)
     atomic_json(worker.run / "done.json", {"run_id": "another-run"})
     with pytest.raises(ValueError, match="checkpoint did not finish"):
-        worker.clear()
+        mainnet_jobs.clear(worker)
     assert (worker.index / "parsed").exists()
 
 
@@ -940,7 +948,7 @@ def test_the_clear_job_can_be_turned_off(config, monkeypatch):
 def synchronize(worker, *stages):
     for stage in stages:
         worker.stage = stage
-        (worker.restore_dataset if stage == "restore" else getattr(worker, stage))()
+        mainnet_runtime.JOBS[stage](worker)
         assert not worker.active.exists(), f"{stage} must release the dataset"
 
 
@@ -955,7 +963,7 @@ def test_blocksci_job_completes_the_index_without_backing_it_up(worker, tmp_path
     fake_components(worker, monkeypatch, events)
     synchronize(worker, "restore", "producer", "blocksci")
     assert not (worker.index / ".writing").exists()
-    assert (worker.index / "files.txt").read_text() == mainnet_runtime.index_inventory(worker.index)
+    assert (worker.index / "files.txt").read_text() == mainnet_worker.index_inventory(worker.index)
     progress = json.loads((worker.run / "blocksci.json").read_text())
     assert (progress["phase"], progress["state"]) == ("indexed", "done")
     assert not (tmp_path / "s3/local/index/manifest.json").exists()
@@ -1015,7 +1023,7 @@ def test_restore_job_refills_an_emptied_dataset_for_the_next_synchronization(wor
     assert not [*worker.root.glob(".restore-*"), *worker.index.glob(".restore-*")]
     # The restored copy is complete, so the producer continues incrementally.
     worker.stage = "producer"
-    worker.require_complete_dataset()
+    mainnet_jobs.require_complete_dataset(worker)
 
 
 @pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
@@ -1029,7 +1037,7 @@ def test_restore_job_leaves_a_dataset_that_is_not_empty(worker, monkeypatch):
     assert json.loads((worker.run / "restore.json").read_text())["action"] == "skipped-not-empty"
     worker.stage = "producer"
     with pytest.raises(ValueError, match=r"incomplete \(missing: BlockSci index\)"):
-        worker.require_complete_dataset()
+        mainnet_jobs.require_complete_dataset(worker)
 
 
 @pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
@@ -1048,7 +1056,7 @@ def test_restore_job_refuses_backups_that_do_not_belong_together(worker, tmp_pat
         message = "lacks the backups index"
     worker.stage = "restore"
     with pytest.raises(ValueError, match=message):
-        worker.restore_dataset()
+        mainnet_jobs.restore(worker)
     assert worker.dataset_members() == []
 
 
@@ -1066,7 +1074,7 @@ def test_restore_job_replaces_a_dataset_with_an_unfinished_index(worker, monkeyp
     assert (worker.dumps / "Scanner/LastProcessedBlockHeight.txt").read_text() == str(HEIGHT)
     assert not [*worker.root.glob(".clear-*"), *worker.index.glob(".clear-*")]
     worker.stage = "producer"
-    worker.require_complete_dataset()
+    mainnet_jobs.require_complete_dataset(worker)
 
 
 @pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
@@ -1089,7 +1097,7 @@ def test_unfinished_index_stays_until_its_backups_check_out(worker, tmp_path, mo
         message = "do not belong together"
     worker.stage = "restore"
     with pytest.raises(ValueError, match=message):
-        worker.restore_dataset()
+        mainnet_jobs.restore(worker)
     assert worker.dataset_members() == present and (worker.index / ".writing").exists()
 
 
@@ -1098,28 +1106,28 @@ def test_restore_job_refuses_archived_blocks_without_backups(worker, tmp_path):
     (tmp_path / "s3/local/blocks/blk00000.dat").write_bytes(bytes(88))
     worker.stage = "restore"
     with pytest.raises(ValueError, match="archived blocks but no backups"):
-        worker.restore_dataset()
+        mainnet_jobs.restore(worker)
 
 
 def test_producer_refuses_an_empty_dataset_the_restore_job_did_not_check(worker):
     worker.stage = "producer"
     with pytest.raises(ValueError, match="restore job did not check S3"):
-        worker.require_complete_dataset()
+        mainnet_jobs.require_complete_dataset(worker)
     atomic_json(worker.run / "restore.json", {"run_id": "an-earlier-run", "action": "skipped-no-backup"})
     with pytest.raises(ValueError, match="restore job did not check S3"):
-        worker.require_complete_dataset()
+        mainnet_jobs.require_complete_dataset(worker)
     first_synchronization(worker)
-    worker.require_complete_dataset()
+    mainnet_jobs.require_complete_dataset(worker)
 
 
 def test_producer_continues_an_unfinished_first_synchronization(worker):
     (worker.core_dir / "blocks").mkdir(parents=True)
     (worker.core_dir / "blocks/blk00000.dat").write_bytes(bytes(88))
-    worker.require_complete_dataset()
+    mainnet_jobs.require_complete_dataset(worker)
     # Without the full block history and without an index, nothing can be parsed any more.
     (worker.core_dir / "blocks/blk00000.dat").unlink()
     with pytest.raises(ValueError, match="incomplete"):
-        worker.require_complete_dataset()
+        mainnet_jobs.require_complete_dataset(worker)
 
 
 @pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
@@ -1131,7 +1139,7 @@ def test_checkpoint_job_refuses_an_index_another_job_changed(worker, tmp_path, m
     atomic_json(worker.index / "manifest.json", {**manifest, "run_id": "a-manual-index-update"})
     worker.stage = "checkpoint"
     with pytest.raises(ValueError, match="not the one this synchronization"):
-        worker.checkpoint()
+        mainnet_jobs.checkpoint(worker)
     assert not (tmp_path / "s3/local/index").exists()
 
 
@@ -1171,7 +1179,7 @@ def test_failed_core_checkpoint_cannot_publish_done(worker, monkeypatch):
     monkeypatch.setattr(worker, "publish_json", lambda uri, value: published.append(uri) or real_publish(uri, value))
     worker.stage = "checkpoint"
     with pytest.raises(RuntimeError, match="final checkpoint"):
-        worker.checkpoint()
+        mainnet_jobs.checkpoint(worker)
     offline = ("offline-core", min(1024, worker.c["dbcache_mb"]))
     assert events[-5:] == ["index-backup", offline, "prune", "clean-stop", "core-backup-failed"]
     assert not (worker.run / "done.json").exists()

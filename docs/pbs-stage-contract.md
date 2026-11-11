@@ -324,7 +324,8 @@ lists every longer key it starts:
   after the report marker is present.
 
 `mainnet-sync` jobs publish `.pbs/mainnet-{restore,producer,blocksci,checkpoint,pack,clear}.*`
-from their own worker (`mainnet_runtime.py`); their bodies are JSON state records,
+from their own worker (`mainnet_runtime.py` runs one of the job functions in `mainnet_jobs.py`
+over the shared services of `mainnet_worker.Worker`); their bodies are JSON state records,
 not the `done`/`failed` lines above. The jobs are chained with `afterok`:
 restore (fills an empty working dataset from S3, otherwise ends at once), producer,
 blocksci (updates the index, no backups), checkpoint (index backup, pruning,

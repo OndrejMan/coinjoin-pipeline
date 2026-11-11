@@ -70,7 +70,8 @@ runs the tag.
 | Frontend marker wait and the remote-job probe states it decides by | `execution/s3_markers.py` (`wait_for_s3_marker`), `execution/probes.py` |
 | Required exporter files and their staging into a run prefix | `paths.py` (`REQUIRED_EXPORTERS`), `execution/s3_staging.py` |
 | s5cmd calls shared by the frontend, the mainnet worker and the Python PBS stages | `storage/s5client.py` |
-| Every S3 PBS job (shell only writes and starts it) | `execution/pbs/stage_runtime.py` |
+| Mainnet synchronization jobs on the node: entry, the six jobs, their shared dataset/Core/Dumplings services | `execution/mainnet_runtime.py`, `mainnet_jobs.py`, `mainnet_worker.py` (rendered by `mainnet_sync.py`) |
+| Every S3 PBS job (shell only writes and starts it): entry, job frame, settings types, jobs | `execution/pbs/stage_runtime.py`, `stage.py`, `stage_settings.py`, `analyzer_jobs.py`, `blocksci_jobs.py` |
 | Container workload shared by Docker and Apptainer | `pipeline/exporters/worker.py` |
 | Parsed block-archive cache height, checkpoint and update continuity verification | `pipeline/exporters/verify_chain.py` |
 | Heavy BlockSci results | `pipeline/exporters/blocksci_export/analysis.py` |
@@ -116,7 +117,11 @@ place; emulations do not introduce a persistent working copy.
 
 The host requires Python 3.10+. Exporter code retains Python 3.8 syntax for the
 BlockSci image. Their input options share `exporters/parameters.py`; exporters
-are staged as a standalone tree and do not import the host package.
+are staged as a standalone tree and do not import the host package. The modules
+PBS jobs ship to compute nodes (`scripts.STAGE_RUNTIME_MODULES`,
+`mainnet_sync.MAINNET_RUNTIME_MODULES` and the extra helpers) are linted as
+Python 3.8 through ruff's `per-file-target-version`;
+`tests/unit/test_shipped_modules.py` fails when a shipped module is missing there.
 
 Standalone [coinjoin-analysis operations](coinjoin-analysis-operations.md) select
 the analyzer's existing public commands through `coinjoin_analysis.*`.
