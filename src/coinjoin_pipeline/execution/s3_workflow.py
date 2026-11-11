@@ -21,7 +21,7 @@ from coinjoin_pipeline.execution.kubernetes import (
 from coinjoin_pipeline.execution.pbs.validation import PBSError, require_qsub
 from coinjoin_pipeline.execution.pbs_settings import stage_pbs_resources
 from coinjoin_pipeline.execution.s3_emulation import pin_emulation_images, run_s3_kubernetes_emulation
-from coinjoin_pipeline.execution.s3_markers import cancel_dependent_pbs_job, wait_for_s3_pbs_stage
+from coinjoin_pipeline.execution.s3_markers import cancel_dependent_pbs_job, wait_for_s3_marker, wait_for_s3_pbs_stage
 from coinjoin_pipeline.execution.s3_staging import stage_kubernetes_s3_run
 from coinjoin_pipeline.execution.s3_submission import s3_full_run_plan_from_args, submit_s3_pbs_graph
 from coinjoin_pipeline.execution.stages import StageGraph, StagePlan, resource_group
@@ -32,7 +32,6 @@ from coinjoin_pipeline.storage.s3 import (
     run_prefix_uri,
     stage_marker_uri,
     upload_marker_uri,
-    wait_for_s3_marker,
 )
 
 

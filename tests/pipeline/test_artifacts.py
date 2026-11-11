@@ -10,24 +10,21 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pipeline"))
 
 from coinjoin_pipeline.paths import EXECUTION_ROOT
-from coinjoin_pipeline.storage.s3 import (  # noqa: E402
-    PROBE_QUEUED,
-    PROBE_RUNNING,
-    PROBE_TERMINAL,
-    PROBE_UNKNOWN,
+from coinjoin_pipeline.execution.probes import PROBE_QUEUED, PROBE_RUNNING, PROBE_TERMINAL, PROBE_UNKNOWN
+from coinjoin_pipeline.execution.s3_markers import wait_for_s3_marker
+from coinjoin_pipeline.storage.s3 import (
+    AWS_SCRUB_VARIABLES,
     ArtifactTransportError,
     S3Access,
     clear_s3_stage_markers,
     ensure_empty_run_prefix,
-    AWS_SCRUB_VARIABLES,
     run_s5cmd,
-    s5_client,
     s3_object_exists,
+    s5_client,
     validate_artifact_uri,
     validate_credentials_file,
     validate_run_id,
     validate_s3_endpoint_url,
-    wait_for_s3_marker,
 )
 
 ACCESS = S3Access(
@@ -143,7 +140,7 @@ def test_clear_stage_markers_propagates_delete_errors() -> None:
 
 
 def _wait(done: str, failed: str, exists, probe=None, timeout: int = 60) -> None:
-    with mock.patch("coinjoin_pipeline.storage.s3.s3_object_exists", side_effect=exists):
+    with mock.patch("coinjoin_pipeline.execution.s3_markers.s3_object_exists", side_effect=exists):
         wait_for_s3_marker(
             "stage",
             done,
@@ -203,7 +200,7 @@ def test_wait_for_s3_marker_extends_start_deadline_while_job_queued() -> None:
 
 def test_wait_for_s3_marker_enforces_explicit_queued_start_deadline() -> None:
     with (
-        mock.patch("coinjoin_pipeline.storage.s3.s3_object_exists", return_value=False),
+        mock.patch("coinjoin_pipeline.execution.s3_markers.s3_object_exists", return_value=False),
         pytest.raises(ArtifactTransportError, match="Timed out"),
     ):
         wait_for_s3_marker(

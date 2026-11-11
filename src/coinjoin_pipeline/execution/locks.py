@@ -11,7 +11,7 @@ from typing import TextIO
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution.pbs.submission import pbs_job_probe, read_pbs_job_id
 from coinjoin_pipeline.execution.run_context import run_dir_under_root
-from coinjoin_pipeline.storage.s3 import PROBE_QUEUED, PROBE_RUNNING, PROBE_UNKNOWN
+from coinjoin_pipeline.execution.probes import PROBE_QUEUED, PROBE_RUNNING, PROBE_UNKNOWN
 
 PBS_SUBMIT_LOCK_NAME = ".pbs-submit.lock"
 

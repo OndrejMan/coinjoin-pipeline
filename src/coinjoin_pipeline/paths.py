@@ -13,6 +13,18 @@ EXPORTERS_ROOT = PIPELINE_ROOT / "exporters"
 SCENARIOS_ROOT = PROJECT_ROOT / "scenarios"
 CONTAINER_ROOT = PROJECT_ROOT / "container"
 
+# Exporter files the compute-node jobs execute (parse/update/analyze worker, chain
+# check, report) or import. A staging step that misses one is useless; checking
+# them turns a late node-side failure into a frontend error.
+REQUIRED_EXPORTERS = (
+    "worker.py",
+    "verify_chain.py",
+    "parameters.py",
+    "analysis_artifact.py",
+    "unified_report.py",
+    "blocksci_export/analysis.py",
+)
+
 
 def default_runs_root() -> Path:
     """The runs root when none is configured: $EMULATION_LOGS_DIR, else ./coinjoin-runs."""

@@ -1,26 +1,21 @@
-"""Validation, shell rendering, and frontend polling for S3-compatible artifact transport."""
+"""S3 run targets, their validation, and the frontend's s5cmd access to them.
+
+Marker waiting lives in ``execution/s3_markers.py`` and exporter staging in
+``execution/s3_staging.py``.
+"""
 
 from __future__ import annotations
 
 import argparse
-import errno
 import os
 import re
 import shlex
 import shutil
 import subprocess
-import sys
-import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
-
-# The exporters ship to the compute node on their own, so the tree hash they
-# record in the report has to come from the same implementation the frontend
-# logs here — otherwise the two provenance values are not comparable.
-from exporters.common import tree_sha256
 
 from coinjoin_pipeline.configuration import required
 from coinjoin_pipeline.storage.s5client import S5Client, no_object_found
@@ -29,6 +24,10 @@ if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import PipelineConfiguration
 
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
+RUN_ID_MAX_LENGTH = 63
+#: Directories of a run prefix holding terminal markers: PBS stages and the Kubernetes uploader.
+PBS_MARKER_DIR = ".pbs"
+KUBERNETES_MARKER_DIR = ".k8s"
 PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 # The variables the in-job shell s5 wrapper unsets; S5Client drops every AWS_* variable.
@@ -42,14 +41,6 @@ AWS_SCRUB_VARIABLES = (
     "AWS_DEFAULT_REGION",
 )
 
-S3_POLL_INTERVAL_SECONDS = 30
-PROBE_RUNNING = "running"
-PROBE_QUEUED = "queued"
-PROBE_TERMINAL = "terminal"
-PROBE_UNKNOWN = "unknown"
-# A frontend at its per-user task limit (MetaCentrum caps user cgroups at pids.max)
-# briefly cannot spawn s5cmd or kubectl; that says nothing about the remote stage.
-TRANSIENT_SPAWN_ERRNOS = frozenset({errno.EAGAIN, errno.ENOMEM, errno.EMFILE, errno.ENFILE})
 
 
 class ArtifactTransportError(RuntimeError):
@@ -128,7 +119,7 @@ RUN_ID_RULE = (
 
 
 def is_valid_run_id(run_id: str) -> bool:
-    return len(run_id) <= 63 and ".." not in run_id and RUN_ID_RE.fullmatch(run_id) is not None
+    return len(run_id) <= RUN_ID_MAX_LENGTH and ".." not in run_id and RUN_ID_RE.fullmatch(run_id) is not None
 
 
 def validate_run_id(run_id: str) -> str:
@@ -235,17 +226,12 @@ def run_prefix_uri(artifact_uri: str, run_id: str) -> str:
 
 def stage_marker_uri(run_prefix: str, stage: str, outcome: str) -> str:
     """``<run-prefix>/.pbs/<stage>.<outcome>``: the terminal marker a PBS stage's trap uploads."""
-    return f"{run_prefix}/.pbs/{stage}.{outcome}"
+    return f"{run_prefix}/{PBS_MARKER_DIR}/{stage}.{outcome}"
 
 
 def upload_marker_uri(run_prefix: str, outcome: str) -> str:
     """``<run-prefix>/.k8s/upload.<outcome>``: written by the Kubernetes uploader after the emulation."""
-    return f"{run_prefix}/.k8s/upload.{outcome}"
-
-
-def staged_exporters_uri(run_prefix: str) -> str:
-    """The run's ``.pipeline/exporters/`` prefix that every BlockSci and report job downloads."""
-    return f"{run_prefix}/.pipeline/exporters/"
+    return f"{run_prefix}/{KUBERNETES_MARKER_DIR}/upload.{outcome}"
 
 
 def s3_object_exists(access: S3Access, object_uri: str) -> bool:
@@ -334,142 +320,3 @@ def ensure_empty_run_prefix(access: S3Access, artifact_uri: str, run_id: str) ->
     run_prefix = run_prefix_uri(artifact_uri, run_id)
     if s3_object_exists(access, f"{run_prefix}/*"):
         raise ArtifactTransportError(f"run prefix {run_prefix}/ already contains artifacts; choose a fresh --run-id")
-
-
-# Exporter files the compute-node jobs execute (parse/update/analyze worker, chain
-# check, report) or import. A staging step that misses one is useless; checking
-# them turns a late node-side failure into a frontend error.
-REQUIRED_EXPORTERS = (
-    "worker.py",
-    "verify_chain.py",
-    "parameters.py",
-    "analysis_artifact.py",
-    "unified_report.py",
-    "blocksci_export/analysis.py",
-)
-
-
-def ensure_local_exporters(exporters_dir: Path) -> None:
-    """Reject an exporter tree that is missing any required exporter."""
-    for relative in REQUIRED_EXPORTERS:
-        candidate = exporters_dir / relative
-        if not candidate.is_file():
-            raise ArtifactTransportError(f"Required exporter is missing: {candidate}")
-
-
-STAGED_EXPORTERS_COMPLETE = "complete"
-STAGED_EXPORTERS_MISSING = "missing"
-STAGED_EXPORTERS_PARTIAL = "partial"
-
-
-def staged_exporters_state(access: S3Access, run_prefix: str) -> tuple[str, list[str]]:
-    """Classify the exporter tree already staged under a run prefix.
-
-    One entry point is not proof of a usable tree. A prefix staged before the
-    ``blocksci/`` → ``blocksci_export/`` rename still carries
-    ``unified_report.py``, so a resumed run would clear the frontend check and
-    only fail on the compute node, which runs the renamed analysis path. The
-    same holds for an upload that died halfway through.
-    """
-    prefix = staged_exporters_uri(run_prefix)
-    missing = [relative for relative in REQUIRED_EXPORTERS if not s3_object_exists(access, f"{prefix}{relative}")]
-    if not missing:
-        return STAGED_EXPORTERS_COMPLETE, []
-    if len(missing) == len(REQUIRED_EXPORTERS):
-        return STAGED_EXPORTERS_MISSING, missing
-    return STAGED_EXPORTERS_PARTIAL, missing
-
-
-def upload_exporters(access: S3Access, run_prefix: str, exporters_dir: Path) -> None:
-    """Stage the checkout's exporters into the run prefix before the Job starts.
-
-    Running bare from a checkout means the tree can hold host bytecode; shipping
-    a 3.14 ``__pycache__`` into BlockSci's Python 3.8 is at best noise, so the
-    sync filters it out rather than snapshotting the tree somewhere first.
-    """
-    ensure_local_exporters(exporters_dir)
-    # Informational provenance for "what exactly was staged": the upload takes
-    # the live checkout, uncommitted changes included, and the node has no .git
-    # to resolve a commit from. The unified report recomputes this hash from the
-    # tree it actually ran, so the two can be compared after the fact.
-    print(f"[stage] exporters tree sha256={tree_sha256(exporters_dir)}")
-    destination = staged_exporters_uri(run_prefix)
-    result = run_s5cmd(
-        access,
-        "sync",
-        "--exclude",
-        "*__pycache__*",
-        "--exclude",
-        "*.pyc",
-        f"{exporters_dir}/",
-        destination,
-    )
-    if result.returncode != 0:
-        raise ArtifactTransportError(
-            f"failed to upload exporters to {destination} (exit {result.returncode}): {(result.stderr or '').strip()}"
-        )
-    for relative in REQUIRED_EXPORTERS:
-        if not s3_object_exists(access, f"{destination}{relative}"):
-            raise ArtifactTransportError(f"exporter upload did not produce {destination}{relative}")
-
-
-def wait_for_s3_marker(
-    stage: str,
-    done_uri: str,
-    failed_uri: str,
-    access: S3Access,
-    *,
-    timeout_seconds: int,
-    start_timeout_seconds: int | None = None,
-    poll_interval: int = S3_POLL_INTERVAL_SECONDS,
-    probe: Callable[[], str] | None = None,
-) -> None:
-    """Block until the stage uploads its S3 marker, with probe and deadline fallbacks.
-
-    ``probe`` reports remote state (``PROBE_QUEUED``/``PROBE_RUNNING``/
-    ``PROBE_TERMINAL``/``PROBE_UNKNOWN``). Queue time may extend the start
-    deadline when ``start_timeout_seconds`` is omitted (the PBS queueing
-    contract), but callers can supply a finite scheduling deadline. The
-    execution deadline starts once the job is observed running and is never
-    extended. After a terminal report one extra poll cycle runs so a marker
-    upload that races the probe still wins.
-    """
-    start_budget = timeout_seconds if start_timeout_seconds is None else start_timeout_seconds
-    start_deadline = time.monotonic() + start_budget
-    execution_deadline: float | None = None
-    terminal_seen = False
-    while True:
-        try:
-            if s3_object_exists(access, failed_uri):
-                raise ArtifactTransportError(f"S3-compatible stage failed: {stage} (marker {failed_uri})")
-            if s3_object_exists(access, done_uri):
-                return
-            # Not probed during the grace cycle: the terminal report already landed.
-            probe_state = probe() if probe is not None and not terminal_seen else None
-        except OSError as error:
-            if error.errno not in TRANSIENT_SPAWN_ERRNOS:
-                raise
-            if time.monotonic() >= (execution_deadline if execution_deadline is not None else start_deadline):
-                raise ArtifactTransportError(f"Timed out waiting for S3 stage marker: {stage} ({done_uri})") from error
-            print(f"[WARN] {stage} poll could not run ({error}); retrying in {poll_interval}s", file=sys.stderr)
-            time.sleep(poll_interval)
-            continue
-        now = time.monotonic()
-        if probe_state == PROBE_RUNNING and execution_deadline is None:
-            execution_deadline = now + timeout_seconds
-        deadline = execution_deadline if execution_deadline is not None else start_deadline
-        if now >= deadline:
-            if execution_deadline is not None or probe_state != PROBE_QUEUED or start_timeout_seconds is not None:
-                raise ArtifactTransportError(f"Timed out waiting for S3 stage marker: {stage} ({done_uri})")
-            # Shared-cluster queue time must not consume the execution budget.
-            start_deadline = now + timeout_seconds
-            print(
-                f"[WARN] {stage} exceeded its {timeout_seconds}s start budget but the job "
-                f"is still queued; extending the start deadline.",
-                file=sys.stderr,
-            )
-        if terminal_seen:
-            raise ArtifactTransportError(f"S3-compatible stage ended without marker: {stage}")
-        if probe_state == PROBE_TERMINAL:
-            terminal_seen = True
-        time.sleep(poll_interval)

@@ -10,12 +10,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from coinjoin_pipeline.storage.s3 import (
-    PROBE_QUEUED,
-    PROBE_RUNNING,
-    PROBE_TERMINAL,
-    PROBE_UNKNOWN,
-)
+from coinjoin_pipeline.execution.probes import PROBE_QUEUED, PROBE_RUNNING, PROBE_TERMINAL, PROBE_UNKNOWN
 
 from .defaults import (
     PBS_ACTIVE_STATES,

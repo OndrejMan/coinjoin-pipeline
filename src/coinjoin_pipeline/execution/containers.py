@@ -17,6 +17,7 @@ from typing import Mapping
 
 from exporters.analysis_artifact import ARTIFACT_NAME
 from exporters.artifact_paths import BASELINE_FILE, COINJOIN_ANALYSIS_DIR, EMULATOR_DIR, blocksci_analysis_dir
+from exporters.common import tree_sha256
 from exporters.image_provenance import inspect_image
 
 from coinjoin_pipeline.configuration import PipelineConfiguration
@@ -36,12 +37,9 @@ from coinjoin_pipeline.execution.runtime import (
     compose_command,
     container_runtime,
 )
+from coinjoin_pipeline.execution.s3_staging import ensure_local_exporters
 from coinjoin_pipeline.images import validate_image
-from coinjoin_pipeline.storage.s3 import (
-    ArtifactTransportError,
-    ensure_local_exporters,
-    tree_sha256,
-)
+from coinjoin_pipeline.storage.s3 import ArtifactTransportError
 
 from . import settings
 

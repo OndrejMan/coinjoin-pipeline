@@ -43,12 +43,7 @@ from coinjoin_pipeline.execution.pbs.templates_local import (
     render_mappings_pbs,
 )
 from coinjoin_pipeline.execution.pbs.validation import PBSError, require_qsub, require_storage_path
-from coinjoin_pipeline.storage.s3 import (  # noqa: E402
-    PROBE_QUEUED,
-    PROBE_RUNNING,
-    PROBE_TERMINAL,
-    PROBE_UNKNOWN,
-)
+from coinjoin_pipeline.execution.probes import PROBE_QUEUED, PROBE_RUNNING, PROBE_TERMINAL, PROBE_UNKNOWN
 
 
 class PBSJobProbeTest(unittest.TestCase):

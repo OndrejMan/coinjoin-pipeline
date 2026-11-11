@@ -44,7 +44,7 @@ def test_in_cluster_preflight_checks_every_required_exporter():
     import json
 
     from coinjoin_pipeline.execution.kubernetes import render_s3_emulation_resources
-    from coinjoin_pipeline.storage.s3 import REQUIRED_EXPORTERS
+    from coinjoin_pipeline.paths import REQUIRED_EXPORTERS
 
     resources = json.loads(
         render_s3_emulation_resources(

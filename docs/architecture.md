@@ -66,7 +66,9 @@ runs the tag.
 | PBS submit, qdel, state probes; S3 job scripts | `execution/pbs/submission.py`, `templates_s3.py`, `analysis_modes.py`, `scripts.py`, `templates/`, `commands.py` |
 | PBS resources and image references | `execution/pbs/defaults.py` (`DEFAULT_RESOURCES`), `execution/pbs_settings.py` |
 | Scenario lookup and host/container scenario paths | `execution/scenarios.py` |
-| S3 access for run, watch/download/cleanup consumers | `storage/s3.py` |
+| S3 targets, validation, listing and exact-key existence for run, watch/download/cleanup consumers | `storage/s3.py` |
+| Frontend marker wait and the remote-job probe states it decides by | `execution/s3_markers.py` (`wait_for_s3_marker`), `execution/probes.py` |
+| Required exporter files and their staging into a run prefix | `paths.py` (`REQUIRED_EXPORTERS`), `execution/s3_staging.py` |
 | s5cmd calls shared by the frontend, the mainnet worker and the Python PBS stages | `storage/s5client.py` |
 | Every S3 PBS job (shell only writes and starts it) | `execution/pbs/stage_runtime.py` |
 | Container workload shared by Docker and Apptainer | `pipeline/exporters/worker.py` |

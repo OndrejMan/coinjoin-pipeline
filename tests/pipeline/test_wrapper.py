@@ -68,7 +68,7 @@ from coinjoin_pipeline.storage.s3 import ArtifactTransportError
 
 
 def _write_required_exporters(root: Path) -> None:
-    from coinjoin_pipeline.storage.s3 import REQUIRED_EXPORTERS
+    from coinjoin_pipeline.paths import REQUIRED_EXPORTERS
 
     for relative in REQUIRED_EXPORTERS:
         target = root / relative
