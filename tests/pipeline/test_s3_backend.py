@@ -1190,7 +1190,8 @@ def test_persistent_manifest_records_requested_cpu_and_memory(tmp_path) -> None:
     manifest = json.loads((index_dir / "manifest.json").read_text())
     assert manifest["index_dir"] == str(index_dir)
     assert manifest["pbs_resources"] == {"ncpus": 3, "mem": "1536mb"}
-    assert manifest["published_at"].endswith("Z")
+    assert manifest["published_at"].endswith("+00:00")
+    assert (manifest["schema_version"], manifest["storage"]) == ("1.1", "persistent")
     assert manifest["exported_max_block"] == 42
     stage.storage.copy.assert_called_once_with(
         index_dir / "manifest.json", "s3://bucket/runs/parse-example/blocksci-index-manifest.json"

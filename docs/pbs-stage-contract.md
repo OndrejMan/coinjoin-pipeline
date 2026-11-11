@@ -161,10 +161,16 @@ NFS and BeeGFS without `flock`). Each entry holds the PBS job ID and an expiry
 half its walltime for the lock, then fails. A copy is complete when it has no
 `.writing` marker and its files match `files.txt`; writers set `.writing` until
 they record `config.json`, `manifest.json` (the S3 cache fields an update reads,
-with `"storage": "persistent"`) and `files.txt`. `parse` refuses a directory
+with `"storage": "persistent"`, `index_dir` and `published_at`) and `files.txt`.
+`index_store.index_manifest` builds the schema-1.1 fields for every writer (the
+S3 cache, `parse`/`update` of a persistent index and the mainnet-sync BlockSci
+job) and `IndexStore.publish` records them, so the index jobs accept an index
+that mainnet-sync wrote and the reverse. `parse` refuses a directory
 with a manifest and a prefix that already holds a backup. An `update` first
-reconciles: a missing or incomplete working copy is replaced by the backup,
-streamed from S3, checked against its SHA-256 and then against `files.txt`.
+reconciles: a missing or incomplete working copy is replaced by the backup.
+The old copy is deleted first, the archive is extracted into `.restore-<job>`
+inside the index directory while its SHA-256 is checked, and only then moved
+into place and checked against `files.txt`.
 Readers never restore; they fail and name the update that does.
 
 The prefix holds one backup: `<index_backup_uri>/blocksci_index.tar.zst`
@@ -175,9 +181,13 @@ until it finishes. The archive is streamed `tar | zstd` into `s5cmd pipe` (an
 s5cmd without `pipe` stages it in scratch) in 256 MiB parts, since a stream cannot
 grow its parts and S3 allows 10,000 of them; its S3 size must match the uploaded
 stream before the manifest is written: the index manifest plus `archive_uri`,
-`archive_sha256`, `archive_size`, `upload_validation` and `uploaded_at`. The
-archive is not read back. A restore reads that manifest and verifies the
-SHA-256 while extracting. The job records the index manifest as `blocksci-index-backup.json`
+`archive_sha256`, `archive_size`, `members`, `member_bytes`, `upload_validation`
+and `uploaded_at`. The archive is not read back. A restore reads that manifest,
+verifies the SHA-256 while extracting and accepts only regular files and
+directories below `members`. `S5Client.replace_backup` and `restore_backup`
+(`storage/s5client.py`) are the only writer and reader of this format; the
+mainnet checkpoint job writes its index and Core backups with the same calls, so
+a backup of either job restores in the other. The job records the index manifest as `blocksci-index-backup.json`
 in its run. Neither `parse` nor
 `update` writes a backup. Analyses copy the index manifest next to their outputs as
 `blocksci-index-manifest.json`. `tests/test-persistent-index-local.sh` runs the

@@ -6,9 +6,11 @@ The working copy (multijob scratch or /storage) holds parsed/, config.json,
 manifest.json and files.txt (every other file with its size). It is complete when it
 has no .writing marker and its files match files.txt.
 
-The backup prefix holds one backup: blocksci_index.tar.zst and manifest.json, written
-last. A new backup deletes the old one first, so S3 never holds two copies; until its
-manifest exists there is no valid backup.
+The backup prefix holds one backup in the format of s5client.py (replace_backup,
+restore_backup): blocksci_index.tar.zst, its .sha256 and manifest.json, written last.
+A new backup deletes the old one first, so S3 never holds two copies; until its
+manifest exists there is no valid backup. The mainnet checkpoint job writes the same
+backup, so either job's backup restores in the other.
 
 Lock: one writer or many readers, as directories under <index>/.lock. Entries are built
 aside and renamed into place, which is atomic on NFS and BeeGFS without flock. Each
@@ -22,16 +24,17 @@ from __future__ import annotations
 import json
 import os
 import random
-import re
 import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Iterable, Mapping
 
 if TYPE_CHECKING:
     from coinjoin_pipeline.storage.s5client import S5Client
 
+# Schema of the manifest every parsed index records, an S3 cache and a persistent index alike.
+MANIFEST_SCHEMA = "1.1"
 ARCHIVE = "blocksci_index.tar.zst"
 # What a backup holds; everything else in the working copy is lock or job state.
 MEMBERS = ("config.json", "files.txt", "manifest.json", "parsed")
@@ -43,6 +46,31 @@ class IndexStoreError(RuntimeError):
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def index_manifest(
+    run_id: str,
+    blocksci_image: str,
+    source_kind: str,
+    network: str,
+    exported_max_block: int,
+    extra: Mapping[str, object] | None = None,
+) -> dict:
+    """What a parse or update records about the index it produced.
+
+    An update resumes only an index of the same image, source kind and network, from
+    exported_max_block. ``extra`` holds what one kind of index adds: the archive of an
+    S3 cache, the block hash of a verified chain, the resources of the job.
+    """
+    return {
+        "schema_version": MANIFEST_SCHEMA,
+        "run_id": run_id,
+        "blocksci_image": blocksci_image,
+        "source_kind": source_kind,
+        "network": network,
+        "exported_max_block": exported_max_block,
+        **(extra or {}),
+    }
 
 
 def directory_usage(root: Path) -> dict[str, int]:
@@ -209,9 +237,14 @@ class IndexStore:
         self.path.mkdir(parents=True, exist_ok=True)
         (self.path / ".writing").touch()
 
-    def publish(self, config: Path, manifest: dict) -> None:
-        """Record a finished parse or update: config, file list and manifest, then completeness."""
-        shutil.copyfile(config, self.path / "config.json")
+    def publish(self, config: Path, manifest: dict) -> dict:
+        """Record a finished parse or update: config, file list and manifest, then completeness.
+
+        The manifest gains where and when the index was recorded; it is returned as written.
+        """
+        manifest = {**manifest, "storage": "persistent", "index_dir": str(self.path), "published_at": utc_now()}
+        if config.resolve() != (self.path / "config.json").resolve():
+            shutil.copyfile(config, self.path / "config.json")
         for name, content in (
             ("files.txt", inventory(self.path)),
             ("manifest.json", json.dumps(manifest, indent=2) + "\n"),
@@ -220,6 +253,7 @@ class IndexStore:
             temporary.write_text(content)
             os.replace(temporary, self.path / name)
         (self.path / ".writing").unlink(missing_ok=True)
+        return manifest
 
     def link_into_run(self, run_work: Path) -> None:
         """The run-local config names the shared parsed/ through a symlink the job binds at the same path."""
@@ -257,47 +291,41 @@ class IndexStore:
         )
 
     def backup(self, threads: int) -> None:
-        """Replace the S3 backup with the working copy; run under at least the shared lock.
-
-        Only the object size is checked after the upload; restore verifies the SHA-256.
-        """
+        """Replace the S3 backup with the working copy; run under at least the shared lock."""
         storage = self._storage()
-        archive = f"{self.backup_uri}/{ARCHIVE}"
         print(f"[index] replacing the S3 backup in {self.backup_uri} (height {self.height()})", flush=True)
-        storage.remove(f"{self.backup_uri}/manifest.json")
-        storage.remove(archive, f"{archive}.sha256")
-        checksum, size = storage.upload_archive(self.path, MEMBERS, archive, threads)
-        storage.copy_text(f"{checksum}  {ARCHIVE}\n", f"{archive}.sha256")
-        listed = storage.object_size(archive)
-        if isinstance(listed, bool) or listed != size:
-            raise IndexStoreError("Index backup S3 size/key mismatch")
-        manifest = {
-            **self.manifest(),
-            "archive_uri": archive,
-            "archive_sha256": checksum,
-            "archive_size": size,
-            "upload_validation": "size-only",
-            "uploaded_at": utc_now(),
-        }
-        storage.copy_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", f"{self.backup_uri}/manifest.json")
+        storage.replace_backup(self.path, MEMBERS, self.backup_uri, ARCHIVE, self.manifest(), threads)
         print("[index] S3 backup complete", flush=True)
 
-    def restore(self) -> None:
-        """Under the writer lock: replace the working copy with the S3 backup."""
-        storage = self._storage()
-        manifest = storage.cat_json(f"{self.backup_uri}/manifest.json")
-        archive, checksum = manifest.get("archive_uri"), manifest.get("archive_sha256")
-        if archive != f"{self.backup_uri}/{ARCHIVE}" or not re.fullmatch(r"[0-9a-f]{64}", str(checksum)):
-            raise IndexStoreError("Invalid index backup manifest")
-        print(f"[index] restoring the working copy from {archive}", flush=True)
-        self.begin_write()
-        for name in ("parsed", "config.json", "files.txt", "manifest.json"):
+    def discard(self) -> None:
+        """Remove the working copy's data; the lock and the .writing marker stay."""
+        for name in MEMBERS:
             path = self.path / name
             if path.is_dir() and not path.is_symlink():
                 shutil.rmtree(path)
             elif path.exists() or path.is_symlink():
                 path.unlink()
-        storage.restore_archive(archive, self.path, str(checksum))
+
+    def restore(self) -> None:
+        """Under the writer lock: replace the working copy with the S3 backup.
+
+        The old copy goes first, so the index never needs its space twice. The backup is
+        extracted beside the data and moved in only after its SHA-256 was verified.
+        """
+        storage = self._storage()
+        print(f"[index] restoring the working copy from {self.backup_uri}", flush=True)
+        self.begin_write()
+        self.discard()
+        # A killed restore leaves its staging directory; the writer lock says none is in use.
+        for leftover in self.path.glob(".restore-*"):
+            shutil.rmtree(leftover, ignore_errors=True)
+        staging = self.path / f".restore-{self.job_id}"
+        try:
+            storage.restore_backup(f"{self.backup_uri}/manifest.json", staging)
+            for entry in staging.iterdir():
+                entry.rename(self.path / entry.name)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
         (self.path / ".writing").unlink()
         if not self.complete():
             raise IndexStoreError("[index] the restored copy does not match its file list")

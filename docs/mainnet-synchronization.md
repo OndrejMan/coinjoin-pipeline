@@ -210,8 +210,10 @@ Existující index lze navázat jen se stejným zdrojem bloků a image; cizí in
 se automaticky nepřekonfiguruje.
 
 Každý prefix drží jedinou zálohu: archiv s pevným jménem
-(`<backup-uri>/checkpoint.tar.zst`, `<index-backup-uri>/blocksci_index.tar.zst`)
-a `manifest.json`. Nová záloha nejdřív smaže manifest a starý archiv, takže S3
+(`<backup-uri>/checkpoint.tar.zst`, `<index-backup-uri>/blocksci_index.tar.zst`),
+jeho `.sha256` a `manifest.json`. Formát zapisuje a čte jen
+`S5Client.replace_backup` a `restore_backup` (`storage/s5client.py`), stejně jako
+u jobu `--blocksci-task backup`. Nová záloha nejdřív smaže manifest a starý archiv, takže S3
 nikdy nedrží dvě kopie a do konce uploadu žádná platná záloha neexistuje.
 Archiv se streamuje do S3 se SHA-256 spočítaným během odesílání; po uploadu se
 ověří jen velikost objektu a nakonec se zapíše manifest

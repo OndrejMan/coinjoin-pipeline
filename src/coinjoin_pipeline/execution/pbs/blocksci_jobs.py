@@ -19,13 +19,12 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import cast
 
-from coinjoin_pipeline.execution.pbs.index_store import IndexStore, usage_report
+from coinjoin_pipeline.execution.pbs.index_store import MANIFEST_SCHEMA, IndexStore, index_manifest, usage_report
 from coinjoin_pipeline.execution.pbs.stage import CONTAINER_RUNS_ROOT, Stage, StageFailure
 from coinjoin_pipeline.execution.pbs.stage_settings import (
     BlocksciAnalysisSettings,
@@ -83,17 +82,14 @@ def publish_index(stage: Stage, source_kind: str, network: str, max_block: int, 
     sidecar = cache / f"{INDEX_ARCHIVE}.sha256"
     sidecar.write_text(f"{checksum}  {INDEX_ARCHIVE}\n")
     stage.storage.copy(sidecar, f"{archive}.sha256")
-    manifest = {
-        "schema_version": "1.1",
-        "run_id": stage.run_id,
-        "blocksci_image": stage.settings["image_name"],
-        "source_kind": source_kind,
-        "network": network,
-        "exported_max_block": max_block,
-        **extra,
-        "archive": INDEX_ARCHIVE,
-        "archive_sha256": checksum,
-    }
+    manifest = index_manifest(
+        stage.run_id,
+        stage.settings["image_name"],
+        source_kind,
+        network,
+        max_block,
+        {**extra, "archive": INDEX_ARCHIVE, "archive_sha256": checksum},
+    )
     (cache / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     stage.storage.copy(cache / "manifest.json", f"{prefix}/manifest.json")
 
@@ -182,7 +178,7 @@ def set_max_block(stage: Stage, max_block: int) -> None:
 
 def check_manifest(manifest: dict, label: str, image_name: str, run_id: str | None = None) -> None:
     """Reject a cache or index manifest of another schema, run or BlockSci image."""
-    if manifest.get("schema_version") != "1.1":
+    if manifest.get("schema_version") != MANIFEST_SCHEMA:
         raise StageFailure(f"{label} manifest has an unsupported schema")
     if run_id is not None and manifest.get("run_id") != run_id:
         raise StageFailure(f"{label} run ID does not match {run_id}")
@@ -343,19 +339,14 @@ def publish_persistent(
 ) -> None:
     """Record the parsed index in place, publish its height to the run and unlock."""
     stage.log(f"recording persistent index at height {max_block}")
-    manifest = {
-        "schema_version": "1.1",
-        "run_id": stage.run_id,
-        "blocksci_image": stage.settings["image_name"],
-        "source_kind": settings["source"]["kind"],
-        "network": settings["source"]["network"],
-        "exported_max_block": max_block,
-        **extra,
-        "storage": "persistent",
-        "index_dir": str(index.path),
-        "pbs_resources": settings["pbs_resources"],
-        "published_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    }
+    manifest = index_manifest(
+        stage.run_id,
+        stage.settings["image_name"],
+        settings["source"]["kind"],
+        settings["source"]["network"],
+        max_block,
+        {**extra, "pbs_resources": settings["pbs_resources"]},
+    )
     index.publish(stage.work / "blocksci_data/config.json", manifest)
     # The lab cannot see the multijob scratch; it reads the index height from here.
     stage.storage.copy(index.path / "manifest.json", f"{stage.run_prefix}/blocksci-index-manifest.json")
@@ -511,12 +502,8 @@ def blocksci_parse(stage: Stage) -> None:
         index = open_index(stage, settings["persistent"], writer=True)
         if (index.path / "manifest.json").exists() or index.backup_available():
             raise StageFailure(f"[index] an index already exists for {index.path}; use --blocksci-task update")
-        for name in ("parsed", "config.json", "files.txt"):
-            path = index.path / name
-            if path.is_dir():
-                shutil.rmtree(path)
-            elif path.exists():
-                path.unlink()
+        # What a failed parse left; a recorded index was refused above.
+        index.discard()
         index.begin_write()
         index.link_into_run(stage.work)
         index_binds = index.binds("rw")

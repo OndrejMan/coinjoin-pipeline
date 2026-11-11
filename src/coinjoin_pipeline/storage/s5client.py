@@ -2,6 +2,10 @@
 
 Standard library only and Python 3.8 syntax: a PBS job copies this file next to its
 worker script and runs it with the node's ``python3``.
+
+It also owns the format of a single backup (the persistent index, the Core checkpoint):
+one archive, its ``.sha256`` and ``manifest.json`` under a prefix. ``replace_backup``
+writes it and ``restore_backup`` reads it, so the two cannot drift apart.
 """
 
 from __future__ import annotations
@@ -10,9 +14,14 @@ import contextlib
 import hashlib
 import json
 import os
+import re
+import shutil
 import subprocess
+import tarfile
 import tempfile
 import threading
+from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import IO, Iterator, Mapping, Sequence
 
@@ -21,6 +30,7 @@ CHUNK = 8 * 1024 * 1024
 # s5cmd cannot size the parts of a stream and S3 allows 10,000 of them: its default of
 # 50 MiB ends at 488 GiB, within reach of the archived index of the whole chain.
 PIPE_PART_SIZE_MIB = 256
+SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
 class S5Error(RuntimeError):
@@ -45,6 +55,29 @@ def stream_sha256(stream: IO[bytes]) -> str:
     for chunk in iter(lambda: stream.read(CHUNK), b""):
         digest.update(chunk)
     return digest.hexdigest()
+
+
+def tree_bytes(root: Path, members: Sequence[str]) -> dict[str, int]:
+    """Apparent size of each backup member, as tar reads it; links are not followed."""
+    sizes = {}
+    for member in members:
+        path = root / member
+        if path.is_file():
+            sizes[member] = path.stat().st_size
+            continue
+        total = 0
+        for directory, _, files in os.walk(path):
+            total += sum(os.lstat(os.path.join(directory, name)).st_size for name in files)
+        sizes[member] = total
+    return sizes
+
+
+def new_staging(destination: Path) -> Path:
+    """An empty directory next to destination, which must not exist yet."""
+    if destination.exists():
+        raise ValueError("Restore destination must not exist")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=destination.name + ".restoring-", dir=destination.parent))
 
 
 @contextlib.contextmanager
@@ -260,3 +293,98 @@ class S5Client:
             self.copy(staged, uri)
         finally:
             Path(staged).unlink(missing_ok=True)
+
+    def require_size(self, uri: str, expected: int) -> None:
+        """The object is listed under exactly this key with this size; it is not read back."""
+        listed = self.object_size(uri)
+        if isinstance(listed, bool) or listed != expected:
+            raise S5Error("S3 size/key mismatch: " + uri)
+
+    def replace_backup(
+        self, root: Path, members: Sequence[str], prefix: str, name: str, metadata: Mapping[str, object], threads: int
+    ) -> dict:
+        """Replace the single backup under prefix with ``tar -C root members | zstd``; its manifest.
+
+        S3 never holds two copies: the manifest and the old archive go first, so until the
+        new manifest is written there is no valid backup. Only the object size is checked
+        after the upload; ``restore_backup`` verifies the SHA-256.
+        """
+        prefix = prefix.rstrip("/")
+        archive, manifest_uri = f"{prefix}/{name}", f"{prefix}/manifest.json"
+        for member in members:
+            path = root / member
+            if not path.exists() or path.is_symlink():
+                raise S5Error(f"Missing or linked backup root: {path}")
+        member_bytes = tree_bytes(root, members)
+        for stale in (manifest_uri, archive, f"{archive}.sha256"):
+            self.remove(stale)
+        checksum, size = self.upload_archive(root, members, archive, threads)
+        self.copy_text(f"{checksum}  {name}\n", f"{archive}.sha256")
+        self.require_size(archive, size)
+        manifest = {
+            **metadata,
+            "archive_uri": archive,
+            "archive_sha256": checksum,
+            "archive_size": size,
+            "members": list(members),
+            "member_bytes": member_bytes,
+            "upload_validation": "size-only",
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self.copy_text(json.dumps(manifest, indent=2) + "\n", manifest_uri)
+        return manifest
+
+    def restore_backup(self, manifest_uri: str, destination: Path) -> dict:
+        """Restore the backup that manifest_uri describes into destination, which must not exist yet.
+
+        The archive is hashed while it is extracted, and only regular files and directories
+        below the manifest's members are accepted. destination appears once all of it was
+        verified; a failure leaves nothing behind. Returns the manifest.
+        """
+        manifest = self.cat_json(manifest_uri)
+        archive, expected = manifest.get("archive_uri"), manifest.get("archive_sha256")
+        members = manifest.get("members")
+        if (
+            not isinstance(archive, str)
+            or not archive.startswith(manifest_uri.rsplit("/", 1)[0] + "/")
+            or not isinstance(expected, str)
+            or not SHA256.fullmatch(expected)
+        ):
+            raise S5Error("Invalid backup reference: " + manifest_uri)
+        if (
+            not isinstance(members, list)
+            or not members
+            or any(not isinstance(name, str) or name.startswith("/") or ".." in Path(name).parts for name in members)
+        ):
+            raise S5Error("Invalid backup member roots: " + manifest_uri)
+        roots = [Path(name) for name in members]
+        staging = new_staging(destination)
+        try:
+            with self.unpacked(archive, expected) as archive_stream:
+                with tarfile.open(fileobj=archive_stream, mode="r|") as stream:
+                    for member in stream:
+                        relative = Path(member.name)
+                        if (
+                            relative.is_absolute()
+                            or ".." in relative.parts
+                            or not any(relative == root or root in relative.parents for root in roots)
+                        ):
+                            raise S5Error("The backup contains a path outside its member roots")
+                        output = staging / relative
+                        if member.isdir():
+                            output.mkdir(parents=True, exist_ok=True)
+                        elif member.isfile():
+                            output.parent.mkdir(parents=True, exist_ok=True)
+                            with pipe(stream.extractfile(member)) as handle, output.open("wb") as target:
+                                shutil.copyfileobj(handle, target)
+                            # Archive markers compare nanosecond mtimes; float tar timestamps lose precision.
+                            mtime_ns = int(Decimal(member.pax_headers.get("mtime", str(member.mtime))) * 1_000_000_000)
+                            os.utime(output, ns=(mtime_ns, mtime_ns))
+                        else:
+                            raise S5Error("The backup contains a link or special file")
+            if any(not (staging / root).exists() for root in roots):
+                raise S5Error("The backup lacks a declared member")
+            staging.rename(destination)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+        return manifest

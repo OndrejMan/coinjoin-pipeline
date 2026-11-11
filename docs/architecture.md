@@ -60,7 +60,8 @@ runs the tag.
 | Kubernetes resource generation and diagnosis | `execution/kubernetes.py` |
 | Graph definitions and dependency queries | `execution/stages.py`, `stage_executor.py` |
 | S3 index archive transport shared by emulation caches, persistent backups and mainnet checkpoints | `storage/s5client.py` (`upload_archive`, `restore_archive`) |
-| Persistent index lock, completeness, backup and restore | `execution/pbs/index_store.py` |
+| Format of a single backup (persistent index, Core checkpoint): archive, `.sha256`, manifest written last | `storage/s5client.py` (`replace_backup`, `restore_backup`) |
+| Persistent index lock, completeness, backup and restore; the index manifest every parse and update records | `execution/pbs/index_store.py` (`IndexStore`, `index_manifest`) |
 | Run-directory layout (every run-relative path, marker sets, report inputs) | `pipeline/exporters/artifact_paths.py` |
 | Command locks and S3 PBS overlap detection | `execution/locks.py` |
 | PBS submit, qdel, state probes; S3 job scripts | `execution/pbs/submission.py`, `templates_s3.py`, `analysis_modes.py`, `scripts.py`, `templates/`, `commands.py` |

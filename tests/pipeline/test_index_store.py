@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from coinjoin_pipeline.execution.pbs.index_store import IndexStore, IndexStoreError
+from coinjoin_pipeline.execution.pbs.index_store import IndexStore, IndexStoreError, index_manifest
 from coinjoin_pipeline.execution.pbs.blocksci_jobs import (
     attach_dumplings,
     dumplings_in_place,
@@ -102,6 +102,22 @@ def test_published_index_is_complete(tmp_path):
     assert block(tmp_path) == "blocks-100"
 
 
+def test_a_published_manifest_says_where_and_when_the_index_was_recorded(tmp_path):
+    index = store(tmp_path)
+    index.begin_write()
+    (tmp_path / "index/config.json").write_text("{}")
+
+    # The mainnet parser writes its config straight into the index; nothing is copied onto itself.
+    recorded = index.publish(
+        tmp_path / "index/config.json", index_manifest("run-1", "docker://blocksci", "external-bitcoin", "bitcoin", 7)
+    )
+
+    assert recorded == index.manifest() and index.complete()
+    assert recorded["schema_version"] == "1.1" and recorded["exported_max_block"] == 7
+    assert (recorded["storage"], recorded["index_dir"]) == ("persistent", str(tmp_path / "index"))
+    assert recorded["published_at"].endswith("+00:00")
+
+
 def test_backup_writes_one_archive_with_its_manifest(tmp_path):
     parse_index(tmp_path)
 
@@ -189,10 +205,36 @@ def test_the_upload_parts_can_hold_an_archive_of_the_whole_chain(tmp_path):
 def test_a_remote_size_mismatch_publishes_no_manifest(tmp_path):
     parse_index(tmp_path)
 
-    with pytest.raises(IndexStoreError, match="size/key mismatch"):
+    with pytest.raises(S5Error, match="size/key mismatch"):
         backup(tmp_path, env={"FAKE_S5CMD_LS_SIZE_DELTA": "1", "FAKE_S5CMD_FORBID_ARCHIVE_CAT": "1"})
 
     assert not (s3(tmp_path) / "manifest.json").exists()
+
+
+def test_the_backup_names_its_members_for_the_mainnet_restore_job(tmp_path):
+    parse_index(tmp_path)
+    backup(tmp_path)
+
+    # mainnet-sync's restore job reads the index backup with the same call.
+    manifest = store(tmp_path).storage.restore_backup(BACKUP + "/manifest.json", tmp_path / "copy")
+
+    assert manifest["members"] == ["config.json", "files.txt", "manifest.json", "parsed"]
+    assert set(manifest["member_bytes"]) == set(manifest["members"])
+    assert (tmp_path / "copy/parsed/chain/block.dat").read_text() == "blocks-100"
+    assert not list(tmp_path.glob("copy.restoring-*"))
+
+
+def test_a_killed_restore_leaves_nothing_in_the_restored_index(tmp_path):
+    parse_index(tmp_path)
+    backup(tmp_path)
+    (tmp_path / "index/.writing").touch()
+    (tmp_path / "index/.restore-killed/parsed").mkdir(parents=True)
+    (tmp_path / "index/.restore-killed/parsed/half").write_text("half-extracted")
+
+    restore(tmp_path)
+
+    assert store(tmp_path).complete()
+    assert not list((tmp_path / "index").glob(".restore-*"))
 
 
 def test_a_corrupted_backup_is_refused(tmp_path):

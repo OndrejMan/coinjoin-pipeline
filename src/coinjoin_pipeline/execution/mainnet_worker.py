@@ -18,12 +18,9 @@ import signal
 import socket
 import subprocess
 import sys
-import tarfile
-import tempfile
 import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
-from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
@@ -33,7 +30,7 @@ if TYPE_CHECKING:  # TypeGuard needs Python 3.10; the PBS node only evaluates no
 from coinjoin_pipeline.execution.pbs.index_store import MEMBERS as INDEX_MEMBERS
 from coinjoin_pipeline.execution.pbs.index_store import inventory as index_inventory
 from coinjoin_pipeline.execution.pbs.index_store import usage_report, utc_now
-from coinjoin_pipeline.storage.s5client import S5Client, S5Error, pipe
+from coinjoin_pipeline.storage.s5client import S5Client, S5Error, new_staging
 
 # Core spans methods; cleanup below owns its lifetime rather than a single local with block.
 # pylint: disable=consider-using-with
@@ -110,14 +107,6 @@ def file_sizes(root: Path) -> dict[str, int]:
 
 def megabytes_per_second(size: int, seconds: float) -> float:
     return round(size / 1e6 / max(seconds, 0.001), 1)
-
-
-def new_staging(destination: Path) -> Path:
-    """An empty directory next to destination, which must not exist yet."""
-    if destination.exists():
-        raise ValueError("Restore destination must not exist")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    return Path(tempfile.mkdtemp(prefix=destination.name + ".restoring-", dir=destination.parent))
 
 
 def atomic_json(path: Path, value: object) -> None:
@@ -207,21 +196,6 @@ def resume_signature(index: Path, blocks: Path) -> dict[str, object]:
     }
 
 
-def tree_bytes(root: Path, members: Sequence[str]) -> dict[str, int]:
-    """Apparent size of each backup member, as tar reads it; links are not followed."""
-    sizes = {}
-    for member in members:
-        path = root / member
-        if path.is_file():
-            sizes[member] = path.stat().st_size
-            continue
-        total = 0
-        for directory, _, files in os.walk(path):
-            total += sum(os.lstat(os.path.join(directory, name)).st_size for name in files)
-        sizes[member] = total
-    return sizes
-
-
 def container_bind(path: str | Path, readonly: bool = False) -> list[str]:
     path = Path(path)
     source = path.resolve()
@@ -263,11 +237,6 @@ class Worker:
         path = self.work / "publish.json"
         atomic_json(path, value)
         self.storage.copy(path, uri)
-
-    def verify_remote_size(self, uri: str, expected_size: int) -> None:
-        size = self.storage.object_size(uri, timeout=60)
-        if not is_count(size) or size != expected_size:
-            raise ValueError("Checkpoint S3 size/key mismatch: " + uri)
 
     def progress(
         self,
@@ -511,88 +480,13 @@ class Worker:
         self.run_command(command, "pruning" if prune else "archiver")
 
     def backup(self, root: Path, members: Sequence[str], prefix: str, metadata: JsonObject, name: str) -> str:
-        """Replace the backup under prefix with a tar/zstd stream, hashing locally.
-
-        S3 never holds two copies: the manifest and the old archive go first, so until the
-        new manifest is written there is no valid backup. Only the object size is checked;
-        restore verifies the checksum.
-        """
-        prefix = prefix.rstrip("/")
-        archive = prefix + "/" + name
-        manifest_uri = prefix + "/manifest.json"
-        for member in members:
-            path = root / member
-            if not path.exists() or path.is_symlink():
-                raise ValueError("Missing or linked checkpoint root: " + str(path))
-        member_bytes = tree_bytes(root, members)
-        self.storage.remove(manifest_uri)
-        self.storage.remove(archive)
-        try:
-            checksum, archive_size = self.storage.upload_archive(
-                root, members, archive, self.c["pbs_resources"]["ncpus"]
-            )
-        except S5Error as error:
-            raise RuntimeError("Checkpoint stream failed") from error
-        self.verify_remote_size(archive, archive_size)
-        manifest = {
-            **metadata,
-            "run_id": self.run_id,
-            "archive_uri": archive,
-            "archive_sha256": checksum,
-            "archive_size": archive_size,
-            "members": list(members),
-            "member_bytes": member_bytes,
-            "upload_validation": "size-only",
-            "uploaded_at": utc_now(),
-        }
-        self.publish_json(manifest_uri, manifest)
-        self.uploaded[manifest_uri] = {"archive_size": archive_size, "member_bytes": member_bytes}
+        """Replace the single backup under prefix (s5client.replace_backup); its manifest URI."""
+        manifest = self.storage.replace_backup(
+            root, members, prefix, name, {**metadata, "run_id": self.run_id}, self.c["pbs_resources"]["ncpus"]
+        )
+        manifest_uri = prefix.rstrip("/") + "/manifest.json"
+        self.uploaded[manifest_uri] = {key: manifest[key] for key in ("archive_size", "member_bytes")}
         return manifest_uri
-
-    def restore_checkpoint(self, manifest_uri: str, destination: Path) -> None:
-        """Explicit recovery into a new directory; never overwrite a working copy."""
-        manifest = self.storage.cat_json(manifest_uri)
-        archive, expected = manifest["archive_uri"], manifest["archive_sha256"]
-        if not is_sha256(expected) or not archive.startswith(manifest_uri.rsplit("/", 1)[0] + "/"):
-            raise ValueError("Invalid checkpoint reference")
-        members = manifest["members"]
-        if (
-            not isinstance(members, list)
-            or not members
-            or any(not isinstance(name, str) or name.startswith("/") or ".." in Path(name).parts for name in members)
-        ):
-            raise ValueError("Invalid checkpoint member roots")
-        staging = new_staging(destination)
-        (staging / ".restoring").touch()
-        try:
-            with self.storage.unpacked(archive, expected) as archive_stream:
-                with tarfile.open(fileobj=archive_stream, mode="r|") as stream:
-                    for member in stream:
-                        relative = Path(member.name)
-                        if (
-                            relative.is_absolute()
-                            or ".." in relative.parts
-                            or not any(relative == Path(root) or Path(root) in relative.parents for root in members)
-                        ):
-                            raise ValueError("Checkpoint contains a path outside its member roots")
-                        output = staging / relative
-                        if member.isdir():
-                            output.mkdir(parents=True, exist_ok=True)
-                        elif member.isfile():
-                            output.parent.mkdir(parents=True, exist_ok=True)
-                            with pipe(stream.extractfile(member)) as handle, output.open("wb") as target:
-                                shutil.copyfileobj(handle, target)
-                            # Archive markers compare nanosecond mtimes; float tar timestamps lose precision.
-                            mtime_ns = int(Decimal(member.pax_headers.get("mtime", str(member.mtime))) * 1_000_000_000)
-                            os.utime(output, ns=(mtime_ns, mtime_ns))
-                        else:
-                            raise ValueError("Checkpoint contains a link or special file")
-        except S5Error as error:
-            raise ValueError("Checkpoint restore SHA-256/stream verification failed") from error
-        if any(not (staging / member).exists() for member in members):
-            raise ValueError("Checkpoint is missing a declared member")
-        (staging / ".restoring").unlink()
-        staging.rename(destination)
 
     def publish_dumplings(self, height: int) -> str:
         """Mirror Scanner/ incrementally; manifest.json, written last, makes the copy readable.

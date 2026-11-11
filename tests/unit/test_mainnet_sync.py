@@ -13,7 +13,10 @@ import pytest
 from coinjoin_pipeline.configuration import ConfigurationError, PipelineConfiguration
 from coinjoin_pipeline.context import resolve_configuration
 from coinjoin_pipeline.execution import mainnet_jobs, mainnet_runtime, mainnet_sync, mainnet_worker, s3_markers
+from coinjoin_pipeline.execution.pbs.index_store import IndexStore
 from coinjoin_pipeline.execution.pbs.scripts import embedded_file
+from coinjoin_pipeline.execution.pbs.blocksci_jobs import check_manifest, check_source
+from coinjoin_pipeline.storage.s5client import S5Error
 from coinjoin_pipeline.execution.mainnet_jobs import require_ready
 from coinjoin_pipeline.execution.mainnet_worker import (
     Worker,
@@ -577,7 +580,7 @@ def test_checkpoint_restore_preserves_archive_marker_nanoseconds(worker, tmp_pat
 
     uri = worker.backup(source, ["bitcoin/blocks", "archive-state"], "s3://local/core", {}, "checkpoint.tar.zst")
     restored = tmp_path / "restored"
-    worker.restore_checkpoint(uri, restored)
+    worker.storage.restore_backup(uri, restored)
 
     restored_block = restored / block.relative_to(source)
     restored_marker = json.loads((restored / marker.relative_to(source)).read_text())
@@ -602,18 +605,19 @@ def test_backup_replaces_the_previous_one_without_readback(worker, tmp_path, mon
     assert "uploaded_at" in manifest and "verified_at" not in manifest
     del worker.storage.environment["FAKE_S5CMD_FORBID_ARCHIVE_CAT"]
     destination = tmp_path / "restored"
-    worker.restore_checkpoint(uri, destination)
+    worker.storage.restore_backup(uri, destination)
     assert (destination / "chainstate/state.dat").read_bytes() == b"a consistent Core snapshot"
     worker.run_id = "next-run"
     worker.backup(source, ["chainstate"], "s3://local/core", {"height": 550}, "checkpoint.tar.zst")
     assert sorted(path.name for path in (tmp_path / "s3/local/core").iterdir()) == [
         "checkpoint.tar.zst",
+        "checkpoint.tar.zst.sha256",
         "manifest.json",
     ]
     assert json.loads((tmp_path / "s3/local/core/manifest.json").read_text())["height"] == 550
     # A failed upload leaves no valid backup until the next run.
     worker.storage.environment["FAKE_S5CMD_LS_SIZE_DELTA"] = "1"
-    with pytest.raises(ValueError, match="size/key mismatch"):
+    with pytest.raises(S5Error, match="size/key mismatch"):
         worker.backup(source, ["chainstate"], "s3://local/core", {"height": 600}, "checkpoint.tar.zst")
     assert not (tmp_path / "s3/local/core/manifest.json").exists()
 
@@ -673,8 +677,8 @@ def test_restore_still_checks_stream_checksum(worker, tmp_path):
     manifest["archive_sha256"] = "0" * 64
     atomic_json(manifest_path, manifest)
     destination = tmp_path / "restored"
-    with pytest.raises(ValueError, match="SHA-256/stream verification failed"):
-        worker.restore_checkpoint(uri, destination)
+    with pytest.raises(S5Error, match="does not match its SHA-256"):
+        worker.storage.restore_backup(uri, destination)
     assert not destination.exists()
 
 
@@ -691,8 +695,8 @@ def test_backup_metadata_must_match_key_and_integer_size(worker, monkeypatch, me
     monkeypatch.setattr(
         worker.storage, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, json.dumps(metadata))
     )
-    with pytest.raises(ValueError, match="size/key mismatch"):
-        worker.verify_remote_size("s3://local/archive", 1)
+    with pytest.raises(S5Error, match="size/key mismatch"):
+        worker.storage.require_size("s3://local/archive", 1)
 
 
 HEIGHT, BLOCK_HASH = 500000, "a" * 64
@@ -964,6 +968,13 @@ def test_blocksci_job_completes_the_index_without_backing_it_up(worker, tmp_path
     synchronize(worker, "restore", "producer", "blocksci")
     assert not (worker.index / ".writing").exists()
     assert (worker.index / "files.txt").read_text() == mainnet_worker.index_inventory(worker.index)
+    # The index jobs (update, script, notebook) accept the manifest this job records.
+    manifest = json.loads((worker.index / "manifest.json").read_text())
+    check_manifest(manifest, "Persistent BlockSci index", worker.c["blocksci_image"], worker.run_id)
+    check_source(manifest, "external-bitcoin", worker.network)
+    assert (manifest["storage"], manifest["index_dir"]) == ("persistent", str(worker.index))
+    assert manifest["exported_max_block"] == HEIGHT and manifest["source_dir"] == str(worker.core_dir)
+    assert set(mainnet_worker.SIGNATURE_KEYS) <= set(manifest)
     progress = json.loads((worker.run / "blocksci.json").read_text())
     assert (progress["phase"], progress["state"]) == ("indexed", "done")
     assert not (tmp_path / "s3/local/index/manifest.json").exists()
@@ -994,7 +1005,7 @@ def test_local_four_job_chain_backs_up_the_post_prune_core(worker, tmp_path, mon
         manifest = json.loads((tmp_path / "s3" / uri.removeprefix("s3://")).read_text())
         assert storage["s3"][key] == manifest["archive_size"] > 0
     restored = tmp_path / "recovered-core"
-    worker.restore_checkpoint(done["core_checkpoint"], restored)
+    worker.storage.restore_backup(done["core_checkpoint"], restored)
     assert not (restored / "bitcoin/blocks/blk00000.dat").exists()
     assert (restored / "bitcoin/blocks/blk00001.dat").exists()
     assert (restored / "bitcoin/chainstate/state.dat").read_text() == "verified chainstate"
@@ -1027,12 +1038,30 @@ def test_restore_job_refills_an_emptied_dataset_for_the_next_synchronization(wor
 
 
 @pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
+def test_an_index_job_restores_the_checkpoint_jobs_index_backup(worker, monkeypatch):
+    fake_components(worker, monkeypatch, [])
+    synchronize(worker, "restore", "producer", "blocksci", "checkpoint")
+    index_files = (worker.index / "files.txt").read_text()
+    # An update died midway: its marker makes the working copy incomplete.
+    (worker.index / ".writing").touch()
+
+    index = IndexStore(str(worker.index), worker.c["index_backup_uri"], storage=worker.storage, job_id="update")
+    index.lock_exclusive()
+    index.reconcile()
+    index.unlock()
+
+    assert index.complete() and (worker.index / "files.txt").read_text() == index_files
+
+
+@pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
 def test_restore_job_leaves_a_dataset_that_is_not_empty(worker, monkeypatch):
     events = []
     fake_components(worker, monkeypatch, events)
     synchronize(worker, "restore", "producer", "blocksci", "checkpoint")
     shutil.rmtree(worker.index)
-    monkeypatch.setattr(worker, "restore_checkpoint", lambda *args: pytest.fail("a partial dataset is never mixed"))
+    monkeypatch.setattr(
+        worker.storage, "restore_backup", lambda *args: pytest.fail("a partial dataset is never mixed")
+    )
     synchronize(worker, "restore")
     assert json.loads((worker.run / "restore.json").read_text())["action"] == "skipped-not-empty"
     worker.stage = "producer"

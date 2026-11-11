@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> None:
     worker = Worker(json.loads(settings.read_text(encoding="utf-8")), settings.parent)
     # Explicit recovery: restore <manifest> <new directory>; the restore job takes no arguments.
     if args[1] == "restore" and len(args) == 4:
-        worker.restore_checkpoint(args[2], Path(args[3]))
+        worker.storage.restore_backup(args[2], Path(args[3]))
         return
     if args[1] == "restore-dumplings":
         worker.restore_dumplings(args[2], Path(args[3]))

@@ -40,8 +40,7 @@ from coinjoin_pipeline.execution.mainnet_worker import (
 )
 from coinjoin_pipeline.execution.pbs.index_store import ARCHIVE as INDEX_ARCHIVE
 from coinjoin_pipeline.execution.pbs.index_store import MEMBERS as INDEX_MEMBERS
-from coinjoin_pipeline.execution.pbs.index_store import inventory as index_inventory
-from coinjoin_pipeline.execution.pbs.index_store import utc_now
+from coinjoin_pipeline.execution.pbs.index_store import IndexStore, index_manifest, utc_now
 from coinjoin_pipeline.storage.s5client import S5Error, stream_sha256
 
 
@@ -179,7 +178,7 @@ def restore(worker: Worker) -> None:
         parts = {
             "core": measured(
                 "core",
-                lambda: worker.restore_checkpoint(backups["core"], staging / "core"),
+                lambda: worker.storage.restore_backup(backups["core"], staging / "core"),
                 core["archive_size"],
                 staging / "core",
             ),
@@ -191,7 +190,7 @@ def restore(worker: Worker) -> None:
             ),
             "index": measured(
                 "index",
-                lambda: worker.restore_checkpoint(backups["index"], index_staging / "index"),
+                lambda: worker.storage.restore_backup(backups["index"], index_staging / "index"),
                 index["archive_size"],
                 index_staging / "index",
             ),
@@ -445,25 +444,17 @@ def blocksci(worker: Worker) -> None:
         "blocksci-verify",
     )
     verified = read_json(output)
-    manifest = {
-        "schema_version": "1.1",
-        "storage": "persistent",
-        "source_kind": "external-bitcoin",
-        "network": worker.network,
-        "run_id": worker.run_id,
-        "source_dir": str(worker.core_dir),
-        "index_dir": str(worker.index),
-        "blocksci_image": image,
-        "pbs_resources": worker.c["pbs_resources"],
-        **signature,
-        "published_at": utc_now(),
-        **verified,
-    }
-    atomic_json(worker.index / "manifest.json", manifest)
-    (worker.index / "files.txt").write_text(index_inventory(worker.index))
+    manifest = index_manifest(
+        worker.run_id,
+        image,
+        "external-bitcoin",
+        worker.network,
+        verified["exported_max_block"],
+        {**verified, "source_dir": str(worker.core_dir), "pbs_resources": worker.c["pbs_resources"], **signature},
+    )
     # The index is complete; its backup is the checkpoint job's, so a failed upload
     # leaves a usable working copy.
-    marker.unlink()
+    manifest = IndexStore(str(worker.index), None).publish(config, manifest)
     worker.publish_json(worker.remote + "/blocksci-index-manifest.json", manifest)
     worker.progress("indexed", state="done", height=height)
     worker.complete(manifest)
@@ -570,7 +561,7 @@ def pack_block(worker: Worker, name: str, work: Path) -> tuple[int, int]:
     finally:
         local.unlink(missing_ok=True)
         (work / (name + ".zst")).unlink(missing_ok=True)
-    worker.verify_remote_size(packed, compressed)
+    worker.storage.require_size(packed, compressed)
     with worker.storage.unpacked(packed) as stream:
         digest = stream_sha256(stream)
     if digest != expected:
