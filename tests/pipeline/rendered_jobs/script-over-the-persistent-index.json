@@ -1,0 +1,60 @@
+{
+  "blocksci-script": {
+    "directives": [
+      "#PBS -N blocksci_script_s3",
+      "#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=100gb:multijob=brno",
+      "#PBS -l walltime=24:00:00",
+      "#PBS -j oe"
+    ],
+    "settings": {
+      "artifact_uri": "s3://bucket/runs",
+      "command": "ACTIVE_RUN_ID=script-persistent BLOCKSCI_CONFIG=/runs/emulation/logs/script-persistent/blocksci_data/config.json BLOCKSCI_RUN_DIR=/runs/emulation/logs/script-persistent BLOCKSCI_OUTPUT_DIR=/runs/emulation/logs/script-persistent/blocksci-custom-analysis_data COINJOIN_TYPE=wasabi2 JOINMARKET_DETECTOR=definite JOINMARKET_MIN_BASE_FEE=5000 JOINMARKET_PERCENTAGE_FEE=4e-05 JOINMARKET_MAX_DEPTH=200000 BLOCKSCI_MAX_BLOCK=850001 SCAN_START_HEIGHT=800000 SCAN_END_HEIGHT=850001 PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/user-analysis.py",
+      "credentials": "/storage/home/user/.aws/credentials",
+      "endpoint": "https://s3.example",
+      "image": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "image_name": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "inputs": [],
+      "job": "blocksci-analysis",
+      "job_log": "blocksci-script.pbs.log",
+      "log_prefix": "s3://bucket/runs/script-persistent/logs",
+      "ncpus": 8,
+      "output": {
+        "relative": "blocksci-custom-analysis_data"
+      },
+      "output_check": null,
+      "persistent": {
+        "backup_uri": null,
+        "dumplings_dir": null,
+        "dumplings_uri": null,
+        "in_scratch": false,
+        "index_dir": "/scratch/multijob-brno/user/blocksci-mainnet",
+        "lock_seconds": 87000,
+        "poll_seconds": 60,
+        "restore": false,
+        "storage_report_uri": null,
+        "wait_seconds": 43200
+      },
+      "profile": "test",
+      "run_id": "script-persistent",
+      "run_prefix": "s3://bucket/runs/script-persistent",
+      "source_run_id": null,
+      "stage": "blocksci-script",
+      "user_script": "<repo>/scripts/blocksci_script_smoke.py"
+    },
+    "shipped_files": [
+      "settings.json",
+      "run.py",
+      "coinjoin_pipeline/__init__.py",
+      "coinjoin_pipeline/storage/__init__.py",
+      "coinjoin_pipeline/storage/s5client.py",
+      "coinjoin_pipeline/execution/__init__.py",
+      "coinjoin_pipeline/execution/pbs/__init__.py",
+      "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/stage_settings.py",
+      "coinjoin_pipeline/execution/pbs/stage.py",
+      "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py"
+    ]
+  }
+}

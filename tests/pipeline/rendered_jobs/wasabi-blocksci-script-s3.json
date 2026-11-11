@@ -1,0 +1,98 @@
+{
+  "blocksci-parse": {
+    "directives": [
+      "#PBS -N blocksci_parse_s3",
+      "#PBS -l select=1:ncpus=2:mem=16gb:scratch_ssd=20gb",
+      "#PBS -l walltime=01:00:00",
+      "#PBS -j oe"
+    ],
+    "settings": {
+      "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py parse --run-dir /runs/emulation/logs/liquidity-large-wallet-20261015-1653 --network bitcoin_regtest --disk /mnt/data/regtest --max-block $((PBS_EXPORTED_MAX_BLOCK + 1))",
+      "credentials": "/storage/brno2/home/xman/.aws/credentials",
+      "endpoint": "https://s3.cl4.du.cesnet.cz",
+      "image": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "image_name": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "job": "blocksci-parse",
+      "job_log": "blocksci-parse.pbs.log",
+      "log_prefix": "s3://xman-coinjoin-new/runs/liquidity-large-wallet-20261015-1653/logs",
+      "ncpus": 2,
+      "pbs_resources": {
+        "mem": "16gb",
+        "ncpus": 2
+      },
+      "persistent": null,
+      "profile": "coinjoin",
+      "python_command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3",
+      "run_id": "liquidity-large-wallet-20261015-1653",
+      "run_prefix": "s3://xman-coinjoin-new/runs/liquidity-large-wallet-20261015-1653",
+      "source": {
+        "description": "emulator Bitcoin and exported-block inputs",
+        "kind": "emulator",
+        "network": "bitcoin_regtest"
+      },
+      "stage": "blocksci-parse"
+    },
+    "shipped_files": [
+      "settings.json",
+      "run.py",
+      "coinjoin_pipeline/__init__.py",
+      "coinjoin_pipeline/storage/__init__.py",
+      "coinjoin_pipeline/storage/s5client.py",
+      "coinjoin_pipeline/execution/__init__.py",
+      "coinjoin_pipeline/execution/pbs/__init__.py",
+      "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/stage_settings.py",
+      "coinjoin_pipeline/execution/pbs/stage.py",
+      "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py"
+    ]
+  },
+  "blocksci-script": {
+    "directives": [
+      "#PBS -N blocksci_script_s3",
+      "#PBS -l select=1:ncpus=2:mem=16gb:scratch_ssd=20gb",
+      "#PBS -l walltime=01:00:00",
+      "#PBS -j oe"
+    ],
+    "settings": {
+      "artifact_uri": "s3://xman-coinjoin-new/runs",
+      "command": "ACTIVE_RUN_ID=liquidity-large-wallet-20261015-1653 BLOCKSCI_CONFIG=/runs/emulation/logs/liquidity-large-wallet-20261015-1653/blocksci_data/config.json BLOCKSCI_RUN_DIR=/runs/emulation/logs/liquidity-large-wallet-20261015-1653 BLOCKSCI_OUTPUT_DIR=/runs/emulation/logs/liquidity-large-wallet-20261015-1653/blocksci-custom-analysis_data COINJOIN_TYPE=wasabi2 JOINMARKET_DETECTOR=definite JOINMARKET_MIN_BASE_FEE=5000 JOINMARKET_PERCENTAGE_FEE=4e-05 JOINMARKET_MAX_DEPTH=200000 MIN_INPUT_COUNT=10 PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/user-analysis.py",
+      "credentials": "/storage/brno2/home/xman/.aws/credentials",
+      "endpoint": "https://s3.cl4.du.cesnet.cz",
+      "image": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "image_name": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "inputs": [],
+      "job": "blocksci-analysis",
+      "job_log": "blocksci-script.pbs.log",
+      "log_prefix": "s3://xman-coinjoin-new/runs/liquidity-large-wallet-20261015-1653/logs",
+      "ncpus": 2,
+      "output": {
+        "relative": "blocksci-custom-analysis_data"
+      },
+      "output_check": null,
+      "persistent": null,
+      "profile": "coinjoin",
+      "run_id": "liquidity-large-wallet-20261015-1653",
+      "run_prefix": "s3://xman-coinjoin-new/runs/liquidity-large-wallet-20261015-1653",
+      "source_run_id": null,
+      "stage": "blocksci-script",
+      "user_script": "<repo>/scripts/blocksci_script_smoke.py"
+    },
+    "shipped_files": [
+      "settings.json",
+      "run.py",
+      "coinjoin_pipeline/__init__.py",
+      "coinjoin_pipeline/storage/__init__.py",
+      "coinjoin_pipeline/storage/s5client.py",
+      "coinjoin_pipeline/execution/__init__.py",
+      "coinjoin_pipeline/execution/pbs/__init__.py",
+      "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/stage_settings.py",
+      "coinjoin_pipeline/execution/pbs/stage.py",
+      "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py"
+    ]
+  }
+}

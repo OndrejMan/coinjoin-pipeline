@@ -1,0 +1,67 @@
+{
+  "blocksci-update": {
+    "directives": [
+      "#PBS -N blocksci_update_s3",
+      "#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=200gb:multijob=brno",
+      "#PBS -l walltime=12:00:00",
+      "#PBS -j oe"
+    ],
+    "settings": {
+      "artifact_uri": "s3://xman-coinjoin-new/runs",
+      "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py update --run-dir /runs/emulation/logs/mainnet-index-update-20261019",
+      "credentials": "/storage/brno2/home/<login>/.aws/credentials",
+      "endpoint": "https://s3.cl4.du.cesnet.cz",
+      "image": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "image_name": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "job": "blocksci-update",
+      "job_log": "blocksci-update.pbs.log",
+      "log_prefix": "s3://xman-coinjoin-new/bitcoin-mainnet/index/logs/mainnet-index-update-20261019",
+      "ncpus": 8,
+      "pbs_resources": {
+        "mem": "64gb",
+        "ncpus": 8
+      },
+      "persistent": {
+        "backup_uri": "s3://xman-coinjoin-new/bitcoin-mainnet/blocksci-index",
+        "dumplings_dir": null,
+        "dumplings_uri": null,
+        "in_scratch": false,
+        "index_dir": "/scratch/multijob-brno/<login>/blocksci-mainnet",
+        "lock_seconds": 43800,
+        "poll_seconds": 60,
+        "restore": false,
+        "storage_report_uri": null,
+        "wait_seconds": 21600
+      },
+      "profile": "coinjoin",
+      "python_command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3",
+      "run_id": "mainnet-index-update-20261019",
+      "run_prefix": "s3://xman-coinjoin-new/bitcoin-mainnet/index",
+      "source": {
+        "blocks_uri": "s3://xman-coinjoin-new/bitcoin-mainnet/blocks",
+        "expected_hash": "000000000000000000010538edbfd2d5b809a33dd83f284aeea41c6d0d96968a",
+        "kind": "bitcoin-blocks-s3",
+        "max_block": 900000,
+        "network": "bitcoin"
+      },
+      "source_run_id": null,
+      "stage": "blocksci-update"
+    },
+    "shipped_files": [
+      "settings.json",
+      "run.py",
+      "coinjoin_pipeline/__init__.py",
+      "coinjoin_pipeline/storage/__init__.py",
+      "coinjoin_pipeline/storage/s5client.py",
+      "coinjoin_pipeline/execution/__init__.py",
+      "coinjoin_pipeline/execution/pbs/__init__.py",
+      "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/stage_settings.py",
+      "coinjoin_pipeline/execution/pbs/stage.py",
+      "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py",
+      "coinjoin_pipeline/execution/block_archive.py"
+    ]
+  }
+}

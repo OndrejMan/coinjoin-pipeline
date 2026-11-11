@@ -1,0 +1,66 @@
+{
+  "blocksci-parse": {
+    "directives": [
+      "#PBS -N blocksci_parse_s3",
+      "#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=100gb:multijob=brno",
+      "#PBS -l walltime=24:00:00",
+      "#PBS -j oe"
+    ],
+    "settings": {
+      "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py parse --run-dir /runs/emulation/logs/persistent-parse --network bitcoin_regtest --disk /mnt/data --max-block 201",
+      "credentials": "/storage/home/user/.aws/credentials",
+      "endpoint": "https://s3.example",
+      "image": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "image_name": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "job": "blocksci-parse",
+      "job_log": "blocksci-parse.pbs.log",
+      "log_prefix": "s3://bucket/runs/persistent-parse/logs",
+      "ncpus": 8,
+      "pbs_resources": {
+        "mem": "64gb",
+        "ncpus": 8
+      },
+      "persistent": {
+        "backup_uri": "s3://bucket/mainnet/blocksci-index",
+        "dumplings_dir": null,
+        "dumplings_uri": null,
+        "in_scratch": false,
+        "index_dir": "/scratch/multijob-brno/user/blocksci-mainnet",
+        "lock_seconds": 87000,
+        "poll_seconds": 60,
+        "restore": false,
+        "storage_report_uri": null,
+        "wait_seconds": 43200
+      },
+      "profile": "test",
+      "python_command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3",
+      "run_id": "persistent-parse",
+      "run_prefix": "s3://bucket/runs/persistent-parse",
+      "source": {
+        "blocks_uri": "s3://bucket/mainnet/blocks",
+        "description": "verified Bitcoin block archive from S3",
+        "expected_hash": null,
+        "kind": "bitcoin-blocks-s3",
+        "max_block": 200,
+        "network": "bitcoin_regtest"
+      },
+      "stage": "blocksci-parse"
+    },
+    "shipped_files": [
+      "settings.json",
+      "run.py",
+      "coinjoin_pipeline/__init__.py",
+      "coinjoin_pipeline/storage/__init__.py",
+      "coinjoin_pipeline/storage/s5client.py",
+      "coinjoin_pipeline/execution/__init__.py",
+      "coinjoin_pipeline/execution/pbs/__init__.py",
+      "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/stage_settings.py",
+      "coinjoin_pipeline/execution/pbs/stage.py",
+      "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py",
+      "coinjoin_pipeline/execution/block_archive.py"
+    ]
+  }
+}

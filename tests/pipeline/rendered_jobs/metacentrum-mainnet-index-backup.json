@@ -1,0 +1,49 @@
+{
+  "blocksci-backup": {
+    "directives": [
+      "#PBS -N blocksci_backup_s3",
+      "#PBS -l select=1:ncpus=8:mem=16gb:scratch_ssd=10gb:multijob=brno",
+      "#PBS -l walltime=12:00:00",
+      "#PBS -j oe"
+    ],
+    "settings": {
+      "credentials": "/storage/brno2/home/<login>/.aws/credentials",
+      "endpoint": "https://s3.cl4.du.cesnet.cz",
+      "job": "blocksci-backup",
+      "job_log": "blocksci-backup.pbs.log",
+      "log_prefix": "s3://xman-coinjoin-new/bitcoin-mainnet/index/logs/mainnet-index-backup-20261025",
+      "ncpus": 8,
+      "persistent": {
+        "backup_uri": "s3://xman-coinjoin-new/bitcoin-mainnet/blocksci-index",
+        "dumplings_dir": null,
+        "dumplings_uri": null,
+        "in_scratch": false,
+        "index_dir": "/scratch/multijob-brno/<login>/blocksci-mainnet",
+        "lock_seconds": 43800,
+        "poll_seconds": 60,
+        "restore": false,
+        "storage_report_uri": null,
+        "wait_seconds": 21600
+      },
+      "profile": "coinjoin",
+      "run_id": "mainnet-index-backup-20261025",
+      "run_prefix": "s3://xman-coinjoin-new/bitcoin-mainnet/index",
+      "stage": "blocksci-backup"
+    },
+    "shipped_files": [
+      "settings.json",
+      "run.py",
+      "coinjoin_pipeline/__init__.py",
+      "coinjoin_pipeline/storage/__init__.py",
+      "coinjoin_pipeline/storage/s5client.py",
+      "coinjoin_pipeline/execution/__init__.py",
+      "coinjoin_pipeline/execution/pbs/__init__.py",
+      "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/stage_settings.py",
+      "coinjoin_pipeline/execution/pbs/stage.py",
+      "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py"
+    ]
+  }
+}

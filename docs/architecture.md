@@ -144,6 +144,13 @@ configuration errors, graph order, rollback/cancellation, job persistence,
 rendered shell behavior, artifact validation and report calculations. They do
 not prove a live emulator, image, parser or MetaCentrum run.
 
+`tests/pipeline/test_rendered_jobs.py` renders every S3 example in `examples/`
+and a few index-job configurations through the real renderers and compares each
+job's `settings.json` and `#PBS` directives with `tests/pipeline/rendered_jobs/`.
+A change in how an option reaches a job shows up there as a diff; after an
+intended one, refresh the stored files with `UPDATE_RENDERED_JOBS=1` and review
+them.
+
 The live paths are covered by the local suite (`run-all.sh local`): Docker,
 k3d, shared-storage PBS and Kubernetes → MinIO → PBS end-to-end tests. Historic
 reports retain their original provenance; new exporter source hashes differ.

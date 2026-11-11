@@ -1,0 +1,64 @@
+{
+  "blocksci-external": {
+    "directives": [
+      "#PBS -N blocksci_external_s3",
+      "#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=2tb",
+      "#PBS -l walltime=24:00:00",
+      "#PBS -j oe"
+    ],
+    "settings": {
+      "artifact_uri": "s3://coinjoin-thesis/runs",
+      "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py analyze --run-dir /runs/emulation/logs/mainnet-s3-archive-900000 --coinjoin-type joinmarket --min-input-count default --joinmarket-detector definite --joinmarket-min-base-fee 5000 --joinmarket-percentage-fee 4e-05 --joinmarket-max-depth 200000 --blocksci-image docker://ghcr.io/ondrejman/blocksci-complete:latest --coinjoin-analysis-image docker://ghcr.io/ondrejman/coinjoin-analysis:latest --coinjoin-emulator-image ghcr.io/ondrejman/emulator-manager:latest --uploader-image ghcr.io/example/uploader:fixed --mode external --network bitcoin --skip-clustering --report",
+      "credentials": "/storage/brno2/home/<login>/.aws/credentials",
+      "endpoint": "https://s3.cl4.du.cesnet.cz",
+      "image": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "image_name": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "inputs": [
+        {
+          "run": ".pipeline/exporters"
+        },
+        {
+          "to": "coinjoin-analysis_data/coinjoin_tx_info.json",
+          "uri": "s3://xman-coinjoin-new/dumplings/joinmarket/coinjoin_tx_info.json"
+        },
+        {
+          "optional": true,
+          "to": "coinjoin-analysis_data/dumplings-snapshot.json",
+          "uri": "s3://xman-coinjoin-new/dumplings/joinmarket/dumplings-snapshot.json"
+        }
+      ],
+      "job": "blocksci-analysis",
+      "job_log": "blocksci-external.pbs.log",
+      "log_prefix": "s3://coinjoin-thesis/runs/mainnet-s3-archive-900000/logs",
+      "ncpus": 8,
+      "output": {
+        "relative": "coinjoinPipeline_data"
+      },
+      "output_check": [
+        "coinjoinPipeline_data/unified_report.json",
+        "External BlockSci report did not produce unified_report.json"
+      ],
+      "persistent": null,
+      "profile": "coinjoin",
+      "run_id": "mainnet-s3-archive-900000",
+      "run_prefix": "s3://coinjoin-thesis/runs/mainnet-s3-archive-900000",
+      "source_run_id": null,
+      "stage": "blocksci-external"
+    },
+    "shipped_files": [
+      "settings.json",
+      "run.py",
+      "coinjoin_pipeline/__init__.py",
+      "coinjoin_pipeline/storage/__init__.py",
+      "coinjoin_pipeline/storage/s5client.py",
+      "coinjoin_pipeline/execution/__init__.py",
+      "coinjoin_pipeline/execution/pbs/__init__.py",
+      "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/stage_settings.py",
+      "coinjoin_pipeline/execution/pbs/stage.py",
+      "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py"
+    ]
+  }
+}
