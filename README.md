@@ -768,6 +768,25 @@ walltime. Use `--pbs-unified-report-ncpus`,
 `--pbs-unified-report-walltime` to override only that job; the shared
 `--pbs-*` resource options remain the fallback.
 
+## Rootless Podman test host
+
+The Podman E2E test checks the host's inotify limits before launching DinD.
+Rootless containers share the host user's budget with IDEs and other processes;
+exhausting it can stop container startup with `too many open files` even when
+disk space and `ulimit -n` are sufficient. Configure the runner once:
+
+```bash
+sudo sysctl -w fs.inotify.max_user_instances=1024 fs.inotify.max_user_watches=524288
+```
+
+To keep these values after reboot, put the following in
+`/etc/sysctl.d/90-coinjoin-runner.conf` and run `sudo sysctl --system`:
+
+```text
+fs.inotify.max_user_instances = 1024
+fs.inotify.max_user_watches = 524288
+```
+
 ## Security
 
 The host process invokes the selected Docker or Podman CLI to manage component

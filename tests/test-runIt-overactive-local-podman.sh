@@ -60,6 +60,8 @@ list_run_dirs() {
     LC_ALL=C sort
 }
 
+python3 "${SCRIPT_DIR}/support/check_inotify.py"
+
 if ! command -v podman >/dev/null 2>&1; then
   echo "FAIL: podman command not found" >&2
   exit 2
