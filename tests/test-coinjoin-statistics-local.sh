@@ -26,7 +26,7 @@ cp "$work/unpack/Scanner/"*.txt "$snapshot/"
 echo 870000 >"$snapshot/LastProcessedBlockHeight.txt"
 touch "$work/credentials"
 
-(cd "$repo" && uv run --frozen python "$support/render_job.py" statistics --run-id stats-1 --root "$work" \
+(cd "$repo" && uv run --frozen python "$support/render_job.py" statistics --run-id stats-1 \
     --input-uri s3://bucket/dumplings/generations/g1 --protocol wasabi2 --protocol wasabi1 \
     --protocol joinmarket --credentials "$work/credentials" --output "$work/statistics.pbs")
 SCRATCHDIR="$work/scratch" PBS_JOBID=statistics.local bash "$work/statistics.pbs" >"$work/statistics.out" 2>&1 \

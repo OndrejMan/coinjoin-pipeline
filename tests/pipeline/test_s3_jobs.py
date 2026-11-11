@@ -208,8 +208,8 @@ def test_archive_checkpoint_reaches_parse_and_update_renderer(backend, task, wor
         )
     )
     values = backend.rendered[f"render_blocksci_{task}_s3_pbs"]
-    assert values["expected_block_hash"] == "a" * 64
-    assert values["external_max_block"] == 12
+    assert values["blocksci"].expected_block_hash == "a" * 64
+    assert values["blocksci"].max_block == 12
 
 
 def test_cached_notebook_has_no_report_or_worker_staging(backend):
@@ -318,7 +318,7 @@ def test_read_only_analysis_passes_its_source_cache_to_the_renderer(backend, tmp
         )
     )
     assert [job.stage for job in backend.jobs] == ["blocksci-script"]
-    assert backend.rendered["render_blocksci_analyze_s3_pbs"]["source_run_id"] == "mainnet-index"
+    assert backend.rendered["render_blocksci_analyze_s3_pbs"]["blocksci"].cache_source_run_id == "mainnet-index"
 
 
 def test_read_only_analysis_needs_a_published_source_cache(backend, tmp_path):
@@ -355,10 +355,10 @@ def test_persistent_update_needs_no_source_run_and_reaches_the_renderer(backend)
         )
     )
     values = backend.rendered["render_blocksci_update_s3_pbs"]
-    assert values["source_run_id"] is None
+    assert values["blocksci"].cache_source_run_id is None
     assert values["multijob"] == "brno"
-    index = values["persistent"]
-    assert (index.index_dir, index.backup_uri) == (
+    index = values["blocksci"]
+    assert (index.index_dir, index.index_backup_uri) == (
         "/scratch/multijob-brno/user/blocksci-mainnet",
         "s3://bucket/blocksci-index",
     )
@@ -377,7 +377,7 @@ def test_the_backup_task_submits_only_the_backup_job(backend):
     )
     assert [job.stage for job in backend.jobs] == ["blocksci-backup"]
     values = backend.rendered["render_blocksci_index_backup_s3_pbs"]
-    assert values["persistent"].backup_uri == "s3://bucket/blocksci-index"
+    assert values["blocksci"].index_backup_uri == "s3://bucket/blocksci-index"
     assert values["multijob"] == "brno"
     assert backend.staged == []
 

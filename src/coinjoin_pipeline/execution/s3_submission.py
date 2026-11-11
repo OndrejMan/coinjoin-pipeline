@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from exporters.artifact_paths import BASELINE_FILE, BLOCKSCI_PARSE_DIR
 
@@ -22,7 +21,6 @@ from coinjoin_pipeline.execution.pbs.commands import (
 )
 from coinjoin_pipeline.execution.pbs.submission import PBSJobSpec, persist_pbs_job_id, submit_pbs_job
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
-    PersistentIndex,
     render_blocksci_analyze_s3_pbs,
     render_blocksci_index_backup_s3_pbs,
     render_blocksci_parse_s3_pbs,
@@ -55,10 +53,6 @@ from coinjoin_pipeline.storage.s3 import (
     s3_access_preflight,
     s3_object_exists,
 )
-
-
-def _optional_path(value: str | None) -> Path | None:
-    return Path(value) if value else None
 
 
 def s3_full_run_plan_from_args(args: PipelineConfiguration) -> StageGraph:
@@ -119,23 +113,10 @@ class S3StageRunner:
             self.jobs[stage.name] = job_id
             persist_pbs_job_id(self.args.runs_path / self.target.run_id, stage.name, job_id)
 
-    def _persistent_index(self) -> dict:
-        """Renderer arguments for a persistent index; empty when the S3 cache is used."""
+    def _index(self) -> dict:
+        """Renderer arguments of a job over a BlockSci index: its settings and the multijob scratch it is on."""
         blocksci = self.args.blocksci
-        if not blocksci.index_dir:
-            return {}
-        return {
-            "persistent": PersistentIndex(
-                index_dir=blocksci.index_dir,
-                backup_uri=blocksci.index_backup_uri,
-                in_scratch=blocksci.index_in_scratch,
-                restore=blocksci.restore_index,
-                dumplings_uri=blocksci.dumplings_uri,
-                dumplings_dir=blocksci.dumplings_dir,
-                storage_report_uri=blocksci.storage_report_uri,
-            ),
-            "multijob": self.args.pbs.blocksci.multijob,
-        }
+        return {"blocksci": blocksci, "multijob": self.args.pbs.blocksci.multijob if blocksci.index_dir else None}
 
     def _analysis(self, stage: StagePlan) -> None:
         common: dict = {
@@ -173,20 +154,8 @@ class S3StageRunner:
         }
 
     def _update(self, stage: StagePlan) -> None:
-        blocksci = self.args.blocksci
-        persistent = self._persistent_index()
         script = render_blocksci_update_s3_pbs(
-            **self._blocksci(),
-            source_run_id=None
-            if persistent
-            else required(blocksci.cache_source_run_id, "--blocksci-cache-source-run-id"),
-            command=blocksci_update_pbs_command(self.target.run_id),
-            external_bitcoin_datadir=_optional_path(blocksci.external_bitcoin_datadir),
-            bitcoin_blocks_uri=blocksci.bitcoin_blocks_uri,
-            expected_block_hash=blocksci.expected_block_hash,
-            external_network=required(blocksci.network, "--blocksci-network"),
-            external_max_block=required(blocksci.max_block, "--blocksci-max-block"),
-            **persistent,
+            **self._blocksci(), **self._index(), command=blocksci_update_pbs_command(self.target.run_id)
         )
         self._submit(stage, script)
 
@@ -202,17 +171,7 @@ class S3StageRunner:
             )
         else:
             command = blocksci_parse_pbs_command(self.target.run_id)
-        script = render_blocksci_parse_s3_pbs(
-            **self._blocksci(),
-            command=command,
-            external_bitcoin_datadir=_optional_path(blocksci.external_bitcoin_datadir),
-            bitcoin_blocks_uri=blocksci.bitcoin_blocks_uri,
-            expected_block_hash=blocksci.expected_block_hash,
-            external_blocksci_dir=_optional_path(blocksci.external_blocksci_dir),
-            external_network=blocksci.network,
-            external_max_block=blocksci.max_block,
-            **self._persistent_index(),
-        )
+        script = render_blocksci_parse_s3_pbs(**self._blocksci(), **self._index(), command=command)
         self._submit(stage, script)
 
     def _blocksci_work(self, stage: StagePlan) -> None:
@@ -220,7 +179,7 @@ class S3StageRunner:
         if task == "backup":
             # The backup only archives the index; it runs no BlockSci image.
             script = render_blocksci_index_backup_s3_pbs(
-                target=self.target, resources=stage_pbs_resources(self.args, "blocksci"), **self._persistent_index()
+                target=self.target, resources=stage_pbs_resources(self.args, "blocksci"), **self._index()
             )
             self._submit(stage, script)
             return
@@ -235,24 +194,14 @@ class S3StageRunner:
             )
             self._submit(stage, script)
             return
-        notebook_port = blocksci.notebook_port
         commands = {
             "detect": lambda: blocksci_analysis_pbs_command(self.target.run_id, self.args),
             "external": lambda: blocksci_external_report_pbs_command(self.target.run_id, self.args),
             "script": lambda: blocksci_script_pbs_command(self.target.run_id, self.args),
-            "notebook": lambda: blocksci_notebook_pbs_command(notebook_port),
+            "notebook": lambda: blocksci_notebook_pbs_command(blocksci.notebook_port),
         }
         script = render_blocksci_analyze_s3_pbs(
-            **self._blocksci(),
-            command=commands[task](),
-            mode=stage.name,
-            source_run_id=blocksci.cache_source_run_id,
-            user_script=Path(required(blocksci.script, "--blocksci-script")) if task == "script" else None,
-            external_baseline_uri=blocksci.external_baseline_uri if task == "external" else None,
-            external_false_cjtxs_uri=blocksci.external_false_cjtxs_uri if task == "external" else None,
-            notebooks_dir=_optional_path(blocksci.notebooks_dir) if task == "notebook" else None,
-            notebook_port=notebook_port,
-            **self._persistent_index(),
+            **self._blocksci(), **self._index(), command=commands[task](), mode=stage.name
         )
         self._submit(stage, script, depends=True)
 

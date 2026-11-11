@@ -8,14 +8,18 @@ settings; the work itself is ``analyzer_jobs``' and ``blocksci_jobs``'.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 from pathlib import Path
+from typing import TypedDict, Union
 
 from exporters.artifact_paths import COINJOIN_ANALYSIS_TOOLS_DIR, DUMPLINGS_SNAPSHOT_FILE
-from exporters.verify_chain import is_block_hash
 
-from coinjoin_pipeline.configuration import CoinjoinAnalysisConfiguration, MappingsConfiguration
+from coinjoin_pipeline.configuration import (
+    BlockSciConfiguration,
+    CoinjoinAnalysisConfiguration,
+    MappingsConfiguration,
+    required,
+)
 from coinjoin_pipeline.execution.coinjoin_tools import (
     RESEARCH_PROGRAMS,
     WORKFLOW_SCRIPTS,
@@ -35,7 +39,7 @@ from coinjoin_pipeline.storage.s3 import (
 )
 
 from .analysis_modes import MODE_OUTPUTS, analysis_mode_settings
-from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND, DEFAULT_RESOURCES, PBS_MULTIJOB_LOCATIONS, PBSResources
+from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND, DEFAULT_RESOURCES, PBSResources
 from .scripts import (
     STAGE_RUNTIME_MODULES,
     directives,
@@ -46,10 +50,25 @@ from .scripts import (
     validated_s3_uri,
     write_files,
 )
+from .stage_settings import (
+    BlocksciAnalysisSettings,
+    BlocksciParseSettings,
+    BlocksciSettings,
+    BlocksciUpdateSettings,
+    CoinjoinToolsSettings,
+    CommandSettings,
+    DumplingsBaselineSettings,
+    MappingsSettings,
+    PbsResourceSettings,
+    PersistentJobSettings,
+    PersistentSettings,
+    SourceSettings,
+    StageSettings,
+    UnifiedReportSettings,
+)
 from .validation import (
     PBSError,
     require_existing_path,
-    require_notebook_port,
     require_safe_image,
     require_safe_pbs_token,
     require_storage_path,
@@ -60,63 +79,20 @@ EXECUTION_DIR = Path(__file__).parent.parent
 # Standalone helpers some jobs ship besides the worker.
 BLOCK_ARCHIVE = EXECUTION_DIR / "block_archive.py"
 NOTEBOOK_SERVER = Path(__file__).parent / "templates/blocksci_notebook.py"
-EXTERNAL_NETWORKS = {"bitcoin", "bitcoin_testnet", "bitcoin_regtest"}
 BLOCKSCI = DEFAULT_RESOURCES["blocksci"]
-
-
-def _run_id(value: str) -> str:
-    try:
-        return validate_run_id(value)
-    except ValueError as error:
-        raise PBSError(str(error)) from error
-
-
-def _require_external_chain(network: str | None, max_block: int | None) -> str:
-    if network is None or network not in EXTERNAL_NETWORKS:
-        raise PBSError("External BlockSci network must be bitcoin, bitcoin_testnet, or bitcoin_regtest")
-    if isinstance(max_block, bool) or not isinstance(max_block, int) or max_block < 0:
-        raise PBSError("External Bitcoin parsing requires a non-negative --blocksci-max-block")
-    return network
-
-
-INDEX_ROOTS = ("/storage/", "/auto/", *(f"/scratch/multijob-{place}/" for place in PBS_MULTIJOB_LOCATIONS))
-
-
-@dataclass(frozen=True)
-class PersistentIndex:
-    """A BlockSci index kept in a directory shared by jobs instead of the S3 cache.
-
-    ``index_dir`` is the working copy jobs read and update in place; ``backup_uri`` is the
-    S3 prefix of its single backup, written by the backup job and read to restore an
-    incomplete working copy. With ``in_scratch`` a reading job restores that backup, and
-    the Dumplings copy at ``dumplings_uri``, into its own scratch and leaves index_dir alone.
-    With ``restore`` it fills an incomplete index_dir from the backup and leaves it there,
-    with the Dumplings copy beside it, for later jobs until it is deleted explicitly.
-    """
-
-    index_dir: str
-    backup_uri: str | None = None
-    in_scratch: bool = False
-    restore: bool = False
-    dumplings_uri: str | None = None
-    dumplings_dir: str | None = None
-    storage_report_uri: str | None = None
-
-    def __post_init__(self) -> None:
-        if not self.index_dir.startswith(INDEX_ROOTS) or ".." in Path(self.index_dir).parts:
-            raise PBSError(
-                f"The index directory must be under /storage/ or /scratch/multijob-<location>/: {self.index_dir}"
-            )
-        if self.backup_uri is not None:
-            validated_s3_uri(self.backup_uri, "index backup URI")
-        if self.dumplings_uri is not None:
-            validated_s3_uri(self.dumplings_uri, "Dumplings URI")
-        if self.dumplings_dir is not None and (
-            not self.dumplings_dir.startswith(INDEX_ROOTS) or ".." in Path(self.dumplings_dir).parts
-        ):
-            raise PBSError(
-                f"The Dumplings directory must be under /storage/ or /scratch/multijob-<location>/: {self.dumplings_dir}"
-            )
+# The fields one job adds to the common StageSettings; its job function reads them.
+JobSettings = Union[
+    CommandSettings,
+    UnifiedReportSettings,
+    CoinjoinToolsSettings,
+    DumplingsBaselineSettings,
+    MappingsSettings,
+    BlocksciSettings,
+    BlocksciParseSettings,
+    BlocksciUpdateSettings,
+    BlocksciAnalysisSettings,
+    PersistentJobSettings,
+]
 
 
 def render_coinjoin_analysis_s3_pbs(
@@ -250,49 +226,31 @@ def _bitcoin_datadir(path: Path) -> str:
     return str(bitcoin_path)
 
 
-def _block_archive(bitcoin_blocks_uri: str, network: str, expected_hash: str | None) -> dict[str, object]:
-    """A verified bitcoin-block-archive; mainnet must name the block hash the parse ends at."""
-    if network == "bitcoin" and expected_hash is None:
-        raise PBSError("Mainnet block archives require --blocksci-expected-block-hash at --blocksci-max-block")
-    if expected_hash is not None and not is_block_hash(expected_hash):
-        raise PBSError("Expected block hash must be 64 lowercase hexadecimal characters")
-    return {
-        "blocks_uri": validated_s3_uri(bitcoin_blocks_uri, "Bitcoin block archive URI"),
-        "expected_hash": expected_hash,
-    }
+def _block_source(blocksci: BlockSciConfiguration) -> SourceSettings:
+    """The single block source of a parse or update; kind becomes the cache manifest's source_kind.
 
-
-def _parse_source(
-    *,
-    external_bitcoin_datadir: Path | None,
-    bitcoin_blocks_uri: str | None,
-    expected_block_hash: str | None,
-    external_blocksci_dir: Path | None,
-    external_network: str | None,
-    external_max_block: int | None,
-) -> dict[str, object]:
-    """Validate the parse's single source; kind becomes the cache manifest's source_kind."""
-    if sum(value is not None for value in (external_bitcoin_datadir, bitcoin_blocks_uri, external_blocksci_dir)) > 1:
-        raise PBSError("Choose only one external Bitcoin or BlockSci source")
-    if external_bitcoin_datadir is not None:
+    The configuration rules allow one source and require its network and last height;
+    an update takes only a Bitcoin datadir or a block archive.
+    """
+    if blocksci.external_bitcoin_datadir:
         return {
             "kind": "external-bitcoin",
-            "network": _require_external_chain(external_network, external_max_block),
+            "network": required(blocksci.network, "--blocksci-network"),
             "description": "external Bitcoin Core block directory",
-            "datadir": _bitcoin_datadir(external_bitcoin_datadir),
-            "max_block": external_max_block,
+            "datadir": _bitcoin_datadir(Path(blocksci.external_bitcoin_datadir)),
+            "max_block": required(blocksci.max_block, "--blocksci-max-block"),
         }
-    if bitcoin_blocks_uri is not None:
-        network = _require_external_chain(external_network, external_max_block)
+    if blocksci.bitcoin_blocks_uri:
         return {
             "kind": "bitcoin-blocks-s3",
-            "network": network,
+            "network": required(blocksci.network, "--blocksci-network"),
             "description": "verified Bitcoin block archive from S3",
-            "max_block": external_max_block,
-            **_block_archive(bitcoin_blocks_uri, network, expected_block_hash),
+            "max_block": required(blocksci.max_block, "--blocksci-max-block"),
+            "blocks_uri": validated_s3_uri(blocksci.bitcoin_blocks_uri, "Bitcoin block archive URI"),
+            "expected_hash": blocksci.expected_block_hash,
         }
-    if external_blocksci_dir is not None:
-        blocksci_path = external_blocksci_dir.expanduser().resolve()
+    if blocksci.external_blocksci_dir:
+        blocksci_path = Path(blocksci.external_blocksci_dir).expanduser().resolve()
         require_storage_path(blocksci_path)
         require_existing_path(blocksci_path, "external BlockSci directory")
         for relative in ("config.json", "parsed/chain/block.dat"):
@@ -307,19 +265,29 @@ def _parse_source(
     return {"kind": "emulator", "network": "bitcoin_regtest", "description": "emulator Bitcoin and exported-block inputs"}
 
 
-def _persistent_settings(index: PersistentIndex | None, walltime: str) -> dict[str, object] | None:
-    """Where the persistent index lives and how long its lock entry lives and waits."""
-    if index is None:
+def _persistent_settings(blocksci: BlockSciConfiguration, walltime: str) -> PersistentSettings | None:
+    """A BlockSci index kept in a directory shared by jobs; None when the job uses the S3 cache.
+
+    ``index_dir`` is the working copy jobs read and update in place; ``backup_uri`` is the
+    S3 prefix of its single backup, written by the backup job and read to restore an
+    incomplete working copy. With ``in_scratch`` a reading job restores that backup, and
+    the Dumplings copy at ``dumplings_uri``, into its own scratch and leaves index_dir alone.
+    With ``restore`` it fills an incomplete index_dir from the backup and leaves it there,
+    with the Dumplings copy beside it, for later jobs until it is deleted explicitly.
+    """
+    if not blocksci.index_dir:
         return None
+    if blocksci.dumplings_uri is not None:
+        validated_s3_uri(blocksci.dumplings_uri, "Dumplings URI")
     seconds = walltime_to_seconds(walltime)
     return {
-        "index_dir": index.index_dir,
-        "backup_uri": index.backup_uri,
-        "in_scratch": index.in_scratch,
-        "restore": index.restore,
-        "dumplings_uri": index.dumplings_uri,
-        "dumplings_dir": index.dumplings_dir,
-        "storage_report_uri": index.storage_report_uri,
+        "index_dir": blocksci.index_dir,
+        "backup_uri": blocksci.index_backup_uri,
+        "in_scratch": blocksci.index_in_scratch,
+        "restore": blocksci.restore_index,
+        "dumplings_uri": blocksci.dumplings_uri,
+        "dumplings_dir": blocksci.dumplings_dir,
+        "storage_report_uri": blocksci.storage_report_uri,
         # Past the walltime the job is gone, so its lock entry may be cleared.
         "lock_seconds": seconds + 600,
         "wait_seconds": max(60, seconds // 2),
@@ -327,7 +295,12 @@ def _persistent_settings(index: PersistentIndex | None, walltime: str) -> dict[s
     }
 
 
-def _index_job_settings(resources: PBSResources) -> dict[str, object]:
+class _IndexJobSettings(TypedDict):
+    pbs_resources: PbsResourceSettings
+    python_command: str
+
+
+def _index_job_settings(resources: PBSResources) -> _IndexJobSettings:
     """What parse and update jobs record in an index manifest and need to verify a chain."""
     return {
         "pbs_resources": {"ncpus": resources.ncpus, "mem": resources.mem},
@@ -341,30 +314,14 @@ def render_blocksci_parse_s3_pbs(
     command: str,
     resources: PBSResources = BLOCKSCI,
     *,
-    external_bitcoin_datadir: Path | None = None,
-    bitcoin_blocks_uri: str | None = None,
-    expected_block_hash: str | None = None,
-    external_blocksci_dir: Path | None = None,
-    external_network: str | None = None,
-    external_max_block: int | None = None,
-    persistent: PersistentIndex | None = None,
+    blocksci: BlockSciConfiguration = BlockSciConfiguration(),
     multijob: str | None = None,
 ) -> str:
     """Render a parser-only job that publishes a checksummed reusable index.
 
-    With ``persistent`` the index is parsed straight into that directory and recorded
-    there instead of being archived to S3.
+    With ``blocksci.index_dir`` the index is parsed straight into that directory and
+    recorded there instead of being archived to S3.
     """
-    source = _parse_source(
-        external_bitcoin_datadir=external_bitcoin_datadir,
-        bitcoin_blocks_uri=bitcoin_blocks_uri,
-        expected_block_hash=expected_block_hash,
-        external_blocksci_dir=external_blocksci_dir,
-        external_network=external_network,
-        external_max_block=external_max_block,
-    )
-    if persistent is not None and source["kind"] not in {"external-bitcoin", "bitcoin-blocks-s3"}:
-        raise PBSError("A persistent index is parsed from an external Bitcoin datadir or block archive")
     return render_python_stage(
         "blocksci-parse",
         target,
@@ -372,52 +329,32 @@ def render_blocksci_parse_s3_pbs(
         image,
         {
             "command": command,
-            "source": source,
-            "persistent": _persistent_settings(persistent, resources.walltime),
+            "source": _block_source(blocksci),
+            "persistent": _persistent_settings(blocksci, resources.walltime),
             **_index_job_settings(resources),
         },
         multijob=multijob,
-        extra_files=(BLOCK_ARCHIVE,) if bitcoin_blocks_uri is not None else (),
+        extra_files=(BLOCK_ARCHIVE,) if blocksci.bitcoin_blocks_uri else (),
     )
 
 
 def render_blocksci_update_s3_pbs(
     target: S3Target,
-    source_run_id: str | None,
     image: str,
     command: str,
     resources: PBSResources = BLOCKSCI,
     *,
-    external_network: str,
-    external_max_block: int,
-    external_bitcoin_datadir: Path | None = None,
-    bitcoin_blocks_uri: str | None = None,
-    expected_block_hash: str | None = None,
-    persistent: PersistentIndex | None = None,
+    blocksci: BlockSciConfiguration,
     multijob: str | None = None,
 ) -> str:
     """Render a job that incrementally updates one S3 cache into a fresh run.
 
     The cache must come from the same source: BlockSci remembers each block by
     its file number and offset, which only that Bitcoin datadir or block
-    archive can resolve. With ``persistent`` the job instead updates that index
-    in place under the writer lock, first restoring it from the S3 backup
+    archive can resolve. With ``blocksci.index_dir`` the job instead updates that
+    index in place under the writer lock, first restoring it from the S3 backup
     when the working copy is incomplete.
     """
-    if persistent is None:
-        source_run_id = _run_id(source_run_id or "")
-        if source_run_id == target.run_id:
-            raise PBSError("Incremental BlockSci update requires different source and target run IDs")
-    elif source_run_id is not None:
-        raise PBSError("A persistent index update reads its own index, not a source run")
-    network = _require_external_chain(external_network, external_max_block)
-    source: dict[str, object] = {"network": network, "max_block": external_max_block}
-    if external_bitcoin_datadir is not None and bitcoin_blocks_uri is None:
-        source.update(kind="external-bitcoin", datadir=_bitcoin_datadir(external_bitcoin_datadir))
-    elif bitcoin_blocks_uri is not None and external_bitcoin_datadir is None:
-        source.update(kind="bitcoin-blocks-s3", **_block_archive(bitcoin_blocks_uri, network, expected_block_hash))
-    else:
-        raise PBSError("Incremental BlockSci update requires exactly one external Bitcoin datadir or block archive")
     return render_python_stage(
         "blocksci-update",
         target,
@@ -425,14 +362,14 @@ def render_blocksci_update_s3_pbs(
         image,
         {
             "command": command,
-            "source": source,
-            "source_run_id": source_run_id,
+            "source": _block_source(blocksci),
+            "source_run_id": blocksci.cache_source_run_id,
             "artifact_uri": validate_artifact_uri(target.artifact_uri),
-            "persistent": _persistent_settings(persistent, resources.walltime),
+            "persistent": _persistent_settings(blocksci, resources.walltime),
             **_index_job_settings(resources),
         },
         multijob=multijob,
-        extra_files=(BLOCK_ARCHIVE,) if bitcoin_blocks_uri is not None else (),
+        extra_files=(BLOCK_ARCHIVE,) if blocksci.bitcoin_blocks_uri else (),
     )
 
 
@@ -443,56 +380,29 @@ def render_blocksci_analyze_s3_pbs(
     resources: PBSResources = BLOCKSCI,
     *,
     mode: str = "blocksci-analyze",
-    source_run_id: str | None = None,
-    persistent: PersistentIndex | None = None,
+    blocksci: BlockSciConfiguration = BlockSciConfiguration(),
     multijob: str | None = None,
-    user_script: Path | None = None,
-    external_baseline_uri: str | None = None,
-    external_false_cjtxs_uri: str | None = None,
-    notebooks_dir: Path | None = None,
-    notebook_port: int = 8888,
 ) -> str:
     """Render analysis, custom-script, or notebook work over a cached index.
 
-    With ``source_run_id`` the index comes read-only from that run's cache while
-    outputs, markers, and logs stay under the target run, so several analyses
-    can share one published index without touching it. With ``persistent`` the
+    With ``blocksci.cache_source_run_id`` the index comes read-only from that run's cache
+    while outputs, markers, and logs stay under the target run, so several analyses
+    can share one published index without touching it. With ``blocksci.index_dir`` the
     index is read in place under the shared lock instead of being downloaded.
     """
     if mode not in MODE_OUTPUTS:
         raise PBSError(f"Unsupported reusable BlockSci mode: {mode}")
-    require_notebook_port(notebook_port)
-    if source_run_id is not None and persistent is not None:
-        raise PBSError("Choose one index source: a source run's cache or a persistent index")
-    if mode == "blocksci-analyze" and persistent is not None:
-        raise PBSError("BlockSci detect reads emulator data of its own run and cannot use a persistent index")
-    if mode == "blocksci-analyze" and source_run_id is not None:
-        raise PBSError("BlockSci detect reads emulator data of its own run and cannot use a source cache")
-    if external_false_cjtxs_uri is not None and mode != "blocksci-external":
-        raise PBSError("A false-positive list belongs to the external BlockSci report")
-    if source_run_id is not None:
-        source_run_id = _run_id(source_run_id)
-        if source_run_id == target.run_id:
-            raise PBSError("A read-only source cache must come from a different run")
-    settings = analysis_mode_settings(
-        mode,
-        user_script=user_script,
-        external_baseline_uri=external_baseline_uri,
-        external_false_cjtxs_uri=external_false_cjtxs_uri,
-        notebooks_dir=notebooks_dir,
-        notebook_port=notebook_port,
-    )
     return render_python_stage(
         mode,
         target,
         resources,
         image,
         {
-            **settings,
+            **analysis_mode_settings(mode, blocksci),
             "command": command,
-            "source_run_id": source_run_id,
+            "source_run_id": blocksci.cache_source_run_id,
             "artifact_uri": validate_artifact_uri(target.artifact_uri),
-            "persistent": _persistent_settings(persistent, resources.walltime),
+            "persistent": _persistent_settings(blocksci, resources.walltime),
         },
         job="blocksci-analysis",
         multijob=multijob,
@@ -503,7 +413,7 @@ def render_blocksci_analyze_s3_pbs(
 def render_blocksci_index_backup_s3_pbs(
     target: S3Target,
     *,
-    persistent: PersistentIndex,
+    blocksci: BlockSciConfiguration,
     multijob: str | None = None,
     resources: PBSResources = BLOCKSCI,
 ) -> str:
@@ -513,14 +423,12 @@ def render_blocksci_index_backup_s3_pbs(
     waits. The old backup is deleted first; the new one is valid once its S3 size matches the
     uploaded stream and its ``manifest.json`` is written.
     """
-    if persistent.backup_uri is None:
-        raise PBSError("An index backup needs --blocksci-index-backup-uri")
     return render_python_stage(
         "blocksci-backup",
         target,
         resources,
         None,
-        {"persistent": _persistent_settings(persistent, resources.walltime)},
+        {"persistent": _persistent_settings(blocksci, resources.walltime)},
         multijob=multijob,
     )
 
@@ -530,7 +438,7 @@ def render_python_stage(
     target: S3Target,
     resources: PBSResources,
     image: str | None,
-    settings: dict[str, object],
+    settings: JobSettings,
     *,
     job: str | None = None,
     multijob: str | None = None,
@@ -542,7 +450,7 @@ def render_python_stage(
     ends the job before it can.
     """
     require_safe_pbs_token(stage, "PBS stage")
-    job_settings: dict[str, object] = {
+    common: StageSettings = {
         "stage": stage,
         "job": job or stage,
         "run_id": validate_run_id(target.run_id),
@@ -554,16 +462,16 @@ def render_python_stage(
         # The whole output goes to S3, so no stage needs PBS to copy its output file back.
         "job_log": f"{stage}.pbs.log",
         "ncpus": resources.ncpus,
-        **settings,
     }
+    image_settings: dict[str, str] = {}
     if image is not None:
         require_safe_image(image)
         # The job runs the digest the tag names now; index manifests keep the configured
         # name, so a rebuilt image under the same tag still reuses an existing index.
-        job_settings["image"] = pinned_reference(image)
-        job_settings["image_name"] = image
+        image_settings = {"image": pinned_reference(image), "image_name": image}
     files = {
-        "settings.json": json.dumps(job_settings, indent=2),
+        # One flat object: the worker reads it as StageSettings and as the job's own type.
+        "settings.json": json.dumps({**common, **settings, **image_settings}, indent=2),
         "run.py": launcher("coinjoin_pipeline.execution.pbs.stage_runtime"),
         **package_files(*STAGE_RUNTIME_MODULES, *extra_files),
     }

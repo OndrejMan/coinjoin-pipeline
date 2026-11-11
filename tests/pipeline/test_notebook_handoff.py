@@ -2,12 +2,12 @@
 
 import json
 import threading
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
+from coinjoin_pipeline.configuration import BlockSciConfiguration
 from coinjoin_pipeline.execution.pbs.analysis_modes import analysis_mode_settings
 from coinjoin_pipeline.execution.pbs.blocksci_jobs import notebook_connection, seed_notebook
 from coinjoin_pipeline.execution.pbs.stage import StageFailure
@@ -78,11 +78,6 @@ def test_publication_retries_and_cleanup_error_does_not_mask_kernel_failure(tmp_
 
 def test_notebook_directory_is_validated_on_compute_node_not_submitting_container():
     settings = analysis_mode_settings(
-        "blocksci-notebook",
-        user_script=None,
-        external_baseline_uri=None,
-        external_false_cjtxs_uri=None,
-        notebooks_dir=Path("/storage/not-present-locally/notebooks"),
-        notebook_port=8888,
+        "blocksci-notebook", BlockSciConfiguration(notebooks_dir="/storage/not-present-locally/notebooks")
     )
     assert settings["output"]["notebooks_dir"] == "/storage/not-present-locally/notebooks"

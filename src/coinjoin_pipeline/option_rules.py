@@ -10,6 +10,7 @@ from exporters.verify_chain import is_block_hash
 
 from .configuration import cli_flag, config_value, option_specs
 from .execution.pbs.defaults import MAINNET_SYNC_RESOURCES
+from .execution.pbs.validation import SHARED_STORAGE_ROOTS, kept_between_jobs, multijob_location
 from .execution.stages import runs_unified_report
 from .storage.s3 import RUN_ID_RULE, is_valid_run_id
 
@@ -21,10 +22,8 @@ READ_ONLY_CACHE_TASKS = frozenset({"script", "external", "notebook"})
 PERSISTENT_INDEX_TASKS = frozenset({"parse", "update", "backup"}) | READ_ONLY_CACHE_TASKS
 # Resource groups only the mainnet synchronization submits; other actions use pbs.blocksci too.
 MAINNET_ONLY_PBS_GROUPS = tuple(f"pbs.{stage}." for stage in MAINNET_SYNC_RESOURCES if stage != "blocksci")
-SHARED_ROOTS = ("/storage/", "/auto/")
 # The jobs that only maintain the index; their state can live at one fixed S3 prefix.
 INDEX_STATE_TASKS = ("parse", "update", "backup")
-MULTIJOB_ROOT = "/scratch/multijob-{}/"
 
 
 def _supplied(config: PipelineConfiguration, path: str, value: object) -> bool:
@@ -56,8 +55,19 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
             "--blocksci-index-state-uri requires --blocksci-index-dir and --blocksci-task parse, update or backup"
         )
     if not index_dir:
-        if backup_uri:
-            errors.append("--blocksci-index-backup-uri requires --blocksci-index-dir")
+        # Without an index directory these would be dropped silently: the job uses the S3 cache.
+        errors.extend(
+            f"{flag} requires --blocksci-index-dir"
+            for flag, value in (
+                ("--blocksci-index-backup-uri", backup_uri),
+                ("--blocksci-index-in-scratch", blocksci.index_in_scratch),
+                ("--blocksci-restore-index", blocksci.restore_index),
+                ("--blocksci-dumplings-uri", blocksci.dumplings_uri),
+                ("--blocksci-dumplings-dir", blocksci.dumplings_dir),
+                ("--blocksci-storage-report-uri", blocksci.storage_report_uri),
+            )
+            if value
+        )
         if multijob:
             errors.append("--pbs-blocksci-multijob requires --blocksci-index-dir on that multijob scratch")
         if blocksci.task == "backup":
@@ -73,10 +83,8 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
         errors.append(
             "a persistent index is parsed from --blocksci-bitcoin-blocks-uri or --blocksci-external-bitcoin-datadir"
         )
-    on_multijob = next(
-        (place for place in ("brno", "plzen", "global") if index_dir.startswith(MULTIJOB_ROOT.format(place))), None
-    )
-    if on_multijob is None and not index_dir.startswith(SHARED_ROOTS):
+    on_multijob = multijob_location(index_dir)
+    if on_multijob is None and not index_dir.startswith(SHARED_STORAGE_ROOTS):
         errors.append("--blocksci-index-dir must be under /scratch/multijob-<location>/ or /storage/")
     elif on_multijob is not None and multijob != on_multijob:
         errors.append(f"--blocksci-index-dir on multijob-{on_multijob} requires --pbs-blocksci-multijob {on_multijob}")
@@ -112,6 +120,8 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
             "--blocksci-dumplings-dir requires --blocksci-task notebook and --blocksci-index-dir, "
             "without --blocksci-index-in-scratch or --blocksci-restore-index"
         )
+    if blocksci.dumplings_dir and not kept_between_jobs(blocksci.dumplings_dir):
+        errors.append("--blocksci-dumplings-dir must be under /scratch/multijob-<location>/ or /storage/, without '..'")
     return errors
 
 

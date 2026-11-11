@@ -7,15 +7,13 @@ import sys
 from types import ModuleType, SimpleNamespace
 
 from coinjoin_pipeline.execution.pbs.templates import blocksci_notebook
+from coinjoin_pipeline.configuration import BlockSciConfiguration
 from coinjoin_pipeline.execution.pbs.analysis_modes import analysis_mode_settings
 from coinjoin_pipeline.execution.pbs.blocksci_jobs import analysis_output, notebook_control
 
 
 def test_notebook_paths_use_submission_home_when_pbs_changes_home(tmp_path, monkeypatch):
-    settings = analysis_mode_settings(
-        "blocksci-notebook", user_script=None, external_baseline_uri=None,
-        external_false_cjtxs_uri=None, notebooks_dir=None, notebook_port=8888,
-    )
+    settings = analysis_mode_settings("blocksci-notebook", BlockSciConfiguration())
     stage = SimpleNamespace(settings=settings, run_id="r1", work=tmp_path / "work")
     frontend_home = tmp_path / "submission-home"
     node_home = tmp_path / "node-home"

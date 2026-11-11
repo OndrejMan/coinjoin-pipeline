@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from coinjoin_pipeline.configuration import PipelineConfiguration
+from coinjoin_pipeline.configuration import BlockSciConfiguration, PipelineConfiguration
 from types import SimpleNamespace
 from unittest import mock
 
@@ -38,7 +38,6 @@ from coinjoin_pipeline.execution.pbs.index_store import IndexStore
 from coinjoin_pipeline.execution.pbs.blocksci_jobs import publish_persistent
 from coinjoin_pipeline.execution.pbs.stage import Stage
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
-    PersistentIndex,
     render_blocksci_analyze_s3_pbs,
     render_blocksci_index_backup_s3_pbs,
     render_coinjoin_analysis_dumplings_s3_pbs,
@@ -74,6 +73,14 @@ S3_TARGET = S3Target(
     profile="coinjoin",
 )
 COMMON = dict(target=S3_TARGET)
+# An update of another run's cache from the block archive.
+ARCHIVE_UPDATE = BlockSciConfiguration(
+    cache_source_run_id="run-0",
+    bitcoin_blocks_uri="s3://bucket/bitcoin-blocks/",
+    expected_block_hash="a" * 64,
+    network="bitcoin",
+    max_block=850100,
+)
 ANALYSIS = DEFAULT_RESOURCES["analysis"]
 
 
@@ -238,7 +245,7 @@ def test_notebook_uses_image_python_and_keeps_control_files_outside_saved_notebo
     assert "/usr/bin/python3 /mnt/blocksci_notebook.py 8890" in command
     assert "uv run" not in command
     script = render_blocksci_analyze_s3_pbs(
-        **COMMON, image="docker://blocksci", command=command, mode="blocksci-notebook", notebook_port=8890
+        **COMMON, image="docker://blocksci", command=command, mode="blocksci-notebook", blocksci=BlockSciConfiguration(notebook_port=8890)
     )
     settings = settings_of(script)
     assert settings["output"] == {"relative": "blocksci-notebooks_data", "notebook": True}
@@ -257,13 +264,9 @@ def test_cache_compression_threads_come_from_rendered_ncpus() -> None:
     )
     update = render_blocksci_update_s3_pbs(
         **COMMON,
-        source_run_id="run-0",
         image="docker://blocksci",
         command=blocksci_update_pbs_command("run-1"),
-        bitcoin_blocks_uri="s3://bucket/bitcoin-blocks/",
-        expected_block_hash="a" * 64,
-        external_network="bitcoin",
-        external_max_block=850100,
+        blocksci=ARCHIVE_UPDATE,
         resources=replace(DEFAULT_RESOURCES["blocksci"], ncpus=5),
     )
 
@@ -338,9 +341,9 @@ def test_external_bitcoin_parse_uses_shared_blocks_without_s3_emulator_inputs() 
             command=blocksci_parse_pbs_command(
                 "run-1", coin_type="bitcoin", disk_path="/mnt/data", max_block_expression="850001"
             ),
-            external_bitcoin_datadir=Path("/storage/external/bitcoin"),
-            external_network="bitcoin",
-            external_max_block=850000,
+            blocksci=BlockSciConfiguration(
+                external_bitcoin_datadir="/storage/external/bitcoin", network="bitcoin", max_block=850000
+            ),
         )
 
     settings = settings_of(script)
@@ -362,10 +365,12 @@ def test_s3_bitcoin_archive_parse_verifies_manifest_checksums_and_height() -> No
         command=blocksci_parse_pbs_command(
             "run-1", coin_type="bitcoin", disk_path="/mnt/data", max_block_expression="900001"
         ),
-        bitcoin_blocks_uri="s3://bucket/bitcoin-mainnet/blocks",
-        expected_block_hash="a" * 64,
-        external_network="bitcoin",
-        external_max_block=900000,
+        blocksci=BlockSciConfiguration(
+            bitcoin_blocks_uri="s3://bucket/bitcoin-mainnet/blocks",
+            expected_block_hash="a" * 64,
+            network="bitcoin",
+            max_block=900000,
+        ),
     )
     settings = settings_of(script)
     assert settings["source"]["kind"] == "bitcoin-blocks-s3"
@@ -413,10 +418,9 @@ def test_s3_bitcoin_archive_parse_uploads_failure_log_before_marker(
         target,
         image="docker://blocksci",
         command="true",
-        bitcoin_blocks_uri="s3://bucket/bitcoin-blocks",
-        expected_block_hash="a" * 64,
-        external_network="bitcoin",
-        external_max_block=1,
+        blocksci=BlockSciConfiguration(
+            bitcoin_blocks_uri="s3://bucket/bitcoin-blocks", expected_block_hash="a" * 64, network="bitcoin", max_block=1
+        ),
     )
     result = subprocess.run(
         ["bash"],
@@ -458,7 +462,7 @@ def test_cached_external_task_downloads_dumplings_baseline_and_uploads_report() 
             image="docker://blocksci",
             command=command,
             mode="blocksci-external",
-            external_baseline_uri="s3://bucket/dumplings/coinjoin_tx_info.json",
+            blocksci=BlockSciConfiguration(external_baseline_uri="s3://bucket/dumplings/coinjoin_tx_info.json"),
         )
     )
     assert "--mode external --network bitcoin" in settings["command"]
@@ -478,12 +482,14 @@ def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target(
     ):
         script = render_blocksci_update_s3_pbs(
             **COMMON,
-            source_run_id="run-0",
             image="docker://blocksci",
             command=blocksci_update_pbs_command("run-1"),
-            external_bitcoin_datadir=Path("/storage/external/bitcoin"),
-            external_network="bitcoin",
-            external_max_block=850100,
+            blocksci=BlockSciConfiguration(
+                cache_source_run_id="run-0",
+                external_bitcoin_datadir="/storage/external/bitcoin",
+                network="bitcoin",
+                max_block=850100,
+            ),
         )
     settings = settings_of(script)
     assert (settings["stage"], settings["source_run_id"]) == ("blocksci-update", "run-0")
@@ -492,6 +498,7 @@ def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target(
         "network": "bitcoin",
         "max_block": 850100,
         "kind": "external-bitcoin",
+        "description": "external Bitcoin Core block directory",
         "datadir": "/storage/external/bitcoin",
     }
     assert "worker.py update --run-dir /runs/emulation/logs/run-1" in settings["command"]
@@ -501,33 +508,14 @@ def test_incremental_blocksci_update_restores_source_and_publishes_fresh_target(
 def test_incremental_blocksci_update_from_the_block_archive_downloads_only_new_files() -> None:
     script = render_blocksci_update_s3_pbs(
         **COMMON,
-        source_run_id="run-0",
         image="docker://blocksci",
         command=blocksci_update_pbs_command("run-1"),
-        bitcoin_blocks_uri="s3://bucket/bitcoin-blocks/",
-        expected_block_hash="a" * 64,
-        external_network="bitcoin",
-        external_max_block=850100,
+        blocksci=ARCHIVE_UPDATE,
     )
     source = settings_of(script)["source"]
     assert source["kind"] == "bitcoin-blocks-s3" and source["blocks_uri"] == "s3://bucket/bitcoin-blocks"
     assert embedded_file(script, "coinjoin_pipeline/execution/block_archive.py")
 
-
-@pytest.mark.parametrize(
-    "sources", [{}, {"bitcoin_blocks_uri": "s3://bucket/blocks", "external_bitcoin_datadir": Path("/x")}]
-)
-def test_incremental_blocksci_update_needs_exactly_one_source(sources: dict[str, object]) -> None:
-    with pytest.raises(PBSError, match="exactly one"):
-        render_blocksci_update_s3_pbs(
-            **COMMON,
-            source_run_id="run-0",
-            image="docker://blocksci",
-            command="true",
-            external_network="bitcoin",
-            external_max_block=1,
-            **sources,
-        )
 
 
 def test_external_blocksci_import_repackages_index_without_parser() -> None:
@@ -540,7 +528,7 @@ def test_external_blocksci_import_repackages_index_without_parser() -> None:
             **COMMON,
             image="docker://blocksci",
             command=blocksci_parse_pbs_command("run-1"),
-            external_blocksci_dir=Path("/storage/external/blocksci_data"),
+            blocksci=BlockSciConfiguration(external_blocksci_dir="/storage/external/blocksci_data"),
         )
     source = settings_of(script)["source"]
     assert source["kind"] == "external-blocksci" and source["network"] == "from-config"
@@ -1129,8 +1117,10 @@ def test_read_only_source_cache_feeds_an_analysis_of_another_run() -> None:
             image="docker://blocksci",
             command=command,
             mode="blocksci-external",
-            source_run_id="mainnet-index",
-            external_baseline_uri="s3://bucket/dumplings/coinjoin_tx_info.json",
+            blocksci=BlockSciConfiguration(
+                cache_source_run_id="mainnet-index",
+                external_baseline_uri="s3://bucket/dumplings/coinjoin_tx_info.json",
+            ),
         )
     )
     # The index comes from the source run; outputs, markers and provenance stay with this run.
@@ -1139,28 +1129,9 @@ def test_read_only_source_cache_feeds_an_analysis_of_another_run() -> None:
     assert settings["output"] == {"relative": "coinjoinPipeline_data"}
 
 
-@pytest.mark.parametrize(
-    "mode,source,message",
-    [
-        ("blocksci-analyze", "mainnet-index", "cannot use a source cache"),
-        ("blocksci-notebook", "run-1", "different run"),
-    ],
-)
-def test_read_only_source_cache_rejects_detect_and_the_same_run(mode, source, message) -> None:
-    with pytest.raises(PBSError, match=message):
-        render_blocksci_analyze_s3_pbs(
-            **COMMON,
-            image="docker://blocksci",
-            command="true",
-            mode=mode,
-            source_run_id=source,
-        )
 
-
-PERSISTENT = dict(
-    persistent=PersistentIndex("/scratch/multijob-brno/user/blocksci-mainnet", "s3://bucket/blocksci-index"),
-    multijob="brno",
-)
+INDEX = dict(index_dir="/scratch/multijob-brno/user/blocksci-mainnet", index_backup_uri="s3://bucket/blocksci-index")
+PERSISTENT = dict(blocksci=BlockSciConfiguration(**INDEX), multijob="brno")
 
 
 def test_persistent_manifest_records_requested_cpu_and_memory(tmp_path) -> None:
@@ -1202,14 +1173,16 @@ def test_persistent_update_works_in_place_under_the_writer_lock() -> None:
     with mock.patch("coinjoin_pipeline.execution.pbs.templates_s3.require_storage_path"):
         script = render_blocksci_update_s3_pbs(
             **COMMON,
-            source_run_id=None,
             image="docker://blocksci",
             command=blocksci_update_pbs_command("run-1"),
-            bitcoin_blocks_uri="s3://bucket/mainnet",
-            expected_block_hash="a" * 64,
-            external_network="bitcoin",
-            external_max_block=850100,
-            **PERSISTENT,
+            blocksci=BlockSciConfiguration(
+                **INDEX,
+                bitcoin_blocks_uri="s3://bucket/mainnet",
+                expected_block_hash="a" * 64,
+                network="bitcoin",
+                max_block=850100,
+            ),
+            multijob="brno",
         )
     assert "scratch_ssd=" in script and ":multijob=brno\n" in script
     settings = settings_of(script)
@@ -1228,7 +1201,7 @@ def test_persistent_update_works_in_place_under_the_writer_lock() -> None:
     }
 
 
-def test_persistent_parse_refuses_an_existing_index() -> None:
+def test_persistent_parse_writes_into_the_index_directory() -> None:
     with (
         mock.patch("coinjoin_pipeline.execution.pbs.templates_s3.require_storage_path"),
         mock.patch("coinjoin_pipeline.execution.pbs.templates_s3.require_existing_path"),
@@ -1238,14 +1211,12 @@ def test_persistent_parse_refuses_an_existing_index() -> None:
             **COMMON,
             image="docker://blocksci",
             command=blocksci_parse_pbs_command("run-1", coin_type="bitcoin", disk_path="/mnt/data"),
-            external_bitcoin_datadir=Path("/storage/external/bitcoin"),
-            external_network="bitcoin",
-            external_max_block=850000,
-            **PERSISTENT,
+            blocksci=BlockSciConfiguration(
+                **INDEX, external_bitcoin_datadir="/storage/external/bitcoin", network="bitcoin", max_block=850000
+            ),
+            multijob="brno",
         )
     assert settings_of(script)["persistent"]["index_dir"] == "/scratch/multijob-brno/user/blocksci-mainnet"
-    with pytest.raises(PBSError, match="persistent index is parsed from"):
-        render_blocksci_parse_s3_pbs(**COMMON, image="docker://blocksci", command="parse", **PERSISTENT)
 
 
 def test_persistent_analysis_reads_under_the_shared_lock() -> None:
@@ -1262,24 +1233,11 @@ def test_persistent_analysis_reads_under_the_shared_lock() -> None:
     assert settings["source_run_id"] is None
 
 
-@pytest.mark.parametrize(
-    "values,message",
-    [
-        (dict(mode="blocksci-analyze", **PERSISTENT), "cannot use a persistent index"),
-        (dict(mode="blocksci-notebook", source_run_id="other", **PERSISTENT), "Choose one index source"),
-        (dict(mode="blocksci-notebook", multijob="ostrava"), "multijob location"),
-    ],
-)
-def test_persistent_analysis_rejects_invalid_combinations(values, message) -> None:
-    with pytest.raises(PBSError, match=message):
-        render_blocksci_analyze_s3_pbs(**COMMON, image="docker://blocksci", command="true", **values)
-
-
-def test_persistent_index_paths_stay_on_shared_storage() -> None:
-    with pytest.raises(PBSError, match="must be under"):
-        PersistentIndex("/tmp/blocksci-mainnet")
-    with pytest.raises(PBSError, match="Invalid index backup URI"):
-        PersistentIndex("/scratch/multijob-brno/user/index", "/storage/brno2/home/user/copy")
+def test_an_unknown_multijob_location_is_refused() -> None:
+    with pytest.raises(PBSError, match="multijob location"):
+        render_blocksci_analyze_s3_pbs(
+            **COMMON, image="docker://blocksci", command="true", mode="blocksci-notebook", multijob="ostrava"
+        )
 
 
 def test_index_backup_job_reads_under_the_shared_lock() -> None:
@@ -1304,12 +1262,6 @@ def test_a_fixed_state_prefix_replaces_the_run_prefix_and_keeps_logs_per_run() -
     assert settings["run_id"] == "run-1"
 
 
-def test_index_backup_job_needs_a_backup_prefix() -> None:
-    with pytest.raises(PBSError, match="index-backup-uri"):
-        render_blocksci_index_backup_s3_pbs(
-            **COMMON, persistent=PersistentIndex("/scratch/multijob-brno/user/blocksci-mainnet")
-        )
-
 
 def test_external_report_downloads_the_curated_false_positives() -> None:
     settings = settings_of(
@@ -1318,24 +1270,16 @@ def test_external_report_downloads_the_curated_false_positives() -> None:
             image="docker://blocksci",
             command="true",
             mode="blocksci-external",
-            external_baseline_uri="s3://bucket/dumplings/coinjoin_tx_info.json",
-            external_false_cjtxs_uri="s3://bucket/dumplings/false_cjtxs.json",
+            blocksci=BlockSciConfiguration(
+                external_baseline_uri="s3://bucket/dumplings/coinjoin_tx_info.json",
+                external_false_cjtxs_uri="s3://bucket/dumplings/false_cjtxs.json",
+            ),
         )
     )
     assert {"uri": "s3://bucket/dumplings/false_cjtxs.json", "to": "coinjoin-analysis_data/false_cjtxs.json"} in (
         settings["inputs"]
     )
 
-
-def test_false_positives_belong_to_the_external_report() -> None:
-    with pytest.raises(PBSError, match="external BlockSci report"):
-        render_blocksci_analyze_s3_pbs(
-            **COMMON,
-            image="docker://blocksci",
-            command="true",
-            mode="blocksci-notebook",
-            external_false_cjtxs_uri="s3://bucket/dumplings/false_cjtxs.json",
-        )
 
 
 def test_dumplings_baseline_reads_the_manifested_copy() -> None:
@@ -1371,7 +1315,9 @@ def test_external_report_fetches_the_snapshot_record_next_to_a_dumplings_baselin
             image="docker://blocksci",
             command="true",
             mode="blocksci-external",
-            external_baseline_uri="s3://bucket/runs/baseline-1/coinjoin-analysis_data/coinjoin_tx_info.json",
+            blocksci=BlockSciConfiguration(
+                external_baseline_uri="s3://bucket/runs/baseline-1/coinjoin-analysis_data/coinjoin_tx_info.json"
+            ),
         )
     )
     assert {

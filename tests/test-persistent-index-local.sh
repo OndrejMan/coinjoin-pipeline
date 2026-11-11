@@ -57,7 +57,7 @@ job() {
     case "$kind" in parse|update|backup) prefix="$state_root"; state=(--state-uri s3://bucket/index-state) ;; esac
     mkdir -p "$prefix/.pipeline/exporters" "$work/scratch-$run"
     cp -r "$repo/pipeline/exporters/." "$prefix/.pipeline/exporters/"
-    (cd "$repo" && uv run --frozen python "$support/render_job.py" "$kind" --run-id "$run" --root "$work" \
+    (cd "$repo" && uv run --frozen python "$support/render_job.py" "$kind" --run-id "$run" \
         --index-dir "$index" --backup-uri s3://bucket/blocksci-index --credentials "$work/credentials" \
         --output "$work/$run.pbs" "${state[@]}" "$@")
     SCRATCHDIR="$work/scratch-$run" PBS_JOBID="$run.local" bash "$work/$run.pbs" >"$work/$run.out" 2>&1 \

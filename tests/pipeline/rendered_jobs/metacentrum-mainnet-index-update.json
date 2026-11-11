@@ -39,6 +39,7 @@
       "run_prefix": "s3://xman-coinjoin-new/bitcoin-mainnet/index",
       "source": {
         "blocks_uri": "s3://xman-coinjoin-new/bitcoin-mainnet/blocks",
+        "description": "verified Bitcoin block archive from S3",
         "expected_hash": "000000000000000000010538edbfd2d5b809a33dd83f284aeea41c6d0d96968a",
         "kind": "bitcoin-blocks-s3",
         "max_block": 900000,

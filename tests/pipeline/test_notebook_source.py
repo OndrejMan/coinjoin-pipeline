@@ -17,6 +17,7 @@ from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_blocksci_parse_s3_pbs,
     render_blocksci_s3_pbs,
 )
+from coinjoin_pipeline.configuration import BlockSciConfiguration
 from coinjoin_pipeline.execution.pbs.scripts import embedded_file
 from coinjoin_pipeline.storage.s5client import S5Client
 from coinjoin_pipeline.storage.s3 import S3Target
@@ -155,7 +156,7 @@ def test_notebook_source_is_archived_readonly_and_does_not_reparse():
         "docker://blocksci",
         "python /mnt/blocksci_notebook.py 8888",
         mode="blocksci-notebook",
-        source_run_id="source",
+        blocksci=BlockSciConfiguration(cache_source_run_id="source"),
     )
     subprocess.run(["bash", "-n"], input=script, text=True, check=True)
     settings = json.loads(embedded_file(script, "settings.json"))

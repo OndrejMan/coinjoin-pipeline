@@ -12,8 +12,11 @@ from exporters.artifact_paths import (
     REPORT_DIR,
 )
 
+from coinjoin_pipeline.configuration import BlockSciConfiguration, required
+
 from .scripts import validated_s3_uri
-from .validation import PBSError, require_existing_path, require_storage_path
+from .stage_settings import AnalysisModeSettings, InputSettings, OutputSettings
+from .validation import require_storage_path
 
 # Uploaded after the job, and given the index provenance.
 MODE_OUTPUTS = {
@@ -24,27 +27,19 @@ MODE_OUTPUTS = {
 }
 
 
-def analysis_mode_settings(
-    mode: str,
-    *,
-    user_script: Path | None,
-    external_baseline_uri: str | None,
-    external_false_cjtxs_uri: str | None,
-    notebooks_dir: Path | None,
-    notebook_port: int,
-) -> dict[str, object]:
-    """Settings of detection, an external comparison, a user script or a notebook (stage_runtime.blocksci_analysis)."""
-    output: dict[str, object] = {"relative": MODE_OUTPUTS[mode]}
-    inputs: list[dict[str, object]] = []
-    settings: dict[str, object] = {"output": output, "inputs": inputs, "output_check": None}
+def analysis_mode_settings(mode: str, blocksci: BlockSciConfiguration) -> AnalysisModeSettings:
+    """Settings of detection, an external comparison, a user script or a notebook (blocksci_jobs.blocksci_analysis)."""
+    output: OutputSettings = {"relative": MODE_OUTPUTS[mode]}
+    inputs: list[InputSettings] = []
+    settings: AnalysisModeSettings = {"output": output, "inputs": inputs, "output_check": None}
     if mode == "blocksci-analyze":
         artifact = f"{BLOCKSCI_ANALYSIS_DIR}/blocksci_analysis.json"
         inputs += [{"run": ".pipeline/exporters"}, {"run": "coinjoin_emulator_data"}]
         settings["output_check"] = [artifact, f"Reusable BlockSci analysis did not produce {artifact}"]
     elif mode == "blocksci-external":
-        if external_baseline_uri is None:
-            raise PBSError("External BlockSci report requires a Dumplings baseline URI")
-        baseline_uri = validated_s3_uri(external_baseline_uri, "Dumplings baseline URI")
+        baseline_uri = validated_s3_uri(
+            required(blocksci.external_baseline_uri, "--external-baseline-uri"), "Dumplings baseline URI"
+        )
         settings["output_check"] = [
             f"{REPORT_DIR}/unified_report.json",
             "External BlockSci report did not produce unified_report.json",
@@ -59,35 +54,31 @@ def analysis_mode_settings(
             inputs.append(
                 {"uri": baseline_uri.rsplit("/", 1)[0] + "/" + name, "to": DUMPLINGS_SNAPSHOT_FILE, "optional": True}
             )
-        if external_false_cjtxs_uri is not None:
+        if blocksci.external_false_cjtxs_uri is not None:
             # The report filters the baseline with every false_cjtxs.json* it finds there.
             inputs.append(
                 {
-                    "uri": validated_s3_uri(external_false_cjtxs_uri, "false-positive list URI"),
+                    "uri": validated_s3_uri(blocksci.external_false_cjtxs_uri, "false-positive list URI"),
                     "to": "coinjoin-analysis_data/false_cjtxs.json",
                 }
             )
     elif mode == "blocksci-script":
-        if user_script is None:
-            raise PBSError("Reusable BlockSci script mode requires --blocksci-script")
-        script_path = user_script.expanduser().resolve()
+        # The configuration rules checked that the script exists; the node reads it from shared storage.
+        script_path = Path(required(blocksci.script, "--blocksci-script")).expanduser().resolve()
         require_storage_path(script_path)
-        require_existing_path(script_path, "BlockSci user script")
-        if not script_path.is_file():
-            raise PBSError(f"BlockSci user script is not a file: {script_path}")
         settings["user_script"] = str(script_path)
     else:
         # The execution node can set HOME to another storage volume; the submission home
         # is where the frontend stages files and looks for readiness.
         output["notebook"] = True
-        if notebooks_dir is not None:
-            notebook_path = notebooks_dir.expanduser().resolve()
+        if blocksci.notebooks_dir:
+            notebook_path = Path(blocksci.notebooks_dir).expanduser().resolve()
             require_storage_path(notebook_path)
             # A submitting container's /storage is not the compute node's shared disk.
             # The worker validates existence there before starting Jupyter.
             output["notebooks_dir"] = str(notebook_path)
         settings["connection_help"] = [
-            f"[blocksci-notebook] Preferred Jupyter port: {notebook_port}",
+            f"[blocksci-notebook] Preferred Jupyter port: {blocksci.notebook_port}",
             "[blocksci-notebook] Open JupyterLab from Scenario Lab; connection details follow after startup.",
         ]
     return settings

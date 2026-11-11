@@ -13,8 +13,6 @@ from exporters import verify_chain
 from coinjoin_pipeline.execution.pbs.defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND
 from coinjoin_pipeline.execution.pbs.stage import Stage
 from coinjoin_pipeline.execution.pbs.blocksci_jobs import verify_chain as verify_stage_chain
-from coinjoin_pipeline.execution.pbs.templates_s3 import _block_archive
-from coinjoin_pipeline.execution.pbs.validation import PBSError
 
 HASH = "a" * 64
 
@@ -169,9 +167,3 @@ def test_pbs_publication_barrier_runs_real_verifier_with_fake_binding(
                 verify_stage_chain(stage, stage.settings, 3, update=True, index_binds=())
             return
         assert verify_stage_chain(stage, stage.settings, 3, update=True, index_binds=()) == (3, HASH)
-
-
-@pytest.mark.parametrize("network,expected", [("bitcoin", None), ("bitcoin", "bad")])
-def test_renderer_refuses_missing_or_invalid_mainnet_checkpoint(network, expected):
-    with pytest.raises(PBSError, match="hash"):
-        _block_archive("s3://bucket/blocks", network, expected)

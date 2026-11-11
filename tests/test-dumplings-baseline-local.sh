@@ -29,7 +29,7 @@ json.dump({"last_processed_height": 392400, "files": files}, open(sys.argv[2], "
 MANIFEST
 touch "$work/credentials"
 
-(cd "$repo" && uv run --frozen python "$support/render_job.py" dumplings --run-id baseline-1 --root "$work" \
+(cd "$repo" && uv run --frozen python "$support/render_job.py" dumplings --run-id baseline-1 \
     --dumplings-uri s3://bucket/dumplings --coinjoin-type joinmarket --credentials "$work/credentials" \
     --output "$work/baseline.pbs")
 SCRATCHDIR="$work/scratch" PBS_JOBID=baseline.local bash "$work/baseline.pbs" >"$work/baseline.out" 2>&1 \

@@ -99,6 +99,12 @@ Stage adapters call their script renderers directly and pass a completed
 `pbs/commands.py` renders detector arguments for both analysis and report phases.
 `pbs/analysis_modes.py` prepares each cached-index consumer's inputs, mounts and
 output checks; `templates_s3.py` adds the shared cache/index access and job lifecycle.
+The BlockSci job renderers take the validated `BlockSciConfiguration` itself and
+write its values into `settings.json`, whose parts are typed in `stage_settings.py`.
+They do not repeat the rules of `option_rules.py`; what they still check is what
+only submission can know or what protects the job script: shared-storage paths
+that must exist, S3 URIs no configuration validator covers, and values
+interpolated into the script or its `#PBS` directives.
 
 `worker.py` supports parse, update, analyze, report, or parse+analyze (`run`).
 Docker and PBS choose mounts and interpreter, then invoke this same payload.
@@ -149,7 +155,8 @@ and a few index-job configurations through the real renderers and compares each
 job's `settings.json` and `#PBS` directives with `tests/pipeline/rendered_jobs/`.
 A change in how an option reaches a job shows up there as a diff; after an
 intended one, refresh the stored files with `UPDATE_RENDERED_JOBS=1` and review
-them.
+them. `tests/unit/test_index_job_rules.py` names the configuration rule each
+unsupported index job fails on.
 
 The live paths are covered by the local suite (`run-all.sh local`): Docker,
 k3d, shared-storage PBS and Kubernetes → MinIO → PBS end-to-end tests. Historic

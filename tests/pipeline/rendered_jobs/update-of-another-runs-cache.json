@@ -28,6 +28,7 @@
       "run_prefix": "s3://bucket/runs/cache-update",
       "source": {
         "blocks_uri": "s3://bucket/mainnet/blocks",
+        "description": "verified Bitcoin block archive from S3",
         "expected_hash": null,
         "kind": "bitcoin-blocks-s3",
         "max_block": 300,

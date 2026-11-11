@@ -1,7 +1,7 @@
 """Render one persistent-index, Dumplings-baseline or statistics PBS job as pbs-from-s3 would, locally.
 
-The production renderers insist on MetaCentrum paths (/storage, /scratch/multijob-*);
-here those roots point at the test's temporary directory instead.
+The production renderers insist on scripts and block directories on MetaCentrum's shared
+storage; here that check is switched off, since the test keeps them in a temporary directory.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
-from coinjoin_pipeline.configuration import PipelineConfiguration
+from coinjoin_pipeline.configuration import BlockSciConfiguration, PipelineConfiguration
 from coinjoin_pipeline.execution.pbs import analysis_modes, templates_s3
 from coinjoin_pipeline.execution.pbs.defaults import DEFAULT_RESOURCES
 from coinjoin_pipeline.execution.pbs.commands import (
@@ -27,7 +27,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("kind", choices=("parse", "update", "backup", "script", "compare", "dumplings", "statistics"))
     parser.add_argument("--run-id", required=True)
-    parser.add_argument("--root", type=Path, required=True, help="stands in for /storage and multijob scratch")
     parser.add_argument("--index-dir")
     parser.add_argument("--dumplings-uri")
     parser.add_argument("--coinjoin-type", default="joinmarket")
@@ -44,7 +43,6 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
-    root = f"{args.root.resolve()}/"
     target = S3Target(
         artifact_uri="s3://bucket/runs",
         run_id=args.run_id,
@@ -54,7 +52,6 @@ def main() -> int:
         state_prefix=args.state_uri,
     )
     with (
-        mock.patch.object(templates_s3, "INDEX_ROOTS", (root,)),
         mock.patch.object(templates_s3, "require_storage_path"),
         # The analysis modes check the script's path themselves since they moved out.
         mock.patch.object(analysis_modes, "require_storage_path"),
@@ -82,9 +79,10 @@ def main() -> int:
             script = templates_s3.render_coinjoin_tools_s3_pbs(target, "docker://coinjoin-analysis-local", options)
             args.output.write_text(script, encoding="utf-8")
             return 0
-        index = templates_s3.PersistentIndex(args.index_dir, args.backup_uri)
+        index = dict(index_dir=args.index_dir, index_backup_uri=args.backup_uri)
+        chain = dict(external_bitcoin_datadir=str(args.bitcoin_datadir), network="bitcoin_regtest", max_block=args.max_block)
         short = replace(DEFAULT_RESOURCES["blocksci"], walltime="02:00:00")
-        common = dict(image="docker://blocksci-local", persistent=index, resources=short)
+        common = dict(image="docker://blocksci-local", resources=short)
         if args.kind == "parse":
             script = templates_s3.render_blocksci_parse_s3_pbs(
                 target,
@@ -94,23 +92,20 @@ def main() -> int:
                     disk_path="/mnt/data",
                     max_block_expression=str(args.max_block + 1),
                 ),
-                external_bitcoin_datadir=args.bitcoin_datadir,
-                external_network="bitcoin_regtest",
-                external_max_block=args.max_block,
+                blocksci=BlockSciConfiguration(**index, **chain),
                 **common,
             )
         elif args.kind == "update":
             script = templates_s3.render_blocksci_update_s3_pbs(
                 target,
-                None,
                 command=blocksci_update_pbs_command(args.run_id),
-                external_bitcoin_datadir=args.bitcoin_datadir,
-                external_network="bitcoin_regtest",
-                external_max_block=args.max_block,
+                blocksci=BlockSciConfiguration(**index, **chain),
                 **common,
             )
         elif args.kind == "backup":
-            script = templates_s3.render_blocksci_index_backup_s3_pbs(target, persistent=index, resources=short)
+            script = templates_s3.render_blocksci_index_backup_s3_pbs(
+                target, blocksci=BlockSciConfiguration(**index), resources=short
+            )
         elif args.kind == "compare":
             config = PipelineConfiguration.from_flat(
                 {"coinjoin_type": "wasabi2", "min_input_count": 15, "blocksci_pin_height": args.pin_height}
@@ -119,7 +114,7 @@ def main() -> int:
                 target,
                 command=blocksci_external_report_pbs_command(args.run_id, config),
                 mode="blocksci-external",
-                external_baseline_uri=args.baseline_uri,
+                blocksci=BlockSciConfiguration(**index, external_baseline_uri=args.baseline_uri),
                 **common,
             )
         else:
@@ -130,7 +125,7 @@ def main() -> int:
                 target,
                 command=blocksci_script_pbs_command(args.run_id, config),
                 mode="blocksci-script",
-                user_script=args.script,
+                blocksci=BlockSciConfiguration(**index, script=str(args.script)),
                 **common,
             )
     args.output.write_text(script, encoding="utf-8")
