@@ -481,6 +481,23 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
                 "Kubernetes S3-compatible mode requires --reuse-namespace because "
                 "the credentials Secret must exist before the Job is created"
             )
+    s3_emulation = s3_backend and action in ("full-run", "emulate") and config.driver == "kubernetes"
+    for flag, path, value in (
+        (
+            "--distributor-startup-timeout",
+            "kubernetes.distributor_startup_timeout",
+            config.kubernetes.distributor_startup_timeout,
+        ),
+        ("--btc-node-image", "kubernetes.btc_node_image", config.kubernetes.btc_node_image),
+        (
+            "--btc-node-initial-block-count",
+            "kubernetes.btc_node_initial_block_count",
+            config.kubernetes.btc_node_initial_block_count,
+        ),
+        ("--kubernetes-image-pull-policy", "kubernetes.image_pull_policy", config.kubernetes.image_pull_policy),
+    ):
+        if _supplied(config, path, value) and not s3_emulation:
+            errors.append(f"{flag} applies only to the S3 emulation Job (--driver kubernetes --artifact-backend s3)")
     if config.resume_run and not s3_backend:
         errors.append("--resume-run requires --artifact-backend s3")
     if config.resume_run and not _supplied(config, "run_id", config.run_id):

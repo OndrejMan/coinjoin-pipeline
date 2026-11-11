@@ -15,6 +15,7 @@ from .configuration import (
     ConfigurationError,
     PipelineConfiguration,
     config_value,
+    decode_text,
     replace_path,
 )
 from .images import Images, resolve_images
@@ -26,6 +27,15 @@ from .storage.s3 import (
     validate_run_id,
     validate_s3_endpoint_url,
     validate_s3_profile,
+)
+
+
+#: Emulation options with an environment fallback, as (configuration path, variable).
+EMULATION_ENVIRONMENT = (
+    ("kubernetes.distributor_startup_timeout", "COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT"),
+    ("kubernetes.btc_node_image", "COINJOIN_BTC_NODE_IMAGE"),
+    ("kubernetes.btc_node_initial_block_count", "COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT"),
+    ("kubernetes.image_pull_policy", "KUBERNETES_IMAGE_PULL_POLICY"),
 )
 
 
@@ -51,6 +61,14 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
             continue
         if config_value(config, path) is None and os.environ.get(variable):
             config = replace_path(config, path, os.environ[variable])
+            provided.add(path)
+    # Scripts and the k3d/MinIO tests still set these; taken over here, they reach the
+    # configuration record of the run instead of only the process environment.
+    s3_emulation = config.action in {"emulate", "full-run"} and config.artifacts.backend == "s3"
+    for path, variable in EMULATION_ENVIRONMENT if s3_emulation else ():
+        text = os.environ.get(variable, "").strip()
+        if config_value(config, path) is None and text:
+            config = replace_path(config, path, decode_text(path, text, variable))
             provided.add(path)
     if config.action in {"pbs-from-s3", "mainnet-sync"}:
         config = replace_path(config, "artifacts.backend", "s3")

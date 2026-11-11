@@ -54,6 +54,7 @@ AnalysisAction = Literal["collect_docker", "analyze_only"]
 ExternalNetwork = Literal["bitcoin"]
 PBSScratchType = Literal["ssd", "local"]
 PBSMultijob = Literal["brno", "plzen", "global"]
+ImagePullPolicy = Literal["Always", "IfNotPresent", "Never"]
 # Alias -> canonical action, accepted from YAML and the command line alike.
 # Aliases are never named in error text.
 ACTION_ALIASES = {"coinjoin": "coinjoin-analysis", "external-analyze": "external analyze"}
@@ -90,6 +91,11 @@ class KubernetesConfiguration(ConfigurationModel):
     btc_datadir: str | None = option(None, name="kubernetes_btc_datadir")
     copy_to_host: bool = option(False, name="copy_to_host")
     infrastructure_local_build: bool = option(False, name="coinjoin_infrastructure_local_build")
+    # Overrides the S3 emulation Job forwards to its controller; the emulator's defaults apply when unset.
+    distributor_startup_timeout: int | None = option(None, name="distributor_startup_timeout", minimum=1)
+    btc_node_image: str | None = option(None, name="btc_node_image")
+    btc_node_initial_block_count: int | None = option(None, name="btc_node_initial_block_count", minimum=0)
+    image_pull_policy: ImagePullPolicy | None = option(None, name="kubernetes_image_pull_policy")
 
 
 @dataclass(frozen=True, slots=True)
@@ -509,6 +515,30 @@ def set_mapping_path(mapping, path, value):
             raise ConfigurationError(f"{part} must be a mapping")
         mapping = mapping[part]
     mapping[parts[-1]] = value
+
+
+def decode_text(path: str, text: str, source: str):
+    """Decode one option given as text, such as an environment variable, with its YAML rules."""
+    model, annotation, item = PipelineConfiguration, None, None
+    for part in path.split("."):
+        annotation = model_annotations(model)[part]
+        item = next(field_ for field_ in fields(model) if field_.name == part)
+        model = annotation
+    value: object = text
+    base = next((argument for argument in get_args(annotation) if argument is not NoneType), annotation)
+    if base is int:
+        try:
+            value = int(text)
+        except ValueError as error:
+            raise ConfigurationError(f"{source} must be an integer, not {text!r}") from error
+    try:
+        value = decode_value(annotation, value, path)
+    except ConfigurationError as error:
+        raise ConfigurationError(f"{source}: {error}") from error
+    minimum = item.metadata.get("minimum") if item is not None else None
+    if value is not None and minimum is not None and value < minimum:
+        raise ConfigurationError(f"{source} must be {'positive' if minimum == 1 else 'non-negative'}")
+    return value
 
 
 def config_value(config, path):

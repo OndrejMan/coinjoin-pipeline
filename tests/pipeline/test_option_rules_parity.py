@@ -34,6 +34,17 @@ S3_EMULATION = [
     "coinjoin-s3",
     "--reuse-namespace",
 ]
+# The emulation options the S3 Job forwards to its controller.
+EMULATION_OVERRIDES = [
+    "--distributor-startup-timeout",
+    "1800",
+    "--btc-node-image",
+    "btc-node:test",
+    "--btc-node-initial-block-count",
+    "201",
+    "--kubernetes-image-pull-policy",
+    "IfNotPresent",
+]
 # A mainnet analysis that only reads the published index of another run.
 MAINNET_SCAN = str(Path(__file__).resolve().parents[2] / "scripts" / "metacentrum_mainnet_coinjoin_scan.py")
 READ_ONLY_SCRIPT = [*PBS_FROM_S3, "--blocksciPbs", "--blocksci-task", "script", "--blocksci-script", MAINNET_SCAN]
@@ -179,6 +190,7 @@ VALID = {
     ],
     "S3 emulation": ["emulate", *S3_EMULATION, *S3],
     "S3 full-run": ["full-run", *S3_EMULATION, *S3, "--analysisPbs", "--blocksciPbs"],
+    "S3 emulation with its Job overrides": ["emulate", *S3_EMULATION, *S3, *EMULATION_OVERRIDES],
 }
 
 INVALID = {
@@ -405,6 +417,15 @@ INVALID = {
         "--blocksciPbs",
         "--dumplings-uri",
         "s3://bucket/dumplings",
+    ],
+    "S3 Job overrides on a Kubernetes run without S3": [
+        "full-run",
+        "--engine",
+        "wasabi",
+        "--driver",
+        "kubernetes",
+        "--btc-node-image",
+        "btc-node:test",
     ],
     "report resources without a report job": [
         *PBS_FROM_S3,
