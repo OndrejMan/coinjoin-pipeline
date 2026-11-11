@@ -162,7 +162,9 @@ class S5Client:
         digest, size = hashlib.sha256(), 0
         staged = None
         with contextlib.ExitStack() as stack:
-            tar = stack.enter_context(_stage(["tar", "-C", str(root), "-cf", "-", *members], stdout=subprocess.PIPE))
+            tar = stack.enter_context(
+                _stage(["tar", "--format=pax", "-C", str(root), "-cf", "-", *members], stdout=subprocess.PIPE)
+            )
             zstd = stack.enter_context(_stage(["zstd", "-3", f"-T{threads}"], stdin=tar.stdout, stdout=subprocess.PIPE))
             pipe(tar.stdout).close()
             processes = [tar, zstd]

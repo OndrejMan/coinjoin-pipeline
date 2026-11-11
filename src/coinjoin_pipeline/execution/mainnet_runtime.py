@@ -27,6 +27,7 @@ import shlex
 import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
+from decimal import Decimal
 from typing import TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:  # TypeGuard needs Python 3.10; the PBS node only evaluates no annotation.
@@ -601,6 +602,9 @@ class Worker:
                             output.parent.mkdir(parents=True, exist_ok=True)
                             with pipe(stream.extractfile(member)) as handle, output.open("wb") as target:
                                 shutil.copyfileobj(handle, target)
+                            # Archive markers compare nanosecond mtimes; float tar timestamps lose precision.
+                            mtime_ns = int(Decimal(member.pax_headers.get("mtime", str(member.mtime))) * 1_000_000_000)
+                            os.utime(output, ns=(mtime_ns, mtime_ns))
                         else:
                             raise ValueError("Checkpoint contains a link or special file")
         except S5Error as error:

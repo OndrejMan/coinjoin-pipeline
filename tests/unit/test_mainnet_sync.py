@@ -557,6 +557,28 @@ def test_core_shutdown_timeout_keeps_dataset_locked(worker, monkeypatch):
 
 
 @pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
+def test_checkpoint_restore_preserves_archive_marker_nanoseconds(worker, tmp_path):
+    source = tmp_path / "source"
+    block = source / "bitcoin/blocks/blk00000.dat"
+    block.parent.mkdir(parents=True)
+    block.write_bytes(b"already archived block")
+    mtime_ns = 1_700_000_000_123_456_789
+    os.utime(block, ns=(mtime_ns, mtime_ns))
+    marker = source / "archive-state/blk00000.dat.json"
+    atomic_json(marker, {"size": block.stat().st_size, "mtime_ns": block.stat().st_mtime_ns})
+
+    uri = worker.backup(source, ["bitcoin/blocks", "archive-state"], "s3://local/core", {}, "checkpoint.tar.zst")
+    restored = tmp_path / "restored"
+    worker.restore_checkpoint(uri, restored)
+
+    restored_block = restored / block.relative_to(source)
+    restored_marker = json.loads((restored / marker.relative_to(source)).read_text())
+    assert restored_block.read_bytes() == block.read_bytes()
+    assert restored_block.stat().st_mtime_ns == restored_marker["mtime_ns"] == mtime_ns
+    assert restored_block.stat().st_size == restored_marker["size"]
+
+
+@pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
 def test_backup_replaces_the_previous_one_without_readback(worker, tmp_path, monkeypatch):
     source = tmp_path / "source"
     (source / "chainstate").mkdir(parents=True)
