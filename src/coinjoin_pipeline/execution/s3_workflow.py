@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sys
 
-from coinjoin_pipeline.configuration import PipelineConfiguration
+from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution.kubernetes import (
     S3_JOB_START_TIMEOUT_SECONDS,
     collect_s3_emulation_diagnostics,
@@ -81,8 +81,6 @@ def run_s3_full_run(args: PipelineConfiguration) -> None:
     target = S3Target.from_args(args)
     access = target.access
     run_prefix = run_prefix_uri(target.artifact_uri, target.run_id)
-    kubeconfig_path = resolve_kubeconfig(args.kubernetes.kubeconfig)
-    job_name = s3_emulation_job_name(target.run_id)
     plan = s3_full_run_plan_from_args(args)
     # Without analyzers the run ends at the emulation upload and never touches PBS.
     analyzed = bool(plan.scheduled())
@@ -100,6 +98,19 @@ def run_s3_full_run(args: PipelineConfiguration) -> None:
         require_qsub()
     stage_kubernetes_s3_run(args)
     run_s3_kubernetes_emulation(args)
+    wait_for_emulation_upload(args, run_prefix, access)
+
+    if not analyzed:
+        print(f"[full-run] Completed emulation only; artifacts under {run_prefix}/")
+        return
+    wait_for_pbs_graph(args, plan, submit_s3_pbs_graph(args), run_prefix, access)
+    print_full_run_completed(run_prefix)
+
+
+def wait_for_emulation_upload(args: PipelineConfiguration, run_prefix: str, access: S3Access) -> None:
+    """Wait for the uploader's marker; a failure collects diagnostics and deletes the Job."""
+    kubeconfig_path = resolve_kubeconfig(args.kubernetes.kubeconfig)
+    job_name = s3_emulation_job_name(required(args.run_id, "--run-id"))
     print(f"[full-run] Waiting for emulation upload marker {upload_marker_uri(run_prefix, 'done')}")
     try:
         wait_for_s3_marker(
@@ -123,10 +134,11 @@ def run_s3_full_run(args: PipelineConfiguration) -> None:
         )
         raise
 
-    if not analyzed:
-        print(f"[full-run] Completed emulation only; artifacts under {run_prefix}/")
-        return
-    jobs = submit_s3_pbs_graph(args)
+
+def wait_for_pbs_graph(
+    args: PipelineConfiguration, plan: StageGraph, jobs: dict[str, str], run_prefix: str, access: S3Access
+) -> None:
+    """Wait for every submitted or adopted stage in graph order; stages without a job are skipped."""
     submitted: list[tuple[StagePlan, str]] = [
         (stage, jobs[stage.name]) for stage in plan.scheduled() if stage.name in jobs
     ]
@@ -140,6 +152,9 @@ def run_s3_full_run(args: PipelineConfiguration) -> None:
             access=access,
             walltime=stage_pbs_resources(args, resource_group(stage.kind)).walltime,
         )
+
+
+def print_full_run_completed(run_prefix: str) -> None:
     print(
         f"[full-run] Completed; results under {run_prefix}/ "
         "(coinjoin-analysis_data/, blocksci-analysis_data/, "

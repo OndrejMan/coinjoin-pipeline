@@ -321,6 +321,7 @@ class PipelineConfiguration(ConfigurationModel):
     min_input_count: int | None = option(None, name="min_input_count", minimum=1)
     dry_run: bool = option(False, name="dry_run")
     parallel: bool = option(False, name="parallel", actions=("full-run",))
+    resume_run: bool = option(False, name="resume_run", actions=("full-run",))
     all_runs: bool = option(False, name="all_runs", actions=("coinjoin-analysis",))
     yes: bool = option(False, name="yes", actions=("clean",))
     analysis_action: AnalysisAction = option("collect_docker", name="analysis_action", actions=("coinjoin-analysis",))

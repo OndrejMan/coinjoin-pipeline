@@ -56,7 +56,8 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
         config = replace_path(config, "artifacts.backend", "s3")
     if config.engine == "joinmarket" and "coinjoin_type" not in provided:
         config = replace(config, coinjoin_type="joinmarket")
-    if config.action in {"full-run", "emulate"} and not config.run_dir:
+    # A resume continues an existing run, so it never invents one.
+    if config.action in {"full-run", "emulate"} and not config.run_dir and not config.resume_run:
         config = replace(config, run_id=run_id_for(config))
         provided.add("run_id")
     config = replace(config, _provided=frozenset(provided))

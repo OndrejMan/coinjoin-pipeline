@@ -481,6 +481,10 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
                 "Kubernetes S3-compatible mode requires --reuse-namespace because "
                 "the credentials Secret must exist before the Job is created"
             )
+    if config.resume_run and not s3_backend:
+        errors.append("--resume-run requires --artifact-backend s3")
+    if config.resume_run and not _supplied(config, "run_id", config.run_id):
+        errors.append("--resume-run requires the --run-id of the run to continue")
     if s3_backend and action == "full-run":
         if config.blocksci.workflow == "cached":
             errors.append("full-run cannot reuse a cache before emulation; use --blocksci-workflow reusable")
