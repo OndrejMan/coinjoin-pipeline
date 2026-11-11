@@ -113,16 +113,14 @@ def persist_pbs_job_id(run_dir: Path, stage: str, job_id: str) -> None:
         raise
 
 
-def qdel_pbs_job(job_id: str) -> bool:
-    """Cancel a PBS job; return whether the cancellation was confirmed.
+def qdel_error(job_id: str) -> str | None:
+    """Cancel a PBS job; None when the cancellation is confirmed, else why it is not.
 
-    Callers such as ``rollback_s3_pbs_submissions`` must be able to tell a
-    cancelled job from one that is still burning allocation, so failures are
-    reported rather than only printed.
+    A job that already left the queue counts as cancelled: ``.jobid`` records
+    are never pruned, so finished stages are cancelled again on every stop.
     """
     if shutil.which("qdel") is None:
-        print(f"[pbs] qdel unavailable; cannot cancel PBS job {job_id}", file=sys.stderr)
-        return False
+        return f"qdel unavailable; cannot cancel PBS job {job_id}"
     result = subprocess.run(
         ["qdel", job_id],
         check=False,
@@ -132,13 +130,22 @@ def qdel_pbs_job(job_id: str) -> bool:
     )
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
-        # A job that already left the queue counts as cancelled for rollback.
         if job_left_scheduler(stderr):
-            return True
-        print(
-            f"[pbs] qdel {job_id} failed (exit {result.returncode}): {stderr}",
-            file=sys.stderr,
-        )
+            return None
+        return f"qdel {job_id} failed (exit {result.returncode}): {stderr}"
+    return None
+
+
+def qdel_pbs_job(job_id: str) -> bool:
+    """Cancel a PBS job; return whether the cancellation was confirmed.
+
+    Callers such as ``rollback_s3_pbs_submissions`` must be able to tell a
+    cancelled job from one that is still burning allocation, so failures are
+    reported rather than only printed.
+    """
+    error = qdel_error(job_id)
+    if error is not None:
+        print(f"[pbs] {error}", file=sys.stderr)
         return False
     return True
 

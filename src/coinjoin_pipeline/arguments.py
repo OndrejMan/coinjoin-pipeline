@@ -37,14 +37,27 @@ def field_type(path: str):
 
 
 CONFIGURATION_FLAGS = ("--from-configuration", "--fromConfiguration")
-# Host commands that need no experiment; the last five parse their own arguments.
-UTILITIES = ("version", "doctor", "pull", "watch", "download-report", "clean-s3", "runs", "scenarios")
-DELEGATING_UTILITIES = frozenset({"watch", "download-report", "clean-s3", "runs", "scenarios"})
+# Host commands that need no experiment; DELEGATING_UTILITIES parse their own arguments.
+UTILITIES = (
+    "version",
+    "doctor",
+    "pull",
+    "watch",
+    "status",
+    "stop",
+    "download-report",
+    "clean-s3",
+    "runs",
+    "scenarios",
+)
+DELEGATING_UTILITIES = frozenset({"watch", "status", "stop", "download-report", "clean-s3", "runs", "scenarios"})
 UTILITY_SUMMARIES = {
     "version": "print the CLI version and the default component images",
     "doctor": "check the container runtime, the runs root and the default images",
     "pull": "pull every component image with the container runtime",
     "watch": "stream Kubernetes and PBS logs of one run",
+    "status": "report the PBS, Kubernetes and S3 marker state of runs",
+    "stop": "delete a run's Kubernetes resources and cancel its PBS jobs",
     "download-report": "download the finished unified report of an S3 run",
     "clean-s3": "delete S3 artifacts of one run or a whole run root",
     "runs": "list, inspect or validate local run directories",

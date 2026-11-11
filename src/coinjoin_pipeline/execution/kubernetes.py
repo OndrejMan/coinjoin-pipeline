@@ -22,6 +22,9 @@ S3_UPLOADER_RESOURCE_LIMITS = {"cpu": "500m", "memory": "512Mi"}
 S3_JOB_TTL_SECONDS_AFTER_FINISHED = 3600
 S3_JOB_START_TIMEOUT_SECONDS = 1800
 S3_JOB_DEADLINE_GRACE_SECONDS = 60
+# Every S3 emulation Job carries both labels; the emulator labels its own pods with the run ID.
+S3_EMULATION_APP_LABEL = "coinjoin-s3"
+RUN_ID_LABEL = "coinjoin.run-id"
 S3_JOB_OWNED_RESOURCE_TYPES = (
     "serviceaccount",
     "configmap",
@@ -364,7 +367,7 @@ def render_s3_emulation_resources(
 ) -> str:
     """Render a kubectl-compatible JSON resource list for in-cluster emulation."""
     name = s3_emulation_job_name(run_id)
-    labels = {"app.kubernetes.io/name": "coinjoin-s3", "coinjoin.run-id": run_id}
+    labels = {"app.kubernetes.io/name": S3_EMULATION_APP_LABEL, RUN_ID_LABEL: run_id}
     btc_node_image_arg = ' --btc-node-image "$BTC_NODE_IMAGE"' if btc_node_image else ""
     controller = (
         'python manager.py --driver kubernetes --in-cluster --engine "$ENGINE" run '
