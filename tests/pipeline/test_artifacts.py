@@ -1,4 +1,5 @@
 import errno
+import json
 import os
 import subprocess
 import sys
@@ -34,8 +35,13 @@ ACCESS = S3Access(
 )
 
 
-def _completed(returncode: int, stderr: str = "") -> subprocess.CompletedProcess:
-    return subprocess.CompletedProcess(args=["s5cmd"], returncode=returncode, stdout="", stderr=stderr)
+def _completed(returncode: int, stderr: str = "", stdout: str = "") -> subprocess.CompletedProcess:
+    return subprocess.CompletedProcess(args=["s5cmd"], returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def _listed(*keys: str) -> subprocess.CompletedProcess:
+    """What ``s5cmd --json ls`` prints for these objects."""
+    return _completed(0, stdout="".join(json.dumps({"key": key, "type": "file", "size": 1}) + "\n" for key in keys))
 
 
 def test_validates_s3_compatible_parameters() -> None:
@@ -80,8 +86,9 @@ def test_scrubbed_environment_drops_aws_variables_and_keeps_others() -> None:
 
 
 def test_s3_object_exists_distinguishes_absent_from_errors() -> None:
-    with mock.patch("coinjoin_pipeline.storage.s5client.subprocess.run", return_value=_completed(0)):
-        assert s3_object_exists(ACCESS, "s3://bucket/runs/run-1/.k8s/upload.done") is True
+    marker = "s3://bucket/runs/run-1/.k8s/upload.done"
+    with mock.patch("coinjoin_pipeline.storage.s5client.subprocess.run", return_value=_listed(marker)):
+        assert s3_object_exists(ACCESS, marker) is True
     with mock.patch(
         "coinjoin_pipeline.storage.s5client.subprocess.run",
         return_value=_completed(1, 'ERROR "ls s3://...": no object found'),
@@ -95,6 +102,13 @@ def test_s3_object_exists_distinguishes_absent_from_errors() -> None:
             s3_object_exists(ACCESS, "s3://bucket/runs/run-1/.k8s/upload.done")
 
 
+def test_s3_object_exists_ignores_longer_keys_that_ls_also_lists() -> None:
+    # s5cmd 2.3 lists s3://b/k.old for "ls s3://b/k" and exits 0 when k itself is absent.
+    marker = "s3://bucket/runs/run-1/.pbs/blocksci.done"
+    with mock.patch("coinjoin_pipeline.storage.s5client.subprocess.run", return_value=_listed(marker + ".old")):
+        assert s3_object_exists(ACCESS, marker) is False
+
+
 def test_run_s5cmd_reports_missing_binary() -> None:
     with mock.patch("coinjoin_pipeline.storage.s5client.subprocess.run", side_effect=FileNotFoundError):
         with pytest.raises(ArtifactTransportError, match="s5cmd is required"):
@@ -102,11 +116,11 @@ def test_run_s5cmd_reports_missing_binary() -> None:
 
 
 def test_ensure_empty_run_prefix_rejects_every_existing_artifact() -> None:
-    with mock.patch("coinjoin_pipeline.storage.s3.s3_object_exists", return_value=True) as exists:
+    with mock.patch("coinjoin_pipeline.storage.s3.s3_listing", return_value=[{"key": "x"}]) as listing:
         with pytest.raises(ArtifactTransportError, match="fresh --run-id"):
             ensure_empty_run_prefix(ACCESS, "s3://bucket/runs", "run-1")
-    exists.assert_called_once_with(ACCESS, "s3://bucket/runs/run-1/*")
-    with mock.patch("coinjoin_pipeline.storage.s3.s3_object_exists", return_value=False):
+    listing.assert_called_once_with(ACCESS, "s3://bucket/runs/run-1/*")
+    with mock.patch("coinjoin_pipeline.storage.s3.s3_listing", return_value=[]):
         ensure_empty_run_prefix(ACCESS, "s3://bucket/runs", "run-1")
 
 

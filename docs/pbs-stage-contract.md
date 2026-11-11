@@ -297,8 +297,9 @@ Robustness rules:
 
 `full-run --artifact-backend s3` is the only frontend-side consumer of the
 markers uploaded to the bucket. It polls these exact keys every 30 s with
-`s5cmd ls` (credentials file + profile + endpoint from the CLI, AWS_* env vars
-scrubbed first):
+`s5cmd --json ls` (credentials file + profile + endpoint from the CLI, AWS_* env
+vars scrubbed first) and matches the listed key exactly, since `ls` of a key also
+lists every longer key it starts:
 
 - `<artifact-uri>/<run-id>/.k8s/upload.done` | `.k8s/upload.failed`
   — written by the Kubernetes uploader container.

@@ -25,9 +25,10 @@ def _completed(returncode: int, stdout: str = "", stderr: str = "") -> subproces
 
 
 def test_list_objects_returns_uris() -> None:
-    listing = "s3://bucket/runs/run-1/a\ns3://bucket/runs/run-2/b\n"
+    # What s5cmd 2.3 prints with --json; without it, it prints dates, sizes and relative keys.
+    listing = '{"key":"s3://bucket/runs/run-1/a","type":"file","size":2}\n{"key":"s3://bucket/runs/run-2/b","size":2}\n'
     with mock.patch(
-        "coinjoin_pipeline.clean_s3.run_s5cmd",
+        "coinjoin_pipeline.storage.s5client.subprocess.run",
         return_value=_completed(0, stdout=listing),
     ):
         objects = list_objects(ACCESS, "s3://bucket/runs")
@@ -39,7 +40,7 @@ def test_list_objects_returns_uris() -> None:
 
 def test_list_objects_treats_empty_prefix_as_no_objects() -> None:
     with mock.patch(
-        "coinjoin_pipeline.clean_s3.run_s5cmd",
+        "coinjoin_pipeline.storage.s5client.subprocess.run",
         return_value=_completed(1, stderr="ERROR no object found"),
     ):
         assert list_objects(ACCESS, "s3://bucket/runs") == []
@@ -47,7 +48,7 @@ def test_list_objects_treats_empty_prefix_as_no_objects() -> None:
 
 def test_list_objects_raises_on_unexpected_error() -> None:
     with mock.patch(
-        "coinjoin_pipeline.clean_s3.run_s5cmd",
+        "coinjoin_pipeline.storage.s5client.subprocess.run",
         return_value=_completed(1, stderr="AccessDenied"),
     ):
         with pytest.raises(CleanError, match="could not inspect"):

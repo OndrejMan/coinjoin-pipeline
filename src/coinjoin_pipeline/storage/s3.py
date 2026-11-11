@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from coinjoin_pipeline.configuration import required
-from coinjoin_pipeline.storage.s5client import S5Client, no_object_found
+from coinjoin_pipeline.storage.s5client import S5Client, S5Error, no_object_found
 
 if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import PipelineConfiguration
@@ -234,14 +234,24 @@ def upload_marker_uri(run_prefix: str, outcome: str) -> str:
     return f"{run_prefix}/{KUBERNETES_MARKER_DIR}/upload.{outcome}"
 
 
+def s3_listing(access: S3Access, pattern: str) -> list[dict[str, object]]:
+    """The objects ``ls`` lists for pattern, empty when none; any other failure raises."""
+    try:
+        return s5_client(access).listing(pattern, timeout=None)
+    except FileNotFoundError as error:
+        raise ArtifactTransportError("s5cmd is required on the frontend for S3-compatible transfers") from error
+    except S5Error as error:
+        raise ArtifactTransportError(str(error)) from error
+
+
 def s3_object_exists(access: S3Access, object_uri: str) -> bool:
-    result = run_s5cmd(access, "ls", object_uri)
-    if result.returncode == 0:
-        return True
-    if no_object_found(result):
-        return False
-    stderr = (result.stderr or "").strip()
-    raise ArtifactTransportError(f"s5cmd ls {object_uri} failed (exit {result.returncode}): {stderr}")
+    """Whether exactly this key exists: ``ls`` of a key also lists every longer key it starts."""
+    return any(entry.get("key") == object_uri for entry in s3_listing(access, object_uri))
+
+
+def s3_prefix_has_objects(access: S3Access, prefix: str) -> bool:
+    """Whether any object lies below ``prefix/``."""
+    return bool(s3_listing(access, f"{prefix}/*"))
 
 
 def delete_s3_object_if_present(access: S3Access, object_uri: str) -> None:
@@ -318,5 +328,5 @@ def s3_access_preflight(access: S3Access, artifact_uri: str) -> None:
 def ensure_empty_run_prefix(access: S3Access, artifact_uri: str, run_id: str) -> None:
     """Reject every occupied run prefix, including marker-less partial runs."""
     run_prefix = run_prefix_uri(artifact_uri, run_id)
-    if s3_object_exists(access, f"{run_prefix}/*"):
+    if s3_prefix_has_objects(access, run_prefix):
         raise ArtifactTransportError(f"run prefix {run_prefix}/ already contains artifacts; choose a fresh --run-id")

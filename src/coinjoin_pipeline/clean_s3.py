@@ -12,6 +12,7 @@ from .storage.s3 import (
     add_s3_arguments,
     run_s5cmd,
     s3_arguments_access,
+    s3_listing,
     validate_run_id,
 )
 
@@ -42,13 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def list_objects(access: S3Access, prefix: str) -> list[str]:
     """Return the object URIs living under ``prefix`` (recursively)."""
-    result = run_s5cmd(access, "ls", f"{prefix}/*")
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        if "no object found" in detail.lower():
-            return []
-        raise CleanError(f"s5cmd could not inspect {prefix} (exit {result.returncode}): {detail}")
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    try:
+        entries = s3_listing(access, f"{prefix}/*")
+    except ArtifactTransportError as error:
+        raise CleanError(f"s5cmd could not inspect {prefix}: {error}") from error
+    return [str(entry["key"]) for entry in entries]
 
 
 def delete_prefix(access: S3Access, prefix: str) -> None:
