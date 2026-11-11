@@ -10,7 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from coinjoin_pipeline.execution.pbs.stage_runtime import Stage, publish_index, restore_index
+from coinjoin_pipeline.execution.pbs.blocksci_jobs import publish_index, restore_index
+from coinjoin_pipeline.execution.pbs.stage import Stage
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_blocksci_analyze_s3_pbs,
     render_blocksci_parse_s3_pbs,
@@ -161,7 +162,7 @@ def test_notebook_source_is_archived_readonly_and_does_not_reparse():
     assert (settings["stage"], settings["job"]) == ("blocksci-notebook", "blocksci-analysis")
     assert settings["source_run_id"] == "source" and settings["persistent"] is None
     assert settings["output"]["notebook"] is True
-    assert embedded_file(script, "blocksci_notebook.py")
+    assert embedded_file(script, "coinjoin_pipeline/execution/pbs/templates/blocksci_notebook.py")
 
 
 def test_combined_report_job_reads_a_nested_datadir_and_only_present_optional_inputs(tmp_path):

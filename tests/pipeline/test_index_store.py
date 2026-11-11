@@ -13,14 +13,14 @@ from types import SimpleNamespace
 import pytest
 
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore, IndexStoreError
-from coinjoin_pipeline.execution.pbs.stage_runtime import (
-    StageFailure,
+from coinjoin_pipeline.execution.pbs.blocksci_jobs import (
     attach_dumplings,
     dumplings_in_place,
     kept_index,
     report_kept_copy,
     scratch_index,
 )
+from coinjoin_pipeline.execution.pbs.stage import StageFailure
 from coinjoin_pipeline.storage.s5client import S5Client, S5Error
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -342,7 +342,7 @@ def test_a_reading_job_restores_the_backup_into_its_own_scratch(tmp_path):
         settings={"persistent": {"backup_uri": BACKUP}}, scratch=tmp_path / "scratch", storage=index.storage
     )
 
-    copy = scratch_index(stage)
+    copy = scratch_index(stage, stage.settings["persistent"])
 
     assert copy.path == tmp_path / "scratch/index"
     assert copy.complete() and copy.height() == 100
@@ -366,13 +366,14 @@ def test_a_kept_copy_is_filled_once_and_stays_after_the_job(tmp_path):
     index = store(tmp_path)
     shutil.rmtree(index.path)
 
-    kept = kept_index(keeping_stage(tmp_path, index))
+    stage = keeping_stage(tmp_path, index)
+    kept = kept_index(stage, stage.settings["persistent"])
     assert kept.complete() and kept.height() == 100 and kept.held is not None
     kept.unlock()
     assert kept.complete(), "The copy stays for the next job"
 
     (tmp_path / "s3/bucket/blocksci-index/manifest.json").unlink()
-    again = kept_index(keeping_stage(tmp_path, index))
+    again = kept_index(stage, stage.settings["persistent"])
     assert again.complete(), "A complete copy needs no backup"
     again.unlock()
 

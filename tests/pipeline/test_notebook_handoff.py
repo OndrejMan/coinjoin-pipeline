@@ -9,7 +9,8 @@ from unittest.mock import Mock
 import pytest
 
 from coinjoin_pipeline.execution.pbs.analysis_modes import analysis_mode_settings
-from coinjoin_pipeline.execution.pbs.stage_runtime import StageFailure, notebook_connection, seed_notebook
+from coinjoin_pipeline.execution.pbs.blocksci_jobs import notebook_connection, seed_notebook
+from coinjoin_pipeline.execution.pbs.stage import StageFailure
 
 
 def stage():

@@ -1,9 +1,9 @@
 """S3-backed PBS job renderers.
 
-Every job is ``directives`` and a few lines of shell that write ``stage_runtime.py``,
-its helpers and a ``settings.json`` to the node's scratch and run them. The renderers
-here validate the options and assemble those settings; the work itself is
-``stage_runtime.py``'s.
+Every job is ``directives`` and a few lines of shell that write the stage worker's
+modules (``scripts.STAGE_RUNTIME_MODULES``) and a ``settings.json`` to the node's
+scratch and run them. The renderers here validate the options and assemble those
+settings; the work itself is ``analyzer_jobs``' and ``blocksci_jobs``'.
 """
 
 from __future__ import annotations
@@ -37,12 +37,11 @@ from coinjoin_pipeline.storage.s3 import (
 from .analysis_modes import MODE_OUTPUTS, analysis_mode_settings
 from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND, DEFAULT_RESOURCES, PBS_MULTIJOB_LOCATIONS, PBSResources
 from .scripts import (
-    INDEX_STORE,
-    S5CLIENT,
-    STAGE_RUNTIME,
+    STAGE_RUNTIME_MODULES,
     directives,
     mappings_run,
-    runtime_source,
+    launcher,
+    package_files,
     template,
     validated_s3_uri,
     write_files,
@@ -565,10 +564,8 @@ def render_python_stage(
         job_settings["image_name"] = image
     files = {
         "settings.json": json.dumps(job_settings, indent=2),
-        "s5client.py": runtime_source(S5CLIENT),
-        "stage_runtime.py": runtime_source(STAGE_RUNTIME),
-        "index_store.py": runtime_source(INDEX_STORE),
-        **{path.name: runtime_source(path) for path in extra_files},
+        "run.py": launcher("coinjoin_pipeline.execution.pbs.stage_runtime"),
+        **package_files(*STAGE_RUNTIME_MODULES, *extra_files),
     }
     return "\n".join(
         (
@@ -578,7 +575,8 @@ def render_python_stage(
             'JOB="$SCRATCHDIR/.stage-runtime"',
             'mkdir -p "$JOB"',
             write_files("$JOB", files),
-            'exec python3 "$JOB/stage_runtime.py" "$JOB/settings.json"',
+            # -s: a coinjoin_pipeline installed in the user's site-packages never shadows the shipped one.
+            'exec python3 -s "$JOB/run.py" "$JOB/settings.json"',
             "",
         )
     )

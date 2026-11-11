@@ -5,7 +5,7 @@ import subprocess
 import pytest
 
 from coinjoin_pipeline.execution.pbs import stage_runtime
-from coinjoin_pipeline.execution.pbs.stage_runtime import Stage
+from coinjoin_pipeline.execution.pbs.stage import Stage
 
 
 def stage(tmp_path, events, *, transfer_status=0, marker_status=0):

@@ -8,7 +8,7 @@ from types import ModuleType, SimpleNamespace
 
 from coinjoin_pipeline.execution.pbs.templates import blocksci_notebook
 from coinjoin_pipeline.execution.pbs.analysis_modes import analysis_mode_settings
-from coinjoin_pipeline.execution.pbs.stage_runtime import analysis_output, notebook_control
+from coinjoin_pipeline.execution.pbs.blocksci_jobs import analysis_output, notebook_control
 
 
 def test_notebook_paths_use_submission_home_when_pbs_changes_home(tmp_path, monkeypatch):
@@ -22,7 +22,7 @@ def test_notebook_paths_use_submission_home_when_pbs_changes_home(tmp_path, monk
     monkeypatch.setenv("HOME", str(node_home))
     for submit_home, expected in ((str(frontend_home), frontend_home), ("", node_home)):
         monkeypatch.setenv("PBS_O_HOME", submit_home)
-        assert analysis_output(stage) == expected / "coinjoin-notebooks/r1"
+        assert analysis_output(stage, settings["output"]) == expected / "coinjoin-notebooks/r1"
         assert notebook_control(stage) == expected / ".local/share/coinjoin-pipeline/jupyter/r1"
 
 

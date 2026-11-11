@@ -6,11 +6,17 @@ lives in `src/coinjoin_pipeline/execution/pbs/`, with the job scripts in its
 side stay compatible.
 
 Every S3 job is `directives()` (`pbs/scripts.py`) and a few lines of shell that
-`render_python_stage` (`pbs/templates_s3.py`) writes: they put the worker
-`pbs/stage_runtime.py`, `storage/s5client.py`, `pbs/index_store.py`, any helper the
-job needs (`execution/block_archive.py`, `templates/blocksci_notebook.py`) and a
-`settings.json` into `$SCRATCHDIR/.stage-runtime` and run `python3` on them (Python
-3.8 syntax, standard library only). The renderers validate the options and assemble
+`render_python_stage` (`pbs/templates_s3.py`) writes: they put the worker's modules
+(`scripts.STAGE_RUNTIME_MODULES`: `pbs/stage_runtime.py`, the job modules
+`pbs/analyzer_jobs.py` and `pbs/blocksci_jobs.py`, `pbs/stage.py`,
+`pbs/stage_settings.py`, `storage/s5client.py`, `pbs/index_store.py`), any helper the
+job needs (`execution/block_archive.py`, `templates/blocksci_notebook.py`), a
+`settings.json` and a three-line `run.py` into `$SCRATCHDIR/.stage-runtime`, and run
+`python3 -s run.py settings.json` (Python 3.8 syntax, standard library only). Each
+module lands at its path below `src/` with empty package markers, so the node imports
+it exactly as the frontend does; `run.py`'s directory comes first on `sys.path` and
+`-s` leaves out the user's site-packages, so an installed `coinjoin_pipeline` never
+shadows the shipped one. The renderers validate the options and assemble
 the settings; the worker does the work. `settings.json` names the stage (its markers
 and logs) and the `job` function, since several jobs share a stage name. All s5cmd
 calls go through `S5Client`, which drops every `AWS_*` variable of the node.
@@ -25,14 +31,14 @@ enumerator and Sake from `templates/mappings_run.sh`.
 | `coinjoin-analysis` | `--analysisPbs`                       | `local_coinjoin_analysis.sh`      |
 | `coinjoin-mappings` | `--mappingsPbs`                       | `local_mappings.sh`               |
 | `unified-report`    | serial or parallel, after analyzers    | `local_blocksci.sh` (report-only command) |
-| S3 analyzer variants | `pbs-from-s3`, `full-run --artifact-backend s3` | `stage_runtime.py` (`coinjoin_analysis`, `blocksci`) |
-| S3 mainnet baseline | `pbs-from-s3 --analysisPbs --dumplings-uri` | `stage_runtime.py` (`dumplings_baseline`) |
-| S3 `coinjoin-mappings` | Wasabi `--mappingsPbs` | `stage_runtime.py` (`coinjoin_mappings`) running `mappings_run.sh` |
-| S3 `blocksci-parse` | reusable BlockSci workflow | `stage_runtime.py` (`blocksci_parse`) |
-| S3 `blocksci-update` | versioned incremental cache update from a coin directory or the block archive | `stage_runtime.py` (`blocksci_update`) |
-| S3 cached work | `detect`, `script`, `external` or `notebook` over a reusable parse | `stage_runtime.py` (`blocksci_analysis`) |
-| S3 `blocksci-backup` | `--blocksci-task backup` of a persistent index | `stage_runtime.py` (`blocksci_backup`) |
-| S3 `unified-report` | BlockSci detect selected, after selected analyzers; a `full-run` also needs coinjoin-analysis | `stage_runtime.py` (`unified_report`) |
+| S3 analyzer variants | `pbs-from-s3`, `full-run --artifact-backend s3` | `analyzer_jobs.py` (`coinjoin_analysis`), `blocksci_jobs.py` (`blocksci`) |
+| S3 mainnet baseline | `pbs-from-s3 --analysisPbs --dumplings-uri` | `analyzer_jobs.py` (`dumplings_baseline`) |
+| S3 `coinjoin-mappings` | Wasabi `--mappingsPbs` | `analyzer_jobs.py` (`coinjoin_mappings`) running `mappings_run.sh` |
+| S3 `blocksci-parse` | reusable BlockSci workflow | `blocksci_jobs.py` (`blocksci_parse`) |
+| S3 `blocksci-update` | versioned incremental cache update from a coin directory or the block archive | `blocksci_jobs.py` (`blocksci_update`) |
+| S3 cached work | `detect`, `script`, `external` or `notebook` over a reusable parse | `blocksci_jobs.py` (`blocksci_analysis`) |
+| S3 `blocksci-backup` | `--blocksci-task backup` of a persistent index | `blocksci_jobs.py` (`blocksci_backup`) |
+| S3 `unified-report` | BlockSci detect selected, after selected analyzers; a `full-run` also needs coinjoin-analysis | `analyzer_jobs.py` (`unified_report`) |
 
 ## Marker files
 

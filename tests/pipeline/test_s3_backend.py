@@ -35,7 +35,8 @@ from coinjoin_pipeline.execution.pbs.commands import (
     blocksci_update_pbs_command,
 )
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore
-from coinjoin_pipeline.execution.pbs.stage_runtime import Stage, publish_persistent
+from coinjoin_pipeline.execution.pbs.blocksci_jobs import publish_persistent
+from coinjoin_pipeline.execution.pbs.stage import Stage
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
     PersistentIndex,
     render_blocksci_analyze_s3_pbs,
@@ -177,7 +178,7 @@ def test_combined_blocksci_and_report_jobs_run_the_stage_worker() -> None:
     report = render_unified_report_s3_pbs(**COMMON, image="docker://pipeline", command="report")
     for script in (blocksci, report):
         subprocess.run(["bash", "-n"], input=script, text=True, check=True)
-        assert script.rstrip().endswith('exec python3 "$JOB/stage_runtime.py" "$JOB/settings.json"')
+        assert script.rstrip().endswith('exec python3 -s "$JOB/run.py" "$JOB/settings.json"')
         # Stale markers are cleared strictly on the frontend before qsub, never by
         # a PBS job that could race a newer submission.
         assert " rm " not in script
@@ -241,7 +242,7 @@ def test_notebook_uses_image_python_and_keeps_control_files_outside_saved_notebo
     )
     settings = settings_of(script)
     assert settings["output"] == {"relative": "blocksci-notebooks_data", "notebook": True}
-    notebook = embedded_file(script, "blocksci_notebook.py")
+    notebook = embedded_file(script, "coinjoin_pipeline/execution/pbs/templates/blocksci_notebook.py")
     assert "--ServerApp.port_retries=0" in notebook
     assert "--ip=127.0.0.1" in notebook
 
@@ -372,7 +373,7 @@ def test_s3_bitcoin_archive_parse_verifies_manifest_checksums_and_height() -> No
     assert settings["source"]["expected_hash"] == "a" * 64
     assert settings["python_command"] == BLOCKSCI_IMAGE_PYTHON_COMMAND
     # The archive helper that checks sidecar checksums ships with the job.
-    assert "checksum mismatch" in embedded_file(script, "block_archive.py")
+    assert "checksum mismatch" in embedded_file(script, "coinjoin_pipeline/execution/block_archive.py")
 
 
 def test_s3_bitcoin_archive_parse_uploads_failure_log_before_marker(
@@ -510,7 +511,7 @@ def test_incremental_blocksci_update_from_the_block_archive_downloads_only_new_f
     )
     source = settings_of(script)["source"]
     assert source["kind"] == "bitcoin-blocks-s3" and source["blocks_uri"] == "s3://bucket/bitcoin-blocks"
-    assert embedded_file(script, "block_archive.py")
+    assert embedded_file(script, "coinjoin_pipeline/execution/block_archive.py")
 
 
 @pytest.mark.parametrize(
@@ -1174,6 +1175,7 @@ def test_persistent_manifest_records_requested_cpu_and_memory(tmp_path) -> None:
             "credentials": "/dev/null",
             "profile": "test",
             "image_name": "docker://blocksci",
+            "source": {"kind": "bitcoin-blocks-s3", "network": "bitcoin"},
             "pbs_resources": {"ncpus": 3, "mem": "1536mb"},
         },
         tmp_path / "scratch",
@@ -1183,7 +1185,7 @@ def test_persistent_manifest_records_requested_cpu_and_memory(tmp_path) -> None:
     (stage.work / "blocksci_data/config.json").write_text("{}")
     index = IndexStore(str(index_dir), None)
 
-    publish_persistent(stage, index, "bitcoin-blocks-s3", "bitcoin", 42, {})
+    publish_persistent(stage, stage.settings, index, 42, {})
 
     manifest = json.loads((index_dir / "manifest.json").read_text())
     assert manifest["index_dir"] == str(index_dir)

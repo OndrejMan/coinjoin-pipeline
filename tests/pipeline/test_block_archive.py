@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from coinjoin_pipeline.execution.pbs.stage_runtime import Stage, download_block_archive
+from coinjoin_pipeline.execution.pbs.blocksci_jobs import download_block_archive
+from coinjoin_pipeline.execution.pbs.stage import Stage
 from coinjoin_pipeline.paths import EXECUTION_ROOT
 
 HELPER = EXECUTION_ROOT / "block_archive.py"
@@ -318,11 +319,10 @@ def run_download(tmp_path: Path, max_block: int, manifest: Path | None = None) -
                 "endpoint": "http://unused",
                 "credentials": "unused",
                 "profile": "unused",
-                "source": {"blocks_uri": "s3://bucket/blocks"},
             },
             tmp_path / f"scratch-{max_block}",
         )
-        _, fields = download_block_archive(stage, max_block, manifest)
+        _, fields = download_block_archive(stage, "s3://bucket/blocks", max_block, manifest)
     downloaded = [name for name in log.read_text(encoding="utf-8").splitlines() if not name.endswith(".json")]
     return downloaded, fields
 
