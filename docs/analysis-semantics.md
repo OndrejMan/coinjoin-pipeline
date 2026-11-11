@@ -140,8 +140,10 @@ reports carry a `wasabi_production_threshold_zero_detections` warning.
 - `filter_coinjoin_txes_raw` returns every transaction-level heuristic match
   in the requested range. The report exporter and the mainnet scan use it for
   every CoinJoin type; for JoinMarket it runs `isJoinMarketCoinJoin`, which
-  needs at least five equal-value outputs and does not exclude Whirlpool or
-  Ashigaru transactions.
+  needs at least five outputs of one uniquely most frequent value. Change
+  values may repeat less often than the mix value; a tie between the most
+  frequent values is rejected. It does not exclude Whirlpool or Ashigaru
+  transactions.
 - `filter_coinjoin_txes` is a separate linked-transaction API. It returns both
   endpoints of connections between matched transactions and excludes isolated
   matches. It is useful for linked-chain analysis, not detector metrics.

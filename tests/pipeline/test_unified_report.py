@@ -2080,6 +2080,30 @@ class UnifiedReportTest(unittest.TestCase):
 
         self.assertEqual(explanation["failed_rules"], ["mix_output_count"])
 
+    def test_joinmarket_explanation_accepts_repeated_change(self):
+        fixture = joinmarket_passing_coinjoin_fixture()
+        tx = fixture["coinjoins"]["txA"]
+        for index in range(5, 9):
+            tx["outputs"][str(index)]["value"] = 460_002
+        records = normalize_coinjoin_analysis(fixture)
+
+        explanation = explain_joinmarket_heuristic(records["txA"])
+
+        self.assertTrue(explanation["would_pass_python_rules"])
+        self.assertEqual(explanation["failed_rules"], [])
+
+    def test_joinmarket_explanation_rejects_tied_mix_denominations(self):
+        fixture = joinmarket_passing_coinjoin_fixture()
+        tx = fixture["coinjoins"]["txA"]
+        for index in range(5, 10):
+            tx["outputs"][str(index)]["value"] = 460_002
+        records = normalize_coinjoin_analysis(fixture)
+
+        explanation = explain_joinmarket_heuristic(records["txA"])
+
+        self.assertFalse(explanation["would_pass_python_rules"])
+        self.assertIn("unique_mix_value", explanation["failed_rules"])
+
     def test_joinmarket_explanation_rejects_address_reuse_and_small_change(self):
         fixture = joinmarket_passing_coinjoin_fixture()
         tx = fixture["coinjoins"]["txA"]

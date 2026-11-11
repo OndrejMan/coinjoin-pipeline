@@ -189,7 +189,6 @@ def explain_joinmarket_heuristic(record: TransactionRecord) -> JsonObject:
     mix_count = max(value_counts.values(), default=0)
     mix_values = [value for value, count in value_counts.items() if count == mix_count]
     mix_value = mix_values[0] if len(mix_values) == 1 else None
-    other_repeated_values = sorted(value for value, count in value_counts.items() if 1 < count < mix_count)
     output_script_types = [str(output["script_type"]) for output in outputs if output.get("script_type")]
     rejected_script_types = sorted(set(output_script_types) & JOINMARKET_REJECTED_OUTPUT_SCRIPT_TYPES)
     address_uses: dict[str, int] = {}
@@ -221,10 +220,10 @@ def explain_joinmarket_heuristic(record: TransactionRecord) -> JsonObject:
             f">= {JOINMARKET_MIN_MIX_OUTPUTS} outputs of the most common value",
         ),
         rule_result(
-            "single_repeated_value",
-            mix_value is not None and not other_repeated_values,
-            {"mix_values": sorted(mix_values), "other_repeated_values": other_repeated_values},
-            "exactly one output value repeats",
+            "unique_mix_value",
+            mix_value is not None,
+            {"mix_values": sorted(mix_values)},
+            "one output value has the highest frequency; change values may repeat less often",
         ),
         rule_result(
             "basic_size",
