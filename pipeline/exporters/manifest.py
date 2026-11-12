@@ -29,10 +29,12 @@ MANIFEST_COMPARE_FIELDS = (
     ("images.blocksci", ("images", "blocksci")),
     ("images.coinjoin_analysis", ("images", "coinjoin_analysis")),
     ("images.coinjoin_emulator", ("images", "coinjoin_emulator")),
+    ("images.uploader", ("images", "uploader")),
     ("images.unified_report", ("images", "unified_report")),
     ("image_digests.blocksci", ("image_digests", "blocksci")),
     ("image_digests.coinjoin_analysis", ("image_digests", "coinjoin_analysis")),
     ("image_digests.coinjoin_emulator", ("image_digests", "coinjoin_emulator")),
+    ("image_digests.uploader", ("image_digests", "uploader")),
     ("image_digests.unified_report", ("image_digests", "unified_report")),
     ("source_commits.coinjoin_emulator", ("source_commits", "coinjoin_emulator")),
 )
@@ -46,10 +48,13 @@ def resolve_manifest_images(
     """Keep each recorded producer identity together, including unknown digests."""
     references = images.copy()
     digests = supplied_digests.copy()
-    components: tuple[Literal["blocksci", "coinjoin_analysis", "coinjoin_emulator", "unified_report"], ...] = (
+    components: tuple[
+        Literal["blocksci", "coinjoin_analysis", "coinjoin_emulator", "uploader", "unified_report"], ...
+    ] = (
         "blocksci",
         "coinjoin_analysis",
         "coinjoin_emulator",
+        "uploader",
         "unified_report",
     )
     for component in components:

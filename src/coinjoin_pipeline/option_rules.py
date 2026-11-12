@@ -31,6 +31,13 @@ def _general_errors(config: PipelineConfiguration) -> list[str]:
             value = config_value(config, path)
             if value is not None and value is not False:
                 errors.append(f"{cli_flag(destination)} is not supported for {config.action}")
+    if config.artifacts.backend == "s3":
+        for flag, value in (
+            ("--kubernetes-btc-datadir", config.kubernetes.btc_datadir),
+            ("--copy-to-host", config.kubernetes.copy_to_host),
+        ):
+            if value:
+                errors.append(f"Kubernetes S3-compatible mode does not support shared Bitcoin storage ({flag})")
     return errors
 
 
@@ -39,6 +46,7 @@ def _action_errors(config: PipelineConfiguration) -> list[str]:
     return [
         *_run_selection_errors(config),
         *_driver_errors(config),
+        *_s3_errors(config),
         *_remaining_errors(config),
     ]
 
@@ -76,6 +84,34 @@ def _driver_errors(config: PipelineConfiguration) -> list[str]:
         )
         if _supplied(config, path, value)
     ]
+
+
+def _missing_s3_options(config: PipelineConfiguration) -> list[str]:
+    """CLI flags of the S3 settings an S3 run lacks, in their documented order."""
+    artifacts = config.artifacts
+    required = (
+        ("--run-id", config.run_id),
+        ("--artifact-uri", artifacts.uri),
+        ("--s3-endpoint-url", artifacts.endpoint_url),
+        ("--s3-secret-name", artifacts.secret_name),
+    )
+    return [flag for flag, value in required if not value]
+
+
+def _s3_errors(config: PipelineConfiguration) -> list[str]:
+    errors: list[str] = []
+    action = config.action
+    s3_backend = config.artifacts.backend == "s3"
+    if s3_backend and action == "emulate":
+        errors.extend(f"Kubernetes S3-compatible mode requires {flag}" for flag in _missing_s3_options(config))
+        if config.driver != "kubernetes":
+            errors.append("--artifact-backend s3 requires --driver kubernetes")
+        if not _supplied(config, "kubernetes.reuse_namespace", config.kubernetes.reuse_namespace):
+            errors.append(
+                "Kubernetes S3-compatible mode requires --reuse-namespace because "
+                "the credentials Secret must exist before the Job is created"
+            )
+    return errors
 
 
 def _remaining_errors(config: PipelineConfiguration) -> list[str]:

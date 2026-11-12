@@ -6,6 +6,7 @@ import os
 from typing import TYPE_CHECKING
 
 from coinjoin_pipeline.paths import CONTAINER_ROOT
+from coinjoin_pipeline.images import in_registry
 
 if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import PipelineConfiguration
@@ -26,6 +27,11 @@ def read_image_lock(name: str) -> str:
     if not reference:
         raise RuntimeError(f"image lock file is empty: {path}")
     return reference
+
+
+def resolve_uploader_image(args: PipelineConfiguration) -> str:
+    """Configured uploader image, else the lock file."""
+    return args.images.uploader or in_registry(read_image_lock("uploader.image"), args.images.registry)
 
 
 def resolve_unified_report_image(args: PipelineConfiguration) -> str:

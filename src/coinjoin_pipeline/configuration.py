@@ -39,6 +39,7 @@ PipelineAction = Literal[
 Engine = Literal["wasabi", "joinmarket"]
 Driver = Literal["docker", "kubernetes"]
 CoinjoinType = Literal["wasabi2", "joinmarket"]
+ArtifactBackend = Literal["shared-storage", "s3"]
 ContainerRuntime = Literal["docker", "podman"]
 JoinMarketDetector = Literal["possible", "definite"]
 AnalysisAction = Literal["collect_docker", "analyze_only"]
@@ -70,6 +71,14 @@ class KubernetesConfiguration(ConfigurationModel):
 
 
 @dataclass(frozen=True, slots=True)
+class ArtifactConfiguration(ConfigurationModel):
+    backend: ArtifactBackend = option("shared-storage", name="artifact_backend")
+    uri: str | None = option(None, name="artifact_uri")
+    endpoint_url: str | None = option(None, name="s3_endpoint_url")
+    secret_name: str | None = option(None, name="s3_secret_name")
+
+
+@dataclass(frozen=True, slots=True)
 class ImageConfiguration(ConfigurationModel):
     version: str | None = option(None, name="version")
     registry: str | None = option(None, name="image_registry")
@@ -77,6 +86,7 @@ class ImageConfiguration(ConfigurationModel):
     emulator: str | None = option(None, name="emulator_image")
     coinjoin_analysis: str | None = option(None, name="coinjoin_analysis_image")
     blocksci: str | None = option(None, name="blocksci_image")
+    uploader: str | None = option(None, name="uploader_image")
     unified_report: str | None = option(None, name="unified_report_image")
 
 
@@ -111,7 +121,9 @@ class PipelineConfiguration(ConfigurationModel):
     all_runs: bool = option(False, name="all_runs", actions=("coinjoin-analysis",))
     yes: bool = option(False, name="yes", actions=("clean",))
     analysis_action: AnalysisAction = option("collect_docker", name="analysis_action", actions=("coinjoin-analysis",))
+    emulation_timeout: int = option(21600, name="emulation_timeout", minimum=1)
     kubernetes: KubernetesConfiguration = field(default_factory=KubernetesConfiguration)
+    artifacts: ArtifactConfiguration = field(default_factory=ArtifactConfiguration)
     images: ImageConfiguration = field(default_factory=ImageConfiguration)
     blocksci: BlockSciConfiguration = field(default_factory=BlockSciConfiguration)
     joinmarket: JoinMarketConfiguration = field(default_factory=JoinMarketConfiguration)

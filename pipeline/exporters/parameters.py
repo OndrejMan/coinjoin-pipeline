@@ -17,7 +17,7 @@ from exporters.common import (
 from exporters.report_types import DetectorManifest, DetectorParameters, ImageFields
 
 # Images whose reference and digest a report records.
-IMAGE_COMPONENTS = ("blocksci", "coinjoin_analysis", "coinjoin_emulator", "unified_report")
+IMAGE_COMPONENTS = ("blocksci", "coinjoin_analysis", "coinjoin_emulator", "uploader", "unified_report")
 
 
 @dataclass(frozen=True)
@@ -86,7 +86,7 @@ class ReportImages:
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> ReportImages:
-        # The report image has no digest option; a pinned reference carries its own.
+        # The uploader and report images have no digest option; a pinned reference carries its own.
         references = {name: getattr(args, name + "_image", None) for name in IMAGE_COMPONENTS}
         return cls(
             references,
@@ -108,6 +108,7 @@ def _image_fields(values: dict[str, str | None]) -> ImageFields:
         "blocksci": values.get("blocksci"),
         "coinjoin_analysis": values.get("coinjoin_analysis"),
         "coinjoin_emulator": values.get("coinjoin_emulator"),
+        "uploader": values.get("uploader"),
         "unified_report": values.get("unified_report"),
     }
 
@@ -195,6 +196,7 @@ def add_image_arguments(parser: argparse.ArgumentParser) -> None:
         "--coinjoin-emulator-image",
         default=os.environ.get("COINJOIN_EMULATOR_IMAGE") or os.environ.get("EMULATOR_IMAGE"),
     )
+    parser.add_argument("--uploader-image", default=os.environ.get("COINJOIN_UPLOADER_IMAGE"))
     parser.add_argument("--unified-report-image", default=os.environ.get("COINJOIN_UNIFIED_REPORT_IMAGE"))
     parser.add_argument("--blocksci-image-digest", default=os.environ.get("BLOCKSCI_IMAGE_DIGEST"))
     parser.add_argument("--blocksci-image-id", default=os.environ.get("BLOCKSCI_IMAGE_ID"))

@@ -60,6 +60,7 @@ ACTION_SUMMARIES = {
 SECTIONS = {
     "": ("run options", None),
     "kubernetes": ("Kubernetes driver", "Used with --driver kubernetes."),
+    "artifacts": ("artifact backend", "S3 options are required by --artifact-backend s3."),
     "images": (
         "component images",
         "Each image is the explicit option, else its environment variable, else the --local-build tag, "
@@ -89,19 +90,25 @@ HELP = {
     "all_runs": "run coinjoin-analysis over every run in the runs root",
     "yes": "confirm the destructive clean action",
     "analysis_action": "collect_docker collects the emulator logs first; analyze_only needs an existing baseline",
+    "emulation_timeout": "seconds to wait for the emulation before giving up",
     "kubernetes.namespace": "namespace of the run's Kubernetes resources",
     "kubernetes.reuse_namespace": "use an existing namespace instead of creating and deleting one",
     "kubernetes.kubeconfig": "kubeconfig file (default: ~/.kube/config)",
     "kubernetes.image_prefix": "registry prefix the emulator uses for its infrastructure images",
-    "kubernetes.btc_datadir": "shared Bitcoin datadir of the Kubernetes emulation",
-    "kubernetes.copy_to_host": "copy the emulation's Bitcoin data to the host",
+    "kubernetes.btc_datadir": "shared Bitcoin datadir of the Kubernetes emulation (shared-storage backend only)",
+    "kubernetes.copy_to_host": "copy the emulation's Bitcoin data to the host (shared-storage backend only)",
     "kubernetes.infrastructure_local_build": "let the emulator build its infrastructure images locally",
+    "artifacts.backend": "where run artifacts are kept between stages",
+    "artifacts.uri": "S3 run root, for example s3://bucket/runs",
+    "artifacts.endpoint_url": "S3-compatible HTTP(S) endpoint URL",
+    "artifacts.secret_name": "Kubernetes Secret with the S3 credentials of the emulation Job",
     "images.version": "release tag of every component image; `cjp version` prints the CLI version",
     "images.registry": (
         "registry and owner of the project's images, e.g. ghcr.io/you (also $COINJOIN_IMAGE_REGISTRY; "
         "default: ghcr.io/ondrejman)"
     ),
     "images.local_build": "use locally built images (*:local)",
+    "images.uploader": "S3 uploader image (default: container/uploader.image)",
     "images.unified_report": ("unified-report job image (default: container/unified-report.image)"),
     "blocksci.script": "Python script run over the parsed BlockSci index",
     **{

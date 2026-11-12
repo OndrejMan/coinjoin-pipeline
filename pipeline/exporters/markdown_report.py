@@ -539,6 +539,7 @@ IMAGE_LABELS = (
     ("blocksci", "BlockSci"),
     ("coinjoin_analysis", "coinjoin-analysis"),
     ("coinjoin_emulator", "coinjoin-emulator"),
+    ("uploader", "uploader"),
     ("unified_report", "unified-report"),
 )
 

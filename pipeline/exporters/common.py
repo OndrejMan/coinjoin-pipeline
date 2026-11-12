@@ -144,7 +144,11 @@ def tree_sha256(root: Path) -> str | None:
 
 
 def digest_from_reference(image: str | None) -> str | None:
-    """Read the digest straight out of a pinned reference, without Docker."""
+    """Read the digest straight out of a pinned reference, without Docker.
+
+    The MetaCentrum frontend has no Docker daemon, so image provenance for the
+    pinned uploader/report references has to come from the reference itself.
+    """
     if image and "@sha256:" in image:
         return f"sha256:{image.rsplit('@sha256:', 1)[1]}"
     return None

@@ -461,6 +461,7 @@ def export_command(active_run_id: str, env: dict[str, str]) -> str:
         ("--coinjoin-emulator-image", env.get("COINJOIN_EMULATOR_IMAGE")),
         ("--coinjoin-emulator-image-id", env.get("COINJOIN_EMULATOR_IMAGE_ID")),
         ("--coinjoin-emulator-image-digest", env.get("COINJOIN_EMULATOR_IMAGE_DIGEST")),
+        ("--uploader-image", env.get("COINJOIN_UPLOADER_IMAGE")),
         ("--unified-report-image", env.get("COINJOIN_UNIFIED_REPORT_IMAGE")),
     ]
     for flag, value in optional_args:

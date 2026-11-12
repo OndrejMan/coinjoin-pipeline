@@ -42,8 +42,9 @@ from exporters.parameters import (
 )
 from exporters.report_types import BlockSciAnalysisArtifact, SubsetMatchingAnalysis
 
+INSPECTED_IMAGE_NAMES = IMAGE_COMPONENTS[:3]
 # The report stage resolves its own image (manifest.resolve_manifest_images).
-PROVENANCE_IMAGE_NAMES = IMAGE_COMPONENTS[:3]
+PROVENANCE_IMAGE_NAMES = IMAGE_COMPONENTS[:4]
 
 
 def exported_addresses(run_dir: Path) -> set[str]:
@@ -106,7 +107,7 @@ def write_analysis(args: argparse.Namespace) -> Path:
         if baseline_path.is_file():
             baseline_heights = baseline_block_heights(chain, load_json(baseline_path).get("coinjoins", {}))
     images = ReportImages.from_args(args)
-    image_ids = {name: getattr(args, name + "_image_id", None) for name in PROVENANCE_IMAGE_NAMES}
+    image_ids = {name: getattr(args, name + "_image_id", None) for name in INSPECTED_IMAGE_NAMES}
     diagnostics = (
         build_integration_diagnostics(run_dir, config_path, blocksci, records, images, image_ids=image_ids)
         if getattr(args, "mode", "emulator") == "emulator"

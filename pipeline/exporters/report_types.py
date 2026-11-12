@@ -140,6 +140,7 @@ class ImageFields(TypedDict):
     blocksci: str | None
     coinjoin_analysis: str | None
     coinjoin_emulator: str | None
+    uploader: str | None
     unified_report: str | None
 
 

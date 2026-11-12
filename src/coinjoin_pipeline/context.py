@@ -20,7 +20,11 @@ from .configuration import (
 from .images import Images, resolve_images
 from .paths import EXPORTERS_ROOT, SCENARIOS_ROOT, default_runs_root
 from .runs import run_id_for
-from .storage.s3 import validate_run_id
+from .storage.s3 import (
+    validate_artifact_uri,
+    validate_run_id,
+    validate_s3_endpoint_url,
+)
 
 
 def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguration:
@@ -37,7 +41,11 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
         config = replace(config, run_id=run_id_for(config))
         provided.add("run_id")
     config = replace(config, _provided=frozenset(provided))
-    for path, validator in (("run_id", validate_run_id),):
+    for path, validator in (
+        ("artifacts.uri", validate_artifact_uri),
+        ("artifacts.endpoint_url", validate_s3_endpoint_url),
+        ("run_id", validate_run_id),
+    ):
         value = config_value(config, path)
         if value is not None:
             config = replace_path(config, path, validator(value))
@@ -54,7 +62,7 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
 
 
 def resolve_run_images(config: PipelineConfiguration) -> tuple[PipelineConfiguration, Images]:
-    """Pin every image reference of the component images."""
+    """Pin every image reference: the component images and the S3 job images."""
     images = resolve_images(
         config.images.version,
         {item.name: getattr(config.images, item.name) for item in fields(Images)},
@@ -70,6 +78,10 @@ def resolve_run_images(config: PipelineConfiguration) -> tuple[PipelineConfigura
             blocksci=images.blocksci,
         ),
     )
+    if config.artifacts.backend == "s3":
+        from .execution.pbs_settings import resolve_uploader_image
+
+        config = replace(config, images=replace(config.images, uploader=resolve_uploader_image(config)))
     return config, images
 
 
@@ -97,8 +109,12 @@ def host_environment(config: PipelineConfiguration, images: Images, reproduction
         "REPRODUCTION_COMMAND": reproduction,
         "PYTHONDONTWRITEBYTECODE": "1",
     }
-    if config.images.unified_report:
-        environment["COINJOIN_UNIFIED_REPORT_IMAGE"] = config.images.unified_report
+    for key, value in (
+        ("COINJOIN_UPLOADER_IMAGE", config.images.uploader),
+        ("COINJOIN_UNIFIED_REPORT_IMAGE", config.images.unified_report),
+    ):
+        if value:
+            environment[key] = value
     if config.run_id:
         environment["PIPELINE_RUN_ID"] = config.run_id
     if config.kubernetes.copy_to_host:

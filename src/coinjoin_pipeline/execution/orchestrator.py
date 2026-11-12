@@ -1,4 +1,8 @@
-"""Dispatch a resolved configuration to the experimental local paths in ``local.py``."""
+"""Dispatch a resolved configuration.
+
+The Kubernetes → S3 path (the S3 ``emulate``) is handled here. Every other
+action belongs to the experimental local paths in ``local.py``.
+"""
 
 from __future__ import annotations
 
@@ -8,17 +12,22 @@ from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.locks import acquire_lock, command_lock_path
 from coinjoin_pipeline.execution.pbs_settings import truthy_env
 from coinjoin_pipeline.execution.pipeline_logging import exit_with_error
+from coinjoin_pipeline.execution.s3_emulation import run_s3_kubernetes_emulation
 
 from . import local
 
 
 def _print_dry_run(args: PipelineConfiguration) -> bool:
     """Print dry-run intent and return whether dispatch must continue."""
+    use_pbs_dry_run = args.action == "emulate" and args.artifacts.backend == "s3"
     if not args.dry_run:
         return True
     print(f"[dry-run] action: {args.action}")
     print(f"[dry-run] runtime: {args.runtime}")
     print(f"[dry-run] engine: {args.engine}")
+    if use_pbs_dry_run:
+        print("[dry-run] Kubernetes resources will be rendered but not applied with kubectl.")
+        return True
     print("[dry-run] No containers, files, reports, or Kubernetes resources will be created.")
     return False
 
@@ -38,4 +47,10 @@ def run_configuration(args: PipelineConfiguration) -> None:
     if local_build:
         os.environ["COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD"] = "1"
 
-    local.run_configuration(args, logs_root, local_build)
+    if args.action == "emulate" and args.driver == "kubernetes" and args.artifacts.backend == "s3":
+        try:
+            run_s3_kubernetes_emulation(args)
+        except RuntimeError as error:
+            exit_with_error(error)
+    else:
+        local.run_configuration(args, logs_root, local_build)

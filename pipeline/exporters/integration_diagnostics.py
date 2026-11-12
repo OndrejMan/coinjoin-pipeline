@@ -17,8 +17,11 @@ from exporters.image_provenance import inspect_image
 from exporters.normalization import is_coinbase_tx, iter_exported_blocks
 from exporters.parameters import ReportImages
 
-# Only the images that ran before the analysis. The report stage resolves its
-# own image, whose reference and digest reach the manifest through build_run_manifest.
+# Only the images the report can actually inspect. The uploader image is pulled
+# by Kubernetes, never by the daemon this code can reach, so `docker image inspect`
+# would always fail and every run would report a spurious provenance problem. Its
+# reference and digest, like the report image's, still reach the manifest through
+# build_run_manifest.
 IMAGE_COMPONENTS = ("blocksci", "coinjoin_analysis", "coinjoin_emulator")
 TARGET_DETAIL_LIMIT = 100
 

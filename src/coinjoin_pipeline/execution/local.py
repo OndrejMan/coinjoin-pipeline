@@ -1,6 +1,7 @@
 """EXPERIMENTAL: local Docker, Kubernetes without S3, and shared-storage PBS actions.
 
-These paths serve local development and reproduction.
+These paths serve local development and reproduction. The thesis results come
+from the Kubernetes → S3 → PBS path dispatched in ``orchestrator.py``.
 """
 
 from __future__ import annotations

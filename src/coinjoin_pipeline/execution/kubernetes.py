@@ -1,12 +1,27 @@
-"""kubectl access and the permission preflight of the Kubernetes driver."""
+"""The S3 emulation Job on Kubernetes: kubectl access, preflight and resources."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shlex
 import subprocess
 import sys
 from pathlib import Path
+
+from coinjoin_pipeline.paths import EXECUTION_ROOT
+
+S3_CONTROLLER_RESOURCE_REQUESTS = {"cpu": "250m", "memory": "512Mi"}
+S3_CONTROLLER_RESOURCE_LIMITS = {"cpu": "1", "memory": "1Gi"}
+S3_UPLOADER_RESOURCE_REQUESTS = {"cpu": "100m", "memory": "128Mi"}
+S3_UPLOADER_RESOURCE_LIMITS = {"cpu": "500m", "memory": "512Mi"}
+S3_JOB_TTL_SECONDS_AFTER_FINISHED = 3600
+S3_JOB_START_TIMEOUT_SECONDS = 1800
+S3_JOB_DEADLINE_GRACE_SECONDS = 60
+# Every S3 emulation Job carries both labels; the emulator labels its own pods with the run ID.
+S3_EMULATION_APP_LABEL = "coinjoin-s3"
+RUN_ID_LABEL = "coinjoin.run-id"
 
 
 def resolve_kubeconfig(value: str | None) -> Path:
@@ -36,6 +51,10 @@ def kubectl(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+
+
+def _output(result: subprocess.CompletedProcess[str]) -> str:
+    return (result.stderr or result.stdout or "").strip()
 
 
 def _preflight(kubeconfig: Path, *arguments: str, namespace: str | None = None) -> str:
@@ -82,3 +101,211 @@ def kubernetes_auth_preflight(kubeconfig_path: Path, namespace: str, reuse_names
     else:
         _require_permissions(kubeconfig_path, (("create", "namespaces"), ("delete", "namespaces")), None)
     print(f"[kubernetes] Auth preflight OK for namespace={namespace}, reuse_namespace={reuse_namespace}")
+
+
+def s3_emulation_job_name(run_id: str) -> str:
+    """Derive a DNS-safe Job name that stays unique per run id.
+
+    Lowercasing, separator folding, and truncation are all lossy, so distinct run
+    ids (``test_1``/``test.1``/``Test-1``) would otherwise share a Job object and
+    watch each other's status. The suffix restores uniqueness.
+    """
+    digest = hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:8]
+    slug = f"coinjoin-s3-{run_id}".lower().replace("_", "-").replace(".", "-")
+    slug = slug[: 63 - len(digest) - 1].rstrip("-")
+    return f"{slug}-{digest}"
+
+
+# What the controller needs to create, watch and exec into the emulation pods.
+S3_EMULATION_ROLE_RULES = (
+    {"apiGroups": [""], "resources": ["pods", "services"], "verbs": ["create", "get", "list", "watch", "delete"]},
+    {"apiGroups": [""], "resources": ["pods/log", "pods/status"], "verbs": ["get"]},
+    {"apiGroups": [""], "resources": ["pods/exec"], "verbs": ["create", "get"]},
+    {"apiGroups": [""], "resources": ["events"], "verbs": ["get", "list", "watch"]},
+)
+S3_EMULATION_POD_SECURITY = {
+    "runAsNonRoot": True,
+    "runAsUser": 1000,
+    "runAsGroup": 1000,
+    "fsGroup": 1000,
+    "seccompProfile": {"type": "RuntimeDefault"},
+}
+
+
+def _env(name: str, value: str) -> dict:
+    return {"name": name, "value": value}
+
+
+def _field_env(name: str, path: str) -> dict:
+    return {"name": name, "valueFrom": {"fieldRef": {"fieldPath": path}}}
+
+
+def _secret_env(secret_name: str, key: str, *, optional: bool = False) -> dict:
+    return {"name": key, "valueFrom": {"secretKeyRef": {"name": secret_name, "key": key, "optional": optional}}}
+
+
+def _container(name: str, image: str, script: str, environment: list[dict], limits: tuple, mounts: dict) -> dict:
+    """A non-root shell container; only the scenario volume is mounted read-only."""
+    requests, maximum = limits
+    return {
+        "name": name,
+        "image": image,
+        "command": ["sh", "-c", script],
+        "env": environment,
+        "securityContext": {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}},
+        "resources": {"requests": requests, "limits": maximum},
+        "volumeMounts": [
+            {"name": volume, "mountPath": path, **({"readOnly": True} if volume == "scenario" else {})}
+            for volume, path in mounts.items()
+        ],
+    }
+
+
+def _execution_script(*names: str) -> str:
+    return "".join((EXECUTION_ROOT / name).read_text(encoding="utf-8") for name in names)
+
+
+def render_s3_emulation_resources(
+    *,
+    namespace: str,
+    run_id: str,
+    scenario_json: str,
+    engine: str,
+    image_prefix: str,
+    emulator_image: str,
+    uploader_image: str,
+    artifact_uri: str,
+    endpoint_url: str,
+    secret_name: str,
+    emulation_timeout_seconds: int = 21600,
+    scheduling_timeout_seconds: int = S3_JOB_START_TIMEOUT_SECONDS,
+    reuse_namespace: bool = False,
+) -> str:
+    """Render a kubectl-compatible JSON resource list for in-cluster emulation."""
+    name = s3_emulation_job_name(run_id)
+    labels = {"app.kubernetes.io/name": S3_EMULATION_APP_LABEL, RUN_ID_LABEL: run_id}
+    controller = (
+        'python manager.py --driver kubernetes --in-cluster --engine "$ENGINE" run '
+        '--scenario /config/scenario.json --namespace "$NAMESPACE" --reuse-namespace '
+        '--disable-port-forward --image-prefix "$IMAGE_PREFIX" --run-id "$RUN_ID" '
+        '--btc-node-arg=-blocksxor=0 --download-btc-data "/app/logs/$RUN_ID/bitcoin_data" '
+        "--controller-done-marker /app/logs/.controller.done "
+        "--controller-failed-marker /app/logs/.controller.failed"
+    )
+    prefix_preflight = _execution_script("k8s_s3_access.sh", "k8s_s3_prefix_preflight.sh")
+    uploader = _execution_script("k8s_s3_access.sh", "k8s_s3_uploader.sh").rstrip("\n")
+
+    # The emulator makes this pod the owner of every pod and service it
+    # creates, so Kubernetes removes them even when the controller is
+    # killed before its own cleanup finishes.
+    env: list[dict] = [
+        _env("NAMESPACE", namespace),
+        _env("RUN_ID", run_id),
+        _env("ENGINE", engine),
+        _env("IMAGE_PREFIX", image_prefix),
+        _field_env("COINJOIN_OWNER_POD_NAME", "metadata.name"),
+        _field_env("COINJOIN_OWNER_POD_UID", "metadata.uid"),
+        _field_env("COINJOIN_OWNER_POD_NAMESPACE", "metadata.namespace"),
+    ]
+    artifact_env: list[dict] = [
+        _env("RUN_ID", run_id),
+        _env("ARTIFACT_URI", artifact_uri),
+        _env("S3_ENDPOINT_URL", endpoint_url),
+        _secret_env(secret_name, "S3_ACCESS_KEY_ID"),
+        _secret_env(secret_name, "S3_SECRET_ACCESS_KEY"),
+        _secret_env(secret_name, "S3_DEFAULT_REGION", optional=True),
+    ]
+    uploader_env: list[dict] = [
+        _env("NAMESPACE", namespace),
+        _env("EMULATION_TIMEOUT_SECONDS", str(emulation_timeout_seconds)),
+        _field_env("POD_NAME", "metadata.name"),
+        *artifact_env,
+    ]
+    small = (S3_UPLOADER_RESOURCE_REQUESTS, S3_UPLOADER_RESOURCE_LIMITS)
+    metadata = {"name": name, "namespace": namespace, "labels": labels}
+    resources: list[dict] = [
+        {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": metadata},
+        {"apiVersion": "v1", "kind": "ConfigMap", "metadata": metadata, "data": {"scenario.json": scenario_json}},
+        {
+            "apiVersion": "rbac.authorization.k8s.io/v1",
+            "kind": "Role",
+            "metadata": {"name": name, "namespace": namespace},
+            "rules": list(S3_EMULATION_ROLE_RULES),
+        },
+        {
+            "apiVersion": "rbac.authorization.k8s.io/v1",
+            "kind": "RoleBinding",
+            "metadata": {"name": name, "namespace": namespace},
+            "subjects": [{"kind": "ServiceAccount", "name": name, "namespace": namespace}],
+            "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": name},
+        },
+        {
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": metadata,
+            "spec": {
+                "backoffLimit": 0,
+                "activeDeadlineSeconds": (
+                    scheduling_timeout_seconds + emulation_timeout_seconds + S3_JOB_DEADLINE_GRACE_SECONDS
+                ),
+                "ttlSecondsAfterFinished": S3_JOB_TTL_SECONDS_AFTER_FINISHED,
+                "template": {
+                    "metadata": {"labels": labels},
+                    "spec": {
+                        "serviceAccountName": name,
+                        "restartPolicy": "Never",
+                        "securityContext": S3_EMULATION_POD_SECURITY,
+                        "volumes": [
+                            {"name": "artifacts", "emptyDir": {}},
+                            {"name": "credentials", "emptyDir": {"medium": "Memory"}},
+                            {"name": "scenario", "configMap": {"name": name}},
+                        ],
+                        "initContainers": [
+                            _container(
+                                "prefix-preflight",
+                                uploader_image,
+                                prefix_preflight,
+                                artifact_env,
+                                small,
+                                {"credentials": "/credentials"},
+                            )
+                        ],
+                        "containers": [
+                            _container(
+                                "controller",
+                                emulator_image,
+                                controller,
+                                env,
+                                (S3_CONTROLLER_RESOURCE_REQUESTS, S3_CONTROLLER_RESOURCE_LIMITS),
+                                {"artifacts": "/app/logs", "scenario": "/config"},
+                            ),
+                            _container(
+                                "uploader",
+                                uploader_image,
+                                uploader,
+                                uploader_env,
+                                small,
+                                {"artifacts": "/artifacts", "credentials": "/credentials"},
+                            ),
+                        ],
+                    },
+                },
+            },
+        },
+    ]
+    if not reuse_namespace:
+        resources.insert(0, {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}})
+    return json.dumps({"apiVersion": "v1", "kind": "List", "items": resources}, indent=2)
+
+
+def apply_s3_emulation_resources(manifest: str, kubeconfig_path: Path) -> None:
+    """Apply the resource list of one emulation Job."""
+    payload = json.loads(manifest)
+    jobs = [item for item in payload.get("items", []) if item.get("kind") == "Job"]
+    if len(jobs) != 1:
+        raise RuntimeError("S3 Kubernetes manifest must contain exactly one Job")
+    applied = subprocess.run(
+        kubectl_command(kubeconfig_path, "apply", "-f", "-"), input=manifest, text=True, check=False
+    )
+    if applied.returncode:
+        raise RuntimeError(f"kubectl apply failed with exit {applied.returncode}")
