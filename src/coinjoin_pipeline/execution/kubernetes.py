@@ -1,4 +1,4 @@
-"""The S3 emulation Job on Kubernetes: kubectl access, preflight, resources, probe and cleanup."""
+"""The S3 emulation Job on Kubernetes: kubectl access, preflight, resources, probe, diagnostics and cleanup."""
 
 from __future__ import annotations
 
@@ -30,6 +30,11 @@ S3_JOB_OWNED_RESOURCE_TYPES = (
     "configmap",
     "role.rbac.authorization.k8s.io",
     "rolebinding.rbac.authorization.k8s.io",
+)
+CONTROLLER_FATAL_SUMMARY_MARKERS = (
+    "Kubernetes CPU quota exhausted",
+    "Terminating exception:",
+    "is unreachable at",
 )
 
 
@@ -243,6 +248,31 @@ def kubernetes_job_probe(kubeconfig_path: Path, namespace: str, job_name: str) -
         return PROBE_UNKNOWN if pods is None else _pod_state(pods.get("items") or [], job_name)
 
     return probe
+
+
+def collect_s3_emulation_diagnostics(kubeconfig_path: Path, namespace: str, job_name: str) -> str:
+    """Best-effort kubectl evidence for a failed or vanished emulation Job."""
+    sections: list[str] = []
+    for description, command in (
+        ("job description", ("describe", "job", job_name)),
+        ("controller logs", ("logs", f"job/{job_name}", "-c", "controller", "--tail=-1")),
+        ("uploader logs", ("logs", f"job/{job_name}", "-c", "uploader", "--tail=100")),
+    ):
+        try:
+            result = kubectl(kubeconfig_path, *command, namespace=namespace)
+        except FileNotFoundError:
+            return "kubectl unavailable; no Kubernetes diagnostics collected"
+        output = (result.stdout or "").strip() or (result.stderr or "").strip() or "(no output)"
+        if description == "controller logs":
+            fatal_lines = [
+                line
+                for line in output.splitlines()
+                if any(marker in line for marker in CONTROLLER_FATAL_SUMMARY_MARKERS)
+            ]
+            if fatal_lines:
+                sections.append(f"--- controller failure summary ---\n{fatal_lines[-1]}")
+        sections.append(f"--- {description} ---\n{output}")
+    return "\n".join(sections)
 
 
 def _delete(kubeconfig_path: Path, namespace: str, resource_type: str, name: str) -> bool:
