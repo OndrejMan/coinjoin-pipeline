@@ -45,6 +45,7 @@ def config(options, **overrides):
     [
         (program, actions)
         for program, actions in coinjoin_tools.PROGRAM_ACTIONS.items()
+        if program not in coinjoin_tools.RESEARCH_PROGRAMS
     ],
 )
 def test_catalog_matches_the_analyzers_public_argparse_choices(program, actions):
@@ -92,7 +93,7 @@ def test_catalog_covers_all_existing_commands_with_configurable_cli_inputs():
         )
         if parser or positional:
             commands.add(path.stem)
-    assert commands == set(coinjoin_tools.PROGRAM_ACTIONS)
+    assert commands == set(coinjoin_tools.PROGRAM_ACTIONS) - coinjoin_tools.RESEARCH_PROGRAMS
 
 
 @pytest.mark.parametrize("program,actions", coinjoin_tools.PROGRAM_ACTIONS.items())
@@ -105,6 +106,10 @@ def test_every_public_operation_can_be_selected_without_report_dependencies(prog
             options["target_paths"] = ["memlog.csv"]
         if program == "ww2_analyze_client" and action != "process_emulations":
             options["data_mode"] = "mainnet"
+        if program == "analyze_tx_size":
+            options["research"] = {"tx_hex": "00", "input_indices": [0]}
+        if program == "update_txids_with_wabisator":
+            options["research"] = {"allow_network": True}
         model = config(options)
         model.validate()
         assert [stage.name for stage in s3_full_run_plan_from_args(model).scheduled()] == ["coinjoin-analysis"]

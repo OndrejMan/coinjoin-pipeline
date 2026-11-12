@@ -233,6 +233,23 @@ class PBSConfiguration(ConfigurationModel):
 
 
 @dataclass(frozen=True, slots=True)
+class ResearchAnalysisConfiguration(ConfigurationModel):
+    txid: str | None = option(None, name="analysis_txid")
+    tx_hex: str | None = option(None, name="analysis_tx_hex")
+    transaction_file: str | None = option(None, name="analysis_transaction_file")
+    input_indices: tuple[int, ...] = option((), name="analysis_input_index")
+    output_indices: tuple[int, ...] = option((), name="analysis_output_index")
+    allow_network: bool = option(False, name="analysis_allow_network")
+    min_wallets: int = option(1, name="analysis_min_wallets", minimum=1)
+    depth: int = option(100, name="analysis_depth", minimum=1)
+    permute_inputs: bool = option(False, name="analysis_permute_inputs")
+    permute_outputs: bool = option(False, name="analysis_permute_outputs")
+    force_limit_anon_score: float = option(100.0, name="analysis_force_limit_anon_score", minimum=0)
+    plot: bool = option(False, name="analysis_plot")
+    coordinator_file: str | None = option(None, name="analysis_coordinator_file")
+
+
+@dataclass(frozen=True, slots=True)
 class CoinjoinAnalysisConfiguration(ConfigurationModel):
     program: (
         Literal[
@@ -243,6 +260,9 @@ class CoinjoinAnalysisConfiguration(ConfigurationModel):
             "file_check",
             "visualize_coordinators",
             "perf_processing",
+            "analyze_tx_size",
+            "generate_llm_inputs",
+            "update_txids_with_wabisator",
         ]
         | None
     ) = option(None, name="analysis_program")
@@ -255,6 +275,7 @@ class CoinjoinAnalysisConfiguration(ConfigurationModel):
     input_dir: str | None = option(None, name="analysis_input_dir")
     filename: str | None = option(None, name="analysis_filename")
     data_mode: Literal["emulation", "mainnet"] = option("emulation", name="analysis_data_mode")
+    research: ResearchAnalysisConfiguration = field(default_factory=ResearchAnalysisConfiguration)
 
 
 @dataclass(frozen=True, slots=True)

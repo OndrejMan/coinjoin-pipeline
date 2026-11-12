@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 import json
 from pathlib import Path, PurePosixPath
 import shlex
+import re
 import shutil
 import subprocess
 from typing import TYPE_CHECKING
@@ -13,6 +15,7 @@ from uuid import uuid4
 from exporters.artifact_paths import COINJOIN_ANALYSIS_DIR, COINJOIN_ANALYSIS_TOOLS_DIR, EMULATOR_DIR
 
 from coinjoin_pipeline.storage.s3 import validate_artifact_uri
+from coinjoin_pipeline.paths import EXPORTERS_ROOT
 from coinjoin_pipeline.images import image_names
 
 if TYPE_CHECKING:
@@ -32,10 +35,74 @@ PROGRAM_ACTIONS = {
     "file_check": (),
     "visualize_coordinators": (),
     "perf_processing": (),
+    "analyze_tx_size": (),
+    "generate_llm_inputs": (),
+    "update_txids_with_wabisator": (),
 }
 POSITIONAL_PROGRAMS = frozenset({"scan_results_plot", "file_check", "visualize_coordinators", "perf_processing"})
-MAINNET_PROGRAMS = frozenset({"parse_dumplings", "visualize_coordinators"})
-EMULATION_PROGRAMS = frozenset({"parse_cj_logs"})
+RESEARCH_PROGRAMS = frozenset({"analyze_tx_size", "generate_llm_inputs", "update_txids_with_wabisator"})
+MAINNET_PROGRAMS = frozenset({"parse_dumplings", "visualize_coordinators", "update_txids_with_wabisator"})
+EMULATION_PROGRAMS = frozenset({"parse_cj_logs", "generate_llm_inputs"})
+RESEARCH_FIELDS = {
+    "analyze_tx_size": {"txid", "tx_hex", "transaction_file", "input_indices", "output_indices", "allow_network"},
+    "generate_llm_inputs": {
+        "min_wallets",
+        "depth",
+        "permute_inputs",
+        "permute_outputs",
+        "force_limit_anon_score",
+        "plot",
+    },
+    "update_txids_with_wabisator": {"coordinator_file", "allow_network"},
+}
+
+
+def uses_run_input(options: CoinjoinAnalysisConfiguration) -> bool:
+    if options.program == "update_txids_with_wabisator":
+        return bool(options.research.coordinator_file)
+    if options.program == "analyze_tx_size":
+        return not options.research.tx_hex and not (
+            options.data_mode == "mainnet" and options.research.allow_network and not options.research.transaction_file
+        )
+    return True
+
+
+def research_option_errors(config: PipelineConfiguration) -> list[str]:
+    options, errors = config.coinjoin_analysis, []
+    settings = options.research
+    prefix = "coinjoin_analysis.research."
+    supplied = {path.removeprefix(prefix) for path in config.provided if path.startswith(prefix)}
+    unexpected = supplied - RESEARCH_FIELDS.get(options.program or "", set())
+    if unexpected:
+        errors.append(f"research options not supported by {options.program}: {', '.join(sorted(unexpected))}")
+    if options.program not in RESEARCH_PROGRAMS:
+        return errors
+    if options.env_vars or options.load_config or options.filename:
+        errors.append("research adapters use coinjoin_analysis.research settings, not parser switches")
+    if options.program != "generate_llm_inputs" and options.target_paths:
+        errors.append("this research adapter uses its named input file settings, not --analysis-target-path")
+    if settings.allow_network and options.data_mode != "mainnet":
+        errors.append("online sources are only available for mainnet data")
+    if settings.txid is not None and re.fullmatch(r"[0-9a-fA-F]{64}", settings.txid) is None:
+        errors.append("--analysis-txid must contain 64 hexadecimal characters")
+    if options.program == "analyze_tx_size":
+        if settings.tx_hex and settings.transaction_file:
+            errors.append("choose raw tx_hex or transaction_file, not both")
+        if not (settings.txid or settings.tx_hex or settings.transaction_file):
+            errors.append("transaction size requires a TXID, raw tx_hex or transaction_file")
+        if settings.tx_hex and (len(settings.tx_hex) % 2 or re.fullmatch(r"[0-9a-fA-F]+", settings.tx_hex) is None):
+            errors.append("--analysis-tx-hex must contain even-length hexadecimal data")
+        if not (settings.input_indices or settings.output_indices):
+            errors.append("select at least one input or output index for the transaction size calculation")
+        for indices in (settings.input_indices, settings.output_indices):
+            if any(index < 0 for index in indices) or len(indices) != len(set(indices)):
+                errors.append("transaction indices must be non-negative and must not repeat")
+    if options.program == "update_txids_with_wabisator" and not settings.allow_network:
+        errors.append("coordinator refresh needs --analysis-allow-network for Wabisator and mempool.space")
+    for path in (settings.transaction_file, settings.coordinator_file):
+        if path is not None and not relative_path(path):
+            errors.append("research input files must be relative to the input dataset, without '..'")
+    return errors
 
 
 def relative_path(value: str) -> bool:
@@ -61,6 +128,7 @@ def option_errors(config: PipelineConfiguration) -> list[str]:
         )
     return [
         *_data_mode_errors(options),
+        *research_option_errors(config),
         *_placement_errors(config),
         *_operation_errors(options),
         *_input_errors(config),
@@ -151,6 +219,25 @@ def command_argv(options: CoinjoinAnalysisConfiguration, run_id: str) -> list[st
     """Pass public CLI flags as values, retaining multiple actions/targets where supported."""
     if options.program not in PROGRAM_ACTIONS:
         raise ValueError("select a coinjoin-analysis program")
+    if options.program in RESEARCH_PROGRAMS:
+        argv = [
+            "python",
+            "/work/coinjoin_research.py",
+            "--program",
+            options.program,
+            "--data-mode",
+            options.data_mode,
+            "--run-id",
+            run_id,
+            "--settings",
+            json.dumps(asdict(options.research)),
+        ]
+        paths = options.target_paths
+        if options.program == "generate_llm_inputs" and not paths and (options.input_dir or options.input_uri):
+            paths = ("coinjoin_tx_info.json",)
+        for path in paths:
+            argv.extend(["--target-path", path])
+        return argv
     default = (
         run_id if options.program == "ww2_analyze_client" and not (options.input_uri or options.input_dir) else "."
     )
@@ -213,6 +300,8 @@ def run_local(config: PipelineConfiguration, run_dir: Path) -> Path:
         raise ValueError("Analysis input directory must not contain the output directory")
     if options.input_dir:
         shutil.copytree(source, output / "input")
+    elif not uses_run_input(options):
+        (output / "input").mkdir(parents=True)
     else:
         experiment = output / "input" / run_dir.name
         baseline, data = run_dir / COINJOIN_ANALYSIS_DIR, run_dir / EMULATOR_DIR / "data"
@@ -223,6 +312,10 @@ def run_local(config: PipelineConfiguration, run_dir: Path) -> Path:
             shutil.copytree(baseline, experiment, dirs_exist_ok=True)
         if data.is_dir():
             shutil.copytree(data, experiment / "data", dirs_exist_ok=True)
+    if options.program in RESEARCH_PROGRAMS:
+        shutil.copyfile(EXPORTERS_ROOT / "coinjoin_research.py", output / "coinjoin_research.py")
+    if options.program == "update_txids_with_wabisator":
+        shutil.copyfile(Path(__file__).parent / "pbs/templates/wabisator_source.txt", output / "wabisator_source.py")
     (output / "invocation.json").write_text(
         json.dumps(
             {"argv": command_argv(options, run_dir.name), "image": image, "input_dir": options.input_dir}, indent=2

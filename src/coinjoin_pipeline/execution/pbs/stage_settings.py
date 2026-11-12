@@ -136,7 +136,9 @@ class CoinjoinToolsSettings(CommandSettings):
     program: str
     output_directory: str
     input_uri: str | None
+    run_input: bool
     invocation: dict[str, object]
+    files: dict[str, str]
 
 
 class DumplingsBaselineSettings(CommandSettings):

@@ -197,6 +197,8 @@ HELP = {
     "coinjoin_analysis.target_paths": "program target path (repeatable)",
     "coinjoin_analysis.input_uri": "S3 input of the program (pbs-from-s3)",
     "coinjoin_analysis.input_dir": "local input directory of the program (coinjoin-analysis)",
+    "coinjoin_analysis.research.input_indices": "input index (repeatable)",
+    "coinjoin_analysis.research.output_indices": "output index (repeatable)",
     "external.bitcoin_datadir": "Bitcoin datadir to analyze",
     "external.baseline": "baseline to compare the detections against",
     "external.false_cjtxs": "false_cjtxs.json applied to the baseline (repeatable)",

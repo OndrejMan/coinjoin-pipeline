@@ -30,9 +30,12 @@ from coinjoin_pipeline.configuration import (
     required,
 )
 from coinjoin_pipeline.execution.coinjoin_tools import (
+    RESEARCH_PROGRAMS,
     command as coinjoin_tools_command,
     command_argv,
+    uses_run_input,
 )
+from coinjoin_pipeline.paths import EXPORTERS_ROOT
 from coinjoin_pipeline.registry import pinned_reference
 from coinjoin_pipeline.storage.s3 import (
     S3Target,
@@ -51,6 +54,7 @@ from .scripts import (
     mappings_run,
     launcher,
     package_files,
+    template,
     validated_s3_uri,
     write_files,
 )
@@ -114,6 +118,11 @@ def render_coinjoin_tools_s3_pbs(
 ) -> str:
     """Run a shipped analyzer CLI on a copy; publish all files apart from the baseline."""
     program = options.program or ""
+    files: dict[str, str] = {}
+    if program in RESEARCH_PROGRAMS:
+        files["coinjoin_research.py"] = (EXPORTERS_ROOT / "coinjoin_research.py").read_text(encoding="utf-8")
+        if program == "update_txids_with_wabisator":
+            files["wabisator_source.py"] = template("wabisator_source.txt")
     return render_python_stage(
         "coinjoin-analysis",
         target,
@@ -123,11 +132,13 @@ def render_coinjoin_tools_s3_pbs(
             "program": program,
             "output_directory": COINJOIN_ANALYSIS_TOOLS_DIR,
             "input_uri": validated_s3_uri(options.input_uri, "analysis input URI") if options.input_uri else None,
+            "run_input": uses_run_input(options),
             "invocation": {
                 "argv": command_argv(options, target.run_id),
                 "image": image,
                 "input_uri": options.input_uri,
             },
+            "files": files,
             "command": "cd /work && " + coinjoin_tools_command(options, target.run_id),
         },
         job="coinjoin-tools",
