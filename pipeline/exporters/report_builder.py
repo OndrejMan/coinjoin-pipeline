@@ -52,6 +52,7 @@ def build_summary(
     transactions: JsonObject,
     coinjoin_analysis: dict[str, TransactionRecord],
     blocksci_records: dict[str, TransactionRecord],
+    emulator_data: JsonObject | None,
 ) -> JsonObject:
     statuses = Counter(transaction["comparison"]["status"] for transaction in transactions.values())
     detected_count = len(blocksci_records)
@@ -69,6 +70,11 @@ def build_summary(
         ),
         "coinjoin_analysis_coverage_by_blocksci": compute_rate(statuses[MATCHED], coinjoin_analysis_count, 1.0),
     }
+    if emulator_data:
+        emulator_summary = emulator_data.get("summary") or {}
+        summary["emulator_data_transactions"] = emulator_summary.get("transactions")
+        summary["emulator_data_coinjoins"] = emulator_summary.get("coinjoin_transactions")
+        summary["emulator_data_unknown_transactions"] = emulator_summary.get("unknown_transactions")
     return summary
 
 
@@ -78,11 +84,13 @@ def build_report(
     blocksci_records: dict[str, TransactionRecord],
     detector: Detector,
     scenario: JsonObject | None = None,
+    *,
+    emulator_data: JsonObject | None = None,
 ) -> JsonObject:
     """The unified report. Every top-level key is always present, null when it does not apply."""
     coinjoin_type, min_input_count = detector.coinjoin_type, detector.min_input_count
     transactions = compare_transactions(coinjoin_analysis, blocksci_records)
-    summary = build_summary(transactions, coinjoin_analysis, blocksci_records)
+    summary = build_summary(transactions, coinjoin_analysis, blocksci_records, emulator_data)
     divergences = build_divergences(transactions)
     summary["divergence_counts"] = {name: len(items) for name, items in divergences.items()}
     return {
@@ -96,6 +104,13 @@ def build_report(
             "scenario_sha256": scenario.get("sha256") if scenario else None,
         },
         "scenario": scenario,
+        "emulator_data": {
+            "schema_version": emulator_data.get("schema_version"),
+            "summary": emulator_data.get("summary"),
+            "label_provenance": emulator_data.get("label_provenance"),
+        }
+        if emulator_data
+        else None,
         "summary": summary,
         "divergences": divergences,
         "transactions": transactions,

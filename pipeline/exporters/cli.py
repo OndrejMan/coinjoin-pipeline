@@ -17,6 +17,7 @@ from exporters.common import (
     load_json,
     save_json,
 )
+from exporters.emulator_data import build_emulator_data
 from exporters.markdown_report import render_report, save_text
 from exporters.normalization import (
     fill_missing_block_heights,
@@ -77,6 +78,10 @@ def assemble_report(args: argparse.Namespace) -> int:
     coinjoin_analysis_data = load_json(baseline_path)
     coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_data)
     fill_missing_block_heights(coinjoin_analysis, load_exported_block_tx_index(run_dir))
+    emulator_data = build_emulator_data(run_dir, coinjoin_analysis_data, args.coinjoin_type)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    save_json(output_dir / "emulator_data.json", emulator_data)
+
     analysis = load_run_analysis(args, run_dir)
     scenario = load_scenario(run_dir)
     output_path = output_dir / args.output_name
@@ -86,6 +91,7 @@ def assemble_report(args: argparse.Namespace) -> int:
         analysis["records"],
         Detector.from_args(args, analysis["first_wasabi2_block"]),
         scenario,
+        emulator_data=emulator_data,
     )
     save_json(output_path, report)
     print(f"Unified report saved to {output_path}")

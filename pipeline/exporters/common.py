@@ -7,6 +7,7 @@ import json
 from collections import Counter
 from collections.abc import Iterator, Mapping
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,6 +22,7 @@ JsonValue = object
 JsonObject = dict
 
 SCHEMA_VERSION = "3.0"
+EMULATOR_DATA_SCHEMA_VERSION = "1.0"
 SATS_IN_BTC = 100_000_000
 DEFAULT_FIRST_WASABI2_BLOCK = 0
 
@@ -46,6 +48,14 @@ def canonical_json(data: JsonValue) -> str:
 
 def sha256_json(data: JsonValue) -> str:
     return hashlib.sha256(canonical_json(data).encode("utf-8")).hexdigest()
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(partial(stream.read, 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def parse_run_started_at(run_id: str) -> str | None:

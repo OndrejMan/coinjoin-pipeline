@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sys
 import tempfile
@@ -26,6 +27,7 @@ from exporters.blocksci_export import detector as unified_report
 from exporters.blocksci_export.detector import export_blocksci_records
 from exporters.cli import parse_args
 from exporters.common import SCHEMA_VERSION, save_json, sha256_json
+from exporters.emulator_data import build_emulator_data, load_wasabi_round_labels
 from exporters.markdown_report import render_report
 from exporters.parameters import Detector  # noqa: E402
 from exporters.normalization import (
@@ -123,6 +125,67 @@ def scenario_fixture():
     }
 
 
+def emulator_data_fixture():
+    return {
+        "schema_version": "1.0",
+        "run_id": "run",
+        "coinjoin_type": "wasabi2",
+        "label_provenance": {
+            "independent": True,
+            "sources": ["fixture/wasabi-coordinator/Logs.txt"],
+            "baseline_used_for_labels": False,
+        },
+        "summary": {
+            "transactions": 3,
+            "coinjoin_transactions": 1,
+            "non_coinjoin_transactions": 2,
+            "unknown_transactions": 0,
+            "wallet_addresses": 4,
+            "labeled_io_records": 4,
+            "total_io_records": 4,
+        },
+        "transactions": {
+            "txA": {"txid": "txA", "is_coinjoin": True, "inputs": [], "outputs": []},
+            "txB": {"txid": "txB", "is_coinjoin": False, "inputs": [], "outputs": []},
+            "txC": {"txid": "txC", "is_coinjoin": False, "inputs": [], "outputs": []},
+        },
+    }
+
+
+def write_producer_label_manifest(
+    raw_emulator_dir: Path,
+    engine: str,
+    source_names: list[str],
+    *,
+    complete: bool = True,
+    reason: str | None = None,
+    positive_count: int | None = None,
+) -> None:
+    data_dir = raw_emulator_dir / "data"
+    sources = []
+    for source_name in source_names:
+        source_path = data_dir / source_name
+        sources.append(
+            {
+                "path": source_name,
+                "size_bytes": source_path.stat().st_size,
+                "sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+            }
+        )
+    save_json(
+        data_dir / "coinjoin_label_manifest.json",
+        {
+            "schema_version": "1.0",
+            "engine": engine,
+            "complete": complete,
+            "reason": reason,
+            "positive_rule": "test producer rule",
+            "positive_count": positive_count,
+            "sources": sources,
+        },
+    )
+
+
 class UnifiedReportTest(unittest.TestCase):
     def test_wasabi_export_uses_raw_transaction_detector(self):
         class RawChain:
@@ -176,6 +239,7 @@ class UnifiedReportTest(unittest.TestCase):
                 blocksci_fixture(),
                 Detector("wasabi2"),
                 scenario,
+                emulator_data=emulator_data_fixture(),
             )
 
         self.assertEqual(report["schema_version"], SCHEMA_VERSION)
@@ -214,6 +278,589 @@ class UnifiedReportTest(unittest.TestCase):
                 "blocksci_only": 0,
                 "shared_tx_mismatches": 0,
             },
+        )
+        self.assertEqual(report["summary"]["emulator_data_transactions"], 3)
+        self.assertEqual(report["summary"]["emulator_data_coinjoins"], 1)
+
+    def test_build_emulator_data_labels_chain_transactions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
+            block_dir.mkdir(parents=True)
+            txid = "a" * 64
+            coordinator_dir = run_dir / "coinjoin_emulator_data" / "data" / "wasabi-coordinator"
+            coordinator_dir.mkdir(parents=True)
+            (coordinator_dir / "Logs.txt").write_text(
+                f"2026-01-01 00:00:00 [INFO] Round (abc): Successfully broadcast the coinjoin: {txid}.\n",
+                encoding="utf-8",
+            )
+            write_producer_label_manifest(
+                run_dir / "coinjoin_emulator_data",
+                "wasabi",
+                ["wasabi-coordinator/Logs.txt"],
+            )
+            (block_dir / "block_1.json").write_text(
+                json.dumps(
+                    {
+                        "height": 1,
+                        "tx": [
+                            {
+                                "txid": "coinbase",
+                                "vin": [{"coinbase": "00"}],
+                                "vout": [],
+                            },
+                            {
+                                "txid": "funding",
+                                "vin": [{"txid": "coinbase", "vout": 0}],
+                                "vout": [
+                                    {
+                                        "value": 0.0015,
+                                        "n": 0,
+                                        "scriptPubKey": {
+                                            "address": "input-a",
+                                            "type": "witness_v0_keyhash",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "txid": txid,
+                                "vin": [{"txid": "funding", "vout": 0}],
+                                "vout": [
+                                    {
+                                        "value": 0.001,
+                                        "n": 0,
+                                        "scriptPubKey": {
+                                            "address": "output-a0",
+                                            "type": "witness_v0_keyhash",
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            data = coinjoin_analysis_fixture()
+
+            emulator_data = build_emulator_data(run_dir, data, "wasabi2")
+
+        self.assertEqual(emulator_data["summary"]["transactions"], 2)
+        self.assertEqual(emulator_data["summary"]["coinjoin_transactions"], 1)
+        self.assertEqual(emulator_data["summary"]["non_coinjoin_transactions"], 1)
+        self.assertFalse(emulator_data["transactions"]["funding"]["is_coinjoin"])
+        self.assertTrue(emulator_data["transactions"][txid]["is_coinjoin"])
+        self.assertEqual(emulator_data["transactions"][txid]["round_id"], "abc")
+        self.assertEqual(
+            emulator_data["transactions"][txid]["inputs"][0]["wallet_name"],
+            "wallet-000",
+        )
+        self.assertEqual(
+            emulator_data["transactions"][txid]["outputs"][0]["wallet_name"],
+            "wallet-000",
+        )
+        self.assertTrue(emulator_data["label_provenance"]["independent"])
+        self.assertFalse(emulator_data["label_provenance"]["baseline_used_for_labels"])
+
+    def test_wasabi_broadcast_parser_accepts_legacy_format_drift(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            log_path = run_dir / "wasabi-backend" / "Logs.txt"
+            log_path.parent.mkdir()
+            txid = "A" * 64
+            log_path.write_text(
+                "2026-01-01 00:00:00 [14]\tINFO\tLegacy.Backend\tROUND (legacy-id): "
+                f"Successfully broadcasted coinjoin transaction: {txid}\n",
+                encoding="utf-8",
+            )
+
+            labels = load_wasabi_round_labels(run_dir, [log_path])
+
+        self.assertEqual(labels[0]["round_id"], "legacy-id")
+        self.assertEqual(labels[0]["txid"], txid.lower())
+
+    def test_wasabi_broadcast_parser_accepts_no_round_prefix_and_trailing_text(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            log_path = run_dir / "wasabi-coordinator" / "Logs.txt"
+            log_path.parent.mkdir()
+            txid = "b" * 64
+            log_path.write_text(
+                f"Successfully broadcast the coinjoin: {txid} after retry\n",
+                encoding="utf-8",
+            )
+
+            labels = load_wasabi_round_labels(run_dir, [log_path])
+
+        self.assertIsNone(labels[0]["round_id"])
+        self.assertEqual(labels[0]["txid"], txid)
+
+    def test_build_emulator_data_leaves_labels_unknown_without_producer_evidence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
+            block_dir.mkdir(parents=True)
+            save_json(
+                block_dir / "block_1.json",
+                {
+                    "height": 1,
+                    "tx": [
+                        {
+                            "txid": "txA",
+                            "vin": [{"txid": "funding", "vout": 0}],
+                            "vout": [],
+                        }
+                    ],
+                },
+            )
+
+            emulator_data = build_emulator_data(run_dir, coinjoin_analysis_fixture(), "wasabi2")
+
+        self.assertIsNone(emulator_data["transactions"]["txA"]["is_coinjoin"])
+        self.assertEqual(emulator_data["summary"]["unknown_transactions"], 1)
+        self.assertFalse(emulator_data["label_provenance"]["independent"])
+
+    def test_verified_empty_producer_source_labels_transactions_negative(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            data_dir = run_dir / "coinjoin_emulator_data" / "data"
+            block_dir = data_dir / "btc-node"
+            coordinator_dir = data_dir / "wasabi-coordinator"
+            block_dir.mkdir(parents=True)
+            coordinator_dir.mkdir(parents=True)
+            (coordinator_dir / "Logs.txt").write_text("", encoding="utf-8")
+            write_producer_label_manifest(
+                run_dir / "coinjoin_emulator_data",
+                "wasabi",
+                ["wasabi-coordinator/Logs.txt"],
+            )
+            save_json(
+                block_dir / "block_1.json",
+                {
+                    "height": 1,
+                    "tx": [
+                        {
+                            "txid": "txA",
+                            "vin": [{"txid": "funding", "vout": 0}],
+                            "vout": [],
+                        }
+                    ],
+                },
+            )
+
+            emulator_data = build_emulator_data(
+                run_dir,
+                coinjoin_analysis_fixture(),
+                "wasabi2",
+            )
+
+        self.assertTrue(emulator_data["label_provenance"]["independent"])
+        self.assertFalse(emulator_data["transactions"]["txA"]["is_coinjoin"])
+        self.assertEqual(emulator_data["summary"]["non_coinjoin_transactions"], 1)
+
+    def test_empty_wasabi_parse_result_with_candidate_transaction_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            data_dir = run_dir / "coinjoin_emulator_data" / "data"
+            block_dir = data_dir / "btc-node"
+            coordinator_dir = data_dir / "wasabi-backend"
+            block_dir.mkdir(parents=True)
+            coordinator_dir.mkdir(parents=True)
+            (coordinator_dir / "Logs.txt").write_text(
+                "legacy backend says the round completed in an unknown format\n",
+                encoding="utf-8",
+            )
+            write_producer_label_manifest(
+                run_dir / "coinjoin_emulator_data",
+                "wasabi",
+                ["wasabi-backend/Logs.txt"],
+            )
+            save_json(
+                block_dir / "block_1.json",
+                {
+                    "height": 1,
+                    "tx": [
+                        {
+                            "txid": "candidate",
+                            "vin": [{"txid": f"funding-{index}", "vout": 0} for index in range(5)],
+                            "vout": [],
+                        }
+                    ],
+                },
+            )
+
+            emulator_data = build_emulator_data(
+                run_dir,
+                coinjoin_analysis_fixture(),
+                "wasabi2",
+            )
+
+        self.assertFalse(emulator_data["label_provenance"]["independent"])
+        self.assertIn(
+            "no parseable broadcast records",
+            emulator_data["label_provenance"]["unavailable_reason"],
+        )
+        self.assertIsNone(emulator_data["transactions"]["candidate"]["is_coinjoin"])
+        self.assertEqual(
+            emulator_data["summary"]["wasabi_parseability_candidate_txids"],
+            ["candidate"],
+        )
+
+    def test_manifest_zero_positive_count_allows_high_input_non_coinjoin(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            data_dir = run_dir / "coinjoin_emulator_data" / "data"
+            block_dir = data_dir / "btc-node"
+            coordinator_dir = data_dir / "wasabi-coordinator"
+            block_dir.mkdir(parents=True)
+            coordinator_dir.mkdir(parents=True)
+            (coordinator_dir / "Logs.txt").write_text("no successful rounds\n", encoding="utf-8")
+            write_producer_label_manifest(
+                run_dir / "coinjoin_emulator_data",
+                "wasabi",
+                ["wasabi-coordinator/Logs.txt"],
+                positive_count=0,
+            )
+            save_json(
+                block_dir / "block_1.json",
+                {
+                    "height": 1,
+                    "tx": [
+                        {
+                            "txid": "batch-payment",
+                            "vin": [{"txid": f"funding-{index}", "vout": 0} for index in range(5)],
+                            "vout": [],
+                        }
+                    ],
+                },
+            )
+
+            emulator_data = build_emulator_data(run_dir, coinjoin_analysis_fixture(), "wasabi2")
+
+        self.assertTrue(emulator_data["label_provenance"]["independent"])
+        self.assertFalse(emulator_data["transactions"]["batch-payment"]["is_coinjoin"])
+
+    def test_manifest_positive_count_mismatch_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            data_dir = run_dir / "coinjoin_emulator_data" / "data"
+            block_dir = data_dir / "btc-node"
+            coordinator_dir = data_dir / "wasabi-coordinator"
+            block_dir.mkdir(parents=True)
+            coordinator_dir.mkdir(parents=True)
+            (coordinator_dir / "Logs.txt").write_text("unrecognized record\n", encoding="utf-8")
+            write_producer_label_manifest(
+                run_dir / "coinjoin_emulator_data",
+                "wasabi",
+                ["wasabi-coordinator/Logs.txt"],
+                positive_count=1,
+            )
+
+            emulator_data = build_emulator_data(run_dir, coinjoin_analysis_fixture(), "wasabi2")
+
+        self.assertFalse(emulator_data["label_provenance"]["independent"])
+        self.assertIn(
+            "does not match manifest",
+            emulator_data["label_provenance"]["unavailable_reason"],
+        )
+
+    def test_unmatched_producer_positive_fails_closed_and_is_rendered(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            data_dir = run_dir / "coinjoin_emulator_data" / "data"
+            block_dir = data_dir / "btc-node"
+            coordinator_dir = data_dir / "wasabi-coordinator"
+            block_dir.mkdir(parents=True)
+            coordinator_dir.mkdir(parents=True)
+            missing_txid = "a" * 64
+            (coordinator_dir / "Logs.txt").write_text(
+                f"2026-01-01 00:00:00 [INFO] Round (abc): Successfully broadcast the coinjoin: {missing_txid}.\n",
+                encoding="utf-8",
+            )
+            write_producer_label_manifest(
+                run_dir / "coinjoin_emulator_data",
+                "wasabi",
+                ["wasabi-coordinator/Logs.txt"],
+            )
+            save_json(
+                block_dir / "block_1.json",
+                {
+                    "height": 1,
+                    "tx": [
+                        {
+                            "txid": "exported-tx",
+                            "vin": [{"txid": "funding", "vout": 0}],
+                            "vout": [],
+                        }
+                    ],
+                },
+            )
+
+            emulator_data = build_emulator_data(run_dir, coinjoin_analysis_fixture(), "wasabi2")
+
+        self.assertFalse(emulator_data["label_provenance"]["independent"])
+        self.assertEqual(emulator_data["summary"]["unmatched_positive_txids"], [missing_txid])
+        self.assertIsNone(emulator_data["transactions"]["exported-tx"]["is_coinjoin"])
+
+    def test_modified_producer_source_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            data_dir = run_dir / "coinjoin_emulator_data" / "data"
+            block_dir = data_dir / "btc-node"
+            coordinator_dir = data_dir / "wasabi-coordinator"
+            block_dir.mkdir(parents=True)
+            coordinator_dir.mkdir(parents=True)
+            log_path = coordinator_dir / "Logs.txt"
+            log_path.write_text("complete capture\n", encoding="utf-8")
+            write_producer_label_manifest(
+                run_dir / "coinjoin_emulator_data",
+                "wasabi",
+                ["wasabi-coordinator/Logs.txt"],
+            )
+            log_path.write_text("truncated\n", encoding="utf-8")
+            save_json(
+                block_dir / "block_1.json",
+                {
+                    "height": 1,
+                    "tx": [
+                        {
+                            "txid": "txA",
+                            "vin": [{"txid": "funding", "vout": 0}],
+                            "vout": [],
+                        }
+                    ],
+                },
+            )
+
+            emulator_data = build_emulator_data(
+                run_dir,
+                coinjoin_analysis_fixture(),
+                "wasabi2",
+            )
+
+        self.assertFalse(emulator_data["label_provenance"]["independent"])
+        self.assertIn(
+            "does not match manifest",
+            emulator_data["label_provenance"]["unavailable_reason"],
+        )
+        self.assertIsNone(emulator_data["transactions"]["txA"]["is_coinjoin"])
+
+    def test_build_emulator_data_adds_joinmarket_round_labels(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
+            block_dir.mkdir(parents=True)
+            (run_dir / "coinjoin_emulator_data" / "data" / "joinmarket_round_events.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "round_id": 1,
+                            "status": "confirmed",
+                            "taker": "jcs-000",
+                            "candidate_makers": ["jcs-001", "jcs-002"],
+                            "destination_address": "output-a0",
+                            "destination_matches": [{"txid": "txA", "block_height": 0}],
+                        },
+                        {
+                            "round_id": 2,
+                            "status": "failed",
+                            "destination_address": "failed-destination",
+                            "txid": "txB",
+                        },
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            write_producer_label_manifest(
+                run_dir / "coinjoin_emulator_data",
+                "joinmarket",
+                ["joinmarket_round_events.json"],
+            )
+            save_json(
+                block_dir / "block_0.json",
+                {
+                    "height": 0,
+                    "tx": [
+                        {
+                            "txid": "funding",
+                            "vin": [{"coinbase": "00"}],
+                            "vout": [
+                                {
+                                    "n": 0,
+                                    "value": 0.0015,
+                                    "scriptPubKey": {"address": "input-a"},
+                                },
+                            ],
+                        },
+                        {
+                            "txid": "txA",
+                            "vin": [{"txid": "funding", "vout": 0}],
+                            "vout": [
+                                {
+                                    "n": 0,
+                                    "value": 0.001,
+                                    "scriptPubKey": {"address": "output-a0"},
+                                },
+                                {
+                                    "n": 1,
+                                    "value": 0.0005,
+                                    "scriptPubKey": {"address": "output-a1"},
+                                },
+                            ],
+                        },
+                        {
+                            "txid": "txB",
+                            "vin": [{"txid": "funding", "vout": 0}],
+                            "vout": [
+                                {
+                                    "n": 0,
+                                    "value": 0.001,
+                                    "scriptPubKey": {"address": "failed-destination"},
+                                },
+                            ],
+                        },
+                    ],
+                },
+            )
+
+            emulator_data = build_emulator_data(run_dir, coinjoin_analysis_fixture(), "joinmarket")
+
+        tx = emulator_data["transactions"]["txA"]
+        self.assertEqual(tx["taker"], "jcs-000")
+        self.assertEqual(tx["candidate_makers"], ["jcs-001", "jcs-002"])
+        self.assertEqual(tx["round_id"], "1")
+        self.assertEqual(tx["input_owners"], ["wallet-000"])
+        self.assertEqual(tx["output_owners"], ["wallet-000"])
+        self.assertFalse(emulator_data["transactions"]["txB"]["is_coinjoin"])
+
+    def test_build_emulator_data_reads_reconciled_joinmarket_round_labels(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
+            block_dir.mkdir(parents=True)
+            label_path = run_dir / "coinjoin_emulator_data" / "data" / "joinmarket_round_events.json"
+            save_json(
+                label_path,
+                [
+                    {
+                        "round_id": 1,
+                        "status": "confirmed",
+                        "taker": "jcs-000",
+                        "destination_matches": [{"txid": "txA", "block_height": 7}],
+                    }
+                ],
+            )
+            write_producer_label_manifest(
+                run_dir / "coinjoin_emulator_data",
+                "joinmarket",
+                ["joinmarket_round_events.json"],
+                positive_count=1,
+            )
+            save_json(
+                block_dir / "block_7.json",
+                {
+                    "height": 7,
+                    "tx": [
+                        {"txid": "funding", "vin": [{"coinbase": "00"}], "vout": []},
+                        {
+                            "txid": "txA",
+                            "vin": [{"txid": "funding", "vout": 0}],
+                            "vout": [],
+                        },
+                    ],
+                },
+            )
+
+            emulator_data = build_emulator_data(run_dir, coinjoin_analysis_fixture(), "joinmarket")
+
+        self.assertTrue(emulator_data["label_provenance"]["independent"])
+        self.assertTrue(emulator_data["transactions"]["txA"]["is_coinjoin"])
+        self.assertEqual(emulator_data["summary"]["producer_positive_labels"], 1)
+
+    def test_joinmarket_destination_conflicts_disable_all_labels(self):
+        cases = [
+            ("multiple_matches", ["txA", "txB"]),
+            ("duplicate_destination", []),
+            ("duplicate_destination", ["txA"]),
+            ("duplicate_destination", ["txA", "txB"]),
+        ]
+        for status, txids in cases:
+            with (
+                self.subTest(status=status, txids=txids),
+                tempfile.TemporaryDirectory() as tmpdir,
+            ):
+                run_dir = Path(tmpdir)
+                data_dir = run_dir / "coinjoin_emulator_data" / "data"
+                block_dir = data_dir / "btc-node"
+                block_dir.mkdir(parents=True)
+                save_json(
+                    data_dir / "joinmarket_round_events.json",
+                    [
+                        {
+                            "export_round_id": 1,
+                            "status": status,
+                            "destination_matches": [{"txid": txid, "block_height": 7} for txid in txids],
+                        },
+                        {
+                            "export_round_id": 2,
+                            "status": "confirmed",
+                            "destination_matches": [{"txid": "txC", "block_height": 7}],
+                        },
+                    ],
+                )
+                # Even a hash-valid manifest with a matching positive count cannot
+                # declare a capture complete when a round has conflicting evidence.
+                write_producer_label_manifest(
+                    run_dir / "coinjoin_emulator_data",
+                    "joinmarket",
+                    ["joinmarket_round_events.json"],
+                    positive_count=1,
+                )
+                save_json(
+                    block_dir / "block_7.json",
+                    {
+                        "height": 7,
+                        "tx": [
+                            {
+                                "txid": txid,
+                                "vin": [{"txid": "funding", "vout": 0}],
+                                "vout": [],
+                            }
+                            for txid in ("txA", "txB", "txC")
+                        ],
+                    },
+                )
+
+                emulator_data = build_emulator_data(run_dir, coinjoin_analysis_fixture(), "joinmarket")
+
+                self.assertFalse(emulator_data["label_provenance"]["independent"])
+                self.assertIn(status, emulator_data["label_provenance"]["unavailable_reason"])
+                self.assertEqual(len(emulator_data["transactions"]), 3)
+                self.assertTrue(all(tx["is_coinjoin"] is None for tx in emulator_data["transactions"].values()))
+
+    def test_build_emulator_data_rejects_malformed_joinmarket_label_source(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            label_path = run_dir / "coinjoin_emulator_data" / "data" / "joinmarket_round_events.json"
+            label_path.parent.mkdir(parents=True)
+            save_json(label_path, {"round_id": 1})
+            write_producer_label_manifest(
+                run_dir / "coinjoin_emulator_data",
+                "joinmarket",
+                ["joinmarket_round_events.json"],
+            )
+
+            emulator_data = build_emulator_data(
+                run_dir,
+                coinjoin_analysis_fixture(),
+                "joinmarket",
+            )
+
+        self.assertFalse(emulator_data["label_provenance"]["independent"])
+        self.assertIn(
+            "cannot be parsed",
+            emulator_data["label_provenance"]["unavailable_reason"],
         )
 
     def test_build_report_blocksci_only_and_missed_by_blocksci(self):

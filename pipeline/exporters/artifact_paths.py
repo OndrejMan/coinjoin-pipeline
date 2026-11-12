@@ -15,7 +15,7 @@ COINJOIN_ANALYSIS_DIR = "coinjoin-analysis_data"
 EMULATOR_DIR = "coinjoin_emulator_data"
 RUN_MANIFEST = "research_manifest.json"
 SCENARIO_FILE = EMULATOR_DIR + "/scenario.json"
-#: The wallet and coordinator logs coinjoin-analysis reads.
+#: The wallet and coordinator logs coinjoin-analysis reads, and the emulator's labels.
 EMULATOR_DATA_DIR = EMULATOR_DIR + "/data"
 BASELINE_FILE = COINJOIN_ANALYSIS_DIR + "/coinjoin_tx_info.json"
 BLOCKSCI_CONFIG_FILE = BLOCKSCI_DIR + "/config.json"
@@ -38,6 +38,14 @@ def block_height_from_path(path: Path) -> int | None:
 
 def _tool_dir(run_dir: Path, name: str) -> Path:
     return run_dir / name
+
+
+def emulator_dir(run_dir: Path) -> Path:
+    return _tool_dir(run_dir, EMULATOR_DIR)
+
+
+def coinjoin_analysis_dir(run_dir: Path) -> Path:
+    return _tool_dir(run_dir, COINJOIN_ANALYSIS_DIR)
 
 
 def blocksci_analysis_dir(run_dir: Path) -> Path:
