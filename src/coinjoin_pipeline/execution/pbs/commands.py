@@ -13,6 +13,7 @@ from coinjoin_pipeline.registry import pinned_reference
 from coinjoin_pipeline.storage.s3 import shell_assignment
 
 from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND
+from .stage import CONTAINER_RUNS_ROOT, CONTAINER_SELECTED_ROOT
 from .validation import require_notebook_port, require_safe_image
 
 
@@ -39,7 +40,7 @@ def blocksci_parse_pbs_command(
 ) -> str:
     return (
         f"{BLOCKSCI_IMAGE_PYTHON_COMMAND} /mnt/exporters/worker.py parse "
-        f"--run-dir {shlex.quote('/runs/emulation/logs/' + run_id)} "
+        f"--run-dir {shlex.quote(CONTAINER_RUNS_ROOT + '/' + run_id)} "
         f"--network {shlex.quote(coin_type)} --disk {shlex.quote(disk_path)} "
         f"--max-block {max_block_expression}"
     )
@@ -48,7 +49,7 @@ def blocksci_parse_pbs_command(
 def blocksci_update_pbs_command(run_id: str) -> str:
     return (
         f"{BLOCKSCI_IMAGE_PYTHON_COMMAND} /mnt/exporters/worker.py update "
-        f"--run-dir {shlex.quote('/runs/emulation/logs/' + run_id)}"
+        f"--run-dir {shlex.quote(CONTAINER_RUNS_ROOT + '/' + run_id)}"
     )
 
 
@@ -84,7 +85,7 @@ def blocksci_script_pbs_command(
     config: PipelineConfiguration,
 ) -> str:
     """Build custom-script execution over an already parsed BlockSci index."""
-    run_dir = f"/runs/emulation/logs/{run_id}"
+    run_dir = f"{CONTAINER_RUNS_ROOT}/{run_id}"
     config_path = f"{run_dir}/{BLOCKSCI_CONFIG_FILE}"
     output = f"{run_dir}/{BLOCKSCI_CUSTOM_ANALYSIS_DIR}"
     environment = {
@@ -135,7 +136,7 @@ def blocksci_export_pbs_command(
 
 def coinjoin_analysis_pbs_command(action: str = "collect_docker") -> str:
     """Build the in-container command for the coinjoin-analysis PBS stage."""
-    return f"python -m cj_process.parse_cj_logs --action {action} --target-path /runs/emulation/selected"
+    return f"python -m cj_process.parse_cj_logs --action {action} --target-path {CONTAINER_SELECTED_ROOT}"
 
 
 def detector_arguments(config: PipelineConfiguration) -> list[str]:
@@ -182,7 +183,7 @@ def worker_command(
         "/mnt/exporters/worker.py",
         phase,
         "--run-dir",
-        f"/runs/emulation/logs/{run_id}",
+        f"{CONTAINER_RUNS_ROOT}/{run_id}",
         *detector_arguments(config),
     ]
     if phase != "report":
