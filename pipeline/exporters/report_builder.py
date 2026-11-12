@@ -18,7 +18,7 @@ from exporters.comparison import (
     compare_records,
 )
 from exporters.manifest import build_run_manifest
-from exporters.parameters import Detector
+from exporters.parameters import Detector, ReportImages
 from exporters.report_types import TransactionRecord
 from exporters.scenario import build_scenario_checks
 
@@ -130,7 +130,9 @@ def build_report(
     *,
     emulator_data: JsonObject | None = None,
     engine: str | None = None,
+    images: ReportImages | None = None,
     emulator_git_commit: str | None = None,
+    image_provenance: JsonObject | None = None,
 ) -> JsonObject:
     """The unified report. Every top-level key is always present, null when it does not apply."""
     coinjoin_type, min_input_count = detector.coinjoin_type, detector.min_input_count
@@ -162,7 +164,9 @@ def build_report(
         scenario,
         detector,
         engine,
+        images,
         emulator_git_commit=emulator_git_commit,
+        image_provenance=image_provenance,
     )
     return {
         "schema_version": SCHEMA_VERSION,

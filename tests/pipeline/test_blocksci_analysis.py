@@ -70,6 +70,10 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
         config=config,
         coinjoin_type="wasabi2",
         min_input_count=10,
+        blocksci_image="blocksci:test",
+        coinjoin_analysis_image="analysis:test",
+        coinjoin_emulator_image="emulator:test",
+        unified_report_image="python:3.12-slim-bookworm",
     )
     fake_blocksci = mock.Mock()
     with (
