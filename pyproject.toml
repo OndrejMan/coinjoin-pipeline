@@ -32,6 +32,9 @@ packages = [
 ]
 package-dir = {coinjoin_pipeline = "src/coinjoin_pipeline", exporters = "pipeline/exporters"}
 
+[tool.setuptools.package-data]
+"coinjoin_pipeline.execution" = ["*.sh"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/pipeline"]
 

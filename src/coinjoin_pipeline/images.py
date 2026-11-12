@@ -36,6 +36,12 @@ def image_names(registry: str | None = None) -> dict[str, str]:
     return {component: f"{prefix}/{repository}" for component, repository in REPOSITORIES.items()}
 
 
+def in_registry(image: str, registry: str | None) -> str:
+    """A default image of the project's registry, moved to the configured one."""
+    prefix = f"{DEFAULT_REGISTRY}/"
+    return image_registry(registry) + "/" + image[len(prefix) :] if image.startswith(prefix) else image
+
+
 # The tags a local build of each component's repository produces.
 LOCAL_IMAGES = {
     "emulator": "coinjoin-emulator:local",
@@ -114,6 +120,11 @@ def read_image_lock(name: str) -> str:
     if not reference:
         raise RuntimeError(f"image lock file is empty: {path}")
     return reference
+
+
+def resolve_uploader_image(args: PipelineConfiguration) -> str:
+    """Configured uploader image, else the lock file in the configured registry."""
+    return args.images.uploader or in_registry(read_image_lock("uploader.image"), args.images.registry)
 
 
 def resolve_unified_report_image(args: PipelineConfiguration) -> str:

@@ -23,16 +23,17 @@ class Capability(Enum):
 
 def required_capabilities(config: PipelineConfiguration) -> set[Capability]:
     capabilities: set[Capability] = set()
+    uses_s3 = config.artifacts.backend == "s3"
     if not config.dry_run:
         if config.driver == "kubernetes":
             capabilities.add(Capability.KUBECTL)
-    if not config.dry_run:
+    if not uses_s3 and not config.dry_run:
         capabilities.add(Capability.CONTAINER_RUNTIME)
     return capabilities
 
 
 def required_image_components(config: PipelineConfiguration) -> set[str]:
-    if config.dry_run or config.action == "clean":
+    if config.dry_run or config.artifacts.backend == "s3" or config.action == "clean":
         return set()
     return {
         "emulate": {"emulator"},

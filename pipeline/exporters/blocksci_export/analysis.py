@@ -34,6 +34,7 @@ from exporters.integration_diagnostics import build_integration_diagnostics
 from exporters.normalization import iter_exported_blocks, load_first_wasabi2_block, output_address
 from exporters.parameters import (
     INSPECTED_IMAGE_COMPONENTS,
+    PRODUCER_IMAGE_COMPONENTS,
     Detector,
     ReportImages,
     add_detector_arguments,
@@ -135,7 +136,7 @@ def write_analysis(args: argparse.Namespace) -> Path:
                 "repo_digest": images.digests[name],
                 **((diagnostics or {}).get("images", {}).get(name) or {}),
             }
-            for name in INSPECTED_IMAGE_COMPONENTS
+            for name in PRODUCER_IMAGE_COMPONENTS
         },
         "records": records,
         "subset_matching": subset_matching,

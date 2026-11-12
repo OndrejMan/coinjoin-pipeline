@@ -26,10 +26,12 @@ MANIFEST_COMPARE_FIELDS = (
     ("images.blocksci", ("images", "blocksci")),
     ("images.coinjoin_analysis", ("images", "coinjoin_analysis")),
     ("images.coinjoin_emulator", ("images", "coinjoin_emulator")),
+    ("images.uploader", ("images", "uploader")),
     ("images.unified_report", ("images", "unified_report")),
     ("image_digests.blocksci", ("image_digests", "blocksci")),
     ("image_digests.coinjoin_analysis", ("image_digests", "coinjoin_analysis")),
     ("image_digests.coinjoin_emulator", ("image_digests", "coinjoin_emulator")),
+    ("image_digests.uploader", ("image_digests", "uploader")),
     ("image_digests.unified_report", ("image_digests", "unified_report")),
     ("source_commits.coinjoin_emulator", ("source_commits", "coinjoin_emulator")),
 )
