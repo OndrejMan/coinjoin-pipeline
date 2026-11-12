@@ -127,7 +127,11 @@ def render_coinjoin_tools_s3_pbs(
             "output_directory": COINJOIN_ANALYSIS_TOOLS_DIR,
             "input_uri": validated_s3_uri(options.input_uri, "analysis input URI") if options.input_uri else None,
             "run_input": uses_run_input(options),
-            "invocation": {"argv": command_argv(options, target.run_id), "image": image, "input_uri": options.input_uri},
+            "invocation": {
+                "argv": command_argv(options, target.run_id),
+                "image": image,
+                "input_uri": options.input_uri,
+            },
             "files": files,
             "command": "cd /work && " + coinjoin_tools_command(options, target.run_id),
         },
@@ -262,7 +266,11 @@ def _block_source(blocksci: BlockSciConfiguration) -> SourceSettings:
             "description": "existing external BlockSci index",
             "blocksci_dir": str(blocksci_path),
         }
-    return {"kind": "emulator", "network": "bitcoin_regtest", "description": "emulator Bitcoin and exported-block inputs"}
+    return {
+        "kind": "emulator",
+        "network": "bitcoin_regtest",
+        "description": "emulator Bitcoin and exported-block inputs",
+    }
 
 
 def _persistent_settings(blocksci: BlockSciConfiguration, walltime: str) -> PersistentSettings | None:
@@ -506,6 +514,4 @@ def render_unified_report_s3_pbs(
         "blocksci-analysis_data",
         *(("coinjoin-mappings_data",) if include_mappings else ()),
     ]
-    return render_python_stage(
-        "unified-report", target, resources, image, {"command": command, "downloads": downloads}
-    )
+    return render_python_stage("unified-report", target, resources, image, {"command": command, "downloads": downloads})
