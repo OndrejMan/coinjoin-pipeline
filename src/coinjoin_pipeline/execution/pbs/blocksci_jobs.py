@@ -15,6 +15,7 @@ from exporters.artifact_paths import (
     EXPORTED_BLOCK_GLOB,
     EXPORTED_BLOCKS_DIR,
     LOGS_DIR,
+    MAPPINGS_DIR,
     REPORT_DIR,
     REPORT_FILE,
     STAGED_EXPORTERS_DIR,
@@ -58,8 +59,9 @@ def blocksci(stage: Stage) -> None:
     datadir = emulator_bitcoin_datadir(stage)
     if settings["include_report"]:
         stage.download(COINJOIN_ANALYSIS_DIR)
-        # Retain prior-report provenance.
-        stage.download_optional(REPORT_DIR, stage.work / REPORT_DIR)
+        # Retain optional mappings and prior-report provenance without fetching an index.
+        for name in (MAPPINGS_DIR, REPORT_DIR):
+            stage.download_optional(name, stage.work / name)
         stage.require_file(BASELINE_FILE, f"BlockSci S3-compatible reporting requires {BASELINE_FILE}")
     max_block = emulator_max_block(stage)
     stage.singularity(

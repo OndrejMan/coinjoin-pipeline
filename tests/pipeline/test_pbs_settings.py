@@ -13,7 +13,7 @@ from coinjoin_pipeline.execution.pbs_settings import (
 )
 
 
-# The default image comes from RunContext (images.blocksci).
+# The default image comes from RunContext (images.blocksci), covered by the registry test below.
 @pytest.mark.parametrize("option", ["pbs_blocksci_image", "pbs_image"])
 @pytest.mark.parametrize(
     "reference,expected",
@@ -68,3 +68,9 @@ def test_scratch_type_is_a_cli_and_yaml_choice(tmp_path):
     experiment.write_text("action: full-run\npbs:\n  scratch_type: tmp\n", encoding="utf-8")
     with pytest.raises(ConfigurationError):
         load_configuration(["run", str(experiment)])
+
+
+def test_default_pbs_image_follows_the_configured_registry(monkeypatch):
+    monkeypatch.delenv("COINJOIN_IMAGE_REGISTRY", raising=False)
+    args = configuration(image_registry="ghcr.io/fork")
+    assert pbs_image(args, "sake") == "docker://ghcr.io/fork/coinjoin-mappings-sake:latest"

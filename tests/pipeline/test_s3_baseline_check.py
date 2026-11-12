@@ -22,6 +22,7 @@ def _args(**overrides):
         dry_run=False,
         analysis_pbs=False,
         blocksci_pbs=True,
+        mappings_pbs=False,
     )
     values.update(overrides)
     return Namespace(**values)

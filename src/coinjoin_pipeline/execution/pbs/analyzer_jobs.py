@@ -1,10 +1,12 @@
-"""The S3 PBS jobs that run coinjoin-analysis and the unified report.
+"""The S3 PBS jobs that run coinjoin-analysis, the mappings and the unified report.
 
 None of them touches a BlockSci index; that is ``blocksci_jobs``'.
 """
 
 from __future__ import annotations
 
+import os
+import subprocess
 from typing import cast
 
 from exporters.artifact_paths import (
@@ -13,6 +15,7 @@ from exporters.artifact_paths import (
     COINJOIN_ANALYSIS_DIR,
     EMULATOR_DATA_DIR,
     EMULATOR_DIR,
+    MAPPINGS_DIR,
     REPORT_DIR,
     REPORT_FILE,
     STAGED_EXPORTERS_DIR,
@@ -21,6 +24,7 @@ from exporters.artifact_paths import (
 from coinjoin_pipeline.execution.pbs.stage import CONTAINER_RUNS_ROOT, CONTAINER_SELECTED_ROOT, Stage, StageFailure
 from coinjoin_pipeline.execution.pbs.stage_settings import (
     CommandSettings,
+    MappingsSettings,
     UnifiedReportSettings,
 )
 
@@ -74,3 +78,28 @@ def coinjoin_analysis(stage: Stage) -> None:
     )
     stage.require_file(BASELINE_FILE, f"Coinjoin analysis did not produce {BASELINE_FILE}")
     stage.upload(output, COINJOIN_ANALYSIS_DIR)
+
+
+def coinjoin_mappings(stage: Stage) -> None:
+    """Wasabi input-output mappings and Sake over the coinjoin-analysis baseline.
+
+    The enumerator and Sake run from ``templates/mappings_run.sh``, which the
+    shared-storage job runs too; their output is published even when they fail.
+    """
+    settings = cast(MappingsSettings, stage.settings)
+    output = stage.work / MAPPINGS_DIR
+    output.mkdir(parents=True, exist_ok=True)
+    stage.finalizers.append(lambda: stage.upload(output, MAPPINGS_DIR))
+    stage.log("downloading coinjoin-analysis input")
+    stage.download(COINJOIN_ANALYSIS_DIR)
+    stage.require_file(BASELINE_FILE, f"CoinJoin mappings require {BASELINE_FILE}")
+    environment = {
+        **os.environ,
+        "WORK": str(stage.work),
+        "OUT": str(output),
+        "INPUT": str(stage.work / BASELINE_FILE),
+        "ENUMERATOR_IMAGE": settings["enumerator_image"],
+        "SAKE_IMAGE": settings["sake_image"],
+    }
+    subprocess.run(["bash", "-euo", "pipefail", "-c", settings["script"]], env=environment, check=True)
+    stage.log("completed")

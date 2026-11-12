@@ -68,6 +68,7 @@ SECTIONS = {
     "stages": ("PBS stages", "Run an analyzer as a PBS job instead of a local container."),
     "blocksci": ("BlockSci", None),
     "joinmarket": ("JoinMarket detector", None),
+    "mappings": ("Wasabi mappings and Sake", "Used with --mappings-pbs (Wasabi runs only)."),
     "pbs": (
         "PBS resources and images",
         "A stage-specific --pbs-<stage>-* value overrides the shared --pbs-* fallback, "
@@ -126,6 +127,7 @@ HELP = {
     "images.unified_report": ("unified-report job image (default: container/unified-report.image)"),
     "stages.analysis": "run coinjoin-analysis as a PBS job",
     "stages.blocksci": "run BlockSci as a PBS job",
+    "stages.mappings": "run the Wasabi mappings enumerator and Sake as PBS jobs",
     "blocksci.script": "Python script run over the parsed BlockSci index",
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
     "joinmarket.detector": "deprecated subset-matching JoinMarket scan of the report; definite matches more strictly",
@@ -136,13 +138,22 @@ HELP = {
         "deprecated subset-matching scan: fee allowance as a fraction of the participant's amount, if larger"
     ),
     "joinmarket.max_depth": "deprecated subset-matching scan: backtracking steps per transaction before it gives up",
+    "mappings.mining_fee_rate": "enumerator: mining fee rate deducted from the inputs, in sat/vB",
+    "mappings.coordination_fee_rate": "enumerator: coordination fee rate deducted from the inputs, as a fraction",
+    "mappings.max_decomposition_fee": (
+        "enumerator: largest difference between the inputs and outputs of one sub-mapping, in satoshis"
+    ),
+    "mappings.mode": "enumerator: numeric counts mappings between amounts, all counts every mapping between coins",
+    "mappings.timeout": "enumerator: seconds per transaction before its first attempt stops",
+    "mappings.retry_timeout": "enumerator: seconds of the one retry a timed-out transaction gets",
+    "mappings.sake_seed": "seed of Sake's random decompositions; one seed reproduces a result",
     **{
         f"images.{component}": f"{component.replace('_', '-')} image (also ${variable})"
         for component, variable in IMAGE_ENVIRONMENT.items()
     },
     **{
         f"pbs.{component}_image": f"Singularity image of the {component.replace('_', '-')} PBS stage"
-        for component in ("blocksci", "coinjoin_analysis")
+        for component in ("blocksci", "coinjoin_analysis", "mappings_enumerator", "sake")
     },
     **{
         f"pbs.{name}": f"shared fallback {name.replace('_', '-')} of every PBS stage"
