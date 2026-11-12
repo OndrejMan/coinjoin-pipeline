@@ -39,7 +39,7 @@ from coinjoin_pipeline.execution.runtime import (
 )
 from coinjoin_pipeline.execution.s3_staging import ensure_local_exporters
 from coinjoin_pipeline.images import default_image, validate_image
-from coinjoin_pipeline.paths import scenarios_dir
+from coinjoin_pipeline.paths import default_runs_root, scenarios_dir
 from coinjoin_pipeline.storage.s3 import ArtifactTransportError
 
 from . import settings
@@ -178,7 +178,7 @@ def compose_env(
         create_directories = not config.dry_run
     env = os.environ.copy()
     host_root_dir = settings.ROOT_DIR
-    runs_root = Path(env.get("EMULATION_LOGS_DIR", settings.ROOT_DIR.parent / "coinjoin-runs"))
+    runs_root = default_runs_root()
     notebooks_dir = runs_root / ".notebooks"
     emulation_logs_dir = runs_root
     exporters_dir = settings.ROOT_DIR / "exporters"
