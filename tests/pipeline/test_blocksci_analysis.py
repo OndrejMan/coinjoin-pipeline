@@ -117,6 +117,7 @@ def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:
             "exporters.blocksci_export.detector.export_blocksci_records",
             side_effect=AssertionError("BlockSci must not be queried"),
         ),
+        mock.patch.object(report_cli, "build_emulator_data", return_value=None),
         mock.patch.object(report_cli, "build_report", return_value={"schema_version": "test"}),
     ):
         code = report_cli.main(

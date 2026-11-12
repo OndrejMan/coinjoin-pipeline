@@ -64,6 +64,11 @@ def normalize_coinjoin_analysis(data: JsonObject) -> dict[str, TransactionRecord
     return {txid: normalize_coinjoin_analysis_record(txid, tx) for txid, tx in sorted_items(coinjoins)}
 
 
+def is_coinbase_tx(tx: JsonObject) -> bool:
+    inputs = tx.get("vin", [])
+    return bool(inputs) and "coinbase" in inputs[0]
+
+
 def exported_block_paths(run_dir: Path) -> list[Path]:
     """The emulator's exported ``block_<height>.json`` files, lowest height first."""
     block_dir = run_dir / EXPORTED_BLOCKS_DIR
@@ -96,6 +101,17 @@ def load_exported_block_tx_index(run_dir: Path) -> dict[str, int]:
             if txid:
                 tx_index[str(txid)] = height
     return tx_index
+
+
+def output_address(output: JsonObject) -> str | None:
+    script_pub_key = output.get("scriptPubKey") or {}
+    address = script_pub_key.get("address")
+    if address:
+        return str(address)
+    addresses = script_pub_key.get("addresses")
+    if isinstance(addresses, list) and addresses:
+        return str(addresses[0])
+    return None
 
 
 def fill_missing_block_heights(

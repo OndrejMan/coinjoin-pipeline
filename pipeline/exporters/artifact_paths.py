@@ -15,8 +15,9 @@ COINJOIN_ANALYSIS_DIR = "coinjoin-analysis_data"
 EMULATOR_DIR = "coinjoin_emulator_data"
 RUN_MANIFEST = "research_manifest.json"
 SCENARIO_FILE = EMULATOR_DIR + "/scenario.json"
-#: The wallet and coordinator logs coinjoin-analysis reads.
+#: The wallet and coordinator logs coinjoin-analysis reads, and the emulator's labels.
 EMULATOR_DATA_DIR = EMULATOR_DIR + "/data"
+ROUND_EVENTS_FILE = EMULATOR_DATA_DIR + "/joinmarket_round_events.json"
 BASELINE_FILE = COINJOIN_ANALYSIS_DIR + "/coinjoin_tx_info.json"
 BLOCKSCI_CONFIG_FILE = BLOCKSCI_DIR + "/config.json"
 ANALYSIS_ARTIFACT_NAME = "blocksci_analysis.json"
