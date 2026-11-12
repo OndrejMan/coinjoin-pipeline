@@ -1,0 +1,60 @@
+action: full-run
+engine: wasabi
+coinjoin_type: wasabi2
+driver: kubernetes
+emulation_timeout: 21600
+
+images:
+  # Replace latest with one immutable release/commit tag for thesis evidence.
+  version: latest
+
+kubernetes:
+  namespace: man5-ns
+  reuse_namespace: true
+
+artifacts:
+  backend: s3
+  uri: s3://coinjoin-thesis/runs
+  endpoint_url: https://s3.cl4.du.cesnet.cz
+  secret_name: coinjoin-s3-credentials
+  credentials_file: /storage/brno2/home/<login>/.aws/credentials
+  profile: coinjoin
+
+stages:
+  mappings: true
+
+blocksci:
+  # Parse once and run detection from the checksummed reusable cache.
+  workflow: reusable
+  task: detect
+
+mappings:
+  mining_fee_rate: 1
+  coordination_fee_rate: 0.003
+  max_decomposition_fee: 6000
+  mode: numeric
+  timeout: 60
+  retry_timeout: 600
+  sake_seed: 20260704
+
+pbs:
+  blocksci:
+    ncpus: 8
+    mem: 64gb
+    scratch: 2tb
+    walltime: "48:00:00"
+  analysis:
+    ncpus: 4
+    mem: 16gb
+    scratch: 100gb
+    walltime: "08:00:00"
+  mappings:
+    ncpus: 4
+    mem: 16gb
+    scratch: 100gb
+    walltime: "08:00:00"
+  unified_report:
+    ncpus: 2
+    mem: 8gb
+    scratch: 10gb
+    walltime: "01:00:00"
