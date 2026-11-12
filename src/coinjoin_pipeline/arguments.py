@@ -243,6 +243,7 @@ def _epilog() -> str:
     lines += [
         "",
         "examples:",
+        "  cjp run examples/metacentrum-regtest-s3.yaml --dry-run",
         "  cjp full-run --engine joinmarket --dry-run",
         "  cjp analyze --run-dir <run-id>",
         "",

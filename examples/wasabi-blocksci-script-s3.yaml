@@ -1,0 +1,37 @@
+# Run a custom BlockSci script on PBS over an existing S3 run (no emulation).
+# A combined-workflow run has no parse cache yet, so the first submission uses
+# the reusable workflow: blocksci-parse publishes blocksci-parse_data/ and
+# blocksci-script runs over it. Later scripts on the same run only need
+# workflow: cached, which skips the parse job.
+# Output lands in <run>/blocksci-custom-analysis_data/ (summary.json, script.py,
+# script.py.sha256). The script must be on /storage, so run cjp from the
+# checkout there.
+action: pbs-from-s3
+engine: wasabi
+coinjoin_type: wasabi2
+run_id: liquidity-large-wallet-20261015-1653
+min_input_count: 10
+
+artifacts:
+  backend: s3
+  uri: s3://xman-coinjoin-new/runs
+  endpoint_url: https://s3.cl4.du.cesnet.cz
+  credentials_file: /storage/brno2/home/xman/.aws/credentials
+  profile: coinjoin
+
+stages:
+  analysis: false
+  blocksci: true
+  mappings: false
+
+blocksci:
+  workflow: reusable
+  task: script
+  script: ./scripts/blocksci_script_smoke.py
+
+pbs:
+  blocksci:
+    ncpus: 2
+    mem: 16gb
+    scratch: 20gb
+    walltime: "01:00:00"

@@ -1,0 +1,228 @@
+{
+  "name": "overactive-k8s-small",
+  "rounds": 10,
+  "blocks": 0,
+  "default_version": "2.6.0",
+  "wallets": [
+    {
+      "funds": [
+        3556956,
+        602502
+      ],
+      "delay_blocks": null,
+      "delay_rounds": null,
+      "stop_blocks": null,
+      "stop_rounds": null,
+      "version": null,
+      "wasabi": {
+        "anon_score_target": 1000000,
+        "redcoin_isolation": null,
+        "skip_rounds": null
+      },
+      "joinmarket": null
+    },
+    {
+      "funds": [
+        720103,
+        1642790,
+        5441272,
+        1491256,
+        2937112,
+        4618783,
+        610368,
+        7746818,
+        4054678,
+        9567312
+      ],
+      "delay_blocks": null,
+      "delay_rounds": null,
+      "stop_blocks": null,
+      "stop_rounds": null,
+      "version": null,
+      "wasabi": {
+        "anon_score_target": 40,
+        "redcoin_isolation": true,
+        "skip_rounds": null
+      },
+      "joinmarket": null
+    },
+    {
+      "funds": [
+        1917653,
+        7426870,
+        3352873,
+        7878280,
+        656751,
+        3406442,
+        6987639,
+        7040799,
+        4227394
+      ],
+      "delay_blocks": null,
+      "delay_rounds": null,
+      "stop_blocks": null,
+      "stop_rounds": null,
+      "version": null,
+      "wasabi": {
+        "anon_score_target": 37,
+        "redcoin_isolation": true,
+        "skip_rounds": null
+      },
+      "joinmarket": null
+    },
+    {
+      "funds": [
+        297931,
+        9425731,
+        5535402,
+        8004034,
+        6984798,
+        8293281,
+        1528062
+      ],
+      "delay_blocks": null,
+      "delay_rounds": null,
+      "stop_blocks": null,
+      "stop_rounds": null,
+      "version": null,
+      "wasabi": {
+        "anon_score_target": 5,
+        "redcoin_isolation": null,
+        "skip_rounds": null
+      },
+      "joinmarket": null
+    },
+    {
+      "funds": [
+        660425,
+        233377,
+        9690708,
+        2441101
+      ],
+      "delay_blocks": null,
+      "delay_rounds": null,
+      "stop_blocks": null,
+      "stop_rounds": null,
+      "version": null,
+      "wasabi": {
+        "anon_score_target": 5,
+        "redcoin_isolation": null,
+        "skip_rounds": null
+      },
+      "joinmarket": null
+    },
+    {
+      "funds": [
+        9882178
+      ],
+      "delay_blocks": null,
+      "delay_rounds": null,
+      "stop_blocks": null,
+      "stop_rounds": null,
+      "version": null,
+      "wasabi": {
+        "anon_score_target": 5,
+        "redcoin_isolation": null,
+        "skip_rounds": null
+      },
+      "joinmarket": null
+    },
+    {
+      "funds": [
+        1462920,
+        8190406,
+        6407290,
+        2596162,
+        6848766
+      ],
+      "delay_blocks": null,
+      "delay_rounds": null,
+      "stop_blocks": null,
+      "stop_rounds": null,
+      "version": null,
+      "wasabi": {
+        "anon_score_target": 5,
+        "redcoin_isolation": null,
+        "skip_rounds": null
+      },
+      "joinmarket": null
+    },
+    {
+      "funds": [
+        601505,
+        2587276,
+        5888223,
+        5001649,
+        6250368,
+        2871826,
+        590278,
+        8439953
+      ],
+      "delay_blocks": null,
+      "delay_rounds": null,
+      "stop_blocks": null,
+      "stop_rounds": null,
+      "version": null,
+      "wasabi": {
+        "anon_score_target": 5,
+        "redcoin_isolation": null,
+        "skip_rounds": null
+      },
+      "joinmarket": null
+    },
+    {
+      "funds": [
+        6644379,
+        2877300,
+        8945025
+      ],
+      "delay_blocks": null,
+      "delay_rounds": null,
+      "stop_blocks": null,
+      "stop_rounds": null,
+      "version": null,
+      "wasabi": {
+        "anon_score_target": 5,
+        "redcoin_isolation": null,
+        "skip_rounds": null
+      },
+      "joinmarket": null
+    },
+    {
+      "funds": [
+        755162,
+        6596221,
+        8308609,
+        7420610,
+        9224353,
+        5763217,
+        7093939
+      ],
+      "delay_blocks": null,
+      "delay_rounds": null,
+      "stop_blocks": null,
+      "stop_rounds": null,
+      "version": null,
+      "wasabi": {
+        "anon_score_target": 5,
+        "redcoin_isolation": null,
+        "skip_rounds": null
+      },
+      "joinmarket": null
+    }
+  ],
+  "distributor_version": null,
+  "default_anon_score_target": 2,
+  "default_redcoin_isolation": null,
+  "backend": {
+    "MaxInputCountByRound": 100,
+    "MinInputCountByRoundMultiplier": 0.12,
+    "StandardInputRegistrationTimeout": "0d 0h 6m 0s",
+    "ConnectionConfirmationTimeout": "0d 0h 1m 30s",
+    "OutputRegistrationTimeout": "0d 0h 1m 30s",
+    "TransactionSigningTimeout": "0d 0h 2m 00s",
+    "FailFastTransactionSigningTimeout": "0d 0h 2m 0s",
+    "DoSMinTimeInPrison": "99d 0h 0m 0s",
+    "RoundExpiryTimeout": "0d 0h 1m 0s"
+  }
+}
