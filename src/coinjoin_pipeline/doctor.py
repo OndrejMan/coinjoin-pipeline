@@ -58,6 +58,7 @@ def required_image_components(config: PipelineConfiguration) -> set[str]:
     if delegated and config.action not in {"full-run", "emulate"}:
         return set()
     selected = {
+        "external-analyze": {"blocksci"},
         "emulate": {"emulator"},
         "coinjoin-analysis": {"coinjoin_analysis"},
         "analyze": {"blocksci", "coinjoin_analysis"},

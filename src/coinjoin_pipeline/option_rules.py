@@ -136,6 +136,8 @@ def _general_errors(config: PipelineConfiguration) -> list[str]:
             value = config_value(config, path)
             if value is not None and value is not False:
                 errors.append(f"{cli_flag(destination)} is not supported for {config.action}")
+    if config.action == "external-analyze" and not config.run_id:
+        errors.append("external-analyze requires --run-id")
     if config.all_runs and config.stages.analysis:
         errors.append("--all-runs is not supported with --analysis-pbs; select one run")
     if not 1024 <= config.blocksci.notebook_port <= 65535:
@@ -152,6 +154,15 @@ def _general_errors(config: PipelineConfiguration) -> list[str]:
         first, second = config.kubernetes.btc_datadir, config.pbs.bitcoin_datadir
         if first and second and Path(first).expanduser().resolve() != Path(second).expanduser().resolve():
             errors.append("Kubernetes and PBS Bitcoin datadirs must identify the same directory")
+    external = config.external
+    if config.action != "external-analyze" and external.configured:
+        errors.append("external settings require action: external-analyze")
+    if config.action == "external-analyze":
+        supplied = external.bitcoin_datadir is not None or external.baseline is not None
+        if external.resume and supplied:
+            errors.append("external.resume cannot be combined with external.bitcoin_datadir or external.baseline")
+        if not external.resume and (not external.bitcoin_datadir or not external.baseline):
+            errors.append("a new external analysis requires external.bitcoin_datadir and external.baseline")
     return errors
 
 

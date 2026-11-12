@@ -8,22 +8,27 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import get_args
 
-from exporters.artifact_paths import REPORT_FILE
+from exporters.artifact_paths import BASELINE_FILE, FALSE_CJTXS_FILE, REPORT_FILE, REPORT_MARKDOWN_FILE
 from exporters.common import load_json
 
 from coinjoin_pipeline.configuration import ContainerRuntime
+from coinjoin_pipeline.execution.locks import acquire_lock
+from coinjoin_pipeline.execution.pbs.commands import detector_arguments
 from coinjoin_pipeline.execution.run_catalog import (
+    create_external_manifest,
     discover_runs,
     load_manifest,
     mode_for_run,
     report_status,
     stage_state,
+    write_manifest,
 )
 from coinjoin_pipeline.execution.scenarios import (
     packaged_scenarios,
@@ -32,6 +37,7 @@ from coinjoin_pipeline.execution.scenarios import (
 )
 from coinjoin_pipeline.execution.settings import DEFAULT_BLOCKSCI_IMAGE
 from coinjoin_pipeline.paths import PIPELINE_ROOT, default_runs_root
+from coinjoin_pipeline.storage.s3 import validate_run_id
 
 ROOT = PIPELINE_ROOT
 
@@ -40,6 +46,38 @@ class ExitError(ValueError):
     def __init__(self, message: str, code: int):
         super().__init__(message)
         self.code = code
+
+
+def require_datadir(path: Path) -> Path:
+    resolved = path.expanduser().resolve()
+    if not (resolved / "blocks").is_dir():
+        raise ValueError(f"Bitcoin Core datadir must contain blocks/: {resolved}")
+    return resolved
+
+
+def require_baseline(path: Path) -> Path:
+    resolved = path.expanduser().resolve()
+    if not resolved.is_file():
+        raise ValueError(f"Baseline file not found: {resolved}")
+    manifest = load_json(resolved)
+    if not isinstance(manifest.get("coinjoins"), dict):
+        raise ValueError(f"Baseline must contain a top-level 'coinjoins' object: {resolved}")
+    return resolved
+
+
+def require_false_cjtxs(path: Path) -> Path:
+    resolved = path.expanduser().resolve()
+    if not resolved.is_file():
+        raise ValueError(f"False-positive file not found: {resolved}")
+    data = load_json(resolved)
+    if any(not isinstance(values, list) for values in data.values()):
+        raise ValueError(f"False-positive file values must all be lists: {resolved}")
+    return resolved
+
+
+def resolve_false_cjtxs(baseline: Path, configured: list[Path] | None) -> list[Path]:
+    candidates = configured if configured is not None else sorted(baseline.parent.glob("false_cjtxs.json*"))
+    return [require_false_cjtxs(path) for path in candidates]
 
 
 def print_runs(runs_root: Path) -> None:
@@ -70,6 +108,8 @@ def inspect_run(runs_root: Path, run_id: str) -> None:
         print(json.dumps(manifest, indent=2, sort_keys=True))
     print("Resume:")
     print(f"  ./runIt.sh export --run-dir {run_dir.name}")
+    if mode_for_run(run_dir, manifest) == "external":
+        print(f"  ./runIt.sh external-analyze --run-id {run_dir.name} --resume")
 
 
 def runtime_check(runtime: str) -> None:
@@ -146,6 +186,109 @@ def show_or_validate_scenario(value: str, engine: str, show: bool) -> None:
         print(f"VALID: {summary['name']} ({engine})")
 
 
+def external_inputs(args: argparse.Namespace, run_dir: Path) -> tuple[Path, Path, list[Path]]:
+    """The validated Bitcoin datadir, baseline and false-positive lists of a new or resumed run."""
+    if args.resume:
+        if not run_dir.is_dir():
+            raise ValueError(f"Cannot resume missing run: {run_dir}")
+        inputs = load_manifest(run_dir).get("inputs")
+        source_datadir = inputs.get("bitcoin_datadir") if isinstance(inputs, dict) else None
+        if not source_datadir:
+            raise ValueError("Cannot resume: external manifest has no bitcoin_datadir provenance")
+        baseline = run_dir / BASELINE_FILE
+        if not baseline.is_file():
+            raise ValueError(f"Cannot resume: baseline is missing at {baseline}")
+        return require_datadir(Path(str(source_datadir))), baseline, []
+    if run_dir.exists():
+        raise FileExistsError(f"Run already exists: {run_dir}; pass --resume to reuse it.")
+    assert args.bitcoin_datadir is not None and args.baseline is not None
+    baseline = require_baseline(args.baseline)
+    return require_datadir(args.bitcoin_datadir), baseline, resolve_false_cjtxs(baseline, args.false_cjtxs)
+
+
+def external_analyze(args: argparse.Namespace) -> None:
+    runs_root = args.runs_root.expanduser().resolve()
+    validate_run_id(args.run_id)
+    run_dir = runs_root / args.run_id
+    datadir, baseline, false_cjtxs = external_inputs(args, run_dir)
+    if args.dry_run:
+        runtime_check(args.runtime)
+        print("[dry-run] No run directory, baseline copy, BlockSci index, container, or report will be created.")
+        print(f"[dry-run] external run: {run_dir}")
+        print(f"[dry-run] command: {external_command(args)}")
+        return
+
+    storage_root = (
+        run_dir if args.resume else next(parent for parent in (runs_root, *runs_root.parents) if parent.exists())
+    )
+    available_gb = shutil.disk_usage(storage_root).free // (1024**3)
+    if available_gb < args.min_free_gb:
+        raise ValueError(
+            f"Only {available_gb} GiB free at {run_dir}; require at least {args.min_free_gb} GiB "
+            "for a persistent BlockSci index."
+        )
+
+    runs_root.mkdir(parents=True, exist_ok=True)
+    _lock = acquire_lock(runs_root / f".{args.run_id}.lock")
+    if not args.resume:
+        run_dir.mkdir()
+        baseline_target = run_dir / BASELINE_FILE
+        baseline_target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(baseline, baseline_target)
+        for index, source in enumerate(false_cjtxs):
+            target = run_dir / FALSE_CJTXS_FILE
+            if index:
+                target = target.with_name(f"false_cjtxs.json.{index}")
+            shutil.copy2(source, target)
+        write_manifest(
+            run_dir,
+            create_external_manifest(run_dir, datadir, baseline, args.network, args.coinjoin_type, false_cjtxs),
+        )
+
+    reproduction_command = f"./runIt.sh external-analyze --run-id {shlex.quote(args.run_id)} --resume"
+    command = [
+        args.runtime,
+        "run",
+        "--rm",
+        "--env",
+        f"REPRODUCTION_COMMAND={reproduction_command}",
+        "-v",
+        f"{datadir}:/mnt/data:ro",
+        "-v",
+        f"{runs_root}:/runs:rw",
+        "-v",
+        f"{ROOT / 'exporters'}:/mnt/exporters:ro",
+        args.blocksci_image,
+        "/bin/bash",
+        "-lc",
+        external_command(args),
+    ]
+    print("Running external BlockSci analysis; parsed data remains in the selected run directory.")
+    subprocess.run(command, check=True)
+    print(f"Report: {run_dir / REPORT_MARKDOWN_FILE}")
+
+
+def external_command(args: argparse.Namespace) -> str:
+    return shlex.join(
+        [
+            "python3",
+            "/mnt/exporters/worker.py",
+            "run",
+            "--run-dir",
+            f"/runs/{args.run_id}",
+            "--mode",
+            "external",
+            "--network",
+            args.network,
+            "--disk",
+            "/mnt/data",
+            *args.detector_arguments,
+            "--skip-clustering",
+            "--report",
+        ]
+    )
+
+
 def parser() -> argparse.ArgumentParser:
     cli = argparse.ArgumentParser(prog="cjp", description="Researcher-facing run catalog.")
     cli.add_argument("--runs-root", type=Path, default=default_runs_root(), help="Runs root (default: %(default)s).")
@@ -198,3 +341,23 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def run_external_configuration(config):
+    """Adapt the research operation to the common resolved configuration."""
+    args = argparse.Namespace(
+        runs_root=Path(config.runs_root),
+        run_id=config.run_id,
+        runtime=config.runtime,
+        coinjoin_type=config.coinjoin_type,
+        detector_arguments=detector_arguments(config),
+        resume=config.external.resume,
+        dry_run=config.dry_run,
+        bitcoin_datadir=Path(config.external.bitcoin_datadir) if config.external.bitcoin_datadir else None,
+        baseline=Path(config.external.baseline) if config.external.baseline else None,
+        false_cjtxs=[Path(path) for path in config.external.false_cjtxs] or None,
+        network=config.external.network or "bitcoin",
+        min_free_gb=config.external.min_free_gb if config.external.min_free_gb is not None else 20,
+        blocksci_image=config.images.blocksci,
+    )
+    external_analyze(args)

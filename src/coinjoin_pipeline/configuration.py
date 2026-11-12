@@ -37,6 +37,7 @@ PipelineAction = Literal[
     "pbs-from-s3",
     "initialize",
     "clean",
+    "external-analyze",
 ]
 Engine = Literal["wasabi", "joinmarket"]
 Driver = Literal["docker", "kubernetes"]
@@ -49,6 +50,7 @@ BlockSciNetwork = Literal["bitcoin", "bitcoin_testnet", "bitcoin_regtest"]
 JoinMarketDetector = Literal["possible", "definite"]
 MappingMode = Literal["numeric", "all"]
 AnalysisAction = Literal["collect_docker", "analyze_only"]
+ExternalNetwork = Literal["bitcoin"]
 PBSScratchType = Literal["ssd", "local"]
 PBSMultijob = Literal["brno", "plzen", "global"]
 ImagePullPolicy = Literal["Always", "IfNotPresent", "Never"]
@@ -176,6 +178,20 @@ class MappingsConfiguration(ConfigurationModel):
 
 
 @dataclass(frozen=True, slots=True)
+class ExternalAnalysisConfiguration(ConfigurationModel):
+    bitcoin_datadir: str | None = option(None, name="bitcoin_datadir")
+    baseline: str | None = option(None, name="baseline")
+    false_cjtxs: tuple[str, ...] = option((), name="false_cjtxs")
+    network: ExternalNetwork | None = option(None, name="network")
+    min_free_gb: int | None = option(None, name="min_free_gb", minimum=0)
+    resume: bool = option(False, name="resume")
+
+    @property
+    def configured(self) -> bool:
+        return any_option_set(self)
+
+
+@dataclass(frozen=True, slots=True)
 class StageConfiguration(ConfigurationModel):
     analysis: bool = option(False, name="analysis_pbs")
     blocksci: bool = option(False, name="blocksci_pbs")
@@ -226,7 +242,7 @@ class PipelineConfiguration(ConfigurationModel):
     driver: Driver = option("docker", name="driver")
     scenario: str | None = option(None, name="scenario")
     run_dir: str | None = option(None, name="run_dir", actions=("analyze", "mappings", "export", "coinjoin-analysis"))
-    run_id: str | None = option(None, name="run_id", actions=("emulate", "full-run", "pbs-from-s3"))
+    run_id: str | None = option(None, name="run_id", actions=("emulate", "full-run", "pbs-from-s3", "external-analyze"))
     run_timezone: str = option("Europe/Prague", name="run_timezone")
     min_input_count: int | None = option(None, name="min_input_count", minimum=1)
     dry_run: bool = option(False, name="dry_run")
@@ -244,6 +260,7 @@ class PipelineConfiguration(ConfigurationModel):
     blocksci: BlockSciConfiguration = field(default_factory=BlockSciConfiguration)
     joinmarket: JoinMarketConfiguration = field(default_factory=JoinMarketConfiguration)
     mappings: MappingsConfiguration = field(default_factory=MappingsConfiguration)
+    external: ExternalAnalysisConfiguration = field(default_factory=ExternalAnalysisConfiguration)
     stages: StageConfiguration = field(default_factory=StageConfiguration)
     pbs: PBSConfiguration = field(default_factory=PBSConfiguration)
     stage_exporters: bool = option(False, name="stage_exporters")

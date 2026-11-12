@@ -130,7 +130,12 @@ def execute(context: RunContext) -> None:
     from .execution import containers, orchestrator
 
     containers.install_termination_handlers()
-    orchestrator.run_configuration(context.config)
+    if context.config.action == "external-analyze":
+        from .execution.research import run_external_configuration
+
+        run_external_configuration(context.config)
+    else:
+        orchestrator.run_configuration(context.config)
 
 
 def preflight_errors(context: RunContext) -> list[str]:
@@ -164,10 +169,11 @@ def start_host_manifest(
     root = config.runs_path
     for path in (root, root / ".notebooks"):
         path.mkdir(parents=True, exist_ok=True)
-    from .execution.locks import acquire_lock, command_lock_path
+    if config.action != "external-analyze":
+        from .execution.locks import acquire_lock, command_lock_path
 
-    # The orchestrator takes the same lock again; this process already holds it.
-    acquire_lock(command_lock_path(config, root))
+        # The orchestrator takes the same lock again; this process already holds it.
+        acquire_lock(command_lock_path(config, root))
     target = None
     if context.run_dir is not None and (config.run_dir or config.action in {"emulate", "full-run"}):
         target = context.run_dir / RUN_MANIFEST
