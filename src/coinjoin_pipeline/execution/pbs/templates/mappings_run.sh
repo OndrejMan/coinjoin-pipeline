@@ -49,7 +49,32 @@ SAKE_STATUS=$?
 set -e
 accept_partial "$SAKE_STATUS" "$OUT/sake.json"
 
-in_enumerator python3 -c \
-  'import json,sys; p,ei,si,ed,sd=sys.argv[1:]; e=json.load(open(p+"/enumerator.json")); s=json.load(open(p+"/sake.json")); es=e.get("summary",{{}}); ss=s.get("summary",{{}}); status="partial" if any((es.get("timed_out",0),es.get("errors",0),ss.get("errors",0))) else "complete"; json.dump({{"schema_version":"1.0","status":status,"provenance":{{"enumerator_image":ei,"sake_image":si,"enumerator_image_digest":ed or None,"sake_image_digest":sd or None}},"enumerator":e,"sake":s}},open(p+"/coinjoin_mappings.json","w"),indent=2,sort_keys=True)' \
-  "$OUT" "$ENUMERATOR_IMAGE" "$SAKE_IMAGE" "$ENUMERATOR_DIGEST" "$SAKE_DIGEST"
+# The only place that decides the stage's status: a timeout or an error in either summary
+# makes it partial. The report shows the status as written here.
+in_enumerator python3 - "$OUT" "$ENUMERATOR_IMAGE" "$SAKE_IMAGE" "$ENUMERATOR_DIGEST" "$SAKE_DIGEST" <<'PY'
+import json
+import sys
+
+out, enumerator_image, sake_image, enumerator_digest, sake_digest = sys.argv[1:]
+with open(out + "/enumerator.json") as stream:
+    enumerator = json.load(stream)
+with open(out + "/sake.json") as stream:
+    sake = json.load(stream)
+enumerator_summary, sake_summary = enumerator.get("summary", {{}}), sake.get("summary", {{}})
+failures = (enumerator_summary.get("timed_out", 0), enumerator_summary.get("errors", 0), sake_summary.get("errors", 0))
+combined = {{
+    "schema_version": "1.0",
+    "status": "partial" if any(failures) else "complete",
+    "provenance": {{
+        "enumerator_image": enumerator_image,
+        "sake_image": sake_image,
+        "enumerator_image_digest": enumerator_digest or None,
+        "sake_image_digest": sake_digest or None,
+    }},
+    "enumerator": enumerator,
+    "sake": sake,
+}}
+with open(out + "/coinjoin_mappings.json", "w") as stream:
+    json.dump(combined, stream, indent=2, sort_keys=True)
+PY
 test -f "$OUT/coinjoin_mappings.json" || {{ echo "CoinJoin mappings did not produce coinjoin_mappings.json" >&2; exit 1; }}

@@ -71,8 +71,8 @@ if [ -n "${tool_output:-}" ]; then
   printf '{"summary": {"errors": %s}}\\n' "${TOOL_ERRORS:-0}" > "$tool_output"
   exit "${TOOL_EXIT:-0}"
 fi
-# exec --bind <work> <sif> python3 -c ...: the enumerator image's Python, here the host's.
-if [ "${5:-}" = python3 ] && [ "${6:-}" = -c ]; then
+# exec --bind <work> <sif> python3 -c|- ...: the enumerator image's Python, here the host's.
+if [ "${5:-}" = python3 ] && { [ "${6:-}" = -c ] || [ "${6:-}" = - ]; }; then
   shift 4
   exec "$@"
 fi
@@ -388,6 +388,16 @@ def test_mappings_provenance_hashes_a_local_sif_file(job: dict[str, Path]) -> No
     assert process.returncode == 0, output
     provenance = json.loads(remote(job, "coinjoin-mappings_data/coinjoin_mappings.json").read_text())["provenance"]
     assert provenance["enumerator_image_digest"] == "sha256:" + hashlib.sha256(sif.read_bytes()).hexdigest()
+
+
+def test_mappings_with_tool_errors_are_partial(job: dict[str, Path]) -> None:
+    upload_inputs(job, {"coinjoin-analysis_data/coinjoin_tx_info.json": '{"coinjoins": {}}'})
+    process = start(job, mappings_script(job), TOOL_EXIT="1", TOOL_ERRORS="1")
+    output, _ = process.communicate(timeout=60)
+
+    assert process.returncode == 0, output
+    combined = json.loads(remote(job, "coinjoin-mappings_data/coinjoin_mappings.json").read_text())
+    assert combined["status"] == "partial"
 
 
 def test_failed_mappings_still_publish_their_partial_output(job: dict[str, Path]) -> None:

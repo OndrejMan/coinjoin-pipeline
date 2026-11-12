@@ -40,16 +40,6 @@ def mapping_summaries(coinjoin_mappings: JsonObject | None) -> tuple[JsonObject,
     )
 
 
-def with_effective_mapping_status(coinjoin_mappings: JsonObject | None) -> JsonObject | None:
-    """A "complete" mapping stage whose transactions timed out or failed is only partial."""
-    if not coinjoin_mappings or coinjoin_mappings.get("status") != "complete":
-        return coinjoin_mappings
-    enumerator_summary, sake_summary = mapping_summaries(coinjoin_mappings)
-    if any((enumerator_summary.get("timed_out"), enumerator_summary.get("errors"), sake_summary.get("errors"))):
-        return {**coinjoin_mappings, "status": "partial"}
-    return coinjoin_mappings
-
-
 def compare_transactions(
     coinjoin_analysis: dict[str, TransactionRecord],
     blocksci_records: dict[str, TransactionRecord],
@@ -232,7 +222,6 @@ def build_report(
 ) -> JsonObject:
     """The unified report. Every top-level key is always present, null when it does not apply."""
     coinjoin_type, min_input_count = detector.coinjoin_type, detector.min_input_count
-    coinjoin_mappings = with_effective_mapping_status(coinjoin_mappings)
     # One read of the exported blocks serves both analyzers' records.
     script_index = load_exported_block_script_metadata(run_dir)
     enrich_records_with_script_metadata(coinjoin_analysis, run_dir, script_index)
