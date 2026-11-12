@@ -8,9 +8,11 @@ local paths in ``local.py``.
 from __future__ import annotations
 
 import os
+from contextlib import AbstractContextManager, nullcontext
 
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.locks import acquire_lock, command_lock_path
+from coinjoin_pipeline.execution.pbs.kerberos import kerberos_ticket_renewal
 from coinjoin_pipeline.execution.pbs.validation import PBSError
 from coinjoin_pipeline.execution.pipeline_logging import exit_with_error
 from coinjoin_pipeline.execution.s3_emulation import run_s3_kubernetes_emulation
@@ -49,6 +51,15 @@ def truthy_env(name: str) -> bool:
     return os.environ.get(name, "").lower() not in ("", "0", "false", "no")
 
 
+def _pbs_credentials(args: PipelineConfiguration) -> AbstractContextManager[None]:
+    """Keep the Kerberos ticket that qstat/qdel need alive while an S3 full-run waits on PBS.
+
+    pbs-from-s3 only submits and returns, so the ticket it starts with is enough for
+    qsub and a rollback qdel; it needs no renewable ticket.
+    """
+    return nullcontext() if args.dry_run else kerberos_ticket_renewal()
+
+
 def run_configuration(args: PipelineConfiguration) -> None:
     if not _print_dry_run(args):
         return
@@ -78,7 +89,8 @@ def run_configuration(args: PipelineConfiguration) -> None:
             exit_with_error(error)
     elif args.action == "full-run" and args.artifacts.backend == "s3":
         try:
-            run_s3_full_run(args)
+            with _pbs_credentials(args):
+                run_s3_full_run(args)
         except (OSError, PBSError, RuntimeError) as error:
             exit_with_error(error)
     else:
