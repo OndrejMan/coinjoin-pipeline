@@ -1,0 +1,62 @@
+{
+  "blocksci-update": {
+    "directives": [
+      "#PBS -N blocksci_update_s3",
+      "#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=100gb",
+      "#PBS -l walltime=24:00:00",
+      "#PBS -j oe"
+    ],
+    "settings": {
+      "artifact_uri": "s3://bucket/runs",
+      "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py update --run-dir /runs/emulation/logs/cache-update",
+      "credentials": "/storage/home/user/.aws/credentials",
+      "endpoint": "https://s3.example",
+      "image": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "image_name": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "job": "blocksci-update",
+      "job_log": "blocksci-update.pbs.log",
+      "log_prefix": "s3://bucket/runs/cache-update/logs",
+      "ncpus": 8,
+      "pbs_resources": {
+        "mem": "64gb",
+        "ncpus": 8
+      },
+      "persistent": null,
+      "profile": "test",
+      "python_command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3",
+      "run_id": "cache-update",
+      "run_prefix": "s3://bucket/runs/cache-update",
+      "source": {
+        "blocks_uri": "s3://bucket/mainnet/blocks",
+        "description": "verified Bitcoin block archive from S3",
+        "expected_hash": null,
+        "kind": "bitcoin-blocks-s3",
+        "max_block": 300,
+        "network": "bitcoin_regtest"
+      },
+      "source_run_id": "cache-parse",
+      "stage": "blocksci-update"
+    },
+    "shipped_files": [
+      "settings.json",
+      "run.py",
+      "coinjoin_pipeline/__init__.py",
+      "coinjoin_pipeline/storage/__init__.py",
+      "coinjoin_pipeline/storage/s5client.py",
+      "coinjoin_pipeline/execution/__init__.py",
+      "coinjoin_pipeline/execution/pbs/__init__.py",
+      "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/apptainer.py",
+      "exporters/__init__.py",
+      "exporters/artifact_paths.py",
+      "coinjoin_pipeline/execution/pbs/stage_settings.py",
+      "coinjoin_pipeline/execution/pbs/stage.py",
+      "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_index.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_analysis_jobs.py",
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py",
+      "coinjoin_pipeline/execution/block_archive.py"
+    ]
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "coinjoin-analysis": {
+    "directives": [
+      "#PBS -N coinjoin_analysis_s3",
+      "#PBS -l select=1:ncpus=4:mem=64gb:scratch_ssd=100gb",
+      "#PBS -l walltime=12:00:00",
+      "#PBS -j oe"
+    ],
+    "settings": {
+      "command": "python -m cj_process.parse_dumplings --cjtype jm --action process_dumplings --target-path /work/dumplings",
+      "credentials": "/storage/brno2/home/<login>/.aws/credentials",
+      "dumplings_uri": "s3://xman-coinjoin-new/bitcoin-mainnet/dumplings",
+      "endpoint": "https://s3.cl4.du.cesnet.cz",
+      "false_cjtxs": "joinmarket",
+      "image": "docker://ghcr.io/ondrejman/coinjoin-analysis:latest",
+      "image_name": "docker://ghcr.io/ondrejman/coinjoin-analysis:latest",
+      "job": "dumplings-baseline",
+      "job_log": "coinjoin-analysis.pbs.log",
+      "log_prefix": "s3://xman-coinjoin-new/runs/mainnet-baseline-joinmarket-20261019/logs",
+      "mix_id": "joinmarket_all",
+      "ncpus": 4,
+      "profile": "coinjoin",
+      "run_id": "mainnet-baseline-joinmarket-20261019",
+      "run_prefix": "s3://xman-coinjoin-new/runs/mainnet-baseline-joinmarket-20261019",
+      "snapshot_file": "coinjoin-analysis_data/dumplings-snapshot.json",
+      "stage": "coinjoin-analysis"
+    },
+    "shipped_files": [
+      "settings.json",
+      "run.py",
+      "coinjoin_pipeline/__init__.py",
+      "coinjoin_pipeline/storage/__init__.py",
+      "coinjoin_pipeline/storage/s5client.py",
+      "coinjoin_pipeline/execution/__init__.py",
+      "coinjoin_pipeline/execution/pbs/__init__.py",
+      "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/apptainer.py",
+      "exporters/__init__.py",
+      "exporters/artifact_paths.py",
+      "coinjoin_pipeline/execution/pbs/stage_settings.py",
+      "coinjoin_pipeline/execution/pbs/stage.py",
+      "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_index.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_analysis_jobs.py",
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py"
+    ]
+  }
+}
