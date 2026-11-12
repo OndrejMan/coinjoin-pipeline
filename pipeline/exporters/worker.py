@@ -27,6 +27,7 @@ def parse_args(argv=None):
     parser.add_argument("--disk", type=Path, default=Path("/mnt/data/regtest"))
     parser.add_argument("--network", default="bitcoin_regtest")
     parser.add_argument("--max-block", type=int)
+    parser.add_argument("--script", type=Path, default=os.environ.get("BLOCKSCI_SCRIPT") or None)
     parser.add_argument("--report", action="store_true")
     parser.add_argument("--share-output", action="store_true")
     parser.add_argument("--blocksci-analysis", type=Path)
@@ -71,6 +72,14 @@ def parse_chain(args):
 def execute(args):
     if args.phase in {"run", "parse"}:
         parse_chain(args)
+    if args.phase == "run" and args.script:
+        environment = {
+            **os.environ,
+            "ACTIVE_RUN_ID": args.run_dir.name,
+            "BLOCKSCI_CONFIG": str(args.config),
+            "BLOCKSCI_RUN_DIR": str(args.run_dir),
+        }
+        subprocess.run([sys.executable, str(args.script)], check=True, cwd=args.run_dir, env=environment)
     if args.phase in {"run", "analyze"}:
         from exporters.blocksci_export.analysis import write_analysis
 

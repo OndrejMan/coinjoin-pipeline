@@ -68,6 +68,11 @@ class ImageConfiguration(ConfigurationModel):
 
 
 @dataclass(frozen=True, slots=True)
+class BlockSciConfiguration(ConfigurationModel):
+    script: str | None = option(None, name="blocksci_script")
+
+
+@dataclass(frozen=True, slots=True)
 class PipelineConfiguration(ConfigurationModel):
     action: PipelineAction = option("full-run")
     runtime: ContainerRuntime = option("docker", name="runtime")
@@ -85,6 +90,7 @@ class PipelineConfiguration(ConfigurationModel):
     yes: bool = option(False, name="yes", actions=("clean",))
     analysis_action: AnalysisAction = option("collect_docker", name="analysis_action", actions=("coinjoin-analysis",))
     images: ImageConfiguration = field(default_factory=ImageConfiguration)
+    blocksci: BlockSciConfiguration = field(default_factory=BlockSciConfiguration)
     _provided: frozenset[str] = field(default_factory=frozenset, repr=False, compare=False)
 
     @property

@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from .configuration import (
     ConfigurationError,
     PipelineConfiguration,
+    replace_path,
 )
 from .images import Images, resolve_images
 from .paths import EXPORTERS_ROOT, default_runs_root, scenarios_dir
@@ -38,6 +39,12 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
         config = replace(config, run_id=run_id_for(config))
         provided.add("run_id")
     config = replace(config, _provided=frozenset(provided))
+    if config.blocksci.script:
+        config = replace_path(
+            config,
+            "blocksci.script",
+            str(Path(config.blocksci.script).expanduser().resolve()),
+        )
     if config.scenario and Path(config.scenario).expanduser().is_file():
         config = replace(config, scenario=str(Path(config.scenario).expanduser().resolve()))
     config.validate()
