@@ -64,16 +64,19 @@ class S3Target:
     endpoint_url: str
     credentials_file: str
     profile: str
+    # A fixed prefix shared by successive runs (the persistent index jobs) in place of
+    # <artifact_uri>/<run_id>; each run replaces its state there and keeps its logs apart.
+    state_prefix: str | None = None
 
     @property
     def run_prefix(self) -> str:
         """Where this run's markers, staged exporters and outputs live."""
-        return run_prefix_uri(self.artifact_uri, self.run_id)
+        return self.state_prefix or run_prefix_uri(self.artifact_uri, self.run_id)
 
     @property
     def log_prefix(self) -> str:
-        """Where this run's logs live."""
-        return f"{self.run_prefix}/logs"
+        """Where this run's logs live; under a fixed prefix every run keeps its own."""
+        return f"{self.run_prefix}/logs/{self.run_id}" if self.state_prefix else f"{self.run_prefix}/logs"
 
     @property
     def access(self) -> S3Access:
@@ -93,6 +96,7 @@ class S3Target:
             endpoint_url=required(args.artifacts.endpoint_url, "--s3-endpoint-url"),
             credentials_file=required(args.artifacts.credentials_file, "--s3-credentials-file"),
             profile=required(args.artifacts.profile, "--s3-profile"),
+            state_prefix=args.blocksci.index_state_uri,
         )
 
 

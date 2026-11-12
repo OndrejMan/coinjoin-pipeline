@@ -150,6 +150,10 @@ HELP = {
         "persistent BlockSci index under /storage/ or /scratch/multijob-<location>/ instead of the S3 cache"
     ),
     "blocksci.index_backup_uri": "S3 prefix of the persistent index's backup (one archive and its manifest)",
+    "blocksci.index_state_uri": (
+        "Fixed S3 prefix of the persistent index's parse, update and backup jobs in place of the run prefix; "
+        "each job replaces its markers and manifest there and keeps its logs under logs/<run-id>/"
+    ),
     "blocksci.index_in_scratch": "script or notebook task: restore the index backup into the job's scratch",
     "blocksci.restore_index": "notebook task: fill an incomplete index directory from the backup and keep it there",
     "blocksci.dumplings_uri": (

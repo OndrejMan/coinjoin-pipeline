@@ -109,9 +109,15 @@ def ensure_staged_exporters(args: PipelineConfiguration) -> None:
     before emulation, but a standalone ``pbs-from-s3`` — a resumed detect, above
     all — can start from a prefix that has none. Only the missing case uploads:
     a prefix that already carries exporters keeps the ones its earlier stages
-    actually ran with.
+    actually ran with. A fixed state prefix serves one run after another, so it
+    is refreshed every time.
     """
     target = S3Target.from_args(args)
+    if target.state_prefix:
+        # Every run of a fixed prefix starts its own jobs; never reuse a previous run's tree.
+        print(f"[stage] Refreshing the exporters of {target.state_prefix} from {EXPORTERS_ROOT}")
+        upload_exporters(target.access, target.run_prefix, EXPORTERS_ROOT)
+        return
     state, missing = staged_exporters_state(target.access, target.run_prefix)
     if state == STAGED_EXPORTERS_COMPLETE:
         return
