@@ -34,6 +34,10 @@ from exporters.heuristics import (
     explain_joinmarket_heuristic,
     explain_wasabi2_heuristic,
 )
+from exporters.integration_diagnostics import (
+    build_integration_diagnostics,
+    exported_block_targets,
+)
 from exporters.manifest import build_run_manifest, compare_run_manifests
 from exporters.markdown_report import render_report
 from exporters.parameters import Detector, ReportImages  # noqa: E402
@@ -348,6 +352,60 @@ def write_producer_label_manifest(
     )
 
 
+class FakeTx:
+    def __init__(self, txid, block_height):
+        self.hash = txid
+        self.block_height = block_height
+
+
+class FakeBlockchain:
+    def __init__(self, _config, tx_heights=None, block_count=0):
+        self.tx_heights = tx_heights or {}
+        self.block_count = block_count
+
+    def __len__(self):
+        return self.block_count
+
+    def tx_with_hash(self, txid):
+        if txid not in self.tx_heights:
+            raise KeyError(txid)
+        return FakeTx(txid, self.tx_heights[txid])
+
+
+class FakeBlockSciModule:
+    def __init__(self, tx_heights, block_count):
+        self.tx_heights = tx_heights
+        self.block_count = block_count
+
+    def Blockchain(self, config):
+        return FakeBlockchain(config, self.tx_heights, self.block_count)
+
+
+def complete_image_ids():
+    return {
+        "blocksci": "sha256:blocksci-id",
+        "coinjoin_analysis": "sha256:analysis-id",
+        "coinjoin_emulator": "sha256:emulator-id",
+    }
+
+
+def complete_image_digests():
+    return {
+        "blocksci": "ghcr.io/ondrejman/blocksci-complete@sha256:blocksci",
+        "coinjoin_analysis": "ghcr.io/ondrejman/coinjoin-analysis@sha256:analysis",
+        "coinjoin_emulator": "ghcr.io/ondrejman/emulator-manager@sha256:emulator",
+    }
+
+
+def complete_image_refs():
+    return {
+        "blocksci": "blocksci:test",
+        "coinjoin_analysis": "coinjoin-analysis:test",
+        "coinjoin_emulator": "coinjoin-emulator:test",
+        "unified_report": "python:3.12-slim-bookworm",
+    }
+
+
 class UnifiedReportTest(unittest.TestCase):
     def test_wasabi_export_uses_raw_transaction_detector(self):
         class RawChain:
@@ -641,6 +699,29 @@ class UnifiedReportTest(unittest.TestCase):
             report["run_manifest"]["image_digests"]["coinjoin_emulator"],
             "sha256:emulator",
         )
+
+    def test_build_report_includes_integration_diagnostics(self):
+        diagnostics = {
+            "status": "ok",
+            "problems": [],
+            "images": {},
+            "chain": {},
+            "target_txids": {},
+            "detector": {},
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            run_dir.mkdir()
+
+            report = build_report(
+                run_dir,
+                normalize_coinjoin_analysis(coinjoin_analysis_fixture()),
+                blocksci_fixture(),
+                Detector("wasabi2"),
+                integration_diagnostics=diagnostics,
+            )
+
+        self.assertEqual(report["integration_diagnostics"], diagnostics)
 
     def test_build_emulator_data_labels_chain_transactions(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1022,6 +1103,169 @@ class UnifiedReportTest(unittest.TestCase):
             emulator_data["label_provenance"]["unavailable_reason"],
         )
         self.assertIsNone(emulator_data["transactions"]["txA"]["is_coinjoin"])
+
+    def test_exported_block_targets_ignore_coinbase_and_capture_max_height(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
+            block_dir.mkdir(parents=True)
+            save_json(
+                block_dir / "block_0.json",
+                {
+                    "height": 0,
+                    "tx": [
+                        {"txid": "coinbase", "vin": [{"coinbase": "00"}]},
+                        {"txid": "funding", "vin": [{"txid": "coinbase", "vout": 0}]},
+                    ],
+                },
+            )
+            save_json(
+                block_dir / "block_2.json",
+                {
+                    "height": 2,
+                    "tx": [
+                        {"txid": "txA", "vin": [{"txid": "funding", "vout": 0}]},
+                    ],
+                },
+            )
+
+            targets, summary = exported_block_targets(run_dir)
+
+        self.assertEqual([target["txid"] for target in targets], ["funding", "txA"])
+        self.assertEqual(summary["exported_block_count"], 2)
+        self.assertEqual(summary["max_exported_block_height"], 2)
+
+    def test_integration_diagnostics_ok_when_provenance_and_chain_match(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
+            block_dir.mkdir(parents=True)
+            save_json(
+                block_dir / "block_0.json",
+                {
+                    "height": 0,
+                    "tx": [
+                        {"txid": "coinbase", "vin": [{"coinbase": "00"}]},
+                        {"txid": "funding", "vin": [{"txid": "coinbase", "vout": 0}]},
+                    ],
+                },
+            )
+            save_json(
+                block_dir / "block_1.json",
+                {
+                    "height": 1,
+                    "tx": [
+                        {"txid": "txA", "vin": [{"txid": "funding", "vout": 0}]},
+                    ],
+                },
+            )
+            diagnostics = build_integration_diagnostics(
+                run_dir,
+                Path("/tmp/config.json"),
+                FakeBlockSciModule({"funding": 0, "txA": 1}, 2),
+                {"txA": blocksci_fixture()["txA"]},
+                ReportImages(complete_image_refs(), complete_image_digests()),
+                image_ids=complete_image_ids(),
+            )
+
+        self.assertEqual(diagnostics["status"], "ok")
+        self.assertEqual(diagnostics["chain"]["blocksci_chain_height"], 1)
+        self.assertEqual(diagnostics["chain"]["max_exported_block_height"], 1)
+        self.assertEqual(diagnostics["target_txids"]["total"], 2)
+        self.assertEqual(diagnostics["target_txids"]["present"], 2)
+
+    def test_integration_diagnostics_not_ok_when_image_digest_missing(self):
+        digests = complete_image_digests()
+        digests["blocksci"] = None
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            (run_dir / "coinjoin_emulator_data" / "data" / "btc-node").mkdir(parents=True)
+            save_json(
+                run_dir / "coinjoin_emulator_data" / "data" / "btc-node" / "block_0.json",
+                {"height": 0, "tx": []},
+            )
+
+            diagnostics = build_integration_diagnostics(
+                run_dir,
+                Path("/tmp/config.json"),
+                FakeBlockSciModule({}, 1),
+                {},
+                ReportImages(complete_image_refs(), digests),
+                image_ids=complete_image_ids(),
+            )
+
+        self.assertEqual(diagnostics["status"], "not_ok")
+        self.assertEqual(diagnostics["images"]["blocksci"]["status"], "not_ok")
+        self.assertIn("blocksci image provenance is incomplete", diagnostics["problems"][0])
+
+    def test_integration_diagnostics_accepts_repo_digest_without_local_image_id(self):
+        # A digest-pinned image needs no local image id.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            (run_dir / "coinjoin_emulator_data" / "data" / "btc-node").mkdir(parents=True)
+            save_json(
+                run_dir / "coinjoin_emulator_data" / "data" / "btc-node" / "block_0.json",
+                {"height": 0, "tx": []},
+            )
+
+            diagnostics = build_integration_diagnostics(
+                run_dir,
+                Path("/tmp/config.json"),
+                FakeBlockSciModule({}, 1),
+                {},
+                ReportImages(complete_image_refs(), complete_image_digests()),
+            )
+
+        self.assertEqual(diagnostics["images"]["blocksci"]["status"], "ok")
+        self.assertEqual(diagnostics["status"], "ok")
+
+    def test_integration_diagnostics_not_ok_when_chain_height_differs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
+            block_dir.mkdir(parents=True)
+            save_json(block_dir / "block_2.json", {"height": 2, "tx": []})
+
+            diagnostics = build_integration_diagnostics(
+                run_dir,
+                Path("/tmp/config.json"),
+                FakeBlockSciModule({}, 2),
+                {},
+                ReportImages(complete_image_refs(), complete_image_digests()),
+                image_ids=complete_image_ids(),
+            )
+
+        self.assertEqual(diagnostics["status"], "not_ok")
+        self.assertEqual(diagnostics["chain"]["blocksci_chain_height"], 1)
+        self.assertEqual(diagnostics["chain"]["max_exported_block_height"], 2)
+
+    def test_integration_diagnostics_not_ok_when_target_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
+            block_dir.mkdir(parents=True)
+            save_json(
+                block_dir / "block_0.json",
+                {
+                    "height": 0,
+                    "tx": [
+                        {"txid": "txA", "vin": [{"txid": "funding", "vout": 0}]},
+                    ],
+                },
+            )
+
+            diagnostics = build_integration_diagnostics(
+                run_dir,
+                Path("/tmp/config.json"),
+                FakeBlockSciModule({}, 1),
+                {},
+                ReportImages(complete_image_refs(), complete_image_digests()),
+                image_ids=complete_image_ids(),
+            )
+
+        self.assertEqual(diagnostics["status"], "not_ok")
+        self.assertEqual(diagnostics["target_txids"]["missing"], 1)
+        self.assertIn("missing from BlockSci", " ".join(diagnostics["problems"]))
 
     def test_build_emulator_data_adds_joinmarket_round_labels(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1752,6 +1996,96 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertIn("#### Inputs", markdown)
         self.assertIn("#### Outputs", markdown)
         self.assertIn("wallet-000", markdown)
+
+    def test_render_markdown_integration_ok_before_run(self):
+        diagnostics = {
+            "status": "ok",
+            "problems": [],
+            "images": {
+                "blocksci": {"status": "ok"},
+                "coinjoin_analysis": {"status": "ok"},
+                "coinjoin_emulator": {"status": "ok"},
+            },
+            "chain": {
+                "status": "ok",
+                "blocksci_chain_height": 1,
+                "max_exported_block_height": 1,
+            },
+            "target_txids": {
+                "status": "ok",
+                "total": 2,
+                "present": 2,
+                "height_mismatches": 0,
+            },
+            "detector": {
+                "status": "ok",
+                "checked": 2,
+                "disagreements": 0,
+                "timeouts": 0,
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            run_dir.mkdir()
+            report = build_report(
+                run_dir,
+                normalize_coinjoin_analysis(coinjoin_analysis_fixture()),
+                blocksci_fixture(),
+                Detector("wasabi2"),
+                integration_diagnostics=diagnostics,
+            )
+
+        markdown = render_report(report)
+
+        self.assertIn("## Inner Report Integration", markdown)
+        self.assertIn("Inner report integration is OK.", markdown)
+        self.assertLess(markdown.index("## Inner Report Integration"), markdown.index("## Run"))
+
+    def test_render_markdown_integration_not_ok_lists_problems(self):
+        diagnostics = {
+            "status": "not_ok",
+            "problems": ["BlockSci chain height 1 does not match max exported block height 2"],
+            "images": {
+                "blocksci": {"status": "ok"},
+                "coinjoin_analysis": {"status": "ok"},
+                "coinjoin_emulator": {"status": "ok"},
+            },
+            "chain": {
+                "status": "not_ok",
+                "blocksci_chain_height": 1,
+                "max_exported_block_height": 2,
+            },
+            "target_txids": {
+                "status": "ok",
+                "total": 0,
+                "present": 0,
+                "height_mismatches": 0,
+            },
+            "detector": {
+                "status": "unavailable",
+                "checked": 0,
+                "disagreements": 0,
+                "timeouts": 0,
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            run_dir.mkdir()
+            report = build_report(
+                run_dir,
+                normalize_coinjoin_analysis(coinjoin_analysis_fixture()),
+                blocksci_fixture(),
+                Detector("wasabi2"),
+                integration_diagnostics=diagnostics,
+            )
+
+        markdown = render_report(report)
+
+        self.assertIn("Inner report integration is NOT OK.", markdown)
+        self.assertIn(
+            "- BlockSci chain height 1 does not match max exported block height 2",
+            markdown,
+        )
 
     def test_render_markdown_pass_but_missed_heuristic_message(self):
         with tempfile.TemporaryDirectory() as tmpdir:

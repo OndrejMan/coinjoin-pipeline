@@ -1,0 +1,255 @@
+"""Integration diagnostics of the unified report: image provenance and BlockSci's view of the exported targets."""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Protocol
+
+from exporters.artifact_paths import EXPORTED_BLOCKS_DIR
+from exporters.common import (
+    JsonObject,
+    safe_attr,
+    to_json_text,
+)
+from exporters.image_provenance import inspect_image
+from exporters.normalization import is_coinbase_tx, iter_exported_blocks
+from exporters.parameters import ReportImages
+
+# Only the images that ran before the analysis. The report stage resolves its
+# own image, whose reference and digest reach the manifest through build_run_manifest.
+IMAGE_COMPONENTS = ("blocksci", "coinjoin_analysis", "coinjoin_emulator")
+TARGET_DETAIL_LIMIT = 100
+
+
+class Blockchain(Protocol):
+    """BlockSci chain operations used by integration diagnostics."""
+
+    def __len__(self) -> int: ...
+
+    def tx_with_hash(self, txid: str) -> object: ...
+
+
+class BlocksciModule(Protocol):
+    """BlockSci module surface used by integration diagnostics."""
+
+    def Blockchain(self, config_path: str) -> Blockchain: ...
+
+
+def docker_image_provenance(image: str | None, runtime: str | None = None) -> JsonObject:
+    if not image:
+        return {"reference": image, "image_id": None, "repo_digest": None, "inspect_error": "image reference missing"}
+    runtime_command = runtime or os.environ.get("CONTAINER_RUNTIME") or "docker"
+    provenance = inspect_image(image, runtime_command)
+    return {
+        "reference": image,
+        "image_id": provenance.image_id,
+        "repo_digest": provenance.repo_digest,
+        "inspect_error": provenance.error,
+    }
+
+
+def build_image_diagnostics(
+    images: dict[str, str | None],
+    image_ids: dict[str, str | None] | None = None,
+    image_digests: dict[str, str | None] | None = None,
+) -> tuple[dict[str, JsonObject], list[str]]:
+    image_ids = image_ids or {}
+    image_digests = image_digests or {}
+    diagnostics: dict[str, JsonObject] = {}
+    problems: list[str] = []
+
+    for component in IMAGE_COMPONENTS:
+        reference = images.get(component)
+        inspected = docker_image_provenance(reference)
+        image_id = image_ids.get(component) or to_json_text(inspected.get("image_id"))
+        repo_digest = image_digests.get(component) or to_json_text(inspected.get("repo_digest"))
+        component_problems = []
+        if not reference:
+            component_problems.append("missing image reference")
+        # A repo digest identifies the image by itself, without a local image id.
+        if not image_id and not repo_digest:
+            component_problems.append("missing image id")
+        if not repo_digest:
+            component_problems.append("missing repo digest")
+        inspect_error = inspected.get("inspect_error")
+        if inspect_error and not repo_digest:
+            component_problems.append(f"image inspect failed: {inspect_error}")
+
+        status = "ok" if not component_problems else "not_ok"
+        if component_problems:
+            problems.append(f"{component} image provenance is incomplete: {', '.join(component_problems)}")
+        diagnostics[component] = {
+            "reference": reference,
+            "image_id": image_id,
+            "repo_digest": repo_digest,
+            "status": status,
+            "problems": component_problems,
+        }
+
+    return diagnostics, problems
+
+
+def exported_block_targets(run_dir: Path) -> tuple[list[JsonObject], JsonObject]:
+    block_dir = run_dir / EXPORTED_BLOCKS_DIR
+    targets: list[JsonObject] = []
+    exported_heights: list[int] = []
+    for block_path, height, block in iter_exported_blocks(run_dir):
+        if height is not None:
+            exported_heights.append(height)
+        for tx in block.get("tx", []):
+            txid = to_json_text(tx.get("txid"))
+            if not txid or is_coinbase_tx(tx):
+                continue
+            targets.append(
+                {
+                    "txid": txid,
+                    "exported_block_height": height,
+                    "source_block_file": block_path.name,
+                }
+            )
+
+    return targets, {
+        "exported_block_count": len(exported_heights),
+        "max_exported_block_height": max(exported_heights) if exported_heights else None,
+        "block_dir": str(block_dir),
+        "status": "ok" if exported_heights else "not_ok",
+    }
+
+
+def _count_problems(*checks: tuple[list[str], str]) -> list[str]:
+    """One "<count> <message>" problem per non-empty list of transaction IDs."""
+    return [f"{len(txids)} {message}" for txids, message in checks if txids]
+
+
+def _lookup_target(chain: Blockchain, target: JsonObject, detected: bool) -> JsonObject:
+    """Whether BlockSci holds an exported target at its height."""
+    txid = str(target["txid"])
+    detail: JsonObject = {
+        "txid": txid,
+        "exported_block_height": target.get("exported_block_height"),
+        "present_in_blocksci": False,
+        "blocksci_block_height": None,
+        "detected_by_bulk_filter": detected,
+    }
+    try:
+        tx = chain.tx_with_hash(txid)
+        blocksci_txid = to_json_text(safe_attr(tx, "hash"))
+        blocksci_height = safe_attr(tx, "block_height")
+        detail["blocksci_block_height"] = int(str(blocksci_height)) if blocksci_height is not None else None
+        detail["present_in_blocksci"] = blocksci_txid in {None, txid}
+    except Exception as exc:
+        detail["lookup_error"] = str(exc)
+    return detail
+
+
+def build_target_diagnostics(
+    chain: Blockchain,
+    targets: list[JsonObject],
+    blocksci_detected_txids: set[str],
+) -> tuple[JsonObject, list[str]]:
+    """Look up every exported target in BlockSci at its exported height."""
+    details: list[JsonObject] = []
+    missing = []
+    height_mismatches = []
+
+    for target in targets:
+        txid = str(target["txid"])
+        detail = _lookup_target(chain, target, txid in blocksci_detected_txids)
+        exported_height = detail["exported_block_height"]
+        if not detail["present_in_blocksci"]:
+            missing.append(txid)
+        elif exported_height is not None and detail.get("blocksci_block_height") != exported_height:
+            height_mismatches.append(txid)
+        details.append(detail)
+
+    target_problems = _count_problems(
+        (missing, "exported target txid(s) are missing from BlockSci"),
+        (height_mismatches, "exported target txid(s) have BlockSci height mismatches"),
+    )
+    return (
+        {
+            "total": len(targets),
+            "present": len(targets) - len(missing),
+            "missing": len(missing),
+            "height_mismatches": len(height_mismatches),
+            "status": "not_ok" if target_problems else "ok",
+            "problems": target_problems,
+            "details": details,
+        },
+        target_problems,
+    )
+
+
+def build_chain_diagnostics(chain: Blockchain, exported_summary: JsonObject) -> tuple[JsonObject, list[str]]:
+    problems = []
+    block_count = len(chain)
+    chain_height = block_count - 1 if block_count > 0 else None
+    max_exported_height = exported_summary.get("max_exported_block_height")
+    status = "ok"
+    if max_exported_height is None:
+        status = "not_ok"
+        problems.append("No exported block files were found for integration diagnostics")
+    elif chain_height != max_exported_height:
+        status = "not_ok"
+        problems.append(
+            f"BlockSci chain height {chain_height} does not match max exported block height {max_exported_height}"
+        )
+    return (
+        {
+            "blocksci_block_count": block_count,
+            "blocksci_chain_height": chain_height,
+            **exported_summary,
+            "status": status,
+        },
+        problems,
+    )
+
+
+def build_integration_diagnostics(
+    run_dir: Path,
+    config_path: Path,
+    blocksci_module: BlocksciModule,
+    blocksci_records: Mapping[str, object],
+    images: ReportImages,
+    image_ids: dict[str, str | None] | None = None,
+) -> JsonObject:
+    problems: list[str] = []
+    image_diagnostics, image_problems = build_image_diagnostics(images.references, image_ids, images.digests)
+    problems.extend(image_problems)
+
+    targets, exported_summary = exported_block_targets(run_dir)
+    try:
+        chain = blocksci_module.Blockchain(str(config_path))
+        chain_diagnostics, chain_problems = build_chain_diagnostics(chain, exported_summary)
+        target_diagnostics, target_problems = build_target_diagnostics(chain, targets, set(blocksci_records))
+        problems.extend(chain_problems)
+        problems.extend(target_problems)
+    except Exception as exc:
+        chain_diagnostics = {
+            **exported_summary,
+            "blocksci_block_count": None,
+            "blocksci_chain_height": None,
+            "status": "not_ok",
+            "error": str(exc),
+        }
+        target_diagnostics = {
+            "total": len(targets),
+            "present": 0,
+            "missing": len(targets),
+            "height_mismatches": 0,
+            "status": "not_ok",
+            "problems": ["BlockSci chain could not be opened for target diagnostics"],
+            "details": [],
+        }
+        problems.append(f"BlockSci diagnostics failed: {exc}")
+
+    status = "ok" if not problems else "not_ok"
+    return {
+        "status": status,
+        "problems": problems,
+        "images": image_diagnostics,
+        "chain": chain_diagnostics,
+        "target_txids": target_diagnostics,
+    }

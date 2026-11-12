@@ -31,6 +31,7 @@ def stored_run(tmp_path: Path) -> Path:
             "first_wasabi2_block": 0,
             "records": {},
             "skipped_txids": [],
+            "integration_diagnostics": {},
         },
     )
     return run

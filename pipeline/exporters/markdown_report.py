@@ -513,6 +513,74 @@ def render_run_manifest(report: JsonObject) -> list[str]:
     return lines
 
 
+def status_text(value: JsonValue) -> str:
+    if value == "ok":
+        return "OK"
+    if value == "not_ok":
+        return "NOT OK"
+    if value == "unavailable":
+        return "unavailable"
+    return metric_value(value)
+
+
+def render_integration_diagnostics(report: JsonObject) -> list[str]:
+    diagnostics = report.get("integration_diagnostics") or {}
+    if not diagnostics:
+        return section(
+            "Inner Report Integration",
+            "Inner report integration is NOT OK.",
+            "",
+            "No integration diagnostics are available in this report.",
+        )
+
+    images = diagnostics.get("images") or {}
+    chain = diagnostics.get("chain") or {}
+    target_txids = diagnostics.get("target_txids") or {}
+    complete_images = sum(1 for item in images.values() if (item or {}).get("status") == "ok")
+    image_status = "ok" if images and complete_images == len(images) else "not_ok"
+    problems = diagnostics.get("problems") or []
+    verdict = (
+        "Inner report integration is OK."
+        if diagnostics.get("status") == "ok"
+        else "Inner report integration is NOT OK."
+    )
+    lines = section(
+        "Inner Report Integration",
+        verdict,
+        "",
+        *table(
+            ["check", "status", "details"],
+            [
+                [
+                    "image provenance",
+                    status_text(image_status),
+                    f"{complete_images}/{len(images)} images complete",
+                ],
+                [
+                    "chain heights",
+                    status_text(chain.get("status")),
+                    (
+                        f"BlockSci height {chain.get('blocksci_chain_height')}; "
+                        f"exported max height {chain.get('max_exported_block_height')}"
+                    ),
+                ],
+                [
+                    "target txids",
+                    status_text(target_txids.get("status")),
+                    (
+                        f"{target_txids.get('present')}/{target_txids.get('total')} present; "
+                        f"{target_txids.get('height_mismatches')} height mismatches"
+                    ),
+                ],
+            ],
+        ),
+    )
+    if problems:
+        lines.extend(["", "Blocking problems:"])
+        lines.extend(f"- {problem}" for problem in problems)
+    return lines
+
+
 def render_header(report: JsonObject) -> list[str]:
     lines = [
         "# BlockSci vs Emulator CoinJoin Report",
@@ -661,6 +729,7 @@ def render_analyzer_diagnostic(report: JsonObject, explorer_base_url: str) -> li
 def render_report(report: JsonObject, explorer_base_url: str = "http://localhost:3002") -> str:
     lines = [
         *render_header(report),
+        *render_integration_diagnostics(report),
         *render_run(report),
         *render_detection_summary(report),
         *render_scope_note(report),

@@ -111,6 +111,7 @@ def assemble_report(args: argparse.Namespace) -> int:
         images=ReportImages.from_args(args),
         emulator_git_commit=args.emulator_git_commit,
         previous_run_manifest=load_previous_run_manifest(output_path),
+        integration_diagnostics=analysis["integration_diagnostics"],
         image_provenance=analysis.get("image_provenance"),
     )
     save_json(output_path, report)

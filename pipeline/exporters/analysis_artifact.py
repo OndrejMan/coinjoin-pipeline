@@ -30,6 +30,8 @@ def load_analysis(
     for field, kind in (("records", dict), ("first_wasabi2_block", int)):
         if not isinstance(artifact.get(field), kind):
             raise ValueError(f"BlockSci analysis artifact has invalid {field}")
+    if not isinstance(artifact.get("integration_diagnostics"), dict):
+        raise ValueError("BlockSci analysis artifact has invalid integration_diagnostics")
     provenance = artifact.get("image_provenance")
     if provenance is not None:
         if not isinstance(provenance, dict):

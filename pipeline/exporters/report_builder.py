@@ -135,6 +135,7 @@ def build_report(
     images: ReportImages | None = None,
     emulator_git_commit: str | None = None,
     previous_run_manifest: JsonObject | None = None,
+    integration_diagnostics: JsonObject | None = None,
     image_provenance: JsonObject | None = None,
 ) -> JsonObject:
     """The unified report. Every top-level key is always present, null when it does not apply."""
@@ -189,6 +190,7 @@ def build_report(
         "run_manifest": run_manifest,
         "run_manifest_comparison": compare_run_manifests(previous_run_manifest, run_manifest),
         "warnings": build_warnings(coinjoin_type, min_input_count, blocksci_records, emulator_data),
+        "integration_diagnostics": integration_diagnostics,
         "scenario": scenario,
         "emulator_data": {
             "schema_version": emulator_data.get("schema_version"),

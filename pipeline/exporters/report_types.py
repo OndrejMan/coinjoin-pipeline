@@ -177,4 +177,5 @@ class BlockSciAnalysisArtifact(TypedDict):
     parameters: DetectorParameters
     first_wasabi2_block: int
     records: dict[str, TransactionRecord]
+    integration_diagnostics: JsonObject | None
     image_provenance: JsonObject
