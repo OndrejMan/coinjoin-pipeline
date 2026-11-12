@@ -111,3 +111,12 @@ def test_run_manifest_lists_mapping_images_only_when_recorded():
     with_mappings = "\n".join(render_run_manifest({"run_manifest": manifest}))
     assert "| Sake image | sake:1 |" in with_mappings
     assert "| mappings-enumerator image | enumerator:1 |" in with_mappings
+
+
+def test_run_start_is_read_from_both_run_id_forms():
+    from exporters.common import parse_run_started_at
+
+    assert parse_run_started_at("2026-11-12_17-06-42_overactive-local") == "2026-11-12T17:06:42"
+    assert parse_run_started_at("2026-05-24_15-42_default") == "2026-05-24T15:42:00"
+    assert parse_run_started_at("2026-05-24_15-42_10-wallets") == "2026-05-24T15:42:00"
+    assert parse_run_started_at("mainnet-index") is None

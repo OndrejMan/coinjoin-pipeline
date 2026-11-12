@@ -43,7 +43,8 @@ def run_id_for(config: PipelineConfiguration) -> str:
             scenario_name = str(data.get("name") or candidate.stem)
         except (OSError, json.JSONDecodeError):
             scenario_name = candidate.stem
-    timestamp = datetime.now(ZoneInfo(config.run_timezone)).strftime("%Y-%m-%d_%H-%M")
+    # Seconds, so two launches of one scenario within a minute get different IDs.
+    timestamp = datetime.now(ZoneInfo(config.run_timezone)).strftime("%Y-%m-%d_%H-%M-%S")
     slug = slugify_run_component(
         scenario_name,
         max_length=MAX_RUN_ID_LENGTH - len(timestamp) - 1,

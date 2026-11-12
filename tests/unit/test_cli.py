@@ -1,6 +1,7 @@
 import fcntl
 import json
 import os
+import re
 from pathlib import Path
 from unittest import mock
 
@@ -349,6 +350,8 @@ def test_run_id_is_safe_and_bounded(tmp_path):
     value = run_id_for(load_configuration(["emulate", "--scenario", str(scenario)]))
     assert validate_run_id(value) == value
     assert len(value) <= 63
+    # Seconds keep two launches within one minute apart.
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_.+", value)
 
 
 def test_stage_flags_have_only_the_kebab_case_spelling() -> None:

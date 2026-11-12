@@ -171,10 +171,13 @@ def nested_get(data: Mapping[str, object] | None, path: tuple[str, ...]) -> Json
 
 
 def parse_run_started_at(run_id: str) -> str | None:
-    try:
-        return datetime.strptime(run_id[:16], "%Y-%m-%d_%H-%M").isoformat()
-    except ValueError:
-        return None
+    """The start time a generated run ID begins with; runs named before seconds were added have minutes only."""
+    for length, pattern in ((19, "%Y-%m-%d_%H-%M-%S"), (16, "%Y-%m-%d_%H-%M")):
+        try:
+            return datetime.strptime(run_id[:length], pattern).isoformat()
+        except ValueError:
+            continue
+    return None
 
 
 def coerce_sats(value: JsonValue, *, unit: str = "sats") -> int | None:
