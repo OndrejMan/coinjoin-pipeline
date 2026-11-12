@@ -110,6 +110,7 @@ services:
       - PYTHONUNBUFFERED=1
       - RUN_TIMEZONE=${RUN_TIMEZONE:-Europe/Prague}
       - PIPELINE_RUN_ID=${PIPELINE_RUN_ID:-}
+      - SCENARIO_PATH=${SCENARIO_PATH:-}
       # Empty means "use the emulator's own default". The Docker path starts
       # from the chain baked into the btc-node image, so the distributor has
       # ~1000 block filters to download before its wallet answers; raise this
@@ -124,7 +125,7 @@ services:
           condition: service_completed_successfully
     command: >
           sh -c "python manager.py clean && 
-                python manager.py --engine ${COINJOIN_ENGINE:-wasabi} --run-timezone \"$${RUN_TIMEZONE}\" run $${PIPELINE_RUN_ID:+--run-id \"$${PIPELINE_RUN_ID}\"} ${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:+--coinjoin-infrastructure-local-build} --control-ip dind --scenario ${SCENARIO_PATH:?emulate.sh names the scenario} --image-prefix ${COINJOIN_EMULATOR_IMAGE_PREFIX:-ghcr.io/ondrejman/} --btcFolder /home/bitcoin/data --btc-node-arg=-blocksxor=0 --download-btc-data /home/bitcoin/data"
+                python manager.py --engine ${COINJOIN_ENGINE:-wasabi} --run-timezone \"$${RUN_TIMEZONE}\" run $${PIPELINE_RUN_ID:+--run-id \"$${PIPELINE_RUN_ID}\"} ${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:+--coinjoin-infrastructure-local-build} --control-ip dind --scenario \"$${SCENARIO_PATH:?emulate.sh names the scenario}\" --image-prefix ${COINJOIN_EMULATOR_IMAGE_PREFIX:-ghcr.io/ondrejman/} --btcFolder /home/bitcoin/data --btc-node-arg=-blocksxor=0 --download-btc-data /home/bitcoin/data"
 
   blocksci:
       profiles: ["analysis"]
