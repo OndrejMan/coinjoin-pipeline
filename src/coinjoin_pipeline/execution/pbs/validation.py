@@ -19,13 +19,8 @@ def walltime_to_seconds(walltime: str) -> int:
     if not isinstance(walltime, str) or not re.fullmatch(r"[0-9]+(?::[0-9]+){2,3}", walltime):
         raise PBSError(f"Unsupported PBS walltime format: {walltime}")
     parts = walltime.split(":")
-    if len(parts) == 3:
-        days = "0"
-        hours, minutes, seconds = parts
-    elif len(parts) == 4:
-        days, hours, minutes, seconds = parts
-    else:
-        raise PBSError(f"Unsupported PBS walltime format: {walltime}")
+    # The pattern admits only HH:MM:SS and DD:HH:MM:SS.
+    days, hours, minutes, seconds = parts if len(parts) == 4 else ["0", *parts]
     day_value, hour_value = int(days), int(hours)
     minute_value, second_value = int(minutes), int(seconds)
     if minute_value >= 60 or second_value >= 60 or (len(parts) == 4 and hour_value >= 24):
