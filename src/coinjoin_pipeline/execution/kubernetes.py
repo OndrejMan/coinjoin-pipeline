@@ -1,4 +1,4 @@
-"""The S3 emulation Job on Kubernetes: kubectl access, preflight and resources."""
+"""The S3 emulation Job on Kubernetes: kubectl access, preflight, resources and cleanup."""
 
 from __future__ import annotations
 
@@ -22,6 +22,12 @@ S3_JOB_DEADLINE_GRACE_SECONDS = 60
 # Every S3 emulation Job carries both labels; the emulator labels its own pods with the run ID.
 S3_EMULATION_APP_LABEL = "coinjoin-s3"
 RUN_ID_LABEL = "coinjoin.run-id"
+S3_JOB_OWNED_RESOURCE_TYPES = (
+    "serviceaccount",
+    "configmap",
+    "role.rbac.authorization.k8s.io",
+    "rolebinding.rbac.authorization.k8s.io",
+)
 
 
 def resolve_kubeconfig(value: str | None) -> Path:
@@ -114,6 +120,32 @@ def s3_emulation_job_name(run_id: str) -> str:
     slug = f"coinjoin-s3-{run_id}".lower().replace("_", "-").replace(".", "-")
     slug = slug[: 63 - len(digest) - 1].rstrip("-")
     return f"{slug}-{digest}"
+
+
+def _delete(kubeconfig_path: Path, namespace: str, resource_type: str, name: str) -> bool:
+    """Best-effort deletion; returns False only when kubectl itself is missing."""
+    try:
+        result = kubectl(
+            kubeconfig_path, "delete", resource_type, name, "--ignore-not-found", "--wait=false", namespace=namespace
+        )
+    except FileNotFoundError:
+        print(f"[WARN] kubectl unavailable; could not delete {resource_type}/{name}", file=sys.stderr)
+        return False
+    if result.returncode != 0:
+        print(f"[WARN] failed to delete {resource_type}/{name}: {_output(result)}", file=sys.stderr)
+    return True
+
+
+def delete_s3_emulation_job(kubeconfig_path: Path, namespace: str, job_name: str) -> None:
+    """Best-effort deletion of the emulation Job."""
+    _delete(kubeconfig_path, namespace, "job", job_name)
+
+
+def delete_s3_emulation_support_resources(kubeconfig_path: Path, namespace: str, resource_name: str) -> None:
+    """Best-effort rollback when owner references could not be installed."""
+    for resource_type in S3_JOB_OWNED_RESOURCE_TYPES:
+        if not _delete(kubeconfig_path, namespace, resource_type, resource_name):
+            return
 
 
 # What the controller needs to create, watch and exec into the emulation pods.
@@ -299,13 +331,44 @@ def render_s3_emulation_resources(
 
 
 def apply_s3_emulation_resources(manifest: str, kubeconfig_path: Path) -> None:
-    """Apply the resource list of one emulation Job."""
+    """Apply the resource list, then make the Job the owner of its support objects.
+
+    Owner references let Kubernetes collect the ServiceAccount, ConfigMap, Role
+    and RoleBinding with the Job; until they are in place a failure removes them here.
+    """
     payload = json.loads(manifest)
     jobs = [item for item in payload.get("items", []) if item.get("kind") == "Job"]
     if len(jobs) != 1:
         raise RuntimeError("S3 Kubernetes manifest must contain exactly one Job")
+    metadata = jobs[0].get("metadata") or {}
+    job_name = metadata.get("name")
+    namespace = metadata.get("namespace")
+    if not job_name or not namespace:
+        raise RuntimeError("S3 Kubernetes Job must declare metadata.name and namespace")
+
+    def roll_back(message: str) -> RuntimeError:
+        delete_s3_emulation_job(kubeconfig_path, namespace, job_name)
+        delete_s3_emulation_support_resources(kubeconfig_path, namespace, job_name)
+        return RuntimeError(message)
+
+    # The manifest orders the support resources before the Job, so a partial
+    # apply can leave them behind with no Job to own them.
     applied = subprocess.run(
         kubectl_command(kubeconfig_path, "apply", "-f", "-"), input=manifest, text=True, check=False
     )
     if applied.returncode:
-        raise RuntimeError(f"kubectl apply failed with exit {applied.returncode}")
+        raise roll_back(f"kubectl apply failed with exit {applied.returncode}")
+    uid_result = kubectl(kubeconfig_path, "get", "job", job_name, "-o", "jsonpath={.metadata.uid}", namespace=namespace)
+    job_uid = (uid_result.stdout or "").strip()
+    if uid_result.returncode or not job_uid:
+        raise roll_back(f"could not read Kubernetes Job UID for lifecycle ownership: {_output(uid_result)}")
+    owner = {"apiVersion": "batch/v1", "kind": "Job", "name": job_name, "uid": job_uid}
+    owner_patch = json.dumps(
+        {"metadata": {"ownerReferences": [{**owner, "controller": True, "blockOwnerDeletion": False}]}}
+    )
+    for resource_type in S3_JOB_OWNED_RESOURCE_TYPES:
+        patched = kubectl(
+            kubeconfig_path, "patch", resource_type, job_name, "--type=merge", "-p", owner_patch, namespace=namespace
+        )
+        if patched.returncode:
+            raise roll_back(f"could not attach Job ownership to {resource_type}/{job_name}: {_output(patched)}")
