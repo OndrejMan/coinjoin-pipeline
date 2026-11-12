@@ -66,6 +66,10 @@ class _PbsStages:
             mappings=_supplied(config, "stages.mappings", stages.mappings),
         )
 
+    @property
+    def blocksci_alone(self) -> bool:
+        return self.blocksci and not self.analysis
+
 
 def _action_errors(config: PipelineConfiguration) -> list[str]:
     """Rules of the emulation and analysis actions."""
@@ -74,7 +78,7 @@ def _action_errors(config: PipelineConfiguration) -> list[str]:
         *_run_selection_errors(config),
         *_driver_errors(config),
         *_pbs_stage_errors(config, stages),
-        *_blocksci_workflow_errors(config, stages),
+        *_blocksci_task_errors(config, stages),
         *_s3_errors(config, stages),
         *_remaining_errors(config, stages),
     ]
@@ -134,11 +138,19 @@ def _pbs_stage_errors(config: PipelineConfiguration, stages: _PbsStages) -> list
     return errors
 
 
-def _blocksci_workflow_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
-    """Which PBS stages a BlockSci workflow runs with."""
+def _blocksci_task_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
+    """Which action, workflow and PBS stages each BlockSci task runs with."""
     errors: list[str] = []
-    if config.blocksci.workflow != "combined" and not stages.blocksci:
+    action = config.action
+    blocksci = config.blocksci
+    workflow, task = blocksci.workflow, blocksci.task
+    if workflow != "combined" and not stages.blocksci:
         errors.append("reusable BlockSci workflows require --blocksci-pbs")
+    if task == "parse":
+        if action != "pbs-from-s3" or workflow != "reusable":
+            errors.append("--blocksci-task parse requires pbs-from-s3 --blocksci-workflow reusable")
+        if not stages.blocksci_alone:
+            errors.append("--blocksci-task parse requires --blocksci-pbs without --analysis-pbs")
     return errors
 
 
@@ -172,6 +184,7 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
             action=action,
             analysis_pbs=stages.analysis,
             blocksci_pbs=stages.blocksci,
+            blocksci_task=config.blocksci.task,
         )
     ):
         errors.append(
@@ -229,7 +242,7 @@ def _remaining_errors(config: PipelineConfiguration, stages: _PbsStages) -> list
     if (
         config.action == "full-run"
         and config.artifacts.backend != "s3"
-        and blocksci.workflow != "combined"
+        and (blocksci.workflow != "combined" or blocksci.task != "detect")
     ):
         errors.append("reusable BlockSci workflows are currently supported only with the S3 artifact backend")
     if blocksci.script and not Path(blocksci.script).expanduser().is_file():

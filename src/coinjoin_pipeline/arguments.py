@@ -68,7 +68,7 @@ SECTIONS = {
         "else the release tag --version.",
     ),
     "stages": ("PBS stages", "Run an analyzer as a PBS job instead of a local container."),
-    "blocksci": ("BlockSci", None),
+    "blocksci": ("BlockSci", "Reusable tasks are submitted with pbs-from-s3 --blocksci-pbs."),
     "joinmarket": ("JoinMarket detector", None),
     "mappings": ("Wasabi mappings and Sake", "Used with --mappings-pbs (Wasabi runs only)."),
     "pbs": (
@@ -132,6 +132,7 @@ HELP = {
     "stages.blocksci": "run BlockSci as a PBS job",
     "stages.mappings": "run the Wasabi mappings enumerator and Sake as PBS jobs",
     "blocksci.workflow": "combined parses and detects in one job; reusable keeps the index; cached reuses one",
+    "blocksci.task": "what the BlockSci job does; detect is the regular analysis",
     "blocksci.script": "Python script run over the parsed BlockSci index",
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
     **{

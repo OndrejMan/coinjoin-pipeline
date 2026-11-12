@@ -53,10 +53,12 @@ def s3_full_run_plan_from_args(args: PipelineConfiguration) -> StageGraph:
         blocksci_pbs=args.stages.blocksci,
         mappings_pbs=args.stages.mappings,
         blocksci_workflow=args.blocksci.workflow,
+        blocksci_task=args.blocksci.task,
         unified_report=runs_unified_report(
             action=args.action,
             analysis_pbs=args.stages.analysis,
             blocksci_pbs=args.stages.blocksci,
+            blocksci_task=args.blocksci.task,
         ),
     )
 
@@ -139,9 +141,10 @@ class S3StageRunner:
         self._submit(stage, script)
 
     def _blocksci_work(self, stage: StagePlan) -> None:
+        task = self.args.blocksci.task
         if stage.name == "blocksci":
-            # A BlockSci PBS stage keeps the report in its own stage; only a run without one reports in place.
-            report_here = not self.args.stages.blocksci
+            # A detect run keeps the report in its own stage; any other combined run reports in place.
+            report_here = not (self.args.stages.blocksci and task == "detect")
             script = render_blocksci_s3_pbs(
                 **self._blocksci(),
                 command=blocksci_pbs_command(self.target.run_id, self.args, include_report=report_here),
