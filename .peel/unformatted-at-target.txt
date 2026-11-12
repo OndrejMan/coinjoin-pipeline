@@ -1,0 +1,17 @@
+pipeline/exporters/coinjoin_research.py
+scripts/render-mainnet-restore-check.py
+src/coinjoin_pipeline/images.py
+src/coinjoin_pipeline/option_rules.py
+src/coinjoin_pipeline/storage/s3.py
+tests/pipeline/test_block_archive.py
+tests/pipeline/test_index_store.py
+tests/pipeline/test_kubernetes_diagnostics.py
+tests/pipeline/test_liquidity.py
+tests/pipeline/test_rendered_jobs.py
+tests/pipeline/test_s3_backend.py
+tests/support/persistent-index/render_job.py
+tests/unit/test_coinjoin_tools.py
+tests/unit/test_mainnet_sync.py
+tests/unit/test_mainnet_sync_e2e.py
+tests/unit/test_publish_workflow.py
+tests/unit/test_registry.py

@@ -1,0 +1,17 @@
+docs/mainnet-synchronization.md -> tests/test_parser_pruning.py
+docs/pbs-stage-contract.md -> scripts/pbs-env.sh
+examples/wasabi-liquidity-s3.yaml -> scripts/generate_liquidity_scenarios.py
+pipeline/exporters/coinjoin_research.py -> scripts/update_txids_with_wabisator.py
+pipeline/exporters/coinjoin_research.py -> src/cj_process/analyze_tx_size.py
+pipeline/exporters/coinjoin_research.py -> src/cj_process/generate_llm_inputs.py
+src/coinjoin_pipeline/execution/pbs/templates/coinjoin_statistics.sh -> scripts/process_ww2.sh
+tests/pipeline/test_index_store.py -> src/coinjoin_pipeline/execution/pbs/templates/index_store.sh
+tests/pipeline/test_wrapper.py -> scenarios/sub/x.json
+tests/support/preflight.sh -> scripts/cleanup-stale-clusters.sh
+tests/test-run-all-local-interrupt.sh -> pipeline/test_delete_profiles.sh
+tests/test-run-all-local-interrupt.sh -> pipeline/test_emulate_interrupt_cleanup.sh
+tests/test-run-all-local-interrupt.sh -> pipeline/test_emulate_log_follower_cleanup.sh
+tests/test-runIt-doctor.sh -> scenarios/missing.json
+tests/unit/test_coinjoin_research.py -> scripts/update_txids_with_wabisator.py
+tests/unit/test_coinjoin_research.py -> src/cj_process/cj_analysis.py
+tests/unit/test_coinjoin_research.py -> src/cj_process/generate_llm_inputs.py
