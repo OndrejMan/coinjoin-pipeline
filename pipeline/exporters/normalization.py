@@ -12,7 +12,6 @@ from exporters.artifact_paths import (
     block_height_from_path,
 )
 from exporters.common import (
-    DEFAULT_FIRST_WASABI2_BLOCK,
     JsonObject,
     coerce_sats,
     load_json,
@@ -213,11 +212,15 @@ def fill_missing_block_heights(
         record["block_height_inferred"] = True
 
 
-def load_first_wasabi2_block(config_path: Path, default: int = DEFAULT_FIRST_WASABI2_BLOCK) -> int:
-    if not config_path.exists():
-        return default
-    config = load_json(config_path)
-    value = (config.get("coinjoin") or config.get("coinjoinConfig") or {}).get("FirstWasabi2Block")
-    if value is None:
-        value = config.get("FirstWasabi2Block")
-    return int(value) if value is not None else default
+def load_first_wasabi2_block(config_path: Path) -> int:
+    """The Wasabi 2 start height BlockSci's heuristic reads from its chain configuration.
+
+    ``blocksci_parser generate-config`` writes it under ``chainConfig.coinJoinConfiguration``
+    for every network (0 on regtest and testnet).
+    """
+    chain = load_json(config_path).get("chainConfig")
+    coinjoin = chain.get("coinJoinConfiguration") if isinstance(chain, dict) else None
+    value = coinjoin.get("FirstWasabi2Block") if isinstance(coinjoin, dict) else None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{config_path} has no integer chainConfig.coinJoinConfiguration.FirstWasabi2Block")
+    return value

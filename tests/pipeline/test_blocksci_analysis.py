@@ -17,6 +17,7 @@ from exporters.blocksci_export.analysis import (  # noqa: E402
     exported_addresses,
     write_analysis,
 )
+from exporters.normalization import load_first_wasabi2_block  # noqa: E402
 from exporters.parameters import Detector  # noqa: E402
 from exporters.blocksci_export.detector import (
     assert_real_blocksci,  # noqa: E402
@@ -325,3 +326,30 @@ def test_io_records_carry_the_bare_address_for_every_script_type() -> None:
     assert _base_io_record(taproot, 9)["address"] == "bcrt1pguuun"
     assert _base_io_record(opreturn, 9)["address"] == "OpReturn()"
     assert _base_io_record(missing, 9)["address"] is None
+
+
+@pytest.mark.parametrize(("network", "height"), [("bitcoin_regtest", 0), ("bitcoin", 741213)])
+def test_first_wasabi2_block_comes_from_the_blocksci_chain_configuration(tmp_path, network, height):
+    """The layout ``blocksci_parser generate-config`` writes, with its per-network start height."""
+    config = tmp_path / "config.json"
+    config.write_text(
+        json.dumps(
+            {
+                "chainConfig": {
+                    "coinName": network,
+                    "coinJoinConfiguration": {"FirstWasabi2Block": height, "FirstWasabiBlock": 0},
+                },
+                "parser": {},
+                "version": 6,
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert load_first_wasabi2_block(config) == height
+
+
+def test_first_wasabi2_block_is_required(tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"chainConfig": {}, "FirstWasabi2Block": 5}), encoding="utf-8")
+    with pytest.raises(ValueError, match="chainConfig.coinJoinConfiguration.FirstWasabi2Block"):
+        load_first_wasabi2_block(config)
