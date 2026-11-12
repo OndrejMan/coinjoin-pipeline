@@ -201,7 +201,7 @@ def _run_selection_errors(config: PipelineConfiguration) -> list[str]:
     action = config.action
     if config.run_dir is not None and config.all_runs:
         errors.append("--run-dir and --all-runs are mutually exclusive")
-    if action in {"analyze", "export", "coinjoin-analysis"}:
+    if action in {"analyze", "export", "coinjoin-analysis", "mappings"}:
         if not _supplied(config, "run_dir", config.run_dir) and not _supplied(config, "all_runs", config.all_runs):
             errors.append(f"{action} requires --run-dir (or --all-runs where supported)")
     if (
@@ -240,7 +240,7 @@ def _pbs_stage_errors(config: PipelineConfiguration, stages: _PbsStages) -> list
     for flag, enabled, permitted in (
         ("--analysis-pbs", stages.analysis, ("full-run", "coinjoin-analysis", "pbs-from-s3")),
         ("--blocksci-pbs", stages.blocksci, ("full-run", "analyze", "pbs-from-s3")),
-        ("--mappings-pbs", stages.mappings, ("full-run", "pbs-from-s3")),
+        ("--mappings-pbs", stages.mappings, ("full-run", "mappings", "pbs-from-s3")),
     ):
         if enabled and config.action not in permitted:
             errors.append(f"{flag} is supported only by {', '.join(permitted)}")
@@ -503,4 +503,6 @@ def _remaining_errors(config: PipelineConfiguration, stages: _PbsStages) -> list
         errors.append("--mappings-pbs is supported only with --engine wasabi")
     if stages.mappings and config.coinjoin_type != "wasabi2":
         errors.append("--mappings-pbs requires --coinjoin-type wasabi2")
+    if config.action == "mappings" and not stages.mappings:
+        errors.append("mappings requires --mappings-pbs")
     return errors

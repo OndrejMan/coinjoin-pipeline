@@ -9,8 +9,9 @@ import sys
 import time
 from pathlib import Path
 
-from exporters.artifact_paths import pbs_marker
+from exporters.artifact_paths import BASELINE_FILE, pbs_marker
 
+from coinjoin_pipeline.configuration import MappingsConfiguration
 from coinjoin_pipeline.execution.probes import PROBE_QUEUED, PROBE_RUNNING, PROBE_TERMINAL
 
 from . import submission
@@ -22,7 +23,7 @@ from .defaults import (
     PBSResources,
 )
 from .status import job_phase
-from .templates_local import render_blocksci_pbs, render_coinjoin_analysis_pbs
+from .templates_local import render_blocksci_pbs, render_coinjoin_analysis_pbs, render_mappings_pbs
 from .validation import (
     PBSError,
     require_bitcoin_datadir,
@@ -185,3 +186,18 @@ def submit_coinjoin_analysis_pbs(
     require_existing_path(input_data_dir, "PBS coinjoin-analysis input data directory")
     script = render_coinjoin_analysis_pbs(run_dir, output_dir, input_data_dir, image, command, resources)
     return _submit_script(run_dir, "coinjoin-analysis", script, dry_run)
+
+
+def submit_mappings_pbs(
+    run_dir: Path,
+    enumerator_image: str,
+    sake_image: str,
+    settings: MappingsConfiguration,
+    resources: PBSResources,
+    *,
+    dry_run: bool = False,
+) -> str | None:
+    require_storage_path(run_dir)
+    require_existing_path(run_dir / BASELINE_FILE, "CoinJoin mappings input")
+    script = render_mappings_pbs(run_dir, enumerator_image, sake_image, settings, resources)
+    return _submit_script(run_dir, "coinjoin-mappings", script, dry_run)

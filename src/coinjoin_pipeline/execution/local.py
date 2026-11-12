@@ -66,6 +66,9 @@ def run_configuration(args: PipelineConfiguration, logs_root: Path, local_build:
             run_analysis(args, run_dir, logs_root)
         except (PBSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
             exit_with_error(error)
+    elif action == "mappings":
+        run_dir = _selected_run_dir(args, logs_root)
+        _on_pbs(logs_root, "CoinJoin mappings", run_dir, lambda: shared_storage_pbs.run_mappings_stage(args, run_dir))
     elif action == "analyze":
         run_dir = _selected_run_dir(args, logs_root)
         if args.stages.blocksci:

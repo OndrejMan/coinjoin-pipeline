@@ -57,6 +57,7 @@ ACTION_SUMMARIES = {
     "analyze": "BlockSci analysis of --run-dir",
     "export": "unified report of --run-dir",
     "coinjoin-analysis": "baseline coinjoin-analysis of --run-dir or --all-runs",
+    "mappings": "Wasabi mappings and Sake of --run-dir on PBS",
     "pbs-from-s3": "submit PBS analysis jobs for a run already in S3",
     "initialize": "pull the emulation and analysis images through Compose",
     "clean": "remove the local pipeline containers and volumes (needs --yes)",

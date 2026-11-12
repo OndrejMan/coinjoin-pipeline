@@ -33,6 +33,7 @@ PipelineAction = Literal[
     "analyze",
     "export",
     "coinjoin-analysis",
+    "mappings",
     "pbs-from-s3",
     "initialize",
     "clean",
@@ -224,7 +225,7 @@ class PipelineConfiguration(ConfigurationModel):
     coinjoin_type: CoinjoinType = option("wasabi2", name="coinjoin_type")
     driver: Driver = option("docker", name="driver")
     scenario: str | None = option(None, name="scenario")
-    run_dir: str | None = option(None, name="run_dir", actions=("analyze", "export", "coinjoin-analysis"))
+    run_dir: str | None = option(None, name="run_dir", actions=("analyze", "mappings", "export", "coinjoin-analysis"))
     run_id: str | None = option(None, name="run_id", actions=("emulate", "full-run", "pbs-from-s3"))
     run_timezone: str = option("Europe/Prague", name="run_timezone")
     min_input_count: int | None = option(None, name="min_input_count", minimum=1)
