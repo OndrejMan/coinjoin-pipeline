@@ -88,8 +88,10 @@ def restore_index(
 
 
 def open_index(stage: Stage, settings: PersistentSettings, *, writer: bool) -> IndexStore:
-    """Lock the persistent index for reading or writing; finalization releases the lock."""
-    require_tools("zstd")
+    """Lock the persistent index for reading or writing; finalization releases the lock.
+
+    Only restoring or backing it up needs zstd, which IndexStore checks when it does.
+    """
     index = IndexStore(
         str(settings["index_dir"]),
         settings.get("backup_uri"),

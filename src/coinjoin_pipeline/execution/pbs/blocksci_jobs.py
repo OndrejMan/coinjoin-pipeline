@@ -343,7 +343,9 @@ def parse_source(stage: Stage, source: SourceSettings) -> tuple[Path | None, int
 def blocksci_parse(stage: Stage) -> None:
     """Parse once and publish a checksummed reusable index, or record it in a persistent directory."""
     settings = cast(BlocksciParseSettings, stage.settings)
-    require_tools("zstd")
+    if not settings["persistent"]:
+        # Fail before parsing: the job ends by packing the run's index.
+        require_tools("zstd")
     stage.download(STAGED_EXPORTERS_DIR)
     source = settings["source"]
     datadir, max_block, extra = parse_source(stage, source)
@@ -389,7 +391,9 @@ def blocksci_update(stage: Stage) -> None:
     settings = cast(BlocksciUpdateSettings, stage.settings)
     source = settings["source"]
     kind, network, max_block = source["kind"], source["network"], int(source["max_block"])
-    require_tools("zstd")
+    if not settings["persistent"]:
+        # Fail before parsing: the job ends by packing the run's index.
+        require_tools("zstd")
     stage.download(STAGED_EXPORTERS_DIR)
     source_cache = stage.work / SOURCE_CACHE_DIR
     source_cache.mkdir(parents=True, exist_ok=True)

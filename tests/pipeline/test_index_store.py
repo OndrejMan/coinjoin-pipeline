@@ -524,3 +524,21 @@ def test_discard_reads_an_object_and_reports_a_missing_one(tmp_path):
     storage.discard("s3://bucket/object.zst")
     with pytest.raises(S5Error, match="Reading s3://bucket/missing failed"):
         storage.discard("s3://bucket/missing")
+
+
+def test_only_packing_and_unpacking_need_zstd(tmp_path, monkeypatch):
+    parse_index(tmp_path)
+    backup(tmp_path)
+    real_which = shutil.which
+    monkeypatch.setattr(shutil, "which", lambda name: None if name == "zstd" else real_which(name))
+    reader = store(tmp_path, job="reader")
+    reader.lock_shared()
+    assert reader.complete() and reader.height() == 100
+    reader.unlock()
+    writer = store(tmp_path, job="writer")
+    with pytest.raises(IndexStoreError, match="zstd is required"):
+        writer.backup(threads=1)
+    with pytest.raises(IndexStoreError, match="zstd is required"):
+        writer.restore()
+    # The refused restore never touched the working copy.
+    assert writer.complete()

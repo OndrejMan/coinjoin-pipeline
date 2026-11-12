@@ -27,7 +27,6 @@ from coinjoin_pipeline.execution.pbs.blocksci_index import (
     check_manifest,
     container_run,
     open_index,
-    require_tools,
     restore_index,
 )
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore, usage_report
@@ -38,7 +37,6 @@ from coinjoin_pipeline.storage.s5client import S5Error
 
 def scratch_index(stage: Stage, settings: PersistentSettings) -> IndexStore:
     """A private copy of the backup in the job's scratch; nobody else reads it, so no lock."""
-    require_tools("zstd")
     index = IndexStore(str(stage.scratch / "index"), settings["backup_uri"], storage=stage.storage)
     index.path.mkdir(parents=True, exist_ok=True)
     index.restore()
@@ -216,7 +214,6 @@ def blocksci_analysis(stage: Stage) -> None:
     mode = stage.name
     output = analysis_output(stage, settings["output"])
     stage.finalizers.append(lambda: stage.upload(output, settings["output"]["relative"]))
-    require_tools("zstd")
     stage.log(f"[{mode}] downloading required reusable BlockSci inputs")
     for download in settings["inputs"]:
         if "run" in download:

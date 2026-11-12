@@ -50,6 +50,12 @@ class IndexStoreError(RuntimeError):
     """The index cannot be locked, is incomplete, or its backup is unusable."""
 
 
+def require_zstd() -> None:
+    """Packing and unpacking the archive need zstd; reading an index in place does not."""
+    if shutil.which("zstd") is None:
+        raise IndexStoreError("[index] zstd is required to pack or unpack the index archive")
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -293,6 +299,7 @@ class IndexStore:
     def backup(self, threads: int) -> None:
         """Replace the S3 backup with the working copy; run under at least the shared lock."""
         storage = self._storage()
+        require_zstd()
         print(f"[index] replacing the S3 backup in {self.backup_uri} (height {self.height()})", flush=True)
         storage.replace_backup(self.path, MEMBERS, self.backup_uri, ARCHIVE, self.manifest(), threads)
         print("[index] S3 backup complete", flush=True)
@@ -313,6 +320,7 @@ class IndexStore:
         extracted beside the data and moved in only after its SHA-256 was verified.
         """
         storage = self._storage()
+        require_zstd()
         print(f"[index] restoring the working copy from {self.backup_uri}", flush=True)
         self.begin_write()
         self.discard()
