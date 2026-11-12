@@ -42,7 +42,7 @@ def unified_report(stage: Stage) -> None:
     stage.log("downloading lightweight report inputs")
     for name in settings["downloads"]:
         stage.download(name)
-    for relative in (ANALYSIS_ARTIFACT_FILE, BASELINE_FILE, f"{STAGED_EXPORTERS_DIR}/unified_report.py"):
+    for relative in (ANALYSIS_ARTIFACT_FILE, BASELINE_FILE, f"{STAGED_EXPORTERS_DIR}/worker.py"):
         stage.require_file(relative, f"Unified S3 report requires {relative}")
     stage.log("assembling JSON and Markdown from precomputed analyzer outputs")
     stage.container(

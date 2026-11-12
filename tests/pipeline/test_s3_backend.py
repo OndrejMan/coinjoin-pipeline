@@ -554,7 +554,7 @@ esac
 """
 
 STAGED_KEYS_LISTING = (
-    "2026/07/26 04:00:00     1024  .pipeline/exporters/unified_report.py\n"
+    "2026/07/26 04:00:00     1024  .pipeline/exporters/worker.py\n"
     "2026/07/26 04:00:00     2048  .pipeline/exporters/blocksci_export/analysis.py\n"
 )
 STAGED_DIR_LISTING = "                                  DIR  .pipeline/\n"

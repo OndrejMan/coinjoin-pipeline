@@ -151,7 +151,7 @@ def test_invalid_yaml_document_never_becomes_default_experiment(tmp_path, text):
 
 
 @pytest.mark.parametrize(
-    "entry", ["blocksci_export/analysis.py", "markdown_report.py", "unified_report.py", "worker.py"]
+    "entry", ["blocksci_export/analysis.py", "markdown_report.py", "worker.py"]
 )
 def test_analysis_script_is_standalone_without_host_package(tmp_path, entry):
     import os

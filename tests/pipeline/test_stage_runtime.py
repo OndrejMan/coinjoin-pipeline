@@ -25,7 +25,7 @@ from coinjoin_pipeline.storage.s3 import S3Target
 FAKE_S5CMD_DIR = Path(__file__).resolve().parents[1] / "support/persistent-index"
 RUN = "s3://bucket/runs/run-1"
 REPORT_INPUTS = {
-    ".pipeline/exporters/unified_report.py": "",
+    ".pipeline/exporters/worker.py": "",
     "coinjoin_emulator_data/scenario.json": "{}",
     "coinjoin-analysis_data/coinjoin_tx_info.json": '{"coinjoins": {}}',
     "blocksci-analysis_data/blocksci_analysis.json": "{}",

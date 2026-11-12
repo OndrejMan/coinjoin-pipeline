@@ -424,7 +424,7 @@ class PBSTemplateTest(unittest.TestCase):
         )
 
         self.assertIn("worker.py run", command)
-        self.assertNotIn("unified_report.py", command)
+        self.assertNotIn("--report", command)
 
     def test_blocksci_pbs_command_can_persist_analysis_for_lightweight_report(self):
         command = blocksci_pbs_command(
@@ -448,7 +448,7 @@ class PBSTemplateTest(unittest.TestCase):
             command,
         )
         self.assertIn("--min-input-count default", command)
-        self.assertNotIn("unified_report.py", command)
+        self.assertNotIn("--report", command)
 
     def test_blocksci_pbs_command_names_the_run_images(self):
         # --cleanenv drops the image variables, so provenance must travel as options.

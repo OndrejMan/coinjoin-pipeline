@@ -75,7 +75,7 @@ def _write_required_exporters(root: Path) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("fixture\n")
     (root / "blocksci_export").mkdir(parents=True, exist_ok=True)
-    (root / "unified_report.py").write_text("report\n", encoding="utf-8")
+    (root / "worker.py").write_text("worker\n", encoding="utf-8")
     (root / "blocksci_export" / "analysis.py").write_text("analysis\n", encoding="utf-8")
 
 
@@ -91,7 +91,7 @@ def test_stage_pbs_exporters_snapshots_checkout_under_shared_run(
     staged = stage_pbs_exporters(run_dir, source)
 
     assert staged == run_dir / ".pipeline" / "exporters"
-    assert (staged / "unified_report.py").read_text(encoding="utf-8") == "report\n"
+    assert (staged / "worker.py").read_text(encoding="utf-8") == "worker\n"
     assert (staged / "blocksci_export" / "analysis.py").is_file()
     assert not (staged / "__pycache__").exists()
 
@@ -108,7 +108,7 @@ def test_stage_pbs_exporters_rejects_partial_existing_snapshot(
     _write_required_exporters(source)
     partial = run_dir / ".pipeline" / "exporters"
     partial.mkdir(parents=True)
-    (partial / "unified_report.py").write_text("report\n", encoding="utf-8")
+    (partial / "worker.py").write_text("worker\n", encoding="utf-8")
 
     with pytest.raises(PBSError, match="Failed to stage PBS exporters"):
         stage_pbs_exporters(run_dir, source)

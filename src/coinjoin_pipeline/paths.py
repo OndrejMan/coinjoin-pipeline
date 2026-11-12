@@ -21,7 +21,6 @@ REQUIRED_EXPORTERS = (
     "verify_chain.py",
     "parameters.py",
     "analysis_artifact.py",
-    "unified_report.py",
     "blocksci_export/analysis.py",
 )
 
