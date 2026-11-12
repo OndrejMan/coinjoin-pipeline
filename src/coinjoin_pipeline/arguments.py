@@ -36,8 +36,12 @@ def field_type(path: str):
 
 CONFIGURATION_FLAGS = ("--from-configuration",)
 # Host commands that need no experiment.
-UTILITIES = ("doctor",)
+UTILITIES = (
+    "version",
+    "doctor",
+)
 UTILITY_SUMMARIES = {
+    "version": "print the CLI version and the default component images",
     "doctor": "check the container runtime, the runs root and the default images",
 }
 ACTION_SUMMARIES = {
@@ -79,7 +83,7 @@ HELP = {
     "all_runs": "run coinjoin-analysis over every run in the runs root",
     "yes": "confirm the destructive clean action",
     "analysis_action": "collect_docker collects the emulator logs first; analyze_only needs an existing baseline",
-    "images.version": "release tag of every component image",
+    "images.version": "release tag of every component image; `cjp version` prints the CLI version",
     "images.registry": (
         "registry and owner of the project's images, e.g. ghcr.io/you (also $COINJOIN_IMAGE_REGISTRY; "
         "default: ghcr.io/ondrejman)"

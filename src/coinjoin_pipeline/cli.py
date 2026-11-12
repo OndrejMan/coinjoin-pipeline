@@ -11,6 +11,7 @@ from pathlib import Path
 
 from exporters.artifact_paths import RUN_MANIFEST
 
+from . import MANIFEST_SCHEMA_VERSION, __version__
 from .arguments import (
     CONFIGURATION_FLAGS,
     UTILITIES,
@@ -24,10 +25,18 @@ from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, fail
 from .context import RunContext
 from .doctor import check as doctor_check
 from .doctor import required_capabilities, required_image_components, validate_arguments
-from .images import DEFAULT_VERSION
+from .images import DEFAULT_VERSION, image_names
 from .manifest import environment_snapshot, initial_manifest, mark_finished
 from .paths import PIPELINE_ROOT
 from .runs import read_host_manifest, store_host_manifest
+
+
+def print_version() -> None:
+    print(f"coinjoin-pipeline {__version__}")
+    print(f"manifest schema: {MANIFEST_SCHEMA_VERSION}")
+    print(f"default image version: {DEFAULT_VERSION}")
+    for component, image in image_names().items():
+        print(f"{component}: {image}")
 
 
 def runtime_root() -> Path:
@@ -64,6 +73,9 @@ def _utility(argv: list[str]) -> int | None:
         return None
     if remaining[:1] in (["-h"], ["--help"]):
         print(utility_usage(action))
+        return EXIT_OK
+    if action == "version":
+        print_version()
         return EXIT_OK
     context = RunContext.prepare(PipelineConfiguration.from_flat(supplied))
     root = context.config.runs_path
