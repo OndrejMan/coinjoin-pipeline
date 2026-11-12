@@ -142,6 +142,12 @@ def cross_option_errors(config: PipelineConfiguration) -> list[str]:
 def _general_errors(config: PipelineConfiguration) -> list[str]:
     """Rules that hold for every action, mainnet-sync included."""
     errors: list[str] = []
+    for flag, run_id in (
+        ("--run-id", config.run_id),
+        ("--blocksci-cache-source-run-id", config.blocksci.cache_source_run_id),
+    ):
+        if run_id is not None and not is_valid_run_id(run_id):
+            errors.append(f"{flag} {RUN_ID_RULE}")
     for path, destination, item in option_specs():
         permitted = item.metadata.get("actions")
         if permitted and path in config.provided and config.action not in permitted:
@@ -236,12 +242,6 @@ def _run_selection_errors(config: PipelineConfiguration) -> list[str]:
         and not _supplied(config, "yes", config.yes)
     ):
         errors.append("clean is destructive; pass --yes or --dry-run")
-    for flag, run_id in (
-        ("--run-id", config.run_id),
-        ("--blocksci-cache-source-run-id", config.blocksci.cache_source_run_id),
-    ):
-        if run_id is not None and not is_valid_run_id(run_id):
-            errors.append(f"{flag} {RUN_ID_RULE}")
     return errors
 
 

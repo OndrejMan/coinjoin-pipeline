@@ -203,7 +203,7 @@ INVALID = {
     ),
     "a malformed source run ID": (
         job(task="script", script=SCRIPT, cache_source_run_id="bad/run"),
-        "run ID must be at most 63 characters",
+        "--blocksci-cache-source-run-id must be at most 63 characters",
     ),
     # What each analysis task needs.
     "a script task without a script": (
