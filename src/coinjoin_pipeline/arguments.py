@@ -273,7 +273,9 @@ def _epilog() -> str:
     width = max(map(len, (*ACTION_SUMMARIES, *UTILITY_SUMMARIES)))
     lines = ["actions:"]
     lines += [f"  {name:<{width}}  {summary}" for name, summary in ACTION_SUMMARIES.items()]
-    lines += ["", "utilities (watch, download-report, clean-s3, runs and scenarios accept their own --help):"]
+    delegating = [name for name in UTILITIES if name in DELEGATING_UTILITIES]
+    own_help = ", ".join(delegating[:-1]) + " and " + delegating[-1]
+    lines += ["", f"utilities ({own_help} accept their own --help):"]
     lines += [f"  {name:<{width}}  {summary}" for name, summary in UTILITY_SUMMARIES.items()]
     lines += [
         "",
