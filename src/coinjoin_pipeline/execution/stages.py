@@ -13,7 +13,7 @@ from enum import Enum
 from typing import Literal
 
 RunnerName = Literal["local", "kubernetes", "pbs"]
-# Stage names are part of the marker and log protocol.
+# Stage names are part of the marker and log protocol; scenario-lab reads them through run_layout.
 EMULATION_STAGE = "kubernetes-emulation"
 BASELINE_STAGE = "coinjoin-analysis"
 BLOCKSCI_STAGE = "blocksci"
