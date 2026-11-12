@@ -13,7 +13,7 @@ from enum import Enum
 from typing import Literal
 
 RunnerName = Literal["local", "kubernetes", "pbs"]
-BlockSciWorkflow = Literal["combined", "reusable"]
+BlockSciWorkflow = Literal["combined", "reusable", "cached"]
 
 
 class StageKind(Enum):
@@ -185,8 +185,9 @@ def _blocksci_stages(
 ) -> tuple[StagePlan | None, StagePlan | None]:
     """Return the ``(parse, work)`` BlockSci stages for one S3 invocation.
 
-    A reusable workflow publishes a cache in its own stage, which the work
-    stage then reads.  ``combined`` keeps parsing and analysis in one job.
+    A reusable workflow publishes a cache in its own stage; a cached workflow
+    consumes one published earlier, so its work stage only waits for the
+    emulation upload.  ``combined`` keeps parsing and analysis in one job.
     """
     if not blocksci_pbs:
         return None, None
@@ -200,17 +201,21 @@ def _blocksci_stages(
             runner="pbs",
             dependencies=(emulation.name,),
         )
-    parse = StagePlan(
-        name="blocksci-parse",
-        kind=StageKind.BLOCKSCI_PARSE,
-        runner="pbs",
-        dependencies=(emulation.name,),
+    parse = (
+        StagePlan(
+            name="blocksci-parse",
+            kind=StageKind.BLOCKSCI_PARSE,
+            runner="pbs",
+            dependencies=(emulation.name,),
+        )
+        if blocksci_workflow == "reusable"
+        else None
     )
     work = StagePlan(
         name="blocksci-analyze",
         kind=StageKind.BLOCKSCI_WORK,
         runner="pbs",
-        dependencies=(parse.name,),
+        dependencies=((parse or emulation).name,),
     )
     return parse, work
 

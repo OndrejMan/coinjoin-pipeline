@@ -131,7 +131,7 @@ HELP = {
     "stages.analysis": "run coinjoin-analysis as a PBS job",
     "stages.blocksci": "run BlockSci as a PBS job",
     "stages.mappings": "run the Wasabi mappings enumerator and Sake as PBS jobs",
-    "blocksci.workflow": "combined parses and detects in one job; reusable keeps the index",
+    "blocksci.workflow": "combined parses and detects in one job; reusable keeps the index; cached reuses one",
     "blocksci.script": "Python script run over the parsed BlockSci index",
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
     **{
