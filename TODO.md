@@ -55,3 +55,40 @@ onwards for headers and each new block from its own `nFile`
 - BlockSci import shadowing (never name a directory `blocksci` under exporters); `PYTHONDONTWRITEBYTECODE` so 3.14 bytecode does not reach S3.
 - Container image pinning: `filter_coinjoin_txes_raw` needs the matching blocksci image; private `joinmarket-base` build args.
 - Wasabi key-cache race (`getnewaddress -32603`) is retried in the emulator, not here.
+
+## 6. Possible, not needed now: extract index archives with native tar
+
+`S5Client.restore_backup` (every index restore: run caches, the persistent index, the mainnet
+checkpoint) unpacks with Python `tarfile` and checks every member. The alternative would keep the
+streamed SHA-256 and the `files.txt` check and unpack with `zstd -d | tar -x` instead.
+
+Measured on vm207 on 2026-11-12 (synthetic index, three rounds, variants alternating, alongside a
+CI job, so the ratios hold better than the absolute times):
+
+| Archive | plain `tar` | SHA-256 + `tar` | SHA-256 + `tarfile` (now) |
+|---|---|---|---|
+| 3.0 GiB, 4 large + 4,000 small files | 24.1 s | 26.2 s | 27.5 s (+5 %) |
+| 3.3 GiB, 4 large + 40,000 files of 32 KiB | 27.2 s | 31.0 s | 38.7 s (+25 %, twice the CPU) |
+
+An emulation run's index is about 600 MB in 70–85 files, so the change would save a fraction of a
+second per restore; the mainnet restore through `tarfile` already reached about 254 MB/s on
+MetaCentrum.
+
+What native tar would cost against the current code:
+
+- **Checks only after the fact.** `tarfile` refuses an absolute path, a `..` component, a link, a
+  special file or a path outside the declared members before anything is written. With `tar`, such a
+  member would already be on disk when a check after extraction finds it, and the restore would have
+  to clean up after it instead of never writing it.
+- **A host tool's behaviour instead of the standard library.** `s5client.py` ships to PBS nodes on
+  its own and needs only Python. Native extraction depends on the node's `tar` (GNU against BusyBox,
+  versions, flags for links, owners and timestamps), which the jobs do not control.
+- **Timestamps and errors.** The extractor sets nanosecond mtimes from the pax headers, which the
+  block archive markers compare, and names the member that broke a restore. GNU tar keeps the
+  mtimes too, but BusyBox and older tars may not, and `tar` reports a broken member only through
+  its exit code and stderr.
+- **Tests and code to rewrite.** The member-check tests of `test_index_store.py` and the restore
+  path would change, for a gain only an index of tens of thousands of small files would notice.
+
+Worth it only if a restore becomes the bottleneck of a job, for example an index with very many
+small files restored often.
