@@ -87,9 +87,8 @@ def cache(tmp_path):
     return tmp_path / "s3/bucket/runs/source/blocksci-parse_data"
 
 
-@pytest.mark.parametrize("no_pipe", ["", "1"])
-def test_streamed_archive_and_scratch_fallback_restore_the_same_verified_index(tmp_path, no_pipe):
-    result = publish(tmp_path, FAKE_S5CMD_NO_PIPE=no_pipe)
+def test_the_streamed_archive_restores_the_same_verified_index(tmp_path):
+    result = publish(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     files = cache(tmp_path)
     assert sorted(p.name for p in files.iterdir()) == [
@@ -101,7 +100,7 @@ def test_streamed_archive_and_scratch_fallback_restore_the_same_verified_index(t
     assert manifest["exported_max_block"] == 42
     assert manifest["archive_sha256"] == hashlib.sha256((files / "blocksci_data.tar.zst").read_bytes()).hexdigest()
     original = (tmp_path / "scratch/coinjoin-run/source/blocksci_data/config.json").read_bytes()
-    # No large archive or FIFO survives locally, including the fallback upload.
+    # No large archive or FIFO survives locally.
     assert not list((tmp_path / "scratch").rglob("*.tar.zst"))
     assert not list((tmp_path / "scratch").rglob("*.fifo"))
     result = restore(tmp_path)

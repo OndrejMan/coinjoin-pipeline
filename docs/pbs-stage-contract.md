@@ -101,8 +101,8 @@ With `cached`, parsing is omitted and the saved index is restored.
 
 `S5Client.upload_archive` and `restore_archive` are the shared transport of
 run-local indexes, the persistent index backup and the mainnet checkpoints. Upload
-hashes the compressed stream and uses `s5cmd pipe` when available, with a temporary
-scratch archive as the fallback. The checksum uploads after the archive and the manifest uploads last.
+hashes the compressed stream on its way into `s5cmd pipe` (s5cmd 2.2 or later; nodes and
+images have 2.3). The checksum uploads after the archive and the manifest uploads last.
 Before replacing an index, the old completion manifest is removed. Restore
 fetches only metadata first, then streams the archive into scratch while hashing
 and extracting it. An incomplete marker remains until the complete stream and
@@ -179,8 +179,8 @@ The prefix holds one backup: `<index_backup_uri>/blocksci_index.tar.zst`
 (`config.json`, `files.txt`, `manifest.json`, `parsed/`), its `.sha256`, and
 `<index_backup_uri>/manifest.json`. A `backup` job first deletes the manifest
 and the old archive, so S3 never holds two copies and there is no valid backup
-until it finishes. The archive is streamed `tar | zstd` into `s5cmd pipe` (an
-s5cmd without `pipe` stages it in scratch) in 256 MiB parts, since a stream cannot
+until it finishes. The archive is streamed `tar | zstd` into `s5cmd pipe`
+in 256 MiB parts, since a stream cannot
 grow its parts and S3 allows 10,000 of them; its S3 size must match the uploaded
 stream before the manifest is written: the index manifest plus `archive_uri`,
 `archive_sha256`, `archive_size`, `members`, `member_bytes`, `upload_validation`

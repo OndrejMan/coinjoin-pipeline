@@ -124,8 +124,8 @@ need `cjp analyze` again.
 All S3 parsers publish `blocksci-parse_data/` as a zstd archive, manifest and
 SHA-256; `combined` and `reusable` differ only in job arrangement. The working
 `blocksci_data/` stays on job scratch. `S5Client` shares the streaming
-upload/restore with the persistent index backup and the mainnet checkpoints,
-retaining the scratch-file upload fallback when `s5cmd pipe` is absent. Consumers run only after verification.
+upload/restore with the persistent index backup and the mainnet checkpoints;
+uploads need `s5cmd pipe` (2.2 or later). Consumers run only after verification.
 Persistent mainnet indexes still stay in shared storage and are read/updated in
 place; emulations do not introduce a persistent working copy.
 

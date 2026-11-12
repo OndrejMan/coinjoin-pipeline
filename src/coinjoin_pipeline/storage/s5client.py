@@ -182,37 +182,25 @@ class S5Client:
         """Best-effort delete; a missing object is not an error. True when s5cmd succeeded."""
         return self.run("rm", *uris, timeout=timeout).returncode == 0
 
-    def supports_pipe(self) -> bool:
-        """Whether this s5cmd uploads from stdin (``pipe``), which s5cmd 2.1 lacks."""
-        return self.run("pipe", "--help", timeout=60).returncode == 0
-
     def upload_archive(self, root: Path, members: Sequence[str], uri: str, threads: int) -> tuple[str, int]:
         """Stream ``tar -C root members | zstd`` to uri; the archive's SHA-256 and size.
 
-        Hashed and measured on the way, so nothing is read back. Without ``pipe`` the
-        archive is staged as a temporary file first.
+        Hashed and measured on the way, so nothing is read back. s5cmd needs ``pipe``
+        (2.2 or later); every node and image the pipeline runs on has 2.3.
         """
         digest, size = hashlib.sha256(), 0
-        staged = None
         with contextlib.ExitStack() as stack:
             tar = stack.enter_context(
                 _stage(["tar", "--format=pax", "-C", str(root), "-cf", "-", *members], stdout=subprocess.PIPE)
             )
             zstd = stack.enter_context(_stage(["zstd", "-3", f"-T{threads}"], stdin=tar.stdout, stdout=subprocess.PIPE))
             pipe(tar.stdout).close()
-            processes = [tar, zstd]
-            if self.supports_pipe():
-                command = self.command("pipe", "--part-size", PIPE_PART_SIZE_MIB, uri)
-                upload = stack.enter_context(
-                    _stage(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, env=self.environment)
-                )
-                processes.append(upload)
-                destination = pipe(upload.stdin)
-            else:
-                # In the job's temporary directory (its scratch), never in the tree being archived.
-                handle, staged = tempfile.mkstemp(prefix="archive-", suffix=".tar.zst")
-                stack.callback(Path(staged).unlink, missing_ok=True)
-                destination = os.fdopen(handle, "wb")
+            command = self.command("pipe", "--part-size", PIPE_PART_SIZE_MIB, uri)
+            upload = stack.enter_context(
+                _stage(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, env=self.environment)
+            )
+            processes = [tar, zstd, upload]
+            destination = pipe(upload.stdin)
             compressed = pipe(zstd.stdout)
             for chunk in iter(lambda: compressed.read(CHUNK), b""):
                 digest.update(chunk)
@@ -222,8 +210,6 @@ class S5Client:
             compressed.close()
             if any(process.wait() != 0 for process in processes):
                 raise S5Error(f"Streaming {root} to {uri} failed")
-            if staged is not None:
-                self.copy(staged, uri, timeout=None)
             return digest.hexdigest(), size
 
     def discard(self, uri: str) -> None:

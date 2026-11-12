@@ -85,8 +85,7 @@ PY
         done
         ;;
     pipe)
-        # FAKE_S5CMD_NO_PIPE acts as s5cmd 2.1, FAKE_S5CMD_FAIL_PIPE as an upload that breaks.
-        [ -n "${FAKE_S5CMD_NO_PIPE:-}" ] && { echo "unknown command pipe" >&2; exit 1; }
+        # FAKE_S5CMD_FAIL_PIPE acts as an upload that breaks.
         [ "${1:-}" = --help ] && { echo "pipe <destination>"; exit 0; }
         [ -n "${FAKE_S5CMD_FAIL_PIPE:-}" ] && { cat >/dev/null; echo "upload failed" >&2; exit 1; }
         [ -n "${FAKE_S5CMD_PIPE_ARGUMENTS:-}" ] && echo "$*" >"$FAKE_S5CMD_PIPE_ARGUMENTS"

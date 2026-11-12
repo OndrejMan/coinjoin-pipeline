@@ -180,16 +180,6 @@ def test_a_broken_upload_leaves_no_valid_backup(tmp_path):
         restore(tmp_path)
 
 
-def test_without_s5cmd_pipe_the_archive_passes_through_scratch(tmp_path):
-    parse_index(tmp_path)
-
-    backup(tmp_path, env={"FAKE_S5CMD_NO_PIPE": "1"})
-    shutil.rmtree(tmp_path / "index")
-    restore(tmp_path)
-
-    assert block(tmp_path) == "blocks-100"
-
-
 def test_the_upload_parts_can_hold_an_archive_of_the_whole_chain(tmp_path):
     parse_index(tmp_path)
     arguments = tmp_path / "pipe-arguments"
