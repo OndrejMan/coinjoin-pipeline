@@ -192,6 +192,7 @@ def build_report(
     mode: str = "emulator",
     network: str | None = None,
     image_provenance: JsonObject | None = None,
+    coverage: JsonObject | None = None,
     baseline_filter: JsonObject | None = None,
 ) -> JsonObject:
     """The unified report. Every top-level key is always present, null when it does not apply."""
@@ -273,6 +274,8 @@ def build_report(
         "blocksci_subset_matching": build_subset_matching_comparison(
             subset_matching, coinjoin_analysis, blocksci_records, detector
         ),
+        # External mode only: the BlockSci scan window and where the baseline sits in it.
+        "coverage": coverage,
         "baseline_filter": baseline_filter if baseline_filter is not None else baseline_filter_summary([], set(), []),
         "summary": summary,
         "divergences": divergences,
