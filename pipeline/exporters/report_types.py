@@ -177,6 +177,9 @@ class RunManifest(_RunManifestFields, total=False):
     network: str | None
     mapping_parameters: JsonObject | None
     sake_seed: int | None
+    # SHA-256 of each report input by run-relative path; `runs list` compares it to mark
+    # a report stale.
+    inputs: dict[str, str]
 
 
 class DetectorParameters(TypedDict):

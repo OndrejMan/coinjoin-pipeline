@@ -42,7 +42,7 @@ def external_run(tmp_path: Path) -> Path:
     return run
 
 
-def test_external_report_records_the_window_snapshot(tmp_path):
+def test_external_report_records_window_snapshot_and_its_inputs(tmp_path):
     run = external_run(tmp_path)
 
     assert report_cli.main(["--run-dir", str(run), "--mode", "external", "--network", "bitcoin"]) == 0
@@ -55,6 +55,8 @@ def test_external_report_records_the_window_snapshot(tmp_path):
     assert coverage["dumplings_commit"] == "abc123"
     assert report["evaluation_scope"] == "baseline_agreement_only"
     assert report["baseline_filter"]["enabled"] is False
+    # The snapshot shapes the coverage, so changing it must mark the report stale.
+    assert DUMPLINGS_SNAPSHOT_FILE in report["run_manifest"]["inputs"]
 
 
 def test_report_replaces_a_previous_report_that_is_not_an_object(tmp_path):
