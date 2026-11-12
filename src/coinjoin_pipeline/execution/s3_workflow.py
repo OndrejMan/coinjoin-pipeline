@@ -10,6 +10,7 @@ import sys
 
 from exporters.artifact_paths import (
     BLOCKSCI_ANALYSIS_DIR,
+    BLOCKSCI_PARSE_DIR,
     COINJOIN_ANALYSIS_DIR,
     LOGS_DIR,
     MAPPINGS_DIR,
@@ -165,6 +166,6 @@ def print_full_run_completed(run_prefix: str) -> None:
     print(
         f"[full-run] Completed; results under {run_prefix}/ "
         f"({COINJOIN_ANALYSIS_DIR}/, {BLOCKSCI_ANALYSIS_DIR}/, "
-        f"{MAPPINGS_DIR}/ when requested, "
+        f"{MAPPINGS_DIR}/ when requested, {BLOCKSCI_PARSE_DIR}/ when reusable, "
         f"{REPORT_DIR}/, {LOGS_DIR}/)"
     )

@@ -191,8 +191,8 @@ def clear_s3_stage_markers(access: S3Access, run_prefix: str, stage: str) -> Non
 def require_s5cmd_version() -> None:
     """Reject a frontend s5cmd too old for `sync --exclude`, which stages the exporters.
 
-    Only the frontend binary is checked here: the uploader runs a pinned image and a PBS
-    node its own s5cmd.
+    Only the frontend binary is checked here: the uploader runs a pinned image, and a PBS
+    job checks its node's s5cmd before it streams an archive through `pipe`.
     """
     found = older_s5cmd(FRONTEND_S5CMD_VERSION)
     if found is not None:

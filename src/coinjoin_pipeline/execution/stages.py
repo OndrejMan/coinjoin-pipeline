@@ -18,12 +18,16 @@ EMULATION_STAGE = "kubernetes-emulation"
 BASELINE_STAGE = "coinjoin-analysis"
 BLOCKSCI_STAGE = "blocksci"
 REPORT_STAGE = "unified-report"
+# The configuration takes this from here, so the dependency graph imports nothing of the package.
+BlockSciWorkflow = Literal["combined", "reusable"]
 
 
 class StageKind(Enum):
     """What kind of work a stage performs, independent of its stage name.
 
-    Stage *names* are part of the marker and log protocol.  Runners and job
+    Stage *names* are part of the marker and log protocol and vary with the
+    selected BlockSci workflow (``blocksci`` versus
+    ``blocksci-analyze``).  Runners and job
     bookkeeping dispatch on the kind instead, so renaming a marker cannot
     silently break a dispatch table.
     """
@@ -31,14 +35,17 @@ class StageKind(Enum):
     EMULATION = "emulation"
     BASELINE = "baseline"
     MAPPINGS = "mappings"
+    BLOCKSCI_PARSE = "blocksci-parse"
     BLOCKSCI_WORK = "blocksci-work"
     REPORT = "report"
 
 
-#: The PBS resources (``pbs.<group>``) each kind of stage runs with.
+#: Several stage names share one PBS budget: every BlockSci job is budgeted
+#: as ``blocksci`` whether it parses or analyzes.
 RESOURCE_GROUPS: dict[StageKind, str] = {
     StageKind.BASELINE: "analysis",
     StageKind.MAPPINGS: "mappings",
+    StageKind.BLOCKSCI_PARSE: "blocksci",
     StageKind.BLOCKSCI_WORK: "blocksci",
     StageKind.REPORT: "unified_report",
 }
@@ -176,9 +183,48 @@ def analysis_plan() -> StageGraph:
     return StageGraph(tuple(stages))
 
 
+def _blocksci_stages(
+    *,
+    emulation: StagePlan,
+    blocksci_pbs: bool,
+    blocksci_workflow: BlockSciWorkflow,
+) -> tuple[StagePlan | None, StagePlan | None]:
+    """Return the ``(parse, work)`` BlockSci stages for one S3 invocation.
+
+    A reusable workflow publishes a cache in its own stage, which the work
+    stage then reads.  ``combined`` keeps parsing and analysis in one job.
+    """
+    if not blocksci_pbs:
+        return None, None
+    if blocksci_workflow == "combined":
+        # The combined worker downloads the emulation bundle from the same S3
+        # prefix as the baseline worker, so it cannot start before the
+        # Kubernetes uploader has published it either.
+        return None, StagePlan(
+            name=BLOCKSCI_STAGE,
+            kind=StageKind.BLOCKSCI_WORK,
+            runner="pbs",
+            dependencies=(emulation.name,),
+        )
+    parse = StagePlan(
+        name="blocksci-parse",
+        kind=StageKind.BLOCKSCI_PARSE,
+        runner="pbs",
+        dependencies=(emulation.name,),
+    )
+    work = StagePlan(
+        name="blocksci-analyze",
+        kind=StageKind.BLOCKSCI_WORK,
+        runner="pbs",
+        dependencies=(parse.name,),
+    )
+    return parse, work
+
+
 def s3_full_run_plan(
     *,
     mappings_pbs: bool,
+    blocksci_workflow: BlockSciWorkflow = "combined",
     analysis_pbs: bool = True,
     blocksci_pbs: bool = True,
     action: str = "pbs-from-s3",
@@ -206,22 +252,14 @@ def s3_full_run_plan(
         else None
     )
     mappings = _mappings_stage(baseline or emulation) if mappings_pbs else None
-    # The BlockSci worker downloads the emulation bundle from the same S3 prefix as
-    # the baseline worker, so it cannot start before the Kubernetes uploader has
-    # published it either.
-    work = (
-        StagePlan(
-            name="blocksci",
-            kind=StageKind.BLOCKSCI_WORK,
-            runner="pbs",
-            dependencies=(emulation.name,),
-        )
-        if blocksci_pbs
-        else None
+    parse, work = _blocksci_stages(
+        emulation=emulation,
+        blocksci_pbs=blocksci_pbs,
+        blocksci_workflow=blocksci_workflow,
     )
     # Completion order: the analyzers publish independently, and mappings is
     # waited for after BlockSci because it is the shorter of the two tails.
-    stages = [stage for stage in (emulation, baseline, work, mappings) if stage is not None]
+    stages = [stage for stage in (emulation, baseline, parse, work, mappings) if stage is not None]
     if runs_unified_report(action=action, analysis_pbs=analysis_pbs, blocksci_pbs=blocksci_pbs):
         stages.append(_report_stage("pbs", baseline, work, mappings))
     return StageGraph(tuple(stages))

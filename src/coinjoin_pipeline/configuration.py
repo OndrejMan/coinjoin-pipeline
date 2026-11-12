@@ -14,6 +14,7 @@ from types import NoneType, UnionType
 from typing import Literal, Mapping, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from coinjoin_pipeline.execution.pbs.defaults import PBSScratchType
+from coinjoin_pipeline.execution.stages import BlockSciWorkflow
 
 T = TypeVar("T")
 
@@ -114,6 +115,7 @@ class ImageConfiguration(ConfigurationModel):
 
 @dataclass(frozen=True, slots=True)
 class BlockSciConfiguration(ConfigurationModel):
+    workflow: BlockSciWorkflow = option("combined", name="blocksci_workflow")
     script: str | None = option(None, name="blocksci_script")
 
 
