@@ -17,7 +17,7 @@ EXIT_CODES = (
     (EXIT_OK, "success"),
     (EXIT_USAGE, "invalid configuration or arguments, or a failed preflight check"),
     (EXIT_ABORTED, "clean-s3 was not confirmed"),
-    (EXIT_FAILURE, "a failed run reported as [ERROR], a runtime error, or a failed pull or S3 transfer"),
+    (EXIT_FAILURE, "a failed run reported as [ERROR], a runtime error, or a failed pull, S3 transfer or log source"),
     (EXIT_INTERRUPTED, "interrupted"),
 )
 
