@@ -37,6 +37,7 @@ PipelineAction = Literal[
     "clean",
 ]
 Engine = Literal["wasabi", "joinmarket"]
+Driver = Literal["docker", "kubernetes"]
 CoinjoinType = Literal["wasabi2", "joinmarket"]
 ContainerRuntime = Literal["docker", "podman"]
 JoinMarketDetector = Literal["possible", "definite"]
@@ -55,6 +56,17 @@ class ConfigurationModel:
     @classmethod
     def from_mapping(cls, value, location=None):
         return decode_model(cls, value, location or cls.__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class KubernetesConfiguration(ConfigurationModel):
+    namespace: str = option("coinjoin", name="namespace")
+    reuse_namespace: bool = option(False, name="reuse_namespace")
+    kubeconfig: str | None = option(None, name="kubeconfig")
+    image_prefix: str = option("ghcr.io/ondrejman/", name="image_prefix")
+    btc_datadir: str | None = option(None, name="kubernetes_btc_datadir")
+    copy_to_host: bool = option(False, name="copy_to_host")
+    infrastructure_local_build: bool = option(False, name="coinjoin_infrastructure_local_build")
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +100,7 @@ class PipelineConfiguration(ConfigurationModel):
     runs_root: str | None = option(None, name="runs_root")
     engine: Engine = option("wasabi", name="engine")
     coinjoin_type: CoinjoinType = option("wasabi2", name="coinjoin_type")
+    driver: Driver = option("docker", name="driver")
     scenario: str | None = option(None, name="scenario")
     run_dir: str | None = option(None, name="run_dir", actions=("analyze", "export", "coinjoin-analysis"))
     run_id: str | None = option(None, name="run_id", actions=("emulate", "full-run"))
@@ -98,6 +111,7 @@ class PipelineConfiguration(ConfigurationModel):
     all_runs: bool = option(False, name="all_runs", actions=("coinjoin-analysis",))
     yes: bool = option(False, name="yes", actions=("clean",))
     analysis_action: AnalysisAction = option("collect_docker", name="analysis_action", actions=("coinjoin-analysis",))
+    kubernetes: KubernetesConfiguration = field(default_factory=KubernetesConfiguration)
     images: ImageConfiguration = field(default_factory=ImageConfiguration)
     blocksci: BlockSciConfiguration = field(default_factory=BlockSciConfiguration)
     joinmarket: JoinMarketConfiguration = field(default_factory=JoinMarketConfiguration)

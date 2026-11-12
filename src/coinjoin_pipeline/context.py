@@ -101,6 +101,10 @@ def host_environment(config: PipelineConfiguration, images: Images, reproduction
         environment["COINJOIN_UNIFIED_REPORT_IMAGE"] = config.images.unified_report
     if config.run_id:
         environment["PIPELINE_RUN_ID"] = config.run_id
+    if config.kubernetes.copy_to_host:
+        environment["KUBERNETES_COPY_TO_HOST_DIR"] = os.environ.get("KUBERNETES_COPY_TO_HOST_DIR") or str(
+            root / ".kubernetes-btc-data"
+        )
     if config.engine == "joinmarket" and platform.machine() in {"arm64", "aarch64"}:
         environment["COINJOIN_EMULATOR_DOCKER_PLATFORM"] = (
             os.environ.get("COINJOIN_EMULATOR_DOCKER_PLATFORM") or "linux/amd64"

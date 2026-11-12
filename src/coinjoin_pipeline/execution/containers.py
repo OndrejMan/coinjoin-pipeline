@@ -110,6 +110,10 @@ def run_command(command: list[str], *, cwd: Path | None = None, env: Mapping[str
         raise subprocess.CalledProcessError(return_code, command)
 
 
+def default_host_root_dir() -> Path:
+    return settings.ROOT_DIR
+
+
 def compose_project_name(host_root_dir: Path) -> str:
     """Return a stable Compose project name isolated to one pipeline checkout."""
     checkout_hash = hashlib.sha256(str(host_root_dir).encode("utf-8")).hexdigest()[:12]

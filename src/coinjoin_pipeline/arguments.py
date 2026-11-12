@@ -59,6 +59,7 @@ ACTION_SUMMARIES = {
 # Argument groups by the first segment of the model path; top-level fields are "".
 SECTIONS = {
     "": ("run options", None),
+    "kubernetes": ("Kubernetes driver", "Used with --driver kubernetes."),
     "images": (
         "component images",
         "Each image is the explicit option, else its environment variable, else the --local-build tag, "
@@ -74,6 +75,7 @@ HELP = {
     "runs_root": "directory holding the run directories (default: $EMULATION_LOGS_DIR, else ./coinjoin-runs)",
     "engine": "CoinJoin implementation to emulate and analyze",
     "coinjoin_type": "protocol the analyzers look for (default: joinmarket for --engine joinmarket)",
+    "driver": "where the emulation runs",
     "scenario": "scenario JSON file, or the file name of a packaged scenario",
     "run_dir": "existing run, as a name inside the runs root or a path to it",
     "run_id": "run ID; emulate and full-run generate <timestamp>_<scenario> when omitted",
@@ -87,6 +89,13 @@ HELP = {
     "all_runs": "run coinjoin-analysis over every run in the runs root",
     "yes": "confirm the destructive clean action",
     "analysis_action": "collect_docker collects the emulator logs first; analyze_only needs an existing baseline",
+    "kubernetes.namespace": "namespace of the run's Kubernetes resources",
+    "kubernetes.reuse_namespace": "use an existing namespace instead of creating and deleting one",
+    "kubernetes.kubeconfig": "kubeconfig file (default: ~/.kube/config)",
+    "kubernetes.image_prefix": "registry prefix the emulator uses for its infrastructure images",
+    "kubernetes.btc_datadir": "shared Bitcoin datadir of the Kubernetes emulation",
+    "kubernetes.copy_to_host": "copy the emulation's Bitcoin data to the host",
+    "kubernetes.infrastructure_local_build": "let the emulator build its infrastructure images locally",
     "images.version": "release tag of every component image; `cjp version` prints the CLI version",
     "images.registry": (
         "registry and owner of the project's images, e.g. ghcr.io/you (also $COINJOIN_IMAGE_REGISTRY; "

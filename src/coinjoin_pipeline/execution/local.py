@@ -1,4 +1,4 @@
-"""EXPERIMENTAL: local Docker actions.
+"""EXPERIMENTAL: local Docker, Kubernetes without S3, and shared-storage PBS actions.
 
 These paths serve local development and reproduction.
 """
@@ -13,14 +13,22 @@ from coinjoin_pipeline.execution.pipeline_logging import captured_pipeline_stage
 from coinjoin_pipeline.execution.run_context import detect_active_run, run_dir_under_root
 from coinjoin_pipeline.execution.workflow import SharedStorageStageRunner, shared_storage_analysis_plan
 
-from . import containers, settings
+from . import containers, kubernetes_launch, settings
 from .stage_executor import execute_analysis
 
 
-def _emulate(args: PipelineConfiguration, logs_root: Path) -> Path:
-    """Run the emulator on Docker and file its log under the run it created."""
-    with captured_pipeline_stage(logs_root, "Docker emulation") as log:
-        containers.run_script(settings.EMULATE_SCRIPT, config=args)
+def _emulate(args: PipelineConfiguration, logs_root: Path, local_build: bool) -> Path:
+    """Run the emulator on Docker or Kubernetes and file its log under the run it created."""
+    on_kubernetes = args.driver == "kubernetes"
+    with captured_pipeline_stage(logs_root, "Kubernetes emulation" if on_kubernetes else "Docker emulation") as log:
+        if on_kubernetes:
+            kubernetes_launch.run_kubernetes_emulation(
+                args,
+                local_build=local_build,
+                btc_datadir=args.kubernetes.btc_datadir,
+            )
+        else:
+            containers.run_script(settings.EMULATE_SCRIPT, config=args)
     active_run = detect_active_run(logs_root)
     if active_run is None:
         log.relocate(logs_root / "_failed")
@@ -34,15 +42,15 @@ def _selected_run_dir(args: PipelineConfiguration, logs_root: Path) -> Path:
     return run_dir_under_root(required(args.run_dir, "run_dir"), logs_root)
 
 
-def run_configuration(args: PipelineConfiguration, logs_root: Path) -> None:
+def run_configuration(args: PipelineConfiguration, logs_root: Path, local_build: bool) -> None:
     action = args.action
     if action in {"full-run", "clean"}:
         with captured_pipeline_stage(logs_root, "Clean containers and volumes", logs_root / "_maintenance"):
             containers.run_script(settings.DELETE_SCRIPT)
     if action == "emulate":
-        _emulate(args, logs_root)
+        _emulate(args, logs_root, local_build)
     elif action == "full-run":
-        run_dir = _emulate(args, logs_root)
+        run_dir = _emulate(args, logs_root, local_build)
         try:
             run_analysis(args, run_dir, logs_root)
         except (RuntimeError, ValueError, subprocess.CalledProcessError) as error:

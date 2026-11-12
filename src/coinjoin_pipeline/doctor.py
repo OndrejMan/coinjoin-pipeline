@@ -9,6 +9,7 @@ from enum import Enum, auto
 from pathlib import Path
 
 from .configuration import PipelineConfiguration
+from .execution.kubernetes import resolve_kubeconfig
 from .images import Images
 from .runs import scenario_file
 
@@ -17,10 +18,14 @@ class Capability(Enum):
     """Host tools an action actually needs, derived from the action itself."""
 
     CONTAINER_RUNTIME = auto()
+    KUBECTL = auto()
 
 
 def required_capabilities(config: PipelineConfiguration) -> set[Capability]:
     capabilities: set[Capability] = set()
+    if not config.dry_run:
+        if config.driver == "kubernetes":
+            capabilities.add(Capability.KUBECTL)
     if not config.dry_run:
         capabilities.add(Capability.CONTAINER_RUNTIME)
     return capabilities
@@ -44,6 +49,10 @@ def validate_arguments(config: PipelineConfiguration, runs_root: Path) -> list[s
         errors.append(
             f"scenario not found: {config.scenario}; pass a scenario JSON path or the name of a catalogue scenario"
         )
+    if config.driver == "kubernetes" and not config.dry_run:
+        kubeconfig = resolve_kubeconfig(config.kubernetes.kubeconfig)
+        if not kubeconfig.is_file():
+            errors.append(f"kubeconfig not found: {kubeconfig}")
     if config.run_dir:
         selected = Path(config.run_dir).expanduser()
         if not selected.is_absolute():
@@ -109,6 +118,9 @@ def check(
                 errors.append(f"{runtime} daemon/API check timed out")
             elif status:
                 errors.append(f"{runtime} daemon/API is not reachable")
+    for capability, command, purpose in ((Capability.KUBECTL, "kubectl", "the Kubernetes driver"),):
+        if capabilities and capability in capabilities and shutil.which(command) is None:
+            errors.append(f"{command} command not found for {purpose}")
     probe = runs_root if runs_root.exists() else runs_root.parent
     if not probe.exists() or not os.access(probe, os.W_OK):
         errors.append(f"output directory is not writable: {runs_root}")

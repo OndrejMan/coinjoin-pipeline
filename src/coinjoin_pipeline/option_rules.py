@@ -38,6 +38,7 @@ def _action_errors(config: PipelineConfiguration) -> list[str]:
     """Rules of the emulation and analysis actions."""
     return [
         *_run_selection_errors(config),
+        *_driver_errors(config),
         *_remaining_errors(config),
     ]
 
@@ -59,6 +60,22 @@ def _run_selection_errors(config: PipelineConfiguration) -> list[str]:
     if config.run_id is not None and not is_valid_run_id(config.run_id):
         errors.append(f"--run-id {RUN_ID_RULE}")
     return errors
+
+
+def _driver_errors(config: PipelineConfiguration) -> list[str]:
+    if config.driver == "kubernetes":
+        return []
+    kubernetes = config.kubernetes
+    return [
+        f"{flag} requires --driver kubernetes"
+        for flag, path, value in (
+            ("--kubeconfig", "kubernetes.kubeconfig", kubernetes.kubeconfig),
+            ("--namespace", "kubernetes.namespace", kubernetes.namespace),
+            ("--reuse-namespace", "kubernetes.reuse_namespace", kubernetes.reuse_namespace),
+            ("--copy-to-host", "kubernetes.copy_to_host", kubernetes.copy_to_host),
+        )
+        if _supplied(config, path, value)
+    ]
 
 
 def _remaining_errors(config: PipelineConfiguration) -> list[str]:

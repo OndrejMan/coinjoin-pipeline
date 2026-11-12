@@ -1,13 +1,19 @@
-"""Image references of the checkout's lock files."""
+"""Image references of the checkout's lock files, and environment flags."""
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 from coinjoin_pipeline.paths import CONTAINER_ROOT
 
 if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import PipelineConfiguration
+
+
+def truthy_env(name: str) -> bool:
+    """Interpret the conventional false-like environment values as false."""
+    return os.environ.get(name, "").lower() not in ("", "0", "false", "no")
 
 
 def read_image_lock(name: str) -> str:

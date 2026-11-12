@@ -196,7 +196,7 @@ def main(argv: list[str] | None = None) -> int:
         errors = preflight_errors(context)
         if errors:
             return fail(*errors)
-        print(f"Run configuration: {config.action}")
+        print(f"Run configuration: {config.action} ({config.driver})")
         if config.dry_run:
             print_dry_run_context(context)
         else:

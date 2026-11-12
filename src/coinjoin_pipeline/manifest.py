@@ -18,6 +18,7 @@ SENSITIVE = re.compile(r"(token|password|secret|credential|private[_-]?key|acces
 PIPELINE_ENVIRONMENT_PREFIXES = (
     "BLOCKSCI_",
     "COINJOIN_",
+    "KUBERNETES_",
 )
 
 
