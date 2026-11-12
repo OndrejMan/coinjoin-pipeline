@@ -67,6 +67,7 @@ ACTION_SUMMARIES = {
     "coinjoin-analysis": "baseline coinjoin-analysis of --run-dir or --all-runs",
     "mappings": "Wasabi mappings and Sake of --run-dir on PBS",
     "pbs-from-s3": "submit PBS analysis jobs for a run already in S3",
+    "mainnet-sync": "synchronize Bitcoin Core, Dumplings and the BlockSci index on PBS",
     "initialize": "pull the emulation and analysis images through Compose",
     "clean": "remove the local pipeline containers and volumes (needs --yes)",
     "external-analyze": "analyze an external Bitcoin datadir against a baseline",
@@ -95,6 +96,7 @@ SECTIONS = {
         "A stage-specific --pbs-<stage>-* value overrides the shared --pbs-* fallback, "
         "which overrides the stage's default.",
     ),
+    "mainnet": ("mainnet-sync", "Only for action mainnet-sync."),
     "external": ("external-analyze", "Only for `cjp external-analyze`."),
 }
 
@@ -219,6 +221,19 @@ HELP = {
     "mappings.timeout": "enumerator: seconds per transaction before its first attempt stops",
     "mappings.retry_timeout": "enumerator: seconds of the one retry a timed-out transaction gets",
     "mappings.sake_seed": "seed of Sake's random decompositions; one seed reproduces a result",
+    "mainnet.target_height": (
+        "height at which Core stops downloading and the chain is frozen for the other jobs (default: the tip)"
+    ),
+    "mainnet.network": "chain to synchronize; bitcoin_regtest is for isolated validation runs",
+    "mainnet.scan_start_height": "regtest validation only: first height Dumplings scans (mainnet: 336861)",
+    "mainnet.root": "dataset directory on the multijob scratch holding Core, Dumplings and the block archive state",
+    "mainnet.state_uri": "fixed S3 prefix of the synchronization's markers, progress and per-run logs",
+    "mainnet.blocks_uri": "S3 prefix of the bitcoin-block-archive the producer writes",
+    "mainnet.core_image": "image running Bitcoin Core and the block archiver",
+    "mainnet.dumplings_image": "image running the Dumplings scanner",
+    "mainnet.dbcache_mb": "Core -dbcache in MB; keep it at half the producer job's memory",
+    "mainnet.poll_seconds": "seconds between progress checks of the running jobs",
+    "mainnet.notebook_root": "notebook data kept beside the dataset, measured in the storage report",
     "coinjoin_analysis.program": (
         "coinjoin-analysis program to run alone: locally with coinjoin-analysis, on PBS with pbs-from-s3"
     ),

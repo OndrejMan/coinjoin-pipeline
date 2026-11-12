@@ -42,10 +42,10 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
     provided = set(config.provided)
     for stage in ("analysis", "blocksci", "mappings"):
         path = f"stages.{stage}"
-        if getattr(config.pbs, stage).configured and path not in provided:
+        if config.action != "mainnet-sync" and getattr(config.pbs, stage).configured and path not in provided:
             config = replace_path(config, path, True)
             provided.add(path)
-    if config.action in {"pbs-from-s3"}:
+    if config.action in {"pbs-from-s3", "mainnet-sync"}:
         if "artifacts.backend" in provided and config.artifacts.backend != "s3":
             raise ConfigurationError(
                 f"{config.action} reads its artifacts from S3; drop --artifact-backend shared-storage"

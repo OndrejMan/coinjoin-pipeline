@@ -33,6 +33,14 @@ DEFAULT_RESOURCES = {
     "unified_report": PBSResources(2, "8gb", "10gb", "01:00:00"),
 }
 
+# mainnet-sync's jobs in submission order, resolved like a stage through `pbs.<job>`; every
+# list of the jobs derives from this one. The Scenario Lab keeps the same values.
+MAINNET_SYNC_RESOURCES = {
+    # mainnet.dbcache_mb is half of this memory; raise them together.
+    "producer": PBSResources(2, "8gb", "20gb", "24:00:00"),
+    "blocksci": PBSResources(4, "64gb", "20gb", "24:00:00"),
+}
+
 BLOCKSCI_IMAGE_PYTHON_COMMAND = (
     "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3"
 )
