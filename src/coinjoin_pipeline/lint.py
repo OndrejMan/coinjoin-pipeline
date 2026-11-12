@@ -9,7 +9,7 @@ TARGETS = ("src/coinjoin_pipeline", "pipeline/exporters")
 
 
 def main() -> int:
-    # --check reports problems instead of rewriting files.
+    # CI passes --check so a run reports problems instead of rewriting files.
     ruff = ["ruff", "check", "."] if "--check" in sys.argv[1:] else ["ruff", "check", ".", "--fix"]
     for command in (
         ruff,
