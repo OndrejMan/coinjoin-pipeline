@@ -194,3 +194,5 @@ class BlockSciAnalysisArtifact(TypedDict):
     subset_matching: SubsetMatchingAnalysis | None
     integration_diagnostics: JsonObject | None
     image_provenance: JsonObject
+    predicted_address_clusters: dict[str, str] | None
+    cluster_export_error: str | None

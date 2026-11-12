@@ -1,4 +1,4 @@
-"""BlockSci detector adapters."""
+"""BlockSci detector and clustering adapters."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from exporters.common import (
+    DEFAULT_CLUSTER_MAX_DISTANCE,
     coerce_sats,
     safe_attr,
     to_json_text,
@@ -24,7 +25,7 @@ BLOCKSCI_REQUIRED_ATTRIBUTES = ("Blockchain", "heuristics")
 
 
 class BlocksciChain(Blockchain, Protocol):
-    """``blocksci.Blockchain`` methods the detector calls.
+    """``blocksci.Blockchain`` methods the detector and clustering call.
 
     The two scan bindings exist only in the fork's builds; ``_require_binding``
     checks for them before use, so an older image fails with a rebuild hint.
@@ -42,6 +43,8 @@ class BlocksciChain(Blockchain, Protocol):
 
     def filter_coinjoin_txes_raw(self, start: int, stop: int, *args: object) -> Iterable[object]: ...
 
+    def address_from_string(self, address: str) -> object: ...
+
     def __getitem__(self, height: int) -> BlocksciBlock: ...
 
 
@@ -52,8 +55,40 @@ class BlocksciBlock(Protocol):
     block_height: int
 
 
+class ClusteringHeuristic(Protocol):
+    """A BlockSci change heuristic; ``&`` composes two into one."""
+
+    def __and__(self, other: ClusteringHeuristic) -> ClusteringHeuristic: ...
+
+
+class CoinjoinHeuristics(Protocol):
+    one_output_consolidation_2hops: ClusteringHeuristic
+    two_equal_output_consolidation_1hop: ClusteringHeuristic
+
+
+class HeuristicsNamespace(Protocol):
+    coinjoin: CoinjoinHeuristics
+
+
+class CoinjoinClusterer(Protocol):
+    """The ``CoinjoinClusterManager`` lookup used to read cluster assignments."""
+
+    def cluster_with_address(self, address: object) -> object: ...
+
+
+class CoinjoinClusterManagerType(Protocol):
+    def create_clustering_from_txes(self, **options: object) -> CoinjoinClusterer: ...
+
+
+class ClusterNamespace(Protocol):
+    CoinjoinClusterManager: CoinjoinClusterManagerType
+
+
 class BlocksciBindings(Protocol):
     """The compiled ``blocksci`` module surface this package uses."""
+
+    heuristics: HeuristicsNamespace
+    cluster: ClusterNamespace
 
     def Blockchain(self, config_path: str, max_block: int = ...) -> BlocksciChain: ...
 
@@ -207,6 +242,12 @@ def normalize_blocksci_tx(tx: object) -> TransactionRecord:
     }
 
 
+def _require_blocksci() -> BlocksciBindings:
+    if blocksci is None:
+        raise RuntimeError("BlockSci Python module is required.")
+    return blocksci
+
+
 def _require_binding(chain: object, method: str, hint: str) -> None:
     """Fail loudly when the BlockSci build lacks the required report binding."""
     if not hasattr(chain, method):
@@ -294,3 +335,91 @@ def export_subset_matching_records(
     window = scan_window(chain, start_height, end_height)
     txes, skipped_txids = _scan_coinjoins_by_subset_matching(chain, detector, window)
     return _records_by_txid(txes), skipped_txids
+
+
+def build_default_coinjoin_clustering_heuristic() -> ClusteringHeuristic:
+    coinjoin_heuristics = _require_blocksci().heuristics.coinjoin
+    return coinjoin_heuristics.one_output_consolidation_2hops & coinjoin_heuristics.two_equal_output_consolidation_1hop
+
+
+def _run_coinjoin_clustering(
+    chain: BlocksciChain,
+    output_dir: Path,
+    coinjoin_txids: Iterable[str],
+    max_distance: int,
+) -> CoinjoinClusterer:
+    """Cluster around the CoinJoins the detection step found.
+
+    Seeding the clustering with the detection result keeps both on one CoinJoin
+    set; ``create_clustering`` would detect CoinJoins again on its own.
+    """
+    manager = _require_blocksci().cluster.CoinjoinClusterManager
+    if not hasattr(manager, "create_clustering_from_txes"):
+        raise RuntimeError(
+            "This BlockSci build does not expose CoinjoinClusterManager.create_clustering_from_txes; "
+            "rebuild BlockSci with the detection-seeded clustering binding."
+        )
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    return manager.create_clustering_from_txes(
+        chain=chain,
+        start=0,
+        stop=-1,
+        coinjoin_txes=[chain.tx_with_hash(txid) for txid in sorted(set(coinjoin_txids))],
+        heuristic_func=build_default_coinjoin_clustering_heuristic(),
+        output_path=str(output_dir),
+        overwrite=True,
+        max_distance=max_distance,
+    )
+
+
+def _cluster_index_for_address(chain: BlocksciChain, clusterer: CoinjoinClusterer, address_text: str) -> str | None:
+    """Return the cluster index for ``address_text``, or None if it is not comparable."""
+    try:
+        address = chain.address_from_string(address_text)
+        if not address:
+            return None
+        cluster = clusterer.cluster_with_address(address)
+        address_count = safe_attr(cluster, "address_count")
+        if callable(address_count) and address_count() == 0:
+            return None
+        cluster_index = safe_attr(cluster, "index")
+        if cluster_index is None:
+            return None
+        return str(cluster_index)
+    except Exception:
+        return None
+
+
+def export_blocksci_cluster_assignments_for_addresses(
+    config_path: Path,
+    addresses: Iterable[str],
+    coinjoin_txids: Iterable[str],
+    output_dir: Path,
+    max_distance: int = DEFAULT_CLUSTER_MAX_DISTANCE,
+) -> tuple[dict[str, str] | None, str | None]:
+    """Cluster the chain and return assignments for the requested addresses."""
+    requested_addresses = sorted({str(address) for address in addresses if address})
+    if not requested_addresses:
+        return None, "No addresses were supplied for BlockSci clustering."
+    coinjoin_txids = list(coinjoin_txids)
+    if not coinjoin_txids:
+        return None, "BlockSci detected no CoinJoins to cluster around."
+
+    try:
+        chain = _require_blocksci().Blockchain(str(config_path))
+        clusterer = _run_coinjoin_clustering(chain, output_dir, coinjoin_txids, max_distance)
+    except Exception as exc:
+        return None, f"BlockSci cluster assignment export failed: {exc}"
+
+    predicted: dict[str, str] = {}
+    skipped = 0
+    for address_text in requested_addresses:
+        cluster_index = _cluster_index_for_address(chain, clusterer, address_text)
+        if cluster_index is None:
+            skipped += 1
+            continue
+        predicted[address_text] = cluster_index
+
+    if not predicted:
+        return None, f"BlockSci clustering produced no comparable address labels; skipped {skipped} addresses."
+    return predicted, None

@@ -30,6 +30,8 @@ def parse_args(argv=None):
     parser.add_argument("--script", type=Path, default=os.environ.get("BLOCKSCI_SCRIPT") or None)
     parser.add_argument("--report", action="store_true")
     parser.add_argument("--share-output", action="store_true")
+    parser.add_argument("--skip-clustering", action="store_true")
+    parser.add_argument("--cluster-output-dir", type=Path)
     parser.add_argument("--engine", default=os.environ.get("COINJOIN_ENGINE"))
     parser.add_argument("--blocksci-analysis", type=Path)
     parser.add_argument("--output-name", default=REPORT_JSON)
