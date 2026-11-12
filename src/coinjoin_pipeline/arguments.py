@@ -66,6 +66,7 @@ HELP = {
         "Wasabi minimum input count for BlockSci detection "
         "(default: BlockSci's height-aware threshold; small regtest rounds need an explicit value)"
     ),
+    "dry_run": "validate and print the plan without starting containers, jobs or uploads",
     "images.version": "release tag of every component image",
     "images.unified_report": ("unified-report job image (default: container/unified-report.image)"),
     **{
@@ -116,10 +117,11 @@ def _epilog() -> str:
     lines += [
         "",
         "examples:",
-        "  cjp full-run --engine joinmarket",
+        "  cjp full-run --engine joinmarket --dry-run",
         "  cjp analyze --run-dir <run-id>",
         "",
         "Every option is also a YAML key (shown as YAML: ...); options after `run CONFIG.yaml` override it.",
+        "Use --dry-run to validate and render an execution without starting work.",
         "",
         "exit codes:",
     ]
