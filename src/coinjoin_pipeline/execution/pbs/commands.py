@@ -19,6 +19,11 @@ def blocksci_pbs_command(run_id: str, config: PipelineConfiguration, include_rep
     return command
 
 
+def coinjoin_analysis_pbs_command(action: str = "collect_docker") -> str:
+    """Build the in-container command for the coinjoin-analysis PBS stage."""
+    return f"python -m cj_process.parse_cj_logs --action {action} --target-path /runs/emulation/selected"
+
+
 def detector_arguments(config: PipelineConfiguration) -> list[str]:
     """Render detector settings once for analysis and report workers."""
     arguments: list[str] = []
@@ -43,6 +48,7 @@ def analysis_image_arguments(config: PipelineConfiguration) -> list[str]:
     arguments: list[str] = []
     for flag, image in (
         ("--blocksci-image", pbs_image(config, "blocksci")),
+        ("--coinjoin-analysis-image", pbs_image(config, "coinjoin_analysis")),
         ("--coinjoin-emulator-image", config.images.emulator),
         ("--uploader-image", config.images.uploader),
     ):

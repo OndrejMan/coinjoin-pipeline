@@ -3,7 +3,7 @@
 Every job is ``directives`` and a few lines of shell that write the stage worker's
 modules (``scripts.STAGE_RUNTIME_MODULES``) and a ``settings.json`` to the node's
 scratch and run them. The renderers here validate the options and assemble those
-settings; the work itself is ``blocksci_jobs``'.
+settings; the work itself is ``analyzer_jobs``' and ``blocksci_jobs``'.
 """
 
 from __future__ import annotations
@@ -44,6 +44,13 @@ JobSettings = Union[
     CommandSettings,
     BlocksciSettings,
 ]
+
+
+def render_coinjoin_analysis_s3_pbs(
+    target: S3Target, image: str, command: str, resources: PBSResources = DEFAULT_RESOURCES["analysis"]
+) -> str:
+    """Render the baseline job that runs coinjoin-analysis over the emulator logs."""
+    return render_python_stage("coinjoin-analysis", target, resources, image, {"command": command})
 
 
 def render_blocksci_s3_pbs(

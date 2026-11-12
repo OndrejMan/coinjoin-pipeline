@@ -6,9 +6,15 @@ from dataclasses import dataclass, field
 
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution.locks import acquire_lock, ensure_no_active_s3_pbs_submission, pbs_submit_lock_path
-from coinjoin_pipeline.execution.pbs.commands import blocksci_pbs_command
+from coinjoin_pipeline.execution.pbs.commands import (
+    blocksci_pbs_command,
+    coinjoin_analysis_pbs_command,
+)
 from coinjoin_pipeline.execution.pbs.submission import PBSJobSpec, persist_pbs_job_id, submit_pbs_job
-from coinjoin_pipeline.execution.pbs.templates_s3 import render_blocksci_s3_pbs
+from coinjoin_pipeline.execution.pbs.templates_s3 import (
+    render_blocksci_s3_pbs,
+    render_coinjoin_analysis_s3_pbs,
+)
 from coinjoin_pipeline.execution.pbs_settings import (
     pbs_image,
     stage_pbs_resources,
@@ -25,6 +31,7 @@ from coinjoin_pipeline.storage.s3 import (
 def s3_full_run_plan_from_args(args: PipelineConfiguration) -> StageGraph:
     """Build the stage graph this invocation submits, waits for, and cancels."""
     return s3_full_run_plan(
+        analysis_pbs=args.stages.analysis,
         blocksci_pbs=args.stages.blocksci,
     )
 
@@ -48,6 +55,7 @@ class S3StageRunner:
     def submit_all(self) -> None:
         """Submit the selected graph nodes in the established qsub order."""
         handlers = {
+            StageKind.BASELINE: self._analysis,
             StageKind.BLOCKSCI_WORK: self._blocksci_work,
         }
         for stage in self.plan.scheduled():
@@ -63,6 +71,15 @@ class S3StageRunner:
             self.submitted_jobs.append((stage.name, job_id))
             self.jobs[stage.name] = job_id
             persist_pbs_job_id(self.args.runs_path / self.target.run_id, stage.name, job_id)
+
+    def _analysis(self, stage: StagePlan) -> None:
+        common: dict = {
+            "target": self.target,
+            "image": pbs_image(self.args, "coinjoin_analysis"),
+            "resources": stage_pbs_resources(self.args, "analysis"),
+        }
+        script = render_coinjoin_analysis_s3_pbs(**common, command=coinjoin_analysis_pbs_command("collect_docker"))
+        self._submit(stage, script)
 
     def _blocksci(self) -> dict:
         """Renderer arguments every BlockSci job shares."""

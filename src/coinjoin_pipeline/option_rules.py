@@ -52,12 +52,14 @@ def _general_errors(config: PipelineConfiguration) -> list[str]:
 class _PbsStages:
     """The PBS stages a configuration requests explicitly."""
 
+    analysis: bool
     blocksci: bool
 
     @classmethod
     def requested(cls, config: PipelineConfiguration) -> _PbsStages:
         stages = config.stages
         return cls(
+            analysis=_supplied(config, "stages.analysis", stages.analysis),
             blocksci=_supplied(config, "stages.blocksci", stages.blocksci),
         )
 
@@ -112,11 +114,13 @@ def _driver_errors(config: PipelineConfiguration) -> list[str]:
 def _pbs_stage_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
     errors: list[str] = []
     for flag, enabled, permitted in (
+        ("--analysis-pbs", stages.analysis, ("pbs-from-s3",)),
         ("--blocksci-pbs", stages.blocksci, ("pbs-from-s3",)),
     ):
         if enabled and config.action not in permitted:
             errors.append(f"{flag} is supported only by {', '.join(permitted)}")
     for stage, resources, enabled, flag in (
+        ("analysis", config.pbs.analysis, stages.analysis, "--analysis-pbs"),
         ("blocksci", config.pbs.blocksci, stages.blocksci, "--blocksci-pbs"),
     ):
         if _resources_supplied(config, stage, resources) and not enabled:
@@ -144,8 +148,8 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
     s3_backend = config.artifacts.backend == "s3"
     if action == "pbs-from-s3":
         errors.extend(f"pbs-from-s3 requires {flag}" for flag in _missing_s3_options(config, with_secret=False))
-        if not stages.blocksci:
-            errors.append("pbs-from-s3 requires --blocksci-pbs")
+        if not any((stages.analysis, stages.blocksci)):
+            errors.append("pbs-from-s3 requires --analysis-pbs or --blocksci-pbs")
     if s3_backend and action == "emulate":
         errors.extend(
             f"Kubernetes S3-compatible mode requires {flag}" for flag in _missing_s3_options(config, with_secret=True)

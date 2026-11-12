@@ -120,6 +120,7 @@ HELP = {
     "images.local_build": "use locally built images (*:local)",
     "images.uploader": "S3 uploader image (default: container/uploader.image)",
     "images.unified_report": ("unified-report job image (default: container/unified-report.image)"),
+    "stages.analysis": "run coinjoin-analysis as a PBS job",
     "stages.blocksci": "run BlockSci as a PBS job",
     "blocksci.script": "Python script run over the parsed BlockSci index",
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
@@ -129,7 +130,7 @@ HELP = {
     },
     **{
         f"pbs.{component}_image": f"Singularity image of the {component.replace('_', '-')} PBS stage"
-        for component in ("blocksci",)
+        for component in ("blocksci", "coinjoin_analysis")
     },
     **{
         f"pbs.{name}": f"shared fallback {name.replace('_', '-')} of every PBS stage"

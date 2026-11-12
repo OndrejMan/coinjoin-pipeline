@@ -23,10 +23,15 @@ class PBSResources:
 # Keyed by resource group: the PBS budget every stage of that group is drawn from.
 DEFAULT_RESOURCES = {
     "blocksci": PBSResources(8, "64gb", "100gb", "24:00:00"),
+    "analysis": PBSResources(4, "16gb", "50gb", "04:00:00"),
 }
 
 DEFAULT_PBS_IMAGES = {
-    component: f"docker://{IMAGE_NAMES[name]}:{DEFAULT_VERSION}" for component, name in (("blocksci", "blocksci"),)
+    component: f"docker://{IMAGE_NAMES[name]}:{DEFAULT_VERSION}"
+    for component, name in (
+        ("blocksci", "blocksci"),
+        ("coinjoin_analysis", "coinjoin_analysis"),
+    )
 }
 BLOCKSCI_IMAGE_PYTHON_COMMAND = (
     "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3"

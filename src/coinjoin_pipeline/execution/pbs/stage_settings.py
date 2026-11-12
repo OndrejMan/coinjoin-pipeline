@@ -36,7 +36,7 @@ class StageSettings(_CommonSettings, total=False):
 
 
 class CommandSettings(TypedDict):
-    """The start of most job settings."""
+    """The coinjoin-analysis baseline's settings, and the start of most others."""
 
     # The shell command run in the image.
     command: str

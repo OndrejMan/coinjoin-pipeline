@@ -117,6 +117,7 @@ class JoinMarketConfiguration(ConfigurationModel):
 
 @dataclass(frozen=True, slots=True)
 class StageConfiguration(ConfigurationModel):
+    analysis: bool = option(False, name="analysis_pbs")
     blocksci: bool = option(False, name="blocksci_pbs")
 
 
@@ -142,6 +143,8 @@ class PBSConfiguration(ConfigurationModel):
     walltime: str | None = option(None, name="pbs_walltime")
     image: str | None = option(None, name="pbs_image")
     blocksci_image: str | None = option(None, name="pbs_blocksci_image")
+    coinjoin_analysis_image: str | None = option(None, name="pbs_coinjoin_analysis_image")
+    analysis: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     blocksci: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
 
 

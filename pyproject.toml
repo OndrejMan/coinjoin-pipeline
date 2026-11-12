@@ -69,6 +69,7 @@ extend-select = ["ANN401", "TID251"]
 "src/coinjoin_pipeline/execution/pbs/stage_runtime.py" = "py38"
 "src/coinjoin_pipeline/execution/pbs/stage.py" = "py38"
 "src/coinjoin_pipeline/execution/pbs/stage_settings.py" = "py38"
+"src/coinjoin_pipeline/execution/pbs/analyzer_jobs.py" = "py38"
 "src/coinjoin_pipeline/execution/pbs/blocksci_jobs.py" = "py38"
 "src/coinjoin_pipeline/execution/pbs/apptainer.py" = "py38"
 

@@ -23,6 +23,7 @@ from coinjoin_pipeline.storage.s5client import S5Client, pipe
 # Where the containers see the runs: exporters read runs below the first root, the
 # coinjoin-analysis collector scans every run below the second.
 CONTAINER_RUNS_ROOT = "/runs/emulation/logs"
+CONTAINER_SELECTED_ROOT = "/runs/emulation/selected"
 
 
 def failure_status(error: BaseException) -> int:
@@ -109,6 +110,14 @@ class Stage:
                     kept.write(line)
         if process.returncode:
             raise subprocess.CalledProcessError(process.returncode, arguments)
+
+    def container(self, root: str, binds: Sequence[str], command: str) -> None:
+        """Run command from the run directory below root as the container sees it."""
+        self.singularity(
+            f'cd "{root}/$PBS_RUN_ID" && {command}',
+            binds=binds,
+            environment=(f"PBS_RUN_ID={self.run_id}",),
+        )
 
     def finalize(self, status: int) -> int:
         """Run every finalizer; a failing one fails a job that had succeeded."""

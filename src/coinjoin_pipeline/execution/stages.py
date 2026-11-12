@@ -119,16 +119,32 @@ def analysis_plan() -> StageGraph:
 
 def s3_full_run_plan(
     *,
+    analysis_pbs: bool = True,
     blocksci_pbs: bool = True,
 ) -> StageGraph:
-    """Build the canonical Kubernetes → S3 → PBS graph for one invocation."""
+    """Build the canonical Kubernetes → S3 → PBS graph for one invocation.
+
+    The two PBS analyzers are intentionally independent.  They publish their
+    own artifacts.
+    """
     emulation = StagePlan(
         name="kubernetes-emulation",
         kind=StageKind.EMULATION,
         runner="kubernetes",
     )
-    # The BlockSci worker downloads the emulation bundle from the run's S3 prefix,
-    # so it cannot start before the Kubernetes uploader has published it.
+    baseline = (
+        StagePlan(
+            name="coinjoin-analysis",
+            kind=StageKind.BASELINE,
+            runner="pbs",
+            dependencies=(emulation.name,),
+        )
+        if analysis_pbs
+        else None
+    )
+    # The BlockSci worker downloads the emulation bundle from the same S3 prefix as
+    # the baseline worker, so it cannot start before the Kubernetes uploader has
+    # published it either.
     work = (
         StagePlan(
             name="blocksci",
@@ -139,5 +155,6 @@ def s3_full_run_plan(
         if blocksci_pbs
         else None
     )
-    stages = [stage for stage in (emulation, work) if stage is not None]
+    # Completion order: the analyzers publish independently.
+    stages = [stage for stage in (emulation, baseline, work) if stage is not None]
     return StageGraph(tuple(stages))

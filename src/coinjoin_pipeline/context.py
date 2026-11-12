@@ -37,7 +37,7 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
     root = Path(config.runs_root).expanduser().resolve() if config.runs_root else default_runs_root()
     config = replace(config, runs_root=str(root))
     provided = set(config.provided)
-    for stage in ("blocksci",):
+    for stage in ("analysis", "blocksci"):
         path = f"stages.{stage}"
         if getattr(config.pbs, stage).configured and path not in provided:
             config = replace_path(config, path, True)
@@ -92,6 +92,7 @@ def resolve_run_images(config: PipelineConfiguration) -> tuple[PipelineConfigura
         pbs=replace(
             pbs,
             blocksci_image=pbs.blocksci_image or pbs.image or images.blocksci,
+            coinjoin_analysis_image=pbs.coinjoin_analysis_image or pbs.image or images.coinjoin_analysis,
         ),
     )
     if config.artifacts.backend == "s3":
