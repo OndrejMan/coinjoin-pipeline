@@ -41,6 +41,7 @@ ACTION_SUMMARIES = {
     "analyze": "BlockSci analysis of --run-dir",
     "export": "unified report of --run-dir",
     "coinjoin-analysis": "baseline coinjoin-analysis of --run-dir or --all-runs",
+    "clean": "remove the local pipeline containers and volumes (needs --yes)",
 }
 
 # Argument groups by the first segment of the model path; top-level fields are "".
@@ -70,6 +71,7 @@ HELP = {
     "dry_run": "validate and print the plan without starting containers, jobs or uploads",
     "parallel": "run the local analysis stages of a full-run in parallel",
     "all_runs": "run coinjoin-analysis over every run in the runs root",
+    "yes": "confirm the destructive clean action",
     "analysis_action": "collect_docker collects the emulator logs first; analyze_only needs an existing baseline",
     "images.version": "release tag of every component image",
     "images.registry": (

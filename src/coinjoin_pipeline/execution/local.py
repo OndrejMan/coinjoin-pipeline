@@ -36,7 +36,7 @@ def _selected_run_dir(args: PipelineConfiguration, logs_root: Path) -> Path:
 
 def run_configuration(args: PipelineConfiguration, logs_root: Path) -> None:
     action = args.action
-    if action == "full-run":
+    if action in {"full-run", "clean"}:
         with captured_pipeline_stage(logs_root, "Clean containers and volumes", logs_root / "_maintenance"):
             containers.run_script(settings.DELETE_SCRIPT)
     if action == "emulate":

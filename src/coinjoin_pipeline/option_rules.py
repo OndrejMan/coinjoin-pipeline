@@ -46,6 +46,12 @@ def _run_selection_errors(config: PipelineConfiguration) -> list[str]:
     if action in {"analyze", "export", "coinjoin-analysis"}:
         if not _supplied(config, "run_dir", config.run_dir) and not _supplied(config, "all_runs", config.all_runs):
             errors.append(f"{action} requires --run-dir (or --all-runs where supported)")
+    if (
+        action == "clean"
+        and not _supplied(config, "dry_run", config.dry_run)
+        and not _supplied(config, "yes", config.yes)
+    ):
+        errors.append("clean is destructive; pass --yes or --dry-run")
     if config.run_id is not None and not is_valid_run_id(config.run_id):
         errors.append(f"--run-id {RUN_ID_RULE}")
     return errors
