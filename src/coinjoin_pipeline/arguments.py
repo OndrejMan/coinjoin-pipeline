@@ -39,10 +39,12 @@ CONFIGURATION_FLAGS = ("--from-configuration",)
 UTILITIES = (
     "version",
     "doctor",
+    "pull",
 )
 UTILITY_SUMMARIES = {
     "version": "print the CLI version and the default component images",
     "doctor": "check the container runtime, the runs root and the default images",
+    "pull": "pull every component image with the container runtime",
 }
 ACTION_SUMMARIES = {
     "full-run": "emulate a new run, then analyze it and export its report",
