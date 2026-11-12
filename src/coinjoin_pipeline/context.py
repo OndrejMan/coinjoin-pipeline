@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import platform
+import signal
 import sys
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, replace
@@ -111,10 +112,13 @@ class RunContext:
         previous = dict(os.environ)
         previous_bytecode = sys.dont_write_bytecode
         sys.dont_write_bytecode = True
+        handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
         os.environ.update(self.environment)
         try:
             yield
         finally:
             sys.dont_write_bytecode = previous_bytecode
+            for sig, handler in handlers.items():
+                signal.signal(sig, handler)
             os.environ.clear()
             os.environ.update(previous)

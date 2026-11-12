@@ -8,6 +8,8 @@ from __future__ import annotations
 import hashlib
 import os
 import shlex
+import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -24,6 +26,8 @@ from coinjoin_pipeline.execution.pipeline_logging import (
 from coinjoin_pipeline.execution.run_context import run_dir_under_root
 from coinjoin_pipeline.execution.scenarios import container_scenario_path, scenario_source_path
 from coinjoin_pipeline.execution.runtime import (
+    CONTAINER_RUNTIME_ENV,
+    DEFAULT_CONTAINER_RUNTIME,
     compose_command,
     container_runtime,
 )
@@ -31,7 +35,52 @@ from coinjoin_pipeline.images import validate_image
 
 from . import settings
 
+_CLEANUP_DONE = False
+
+
 DEFAULT_CONFIGURATION = PipelineConfiguration()
+
+
+def cleanup_peer_containers() -> None:
+    """Stop peer containers; safe to call more than once."""
+    global _CLEANUP_DONE  # pylint: disable=global-statement  # one cleanup per process, shared by both signals
+    if _CLEANUP_DONE:
+        return
+    _CLEANUP_DONE = True
+    runtime = os.environ.get(CONTAINER_RUNTIME_ENV, DEFAULT_CONTAINER_RUNTIME)
+    if shutil.which(runtime):
+        subprocess.run(
+            [runtime, "stop", *settings.PEER_CONTAINERS],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if runtime == "podman":
+            subprocess.run(
+                [runtime, "rm", "-f", "-i", *settings.PEER_CONTAINERS],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
+
+def handle_termination(signum: int, _frame: object) -> None:
+    """Exit 130 after cleanup, matching the launcher's interrupt contract."""
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    print(
+        f"Interrupted (signal {signum}); stopping CoinJoin analysis containers...",
+        file=sys.stderr,
+    )
+    cleanup_peer_containers()
+    sys.exit(130)
+
+
+def install_termination_handlers() -> None:
+    global _CLEANUP_DONE  # pylint: disable=global-statement
+    _CLEANUP_DONE = False
+    signal.signal(signal.SIGINT, handle_termination)
+    signal.signal(signal.SIGTERM, handle_termination)
 
 
 def run_command(command: list[str], *, cwd: Path | None = None, env: Mapping[str, str] | None = None) -> None:

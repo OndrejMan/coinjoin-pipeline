@@ -26,3 +26,11 @@ DEFAULT_EMULATOR_IMAGE = IMAGE_NAMES["emulator"] + ":" + DEFAULT_VERSION
 VALID_PULL_POLICIES = ("always", "missing", "never")
 RUNS_ROOT_CONTAINER = "/runs/emulation/logs"
 COINJOIN_ANALYSIS_SELECTED_ROOT_CONTAINER = "/runs/emulation/selected"
+PEER_CONTAINERS = (
+    "blocksci_analyzer",
+    "coinjoin_analysis",
+    "emulator_manager",
+    "btc_data_wiper",
+    "dind_image_prefetch",
+    "isolated_docker_daemon",
+)

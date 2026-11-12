@@ -31,8 +31,9 @@ def use_line_buffered_output() -> None:
 
 
 def execute(context: RunContext) -> None:
-    from .execution import orchestrator
+    from .execution import containers, orchestrator
 
+    containers.install_termination_handlers()
     orchestrator.run_configuration(context.config)
 
 
