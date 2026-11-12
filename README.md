@@ -328,8 +328,7 @@ and `pbs.mappings` enable their corresponding PBS stages.
 ```
 
 `examples/metacentrum-regtest-s3.yaml` is the recommended regtest full-run
-configuration; `examples/metacentrum-s3.yaml` remains as its compatibility
-predecessor. Mainnet is deliberately split into two submissions:
+configuration. Mainnet is deliberately split into two submissions:
 
 For the default JoinMarket regtest scenario, use the measured MetaCentrum
 profile. It requests 2 CPUs, 16 GB RAM, and 8 GB scratch for BlockSci, plus
