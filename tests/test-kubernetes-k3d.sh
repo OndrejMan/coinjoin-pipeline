@@ -1,0 +1,367 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=tests/support/local-images.sh
+source "${SCRIPT_DIR}/support/local-images.sh"
+TMP_DIR="$(mktemp -d)"
+
+CLUSTER_NAME="${CLUSTER_NAME:-coinjoin-k3d-$$}"
+NAMESPACE="${NAMESPACE:-coinjoin-itest-$$}"
+SERVERS="${SERVERS:-1}"
+AGENTS="${AGENTS:-2}"
+WAIT_TIMEOUT="${WAIT_TIMEOUT:-180s}"
+# overactive-local runs 10 rounds; with its backend overrides applied each
+# round waits out the 6 min input registration and rounds under 12 inputs are
+# aborted, so emulation alone took ~80 min on 2026-10-04.
+EMULATION_TIMEOUT="${EMULATION_TIMEOUT:-240m}"
+SCENARIO="${SCENARIO:-overactive-local.json}"
+ACTION="${ACTION:-emulate}"
+CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
+EMULATOR_IMAGE="${EMULATOR_IMAGE:-ghcr.io/ondrejman/emulator-manager:latest}"
+# The wrapper reads COINJOIN_EMULATOR_IMAGE. Keep it aligned with the image
+# selected for this test so local-image validation does not fall back to GHCR.
+COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-${EMULATOR_IMAGE}}"
+IMAGE_PREFIX="${IMAGE_PREFIX:-ghcr.io/ondrejman/}"
+COINJOIN_EMULATOR_SOURCE_DIR="${COINJOIN_EMULATOR_SOURCE_DIR:-${PROJECT_DIR}/../coinjoin-emulator}"
+BTC_NODE_IMAGE_REQUESTED="${COINJOIN_BTC_NODE_IMAGE:-}"
+BTC_NODE_IMAGE="${BTC_NODE_IMAGE_REQUESTED:-coinjoin-btc-node-k3d:${CLUSTER_NAME}}"
+BUILT_BTC_NODE_IMAGE=0
+KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
+PRE_CLEANUP="${PRE_CLEANUP:-1}"
+PRE_CLEANUP_PREFIX="${PRE_CLEANUP_PREFIX-coinjoin-k3d-}"
+PRE_CLEANUP_CONTAINERS="${PRE_CLEANUP_CONTAINERS:-1}"
+# Long-lived services on the same host, such as Scenario Lab, opt out of the kill.
+PRE_CLEANUP_KEEP_LABEL="${PRE_CLEANUP_KEEP_LABEL:-coinjoin.keep=true}"
+
+export COINJOIN_EMULATOR_IMAGE
+export KUBERNETES_COPY_TO_HOST_DIR="${KUBERNETES_COPY_TO_HOST_DIR:-${TMP_DIR}/btc-data}"
+
+HOST_KUBECONFIG="${TMP_DIR}/kubeconfig-host.yaml"
+CONTAINER_KUBECONFIG="${TMP_DIR}/kubeconfig-container.yaml"
+ANONYMOUS_DOCKER_CONFIG="${TMP_DIR}/docker-anonymous"
+
+dump_kubernetes_diagnostics() {
+  if [[ ! -s "${HOST_KUBECONFIG}" ]]; then
+    return 0
+  fi
+
+  echo "Kubernetes diagnostics for namespace '${NAMESPACE}':" >&2
+  kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" get pods -o wide >&2 || true
+  kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" describe pods >&2 || true
+  kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" \
+    get events --sort-by=.lastTimestamp >&2 || true
+  kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" logs \
+    --all-containers=true --prefix=true --tail=200 \
+    -l app.kubernetes.io/managed-by=coinjoin-emulator >&2 || true
+}
+
+cleanup() {
+  local exit_status=$?
+  trap - EXIT
+  if [[ "${exit_status}" -ne 0 ]]; then
+    dump_kubernetes_diagnostics
+  fi
+  if [[ "${KEEP_CLUSTER}" != "1" ]]; then
+    k3d cluster delete "${CLUSTER_NAME}" >/dev/null 2>&1 || true
+  else
+    echo "KEEP_CLUSTER=1; leaving k3d cluster '${CLUSTER_NAME}' running."
+    echo "Host kubeconfig: ${HOST_KUBECONFIG}"
+  fi
+  if [[ "${BUILT_BTC_NODE_IMAGE}" == "1" ]]; then
+    docker image rm "${BTC_NODE_IMAGE}" >/dev/null 2>&1 || true
+  fi
+  if [[ "${KEEP_CLUSTER}" != "1" ]]; then
+    rm -rf "${TMP_DIR}"
+  fi
+  return "${exit_status}"
+}
+trap cleanup EXIT
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "FAIL: required command not found: $1" >&2
+    exit 2
+  fi
+}
+
+pre_cleanup_clusters() {
+  local cluster_names=()
+  local cluster_name
+  local cluster_json
+  local cluster_names_file
+
+  if [[ "${PRE_CLEANUP}" != "1" ]]; then
+    return 0
+  fi
+  if [[ -z "${PRE_CLEANUP_PREFIX}" ]]; then
+    echo "FAIL: PRE_CLEANUP_PREFIX must not be empty when PRE_CLEANUP=1." >&2
+    exit 2
+  fi
+
+  echo "Cleaning up existing k3d test clusters matching '${PRE_CLEANUP_PREFIX}*'..."
+  cluster_json="$(k3d cluster list -o json)"
+  cluster_names_file="${TMP_DIR}/pre-cleanup-clusters.txt"
+  python3 -c '
+import json
+import sys
+
+target_name, cleanup_prefix = sys.argv[1], sys.argv[2]
+clusters = json.loads(sys.argv[3])
+if isinstance(clusters, dict):
+    clusters = clusters.get("clusters", [])
+for cluster in clusters:
+    name = cluster.get("name") or cluster.get("Name") or ""
+    if name == target_name or name.startswith(cleanup_prefix):
+        print(name)
+' "${CLUSTER_NAME}" "${PRE_CLEANUP_PREFIX}" "${cluster_json}" >"${cluster_names_file}"
+  mapfile -t cluster_names <"${cluster_names_file}"
+
+  for cluster_name in "${cluster_names[@]}"; do
+    echo "Deleting existing k3d cluster '${cluster_name}'..."
+    k3d cluster delete "${cluster_name}" >/dev/null
+  done
+}
+
+pre_cleanup_running_containers() {
+  local container_ids=()
+  local container_id
+
+  if [[ "${PRE_CLEANUP}" != "1" || "${PRE_CLEANUP_CONTAINERS}" != "1" ]]; then
+    return 0
+  fi
+
+  local kept=()
+  mapfile -t kept < <("${CONTAINER_RUNTIME}" ps -q --filter "label=${PRE_CLEANUP_KEEP_LABEL}")
+  mapfile -t container_ids < <(
+    "${CONTAINER_RUNTIME}" ps -q | grep -vxF -f <(printf '%s\n' "${kept[@]}") || true
+  )
+  if [[ "${#kept[@]}" -gt 0 ]]; then
+    echo "Keeping ${#kept[@]} container(s) labelled ${PRE_CLEANUP_KEEP_LABEL}."
+  fi
+  if [[ "${#container_ids[@]}" -eq 0 ]]; then
+    echo "No running ${CONTAINER_RUNTIME} containers to kill before test."
+    return 0
+  fi
+
+  echo "Killing ${#container_ids[@]} running ${CONTAINER_RUNTIME} container(s) before test..."
+  for container_id in "${container_ids[@]}"; do
+    "${CONTAINER_RUNTIME}" kill "${container_id}" >/dev/null 2>&1 || true
+  done
+}
+
+podman_socket() {
+  local socket_path
+
+  for socket_path in \
+    "${CONTAINER_SOCKET:-}" \
+    "${PODMAN_SOCKET:-}" \
+    "${XDG_RUNTIME_DIR:-}/podman/podman.sock" \
+    "/run/user/$(id -u)/podman/podman.sock" \
+    "/run/podman/podman.sock"
+  do
+    if [[ -n "${socket_path}" && -S "${socket_path}" ]]; then
+      printf '%s\n' "${socket_path}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+rewrite_kubeconfig_for_container() {
+  local source_kubeconfig="$1"
+  local target_kubeconfig="$2"
+  local api_host="$3"
+  local api_port="$4"
+  local cluster_name
+
+  cp "${source_kubeconfig}" "${target_kubeconfig}"
+
+  cluster_name="$(kubectl --kubeconfig "${target_kubeconfig}" config view --minify -o jsonpath='{.contexts[0].context.cluster}')"
+
+  kubectl --kubeconfig "${target_kubeconfig}" \
+    config set-cluster "${cluster_name}" \
+    --server="https://${api_host}:${api_port}" \
+    --insecure-skip-tls-verify=true >/dev/null
+  kubectl --kubeconfig "${target_kubeconfig}" \
+    config unset "clusters.${cluster_name}.certificate-authority-data" >/dev/null 2>&1 || true
+  kubectl --kubeconfig "${target_kubeconfig}" \
+    config unset "clusters.${cluster_name}.certificate-authority" >/dev/null 2>&1 || true
+
+  echo "Container kubeconfig API server: https://${api_host}:${api_port}"
+}
+
+require_command k3d
+require_command kubectl
+require_command "${CONTAINER_RUNTIME}"
+require_command python3
+require_command timeout
+
+pre_cleanup_running_containers
+pre_cleanup_clusters
+
+pull_image() {
+  local image="$1"
+  if [[ "${image}" != */* ]]; then
+    echo "Using local image: ${image}"
+    return 0
+  fi
+
+  echo "Pulling latest artifact image: ${image}"
+  if [[ "${CONTAINER_RUNTIME}" == "docker" ]]; then
+    # Public GHCR pulls must not inherit a stale or under-scoped credential
+    # from the developer's normal Docker config. k3d/containerd pulls these
+    # same images anonymously inside the cluster.
+    mkdir -p "${ANONYMOUS_DOCKER_CONFIG}"
+    env DOCKER_CONFIG="${ANONYMOUS_DOCKER_CONFIG}" docker pull "${image}"
+  else
+    "${CONTAINER_RUNTIME}" pull "${image}"
+  fi
+}
+
+prepare_btc_node_image() {
+  if docker image inspect "${BTC_NODE_IMAGE}" >/dev/null 2>&1; then
+    echo "Using existing btc-node image: ${BTC_NODE_IMAGE}"
+    return 0
+  fi
+  if [[ -n "${BTC_NODE_IMAGE_REQUESTED}" ]]; then
+    echo "FAIL: requested local btc-node image is missing: ${BTC_NODE_IMAGE}" >&2
+    exit 2
+  fi
+  if [[ ! -f "${COINJOIN_EMULATOR_SOURCE_DIR}/containers/btc-node/Dockerfile" ]]; then
+    echo "FAIL: btc-node Dockerfile not found under ${COINJOIN_EMULATOR_SOURCE_DIR}" >&2
+    exit 2
+  fi
+  echo "Building local btc-node image: ${BTC_NODE_IMAGE}"
+  docker build -t "${BTC_NODE_IMAGE}" "${COINJOIN_EMULATOR_SOURCE_DIR}/containers/btc-node"
+  BUILT_BTC_NODE_IMAGE=1
+}
+
+if [[ ! -f "${PROJECT_DIR}/scenarios/${SCENARIO}" && ! -f "${SCENARIO}" ]]; then
+  echo "FAIL: scenario not found: ${SCENARIO}" >&2
+  echo "Pass SCENARIO=<file> or keep it under ${PROJECT_DIR}/scenarios." >&2
+  exit 2
+fi
+if [[ -f "${PROJECT_DIR}/scenarios/${SCENARIO}" ]]; then
+  SCENARIO_PATH="${PROJECT_DIR}/scenarios/${SCENARIO}"
+else
+  SCENARIO_PATH="${SCENARIO}"
+fi
+
+if [[ "${CONTAINER_RUNTIME}" == "podman" ]]; then
+  if ! CONTAINER_SOCKET="$(podman_socket)"; then
+    echo "FAIL: Podman socket not found." >&2
+    echo "Start it with: systemctl --user enable --now podman.socket" >&2
+    echo "Or pass CONTAINER_SOCKET=/path/to/podman.sock." >&2
+    exit 2
+  fi
+  export CONTAINER_SOCKET
+  echo "Using Podman socket: ${CONTAINER_SOCKET}"
+fi
+
+mapfile -t ARTIFACT_IMAGES < <(
+  python3 - "${SCENARIO_PATH}" "${IMAGE_PREFIX}" <<'PY'
+import json
+import sys
+
+scenario_path, image_prefix = sys.argv[1], sys.argv[2]
+with open(scenario_path, "r", encoding="utf-8") as scenario_file:
+    scenario = json.load(scenario_file)
+
+versions = {scenario.get("default_version") or "2.6.0"}
+if scenario.get("distributor_version"):
+    versions.add(scenario["distributor_version"])
+for wallet in scenario.get("wallets", []):
+    if wallet.get("version"):
+        versions.add(wallet["version"])
+
+for version in sorted(versions):
+    print(f"{image_prefix}wasabi-client:{version}")
+
+if any(version >= "2.6.0" for version in versions):
+    print(f"{image_prefix}wasabi-backend:2.6.0")
+    print(f"{image_prefix}wasabi-coordinator:2.6.0")
+else:
+    print(f"{image_prefix}wasabi-backend:2.0.4")
+PY
+)
+
+pull_image "${EMULATOR_IMAGE}"
+prepare_btc_node_image
+for image in "${ARTIFACT_IMAGES[@]}"; do
+  pull_image "${image}"
+done
+
+echo "Creating k3d cluster '${CLUSTER_NAME}' with ${SERVERS} server(s) and ${AGENTS} worker agent(s)..."
+local_images_build "${ENGINE:-wasabi}" "${SCENARIO_PATH}"
+
+k3d cluster create "${CLUSTER_NAME}" \
+  --servers "${SERVERS}" \
+  --agents "${AGENTS}" \
+  --wait \
+  --timeout "${WAIT_TIMEOUT}"
+
+echo "Importing local btc-node image into k3d and disabling registry pulls for it..."
+k3d image import --cluster "${CLUSTER_NAME}" "${BTC_NODE_IMAGE}"
+export COINJOIN_BTC_NODE_IMAGE="${BTC_NODE_IMAGE}"
+export KUBERNETES_IMAGE_PULL_POLICY=IfNotPresent
+
+k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
+local_images_import "${CLUSTER_NAME}"
+
+echo "Waiting for all Kubernetes nodes to be Ready..."
+kubectl --kubeconfig "${HOST_KUBECONFIG}" \
+  wait node --all --for=condition=Ready --timeout="${WAIT_TIMEOUT}"
+
+node_count="$(kubectl --kubeconfig "${HOST_KUBECONFIG}" get nodes --no-headers | wc -l | tr -d ' ')"
+expected_nodes=$((SERVERS + AGENTS))
+if [[ "${node_count}" -lt "${expected_nodes}" ]]; then
+  echo "FAIL: expected at least ${expected_nodes} nodes, found ${node_count}" >&2
+  kubectl --kubeconfig "${HOST_KUBECONFIG}" get nodes -o wide >&2
+  exit 1
+fi
+
+echo "Cluster nodes:"
+kubectl --kubeconfig "${HOST_KUBECONFIG}" get nodes -o wide
+
+# Both the Kubernetes API and NodePort listeners belong to the k3d node
+# containers, not to the host's default Docker bridge. Put the external
+# emulator manager in that network and address the server node directly.
+K3D_NETWORK="k3d-${CLUSTER_NAME}"
+K3D_SERVER="k3d-${CLUSTER_NAME}-server-0"
+K3D_SERVER_IP="$(python3 - "${K3D_SERVER}" "${K3D_NETWORK}" <<'PY'
+import json
+import subprocess
+import sys
+
+server, network = sys.argv[1:]
+container = json.loads(subprocess.check_output(["docker", "inspect", server]))[0]
+address = (container.get("NetworkSettings", {}).get("Networks", {}).get(network, {}).get("IPAddress", ""))
+if not address:
+    raise SystemExit(f"FAIL: could not determine {server}'s address on Docker network {network}")
+print(address)
+PY
+)"
+rewrite_kubeconfig_for_container "${HOST_KUBECONFIG}" "${CONTAINER_KUBECONFIG}" "${K3D_SERVER_IP}" 6443
+export KUBERNETES_EMULATOR_CONTAINER_NETWORK="${K3D_NETWORK}"
+export KUBERNETES_CONTROL_IP="${K3D_SERVER_IP}"
+echo "Emulator manager network: ${K3D_NETWORK}; Kubernetes NodePort host: ${K3D_SERVER_IP}"
+
+echo "Running Kubernetes emulation test action '${ACTION}' in namespace '${NAMESPACE}'..."
+(
+  cd "${PROJECT_DIR}"
+  timeout --foreground "${EMULATION_TIMEOUT}" \
+    ./runIt.sh container "${CONTAINER_RUNTIME}" "${ACTION}" \
+    --engine wasabi \
+    --scenario "${SCENARIO}" \
+    --driver kubernetes \
+    --namespace "${NAMESPACE}" \
+    --kubeconfig "${CONTAINER_KUBECONFIG}" \
+    --image-prefix "${IMAGE_PREFIX}" \
+    --copy-to-host \
+    "$@"
+)
+
+echo "PASS: Kubernetes emulation path completed on k3d cluster '${CLUSTER_NAME}' with ${AGENTS} worker agent(s)."
