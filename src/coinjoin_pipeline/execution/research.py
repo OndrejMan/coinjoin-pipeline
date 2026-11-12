@@ -25,6 +25,11 @@ from coinjoin_pipeline.execution.run_catalog import (
     report_status,
     stage_state,
 )
+from coinjoin_pipeline.execution.scenarios import (
+    packaged_scenarios,
+    resolve_scenario,
+    validate_scenario,
+)
 from coinjoin_pipeline.execution.settings import DEFAULT_BLOCKSCI_IMAGE
 from coinjoin_pipeline.paths import PIPELINE_ROOT, default_runs_root
 
@@ -123,6 +128,24 @@ def validate_existing_run(args: argparse.Namespace) -> None:
     print(f"VALID: {run_dir.name} (runtime={args.runtime}, report={status})")
 
 
+def print_scenarios(engine: str | None) -> None:
+    scenarios = packaged_scenarios(engine)
+    print("name\tengine\trounds\twallets\tmakers\ttakers\tpath")
+    for item in scenarios:
+        print(
+            f"{item['name']}\t{item['engine']}\t{item['rounds']}\t{item['wallet_count']}\t"
+            f"{item['makers']}\t{item['takers']}\t{item['path']}"
+        )
+
+
+def show_or_validate_scenario(value: str, engine: str, show: bool) -> None:
+    summary = validate_scenario(resolve_scenario(value), engine)
+    if show:
+        print(json.dumps(summary, indent=2, sort_keys=True))
+    else:
+        print(f"VALID: {summary['name']} ({engine})")
+
+
 def parser() -> argparse.ArgumentParser:
     cli = argparse.ArgumentParser(prog="cjp", description="Researcher-facing run catalog.")
     cli.add_argument("--runs-root", type=Path, default=default_runs_root(), help="Runs root (default: %(default)s).")
@@ -136,6 +159,14 @@ def parser() -> argparse.ArgumentParser:
     validate = run_commands.add_parser("validate", help="Check one run's report inputs in the BlockSci image.")
     validate.add_argument("--run-dir", required=True, help="Run directory, absolute or below the runs root.")
     validate.add_argument("--blocksci-image", help="BlockSci image to validate with.")
+    scenarios = subcommands.add_parser("scenarios", help="List, show and validate emulator scenarios.")
+    scenario_commands = scenarios.add_subparsers(dest="scenarios_command", required=True)
+    list_scenarios = scenario_commands.add_parser("list", help="The packaged scenarios.")
+    list_scenarios.add_argument("--engine", choices=("wasabi", "joinmarket"))
+    for name, summary in (("show", "Print one scenario."), ("validate", "Check one scenario for an engine.")):
+        scenario_command = scenario_commands.add_parser(name, help=summary)
+        scenario_command.add_argument("scenario", help="Scenario name or path.")
+        scenario_command.add_argument("--engine", choices=("wasabi", "joinmarket"), required=True)
     return cli
 
 
@@ -149,6 +180,10 @@ def main(argv: list[str] | None = None) -> int:
                 inspect_run(args.runs_root, args.run_dir)
             else:
                 validate_existing_run(args)
+        elif args.scenarios_command == "list":
+            print_scenarios(args.engine)
+        else:
+            show_or_validate_scenario(args.scenario, args.engine, args.scenarios_command == "show")
     except ExitError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return error.code

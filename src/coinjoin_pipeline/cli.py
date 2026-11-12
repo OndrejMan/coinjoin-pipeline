@@ -92,7 +92,7 @@ def _utility(argv: list[str]) -> int | None:
     if action in {"watch", "status", "stop", "download-report", "clean-s3"}:
         module = importlib.import_module(f"coinjoin_pipeline.{action.replace('-', '_')}")
         return module.main(remaining, runs_root=root)
-    if action in {"runs"}:
+    if action in {"runs", "scenarios"}:
         from .execution.research import main as research_main
 
         if action == "runs" and remaining[:1] == ["validate"] and "blocksci_image" in supplied:

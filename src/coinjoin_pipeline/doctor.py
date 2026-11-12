@@ -72,7 +72,8 @@ def validate_arguments(config: PipelineConfiguration, runs_root: Path) -> list[s
     errors: list[str] = []
     if config.scenario and scenario_file(config.scenario, config.engine) is None:
         errors.append(
-            f"scenario not found: {config.scenario}; pass a scenario JSON path or the name of a catalogue scenario"
+            f"scenario not found: {config.scenario}; pass a scenario JSON path or the name "
+            "of a catalogue scenario (see cjp scenarios list)"
         )
     if config.driver == "kubernetes" and not config.dry_run:
         kubeconfig = resolve_kubeconfig(config.kubernetes.kubeconfig)
