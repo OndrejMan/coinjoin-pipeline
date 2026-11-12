@@ -9,7 +9,7 @@ from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.pbs_settings import pbs_image
 
 from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND
-from .stage import CONTAINER_RUNS_ROOT
+from .stage import CONTAINER_RUNS_ROOT, CONTAINER_SELECTED_ROOT
 from .validation import require_safe_image
 
 
@@ -18,6 +18,11 @@ def blocksci_pbs_command(run_id: str, config: PipelineConfiguration, include_rep
     if include_report:
         command += " --report"
     return command
+
+
+def coinjoin_analysis_pbs_command(action: str = "collect_docker") -> str:
+    """Build the in-container command for the coinjoin-analysis PBS stage."""
+    return f"python -m cj_process.parse_cj_logs --action {action} --target-path {CONTAINER_SELECTED_ROOT}"
 
 
 def detector_arguments(config: PipelineConfiguration) -> list[str]:
@@ -44,6 +49,7 @@ def analysis_image_arguments(config: PipelineConfiguration) -> list[str]:
     arguments: list[str] = []
     for flag, image in (
         ("--blocksci-image", pbs_image(config, "blocksci")),
+        ("--coinjoin-analysis-image", pbs_image(config, "coinjoin_analysis")),
         ("--coinjoin-emulator-image", config.images.emulator),
         ("--uploader-image", config.images.uploader),
     ):

@@ -40,7 +40,7 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
         raise ConfigurationError(f"invalid run timezone: {config.run_timezone}") from error
     config = replace(config, runs_root=str(runs_root(config)))
     provided = set(config.provided)
-    for stage in ("blocksci",):
+    for stage in ("analysis", "blocksci"):
         path = f"stages.{stage}"
         if getattr(config.pbs, stage).configured and path not in provided:
             config = replace_path(config, path, True)
@@ -98,6 +98,7 @@ def resolve_run_images(config: PipelineConfiguration) -> tuple[PipelineConfigura
         pbs=replace(
             pbs,
             blocksci_image=pbs.blocksci_image or pbs.image or images.blocksci,
+            coinjoin_analysis_image=pbs.coinjoin_analysis_image or pbs.image or images.coinjoin_analysis,
         ),
     )
     if config.artifacts.backend == "s3":

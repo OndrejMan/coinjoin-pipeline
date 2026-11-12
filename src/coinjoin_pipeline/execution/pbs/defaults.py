@@ -25,6 +25,7 @@ class PBSResources:
 # Keyed by resource group: the PBS budget every stage of that group is drawn from.
 DEFAULT_RESOURCES = {
     "blocksci": PBSResources(8, "64gb", "100gb", "24:00:00"),
+    "analysis": PBSResources(4, "16gb", "50gb", "04:00:00"),
 }
 
 BLOCKSCI_IMAGE_PYTHON_COMMAND = (

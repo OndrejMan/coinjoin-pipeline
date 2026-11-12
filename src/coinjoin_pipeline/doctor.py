@@ -28,7 +28,7 @@ class Capability(Enum):
 def required_capabilities(config: PipelineConfiguration) -> set[Capability]:
     capabilities: set[Capability] = set()
     uses_s3 = config.artifacts.backend == "s3"
-    uses_pbs = config.stages.blocksci or config.action in {
+    uses_pbs = any((config.stages.analysis, config.stages.blocksci)) or config.action in {
         "pbs-from-s3",
     }
     if not config.dry_run:
@@ -48,7 +48,10 @@ def required_image_components(config: PipelineConfiguration) -> set[str]:
     if config.dry_run or config.artifacts.backend == "s3" or config.action == "clean":
         return set()
     delegated = set()
-    for enabled, names in ((config.stages.blocksci, {"blocksci"}),):
+    for enabled, names in (
+        (config.stages.analysis, {"coinjoin_analysis"}),
+        (config.stages.blocksci, {"blocksci"}),
+    ):
         if enabled:
             delegated.update(names)
     if delegated and config.action not in {"full-run", "emulate"}:

@@ -24,12 +24,13 @@ from pathlib import Path
 
 from exporters.artifact_paths import LOGS_DIR, PBS_MARKER_DIR
 
-from coinjoin_pipeline.execution.pbs import blocksci_jobs
+from coinjoin_pipeline.execution.pbs import analyzer_jobs, blocksci_jobs
 from coinjoin_pipeline.execution.pbs.stage import Stage, StageFailure, with_job_log
 from coinjoin_pipeline.execution.pbs.stage_settings import StageSettings
 
 JOBS: dict[str, Callable[[Stage], None]] = {
     "blocksci": blocksci_jobs.blocksci,
+    "coinjoin-analysis": analyzer_jobs.coinjoin_analysis,
 }
 
 

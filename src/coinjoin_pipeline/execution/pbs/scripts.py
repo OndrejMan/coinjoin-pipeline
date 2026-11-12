@@ -21,7 +21,7 @@ STAGE_RUNTIME_MODULES = (
     S5CLIENT,
     APPTAINER,
     ARTIFACT_PATHS,
-    *(Path(__file__).with_name(name) for name in ("stage_settings.py", "stage.py")),
+    *(Path(__file__).with_name(name) for name in ("stage_settings.py", "stage.py", "analyzer_jobs.py")),
     *(Path(__file__).with_name(name) for name in ("blocksci_jobs.py", "stage_runtime.py")),
 )
 
