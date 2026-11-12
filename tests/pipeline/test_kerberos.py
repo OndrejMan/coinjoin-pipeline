@@ -104,5 +104,30 @@ class RenewPeriodicallyTest(unittest.TestCase):
         self.assertEqual(output.count("renewal recovered"), 1)
 
 
+class SubmitOnlyActionsTest(unittest.TestCase):
+    """pbs-from-s3 and mainnet-sync return after qsub; only the S3 full-run waits on PBS."""
+
+    def _run(self, action: str, target: str) -> mock.Mock:
+        from coinjoin_pipeline.configuration import PipelineConfiguration
+        from coinjoin_pipeline.execution import orchestrator
+
+        config = PipelineConfiguration(action=action, runs_root="/tmp/runs", run_id="run-1")
+        with (
+            mock.patch.object(orchestrator, "acquire_lock"),
+            mock.patch.object(
+                orchestrator, "kerberos_ticket_renewal", side_effect=AssertionError("renewal")
+            ) as renewal,
+            mock.patch(target),
+        ):
+            orchestrator.run_configuration(config)
+        return renewal
+
+    def test_pbs_from_s3_needs_no_renewable_ticket(self):
+        self._run("pbs-from-s3", "coinjoin_pipeline.execution.orchestrator.submit_s3_pbs_graph").assert_not_called()
+
+    def test_mainnet_sync_needs_no_renewable_ticket(self):
+        self._run("mainnet-sync", "coinjoin_pipeline.execution.mainnet_sync.submit_sync").assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
