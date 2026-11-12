@@ -17,7 +17,7 @@ from typing import Iterator, TextIO
 
 from .configuration import KubernetesConfiguration
 from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, fail
-from .execution.kubernetes import resolve_kubeconfig
+from .execution.kubernetes import kubectl_command, resolve_kubeconfig
 from .execution.pbs.defaults import MAINNET_SYNC_RESOURCES, PBS_TERMINAL_STATES
 from .execution.pbs.status import job_details
 from .execution.pbs.submission import read_pbs_job_id
@@ -140,10 +140,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--no-follow", action="store_true", help="Print current logs and exit.")
     return parser
-
-
-def _kubectl_base(kubeconfig: Path, namespace: str) -> list[str]:
-    return ["kubectl", "--kubeconfig", str(kubeconfig), "--namespace", namespace]
 
 
 def _newest_pod(payload: str) -> str | None:
@@ -423,7 +419,7 @@ def _kubernetes_sources(
     kubeconfig = resolve_kubeconfig(args.kubeconfig)
     if not kubeconfig.is_file():
         raise _SourceError(f"kubeconfig not found: {kubeconfig}; pass --kubeconfig, or --pbs-only for PBS output alone")
-    kubectl = _kubectl_base(kubeconfig, args.namespace)
+    kubectl = kubectl_command(kubeconfig, namespace=args.namespace)
     try:
         outer_pod = _discover_pod(
             kubectl,

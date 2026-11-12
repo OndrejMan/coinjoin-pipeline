@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .console import EXIT_FAILURE, EXIT_OK, fail
-from .execution.kubernetes import RUN_ID_LABEL, kubectl, resolve_kubeconfig
+from .execution.kubernetes import RUN_ID_LABEL, kubectl, kubectl_command, resolve_kubeconfig
 from .execution.pbs.submission import qdel_error
 from .run_records import RUN_RESOURCE_TYPES, recorded_jobs
 from .storage.s3 import validate_run_id
@@ -52,19 +52,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _save_pod_logs(kubeconfig: Path, namespace: str, run_id: str, path: Path) -> str | None:
     """Preserve the current pod output; None when it was saved."""
-    command = [
-        "kubectl",
-        "--kubeconfig",
-        str(kubeconfig),
-        "--namespace",
-        namespace,
+    command = kubectl_command(
+        kubeconfig,
         "logs",
         "-l",
         f"{RUN_ID_LABEL}={run_id}",
         "--all-containers=true",
         "--prefix",
         "--tail=-1",
-    ]
+        namespace=namespace,
+    )
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as stream:

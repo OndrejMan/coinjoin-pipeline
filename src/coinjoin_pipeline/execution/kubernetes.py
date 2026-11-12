@@ -45,15 +45,20 @@ def resolve_kubeconfig(value: str | None) -> Path:
     return Path(value).expanduser().resolve() if value else Path.home() / ".kube" / "config"
 
 
+def kubectl_command(kubeconfig: Path, *arguments: str, namespace: str | None = None) -> list[str]:
+    """The kubectl command line against one kubeconfig, for callers that stream its output."""
+    command = ["kubectl", "--kubeconfig", str(kubeconfig)]
+    if namespace is not None:
+        command += ["--namespace", namespace]
+    return [*command, *arguments]
+
+
 def kubectl(
     kubeconfig: Path, *arguments: str, namespace: str | None = None, input_text: str | None = None
 ) -> subprocess.CompletedProcess[str]:
     """Run kubectl against one kubeconfig; FileNotFoundError when kubectl is missing."""
-    command = ["kubectl", "--kubeconfig", str(kubeconfig)]
-    if namespace is not None:
-        command += ["--namespace", namespace]
     return subprocess.run(
-        [*command, *arguments],
+        kubectl_command(kubeconfig, *arguments, namespace=namespace),
         input=input_text,
         check=False,
         text=True,
@@ -519,9 +524,7 @@ def apply_s3_emulation_resources(manifest: str, kubeconfig_path: Path) -> None:
 
     # The manifest orders the support resources before the Job, so a partial
     # apply can leave them behind with no Job to own them.
-    applied = subprocess.run(
-        ["kubectl", "--kubeconfig", str(kubeconfig_path), "apply", "-f", "-"], input=manifest, text=True, check=False
-    )
+    applied = subprocess.run(kubectl_command(kubeconfig_path, "apply", "-f", "-"), input=manifest, text=True, check=False)
     if applied.returncode:
         raise roll_back(f"kubectl apply failed with exit {applied.returncode}")
     uid_result = kubectl(kubeconfig_path, "get", "job", job_name, "-o", "jsonpath={.metadata.uid}", namespace=namespace)
