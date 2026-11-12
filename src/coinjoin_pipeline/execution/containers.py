@@ -31,7 +31,7 @@ from coinjoin_pipeline.images import resolve_unified_report_image
 from coinjoin_pipeline.execution.pipeline_logging import (
     captured_pipeline_stage,
 )
-from coinjoin_pipeline.execution.run_context import run_dir_under_root
+from coinjoin_pipeline.execution.run_context import run_dir_under_root, run_dirs
 from coinjoin_pipeline.execution.scenarios import container_scenario_path, scenario_source_path
 from coinjoin_pipeline.execution.runtime import (
     CONTAINER_RUNTIME_ENV,
@@ -230,15 +230,27 @@ def run_script(
         sys.exit(exc.returncode)
 
 
-def run_coinjoin_analysis(config: PipelineConfiguration, run_dir_arg: str | None = None) -> None:
+def run_coinjoin_analysis(
+    config: PipelineConfiguration,
+    run_dir_arg: str | None = None,
+    all_runs: bool = False,
+) -> None:
     env = compose_env(config)
     emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"])
-    selected = run_dir_under_root(required(run_dir_arg, "run_dir"), emulation_logs_dir.expanduser().resolve())
-    with captured_pipeline_stage(emulation_logs_dir, "coinjoin-analysis baseline", selected):
-        try:
-            run_coinjoin_analysis_docker_stage(config, selected.name)
-        except subprocess.CalledProcessError as exc:
-            sys.exit(exc.returncode)
+    if all_runs:
+        active_run_ids = [path.name for path in sorted(run_dirs(emulation_logs_dir))]
+        if not active_run_ids:
+            raise ValueError(f"no emulation run folder found under {emulation_logs_dir}")
+    else:
+        selected = run_dir_under_root(required(run_dir_arg, "run_dir"), emulation_logs_dir.expanduser().resolve())
+        active_run_ids = [selected.name]
+    for active_run_id in active_run_ids:
+        run_dir = emulation_logs_dir / active_run_id
+        with captured_pipeline_stage(emulation_logs_dir, "coinjoin-analysis baseline", run_dir):
+            try:
+                run_coinjoin_analysis_docker_stage(config, active_run_id)
+            except subprocess.CalledProcessError as exc:
+                sys.exit(exc.returncode)
 
 
 def run_coinjoin_analysis_docker_stage(config: PipelineConfiguration, active_run_id: str) -> None:
