@@ -23,6 +23,7 @@ from exporters.common import (
     save_json,
 )
 from exporters.emulator_data import build_emulator_data
+from exporters.liquidity import build_liquidity, save_liquidity_dataset
 from exporters.markdown_report import render_report, save_text
 from exporters.normalization import (
     baseline_filter_summary,
@@ -153,6 +154,14 @@ def assemble_report(args: argparse.Namespace) -> int:
         predicted_address_clusters = None
         cluster_export_error = "Clustering was explicitly skipped during report assembly."
     scenario = load_scenario(run_dir)
+    liquidity_evaluation, liquidity_dataset = build_liquidity(
+        run_dir,
+        emulator_data,
+        coinjoin_analysis_data,
+        analysis.get("mix_events"),
+        analysis.get("mix_events_error"),
+        (scenario or {}).get("liquidity_groups"),
+    )
     output_path = output_dir / args.output_name
     report = build_report(
         run_dir,
@@ -175,7 +184,10 @@ def assemble_report(args: argparse.Namespace) -> int:
         image_provenance=analysis.get("image_provenance"),
         coverage=coverage,
         baseline_filter=baseline_filter_summary(false_positive_sources, false_positive_txids, filtered_txids),
+        liquidity_evaluation=liquidity_evaluation,
     )
+    if liquidity_dataset is not None:
+        save_liquidity_dataset(output_dir, liquidity_dataset)
     save_json(output_path, report)
     print(f"Unified report saved to {output_path}")
     if args.markdown:

@@ -6,7 +6,7 @@ from pathlib import Path
 from exporters import cli as report_cli
 from exporters.artifact_paths import DUMPLINGS_SNAPSHOT_FILE, EXPORTED_BLOCKS_DIR
 from exporters.common import f1_score, io_items, wallet_names
-from exporters.markdown_report import render_run_manifest
+from exporters.markdown_report import is_disagreement, render_run_manifest
 from exporters.analysis_artifact import SCHEMA_VERSION
 from exporters.parameters import Detector
 from exporters.normalization import iter_exported_blocks
@@ -94,6 +94,11 @@ def test_shared_record_helpers():
     assert f1_score(0.5, 1.0) == 0.666667
     assert f1_score(0.0, 0.0) is None
     assert f1_score(None, 1.0) is None
+
+
+def test_liquidity_disagreement_compares_the_two_events():
+    assert is_disagreement("inputs:MIX_ENTER->MIX_REMIX")
+    assert not is_disagreement("outputs:MIX_STAY->MIX_STAY")
 
 
 def test_run_manifest_lists_mapping_images_only_when_recorded():

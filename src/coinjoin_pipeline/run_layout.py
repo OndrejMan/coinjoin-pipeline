@@ -30,8 +30,10 @@ def run_layout() -> dict[str, object]:
         "runId": {"pattern": RUN_ID_RE.pattern, "maxLength": RUN_ID_MAX_LENGTH},
         "markers": [paths.KUBERNETES_MARKER_DIR, paths.PBS_MARKER_DIR],
         "files": {
+            "dataset": f"{paths.REPORT_DIR}/{paths.LIQUIDITY_DATASET}",
             "scenario": paths.SCENARIO_FILE,
             "report": paths.REPORT_FILE,
+            "postmix": paths.POSTMIX_SPENDS_FILE,
         },
         "artifacts": {
             "emulator": {"directories": [paths.EMULATOR_DIR], "stage": EMULATION_STAGE},

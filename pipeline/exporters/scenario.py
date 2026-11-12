@@ -13,6 +13,31 @@ def wallet_name(index: int) -> str:
     return f"wallet-{index:03}"
 
 
+def liquidity_groups(scenario: JsonObject) -> dict[str, list[str]]:
+    """The scenario's wallet groups whose joint liquidity the report evaluates as one wallet.
+
+    ``liquidity_groups`` maps a group name to scenario wallet indices, e.g. the five
+    wallets that split a large wallet's funds. The emulator ignores the field.
+    """
+    groups = scenario.get("liquidity_groups")
+    if groups is None:
+        return {}
+    wallet_count = len(scenario.get("wallets") or [])
+    if not isinstance(groups, dict):
+        raise TypeError("scenario liquidity_groups must map group names to wallet indices")
+    result = {}
+    for name, indices in groups.items():
+        if (
+            not isinstance(indices, list)
+            or not indices
+            or any(isinstance(index, bool) or not isinstance(index, int) for index in indices)
+            or any(not 0 <= index < wallet_count for index in indices)
+        ):
+            raise ValueError(f"liquidity group {name!r} must list wallet indices below {wallet_count}")
+        result[str(name)] = [wallet_name(index) for index in indices]
+    return result
+
+
 def normalize_scenario(scenario: JsonObject, source_path: Path) -> JsonObject:
     default_version = scenario.get("default_version")
     wallets = []
@@ -48,6 +73,7 @@ def normalize_scenario(scenario: JsonObject, source_path: Path) -> JsonObject:
         "wallet_count": len(wallets),
         "total_initial_funds_sats": total_initial_funds,
         "wallets": wallets,
+        "liquidity_groups": liquidity_groups(scenario),
     }
 
 

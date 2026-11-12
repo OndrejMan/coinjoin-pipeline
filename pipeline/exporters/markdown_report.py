@@ -296,6 +296,127 @@ def render_clustering_evaluation(report: JsonObject) -> list[str]:
     return lines
 
 
+def is_disagreement(confusion_key: str) -> bool:
+    """Whether a ``side:TRUTH->ANALYZER`` confusion key pairs two different events."""
+    truth, _, analyzer = confusion_key.partition("->")
+    return truth.partition(":")[2] != analyzer
+
+
+# Columns the large-wallet and wallet-group tables share, between the name and the lift.
+FIN_HEADERS = ["peak pool share", "first entry", "observed entry", "last leave", "descending window", "leave precision"]
+
+
+def fin_columns(holder: JsonObject, *, recall: bool) -> list[object]:
+    """When a large wallet or group entered and left, and how well its fin predicts its exit."""
+    fin = holder.get("fin") or {}
+    return [
+        metric_value(holder.get("peak_pool_share")),
+        holder.get("first_enter_index"),
+        fin.get("observed_entry_index"),
+        holder.get("last_leave_index"),
+        fin.get("descending_window"),
+        metric_value(fin.get("window_leave_precision")),
+        *([metric_value(fin.get("window_leave_recall"))] if recall else []),
+        metric_value(fin.get("lift")),
+    ]
+
+
+def render_large_holders(liquidity: JsonObject) -> list[str]:
+    lines: list[str] = []
+    large_wallets = liquidity.get("large_wallets") or []
+    if large_wallets:
+        rows = [[wallet.get("wallet"), *fin_columns(wallet, recall=False)] for wallet in large_wallets]
+        headers = ["wallet", *FIN_HEADERS, "lift"]
+        lines.extend(section("Large Wallets", *table(headers, rows), level=3))
+    large_groups = liquidity.get("large_groups") or []
+    if large_groups:
+        rows = [
+            [group.get("group"), ", ".join(group.get("wallets") or []), *fin_columns(group, recall=True)]
+            for group in large_groups
+        ]
+        headers = ["group", "wallets", *FIN_HEADERS, "leave recall", "lift"]
+        lines.extend(section("Wallet Groups", *table(headers, rows), level=3))
+    return lines
+
+
+def render_liquidity_evaluation(report: JsonObject) -> list[str]:
+    liquidity = report.get("liquidity_evaluation")
+    if not liquidity:
+        return []
+    lines = section("Liquidity Evaluation")
+    if not liquidity.get("available"):
+        lines.append(liquidity.get("reason") or "Liquidity evaluation is not available for this run.")
+        return lines
+
+    ground_truth = liquidity.get("ground_truth") or {}
+    observed = liquidity.get("observed") or {}
+    agreement = liquidity.get("classification_agreement") or {}
+    blocksci = liquidity.get("blocksci") or {}
+    with_blocksci = blocksci.get("available") is True
+    blocksci_agreement = blocksci.get("classification_agreement") or {}
+    lines.extend(
+        table(
+            ["metric", "ground truth", "coinjoin-analysis", *(["BlockSci"] if with_blocksci else [])],
+            [
+                [
+                    name,
+                    sats(ground_truth.get(field)),
+                    sats(observed.get(field)),
+                    *([sats(blocksci.get(field))] if with_blocksci else []),
+                ]
+                for name, field in (
+                    ("entered", "entered_sats"),
+                    ("left", "left_sats"),
+                    ("stayed", "stayed_sats"),
+                    ("peak interim liquidity", "peak_interim_sats"),
+                    ("final interim liquidity", "final_interim_sats"),
+                )
+            ],
+        )
+    )
+    summary_rows: list[list[object]] = [
+        ["coinjoins", liquidity.get("coinjoins")],
+        ["max interim difference", sats(liquidity.get("interim_max_abs_difference_sats"))],
+        ["classified inputs and outputs", agreement.get("classified")],
+        ["classification agreement", metric_value(agreement.get("agreement_rate"))],
+    ]
+    if with_blocksci:
+        summary_rows.extend(
+            [
+                ["BlockSci max interim difference", sats(blocksci.get("interim_max_abs_difference_sats"))],
+                ["BlockSci classification agreement", metric_value(blocksci_agreement.get("agreement_rate"))],
+                ["labelled coinjoins BlockSci did not classify", blocksci.get("unclassified_coinjoins")],
+                ["BlockSci coinjoins without a label", blocksci.get("extra_coinjoins")],
+            ]
+        )
+    summary_rows.append(["dominant wallet", liquidity.get("dominant_wallet")])
+    lines.extend(["", *key_values(summary_rows)])
+    if blocksci and not with_blocksci:
+        lines.extend(["", f"BlockSci liquidity classification unavailable: {blocksci.get('reason')}"])
+    for title, analyzer, confusion in (
+        ("Classification Disagreements", "observed", agreement.get("confusion")),
+        ("BlockSci Classification Disagreements", "BlockSci", blocksci_agreement.get("confusion")),
+    ):
+        disagreements = [[key, count] for key, count in (confusion or {}).items() if is_disagreement(key)]
+        if disagreements:
+            lines.extend(section(title, *table([f"ground truth -> {analyzer}", "count"], disagreements), level=3))
+
+    lines.extend(render_large_holders(liquidity))
+
+    spends = liquidity.get("postmix_spends")
+    if spends:
+        lines.extend(
+            [
+                "",
+                f"Scheduled postmix spends: {spends.get('scheduled')} "
+                f"({', '.join(f'{status} {count}' for status, count in (spends.get('by_status') or {}).items())}); "
+                f"{spends.get('confirmed_postmix')} confirmed as spends of coinjoin outputs.",
+            ]
+        )
+    lines.extend(["", "Per-wallet events: " + ", ".join(f"`{name}`" for name in liquidity.get("dataset_files") or [])])
+    return lines
+
+
 def render_subset_matching(report: JsonObject, explorer_base_url: str) -> list[str]:
     comparison = report.get("blocksci_subset_matching") or {}
     if not comparison:
@@ -943,6 +1064,7 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
         *render_emulator_detection(report, explorer_base_url),
         *render_subset_matching(report, explorer_base_url),
         *render_clustering_evaluation(report),
+        *render_liquidity_evaluation(report),
         *render_analyzer_diagnostic(report, explorer_base_url),
     ]
     return "\n".join(lines).rstrip() + "\n"

@@ -228,6 +228,7 @@ def build_report(
     image_provenance: JsonObject | None = None,
     coverage: JsonObject | None = None,
     baseline_filter: JsonObject | None = None,
+    liquidity_evaluation: JsonObject | None = None,
 ) -> JsonObject:
     """The unified report. Every top-level key is always present, null when it does not apply."""
     coinjoin_type, min_input_count = detector.coinjoin_type, detector.min_input_count
@@ -315,6 +316,7 @@ def build_report(
         # External mode only: the BlockSci scan window and where the baseline sits in it.
         "coverage": coverage,
         "baseline_filter": baseline_filter if baseline_filter is not None else baseline_filter_summary([], set(), []),
+        "liquidity_evaluation": liquidity_evaluation,
         "summary": summary,
         "divergences": divergences,
         "transactions": transactions,
