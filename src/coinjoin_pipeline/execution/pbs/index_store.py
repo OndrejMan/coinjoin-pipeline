@@ -54,10 +54,11 @@ def index_manifest(
     exported_max_block: int,
     extra: Mapping[str, object] | None = None,
 ) -> dict:
-    """What a parse records about the index it produced.
+    """What a parse or update records about the index it produced.
 
-    ``extra`` holds what one kind of index adds: the archive of an S3 cache, the
-    resources of the job.
+    An update resumes only an index of the same image, source kind and network, from
+    exported_max_block. ``extra`` holds what one kind of index adds: the archive of an
+    S3 cache, the resources of the job.
     """
     return {
         "schema_version": MANIFEST_SCHEMA,

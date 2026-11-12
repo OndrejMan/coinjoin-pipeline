@@ -158,11 +158,12 @@ def _blocksci_task_errors(config: PipelineConfiguration, stages: _PbsStages) -> 
     workflow, task = blocksci.workflow, blocksci.task
     if workflow != "combined" and not stages.blocksci:
         errors.append("reusable BlockSci workflows require --blocksci-pbs")
-    if task == "parse":
-        if action != "pbs-from-s3" or workflow != "reusable":
-            errors.append("--blocksci-task parse requires pbs-from-s3 --blocksci-workflow reusable")
+    if task in {"parse", "update"}:
+        required_workflow = "reusable" if task == "parse" else "cached"
+        if action != "pbs-from-s3" or workflow != required_workflow:
+            errors.append(f"--blocksci-task {task} requires pbs-from-s3 --blocksci-workflow {required_workflow}")
         if not stages.blocksci_alone:
-            errors.append("--blocksci-task parse requires --blocksci-pbs without --analysis-pbs")
+            errors.append(f"--blocksci-task {task} requires --blocksci-pbs without --analysis-pbs")
     elif task != "detect":
         if action != "pbs-from-s3":
             errors.append("BlockSci reusable tasks are submitted with pbs-from-s3")
@@ -189,14 +190,23 @@ def _cache_source_errors(config: PipelineConfiguration) -> list[str]:
     errors: list[str] = []
     blocksci = config.blocksci
     source_run_id = blocksci.cache_source_run_id
-    if blocksci.task in READ_ONLY_CACHE_TASKS and source_run_id:
+    if blocksci.task == "update":
+        if not source_run_id:
+            errors.append("--blocksci-task update requires --blocksci-cache-source-run-id")
+        if not blocksci.external_bitcoin_datadir:
+            errors.append("--blocksci-task update requires --blocksci-external-bitcoin-datadir")
+        if blocksci.external_blocksci_dir:
+            errors.append("--blocksci-task update does not support --blocksci-external-blocksci-dir")
+        if source_run_id and config.run_id == source_run_id:
+            errors.append("--blocksci-cache-source-run-id must differ from target --run-id")
+    elif blocksci.task in READ_ONLY_CACHE_TASKS and source_run_id:
         # The analysis only reads the source cache; its outputs and markers belong to its own run.
         if blocksci.workflow != "cached":
             errors.append("--blocksci-cache-source-run-id with an analysis task requires --blocksci-workflow cached")
         if config.run_id == source_run_id:
             errors.append("--blocksci-cache-source-run-id must differ from target --run-id")
     elif source_run_id:
-        errors.append("--blocksci-cache-source-run-id requires --blocksci-task script or notebook")
+        errors.append("--blocksci-cache-source-run-id requires --blocksci-task update, script, or notebook")
     return errors
 
 
@@ -220,7 +230,7 @@ def _height_errors(config: PipelineConfiguration) -> list[str]:
 
 
 def _blocksci_source_errors(config: PipelineConfiguration) -> list[str]:
-    """Rules for parsing an index from an external Bitcoin or BlockSci source."""
+    """Rules for parsing or updating an index from an external Bitcoin or BlockSci source."""
     errors: list[str] = []
     blocksci = config.blocksci
     external_bitcoin = bool(blocksci.external_bitcoin_datadir)
@@ -230,8 +240,17 @@ def _blocksci_source_errors(config: PipelineConfiguration) -> list[str]:
             "choose only one BlockSci source: --blocksci-external-bitcoin-datadir or --blocksci-external-blocksci-dir"
         )
     if external_bitcoin or external_index:
-        if not (config.action == "pbs-from-s3" and blocksci.workflow == "reusable" and blocksci.task == "parse"):
-            errors.append("external BlockSci sources require a reusable parse")
+        on_s3 = config.action == "pbs-from-s3"
+        parse_source = on_s3 and blocksci.workflow == "reusable" and blocksci.task == "parse"
+        update_source = (
+            on_s3
+            and blocksci.workflow == "cached"
+            and blocksci.task == "update"
+            and external_bitcoin
+            and not external_index
+        )
+        if not (parse_source or update_source):
+            errors.append("external BlockSci sources require either reusable parse or cached update")
     network_supplied = _supplied(config, "blocksci.network", blocksci.network)
     max_block_supplied = _supplied(config, "blocksci.max_block", blocksci.max_block)
     if external_bitcoin:

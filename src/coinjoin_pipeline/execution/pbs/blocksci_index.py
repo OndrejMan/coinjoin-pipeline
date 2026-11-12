@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, BLOCKSCI_DIR
@@ -74,7 +75,9 @@ def run_index(stage: Stage, prefix: str) -> IndexStore:
     return IndexStore(str(stage.work / BLOCKSCI_DIR), prefix, storage=stage.storage)
 
 
-def restore_index(stage: Stage, cache_dir: Path, prefix: str, run_id: str, label: str) -> dict:
+def restore_index(
+    stage: Stage, cache_dir: Path, prefix: str, run_id: str, label: str, check: Callable[[dict], None] | None = None
+) -> dict:
     """Check a published index's manifest, then restore it into the run's working index.
 
     The archive is hashed while it is extracted, only its declared members are accepted,
@@ -87,6 +90,8 @@ def restore_index(stage: Stage, cache_dir: Path, prefix: str, run_id: str, label
     stage.storage.copy(f"{prefix}/manifest.json", str(manifest_path))
     manifest = json.loads(manifest_path.read_text())
     check_manifest(manifest, label, stage.settings["image_name"], run_id)
+    if check is not None:
+        check(manifest)
     run_index(stage, prefix).restore()
     for relative in INDEX_FILES:
         stage.require_file(relative, f"{label} did not contain {relative}")

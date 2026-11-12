@@ -19,7 +19,7 @@ from exporters.parameters import add_detector_arguments, add_image_arguments, ad
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=("run", "parse", "analyze", "report"))
+    parser.add_argument("phase", choices=("run", "parse", "update", "analyze", "report"))
     run_id = os.environ.get("PBS_RUN_ID") or os.environ.get("ACTIVE_RUN_ID")
     default_run = Path("/runs/emulation/logs") / run_id if run_id else None
     parser.add_argument("--run-dir", type=Path, default=default_run)
@@ -52,7 +52,7 @@ def parse_args(argv=None):
 
 def parse_chain(args):
     args.config.parent.mkdir(parents=True, exist_ok=True)
-    if not (args.mode == "external" and args.config.is_file()):
+    if args.phase != "update" and not (args.mode == "external" and args.config.is_file()):
         maximum = args.max_block
         if maximum is None and args.mode != "external":
             heights = [
@@ -82,7 +82,7 @@ def parse_chain(args):
 
 
 def execute(args):
-    if args.phase in {"run", "parse"}:
+    if args.phase in {"run", "parse", "update"}:
         parse_chain(args)
     if args.phase == "run" and args.script:
         environment = {
