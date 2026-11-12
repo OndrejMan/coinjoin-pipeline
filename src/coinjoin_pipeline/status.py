@@ -8,10 +8,18 @@ from pathlib import Path
 
 from .console import EXIT_OK, fail
 from .execution.kubernetes import resolve_kubeconfig
-from .run_records import emulation_states, job_state, recorded_jobs, run_markers, scheduler_states
+from .run_records import (
+    DEFAULT_NAMESPACE,
+    add_namespace_argument,
+    add_record_arguments,
+    emulation_states,
+    job_state,
+    recorded_jobs,
+    run_markers,
+    scheduler_states,
+)
 from .run_ids import validate_run_id
 from .storage.s3 import ArtifactTransportError, add_s3_arguments, s3_arguments_access
-from .watch import DEFAULT_NAMESPACE
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -23,25 +31,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--run-id", action="append", required=True, help="Run to report (repeatable).")
-    parser.add_argument(
-        "--namespace",
-        action="append",
-        help=f"Kubernetes namespace to look for emulation Jobs in (repeatable; default: {DEFAULT_NAMESPACE}).",
-    )
-    parser.add_argument("--kubeconfig", help="kubeconfig file (default: $KUBECONFIG, else ~/.kube/config).")
-    parser.add_argument(
-        "--search-root",
-        action="append",
-        type=Path,
-        help="Runs root holding <run-id>/.pbs/*.jobid (repeatable, earlier wins; default: the runs root).",
-    )
+    add_namespace_argument(parser, repeatable=True)
     parser.add_argument("--no-kubernetes", action="store_true", help="Skip the Kubernetes emulation Job lookup.")
     parser.add_argument("--no-pbs", action="store_true", help="Skip the PBS scheduler lookup.")
     parser.add_argument(
         "--markers", action="store_true", help="Also read the upload and stage markers from the S3 run prefix."
     )
     add_s3_arguments(parser, "S3 run root of --markers (default: $ARTIFACT_URI).")
-    parser.add_argument("--json", action="store_true", help="Print one JSON object instead of text.")
+    add_record_arguments(parser)
     return parser
 
 

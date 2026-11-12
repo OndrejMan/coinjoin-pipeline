@@ -8,6 +8,7 @@ them here keeps their names in one place instead of in every client.
 
 from __future__ import annotations
 
+import argparse
 import getpass
 import json
 import os
@@ -20,7 +21,41 @@ from .execution.pbs.status import LEFT_SCHEDULER, PBS_COMMAND_TIMEOUT_SECONDS, j
 from .execution.pbs.submission import recorded_pbs_job_ids
 from .execution.probes import PROBE_RUNNING, PROBE_TERMINAL
 from .execution.pbs.validation import PBSError, require_safe_pbs_token
+from .configuration import KubernetesConfiguration
 from .storage.s3 import S3Access, run_prefix_uri, s3_object_exists, stage_marker_uri, upload_marker_uri
+
+DEFAULT_NAMESPACE = KubernetesConfiguration().namespace
+
+
+def add_namespace_argument(parser: argparse.ArgumentParser, *, repeatable: bool = False) -> None:
+    """--namespace and --kubeconfig, worded and defaulted the same in every utility."""
+    if repeatable:
+        parser.add_argument(
+            "--namespace",
+            action="append",
+            help=f"Kubernetes namespace of the runs (repeatable; default: {DEFAULT_NAMESPACE}).",
+        )
+    else:
+        parser.add_argument(
+            "--namespace",
+            default=DEFAULT_NAMESPACE,
+            help=f"Kubernetes namespace of the run (default: {DEFAULT_NAMESPACE}).",
+        )
+    parser.add_argument(
+        "--kubeconfig", help="kubeconfig file (default: the first file of $KUBECONFIG, else ~/.kube/config)."
+    )
+
+
+def add_record_arguments(parser: argparse.ArgumentParser) -> None:
+    """--search-root and --json of the utilities that read a run's records."""
+    parser.add_argument(
+        "--search-root",
+        action="append",
+        type=Path,
+        help="Runs root holding <run-id>/.pbs/*.jobid (repeatable, earlier wins; default: the runs root).",
+    )
+    parser.add_argument("--json", action="store_true", help="Print one JSON object instead of text.")
+
 
 #: Resources an S3 emulation creates under the run label. The Role and RoleBinding
 #: carry no run label; owner references on the Job remove them.

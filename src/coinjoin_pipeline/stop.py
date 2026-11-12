@@ -16,9 +16,8 @@ from pathlib import Path
 from .console import EXIT_FAILURE, EXIT_OK, fail
 from .execution.kubernetes import RUN_ID_LABEL, kubectl, kubectl_command, resolve_kubeconfig
 from .execution.pbs.submission import qdel_error
-from .run_records import RUN_RESOURCE_TYPES, recorded_jobs
+from .run_records import RUN_RESOURCE_TYPES, add_namespace_argument, add_record_arguments, recorded_jobs
 from .run_ids import validate_run_id
-from .watch import DEFAULT_NAMESPACE
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,23 +29,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--run-id", required=True, help="Run to stop.")
-    parser.add_argument(
-        "--namespace",
-        default=DEFAULT_NAMESPACE,
-        help=f"Kubernetes namespace of the run (default: {DEFAULT_NAMESPACE}).",
-    )
-    parser.add_argument("--kubeconfig", help="kubeconfig file (default: $KUBECONFIG, else ~/.kube/config).")
-    parser.add_argument(
-        "--search-root",
-        action="append",
-        type=Path,
-        help="Runs root holding <run-id>/.pbs/*.jobid (repeatable; default: the runs root).",
-    )
+    add_namespace_argument(parser)
     parser.add_argument("--pbs-only", action="store_true", help="Cancel PBS jobs only; leave Kubernetes alone.")
     parser.add_argument(
         "--save-pod-logs", type=Path, help="Append the run's pod logs to this file before deleting the pods."
     )
-    parser.add_argument("--json", action="store_true", help="Print one JSON object instead of text.")
+    add_record_arguments(parser)
     return parser
 
 

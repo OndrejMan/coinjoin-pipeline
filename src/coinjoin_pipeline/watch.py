@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterator, TextIO
 
-from .configuration import KubernetesConfiguration
+from .run_records import add_namespace_argument
 from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, fail
 from .execution.kubernetes import kubectl_command, resolve_kubeconfig
 from .execution.pbs.defaults import MAINNET_SYNC_RESOURCES
@@ -26,7 +26,6 @@ from .paths import default_runs_root
 from .run_ids import is_valid_run_id, RUN_ID_RULE
 
 # The pipeline's own default, so a run started without --namespace is found without it.
-DEFAULT_NAMESPACE = KubernetesConfiguration().namespace
 DEFAULT_WAIT_SECONDS = 120
 ALL_COMPONENTS = {"controller", "uploader", "engine"}
 ENGINE_SELECTORS = {
@@ -76,15 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=_run_id,
         help="Pipeline run ID used for Kubernetes and PBS source discovery.",
     )
-    parser.add_argument(
-        "--namespace",
-        default=DEFAULT_NAMESPACE,
-        help=f"Kubernetes namespace of the run (default: {DEFAULT_NAMESPACE}).",
-    )
-    parser.add_argument(
-        "--kubeconfig",
-        help="kubeconfig file (default: the first file of $KUBECONFIG, else ~/.kube/config).",
-    )
+    add_namespace_argument(parser)
     parser.add_argument(
         "--components",
         default="controller",
