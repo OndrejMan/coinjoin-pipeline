@@ -432,6 +432,8 @@ def export_command(active_run_id: str, env: dict[str, str]) -> list[str]:
         "report",
         "--run-dir",
         f"{settings.RUNS_ROOT_CONTAINER}/{active_run_id}",
+        "--engine",
+        env.get("COINJOIN_ENGINE", settings.DEFAULT_ENGINE),
     ]
     for name, key in (
         ("coinjoin-type", "BLOCKSCI_COINJOIN_TYPE"),
@@ -464,6 +466,10 @@ def run_export_only(args: PipelineConfiguration) -> None:
         f"{emulation_logs_dir}:{settings.RUNS_ROOT_CONTAINER}:rw",
         "-v",
         f"{env['EXPORTERS_DIR']}:/mnt/exporters:ro",
+        "--env",
+        "REPRODUCTION_COMMAND",
+        "--env",
+        "COINJOIN_EMULATOR_GIT_COMMIT",
         "--entrypoint",
         "",
         image,

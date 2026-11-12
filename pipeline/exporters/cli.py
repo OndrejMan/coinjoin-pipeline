@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from exporters.analysis_artifact import load_analysis as load_blocksci_analysis
@@ -43,7 +44,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--config", type=Path, help="BlockSci config; defaults to the selected run config.")
     parser.add_argument("--runs-root", type=Path, default=Path("/runs/emulation/logs"))
     parser.add_argument("--run-dir", required=True, help="Run folder path or name under --runs-root.")
+    parser.add_argument("--engine", default=os.environ.get("COINJOIN_ENGINE"))
     parser.add_argument("--output-name", default=REPORT_JSON)
+    parser.add_argument("--emulator-git-commit", default=os.environ.get("COINJOIN_EMULATOR_GIT_COMMIT"))
     parser.add_argument(
         "--blocksci-analysis",
         type=Path,
@@ -93,6 +96,8 @@ def assemble_report(args: argparse.Namespace) -> int:
         Detector.from_args(args, analysis["first_wasabi2_block"]),
         scenario,
         emulator_data=emulator_data,
+        engine=args.engine,
+        emulator_git_commit=args.emulator_git_commit,
     )
     save_json(output_path, report)
     print(f"Unified report saved to {output_path}")

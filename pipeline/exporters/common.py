@@ -56,6 +56,13 @@ def sha256_json(data: JsonValue) -> str:
     return hashlib.sha256(canonical_json(data).encode("utf-8")).hexdigest()
 
 
+def first_present(*values: str | None) -> str | None:
+    for value in values:
+        if value is not None and value != "":
+            return value
+    return None
+
+
 def file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
