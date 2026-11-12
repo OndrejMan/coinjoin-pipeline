@@ -18,6 +18,7 @@ from exporters.artifact_paths import (
     STAGED_EXPORTERS_DIR,
 )
 
+from coinjoin_pipeline.registry import pinned_reference
 from coinjoin_pipeline.storage.s3 import (
     S3Target,
     validate_artifact_uri,
@@ -110,7 +111,8 @@ def render_python_stage(
     image_settings: dict[str, str] = {}
     if image is not None:
         require_safe_image(image)
-        image_settings = {"image": image}
+        # The job runs the digest the tag names now.
+        image_settings = {"image": pinned_reference(image)}
     files = {
         # One flat object: the worker reads it as StageSettings and as the job's own type.
         "settings.json": json.dumps({**common, **settings, **image_settings}, indent=2),

@@ -7,6 +7,7 @@ from typing import Literal
 
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.pbs_settings import pbs_image
+from coinjoin_pipeline.registry import pinned_reference
 
 from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND
 from .validation import require_safe_image
@@ -64,8 +65,9 @@ def analysis_image_arguments(config: PipelineConfiguration) -> list[str]:
     """
     arguments: list[str] = []
     for flag, image in (
-        ("--blocksci-image", pbs_image(config, "blocksci")),
-        ("--coinjoin-analysis-image", pbs_image(config, "coinjoin_analysis")),
+        # The same pinned references the jobs run, so the artifact carries their digests.
+        ("--blocksci-image", pinned_reference(pbs_image(config, "blocksci"))),
+        ("--coinjoin-analysis-image", pinned_reference(pbs_image(config, "coinjoin_analysis"))),
         ("--coinjoin-emulator-image", config.images.emulator),
         ("--uploader-image", config.images.uploader),
     ):
