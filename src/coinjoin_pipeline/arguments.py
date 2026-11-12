@@ -69,6 +69,7 @@ ACTION_SUMMARIES = {
     "pbs-from-s3": "submit PBS analysis jobs for a run already in S3",
     "initialize": "pull the emulation and analysis images through Compose",
     "clean": "remove the local pipeline containers and volumes (needs --yes)",
+    "external-analyze": "analyze an external Bitcoin datadir against a baseline",
 }
 
 # Argument groups by the first segment of the model path; top-level fields are "".
@@ -90,6 +91,7 @@ SECTIONS = {
         "A stage-specific --pbs-<stage>-* value overrides the shared --pbs-* fallback, "
         "which overrides the stage's default.",
     ),
+    "external": ("external-analyze", "Only for `cjp external-analyze`."),
 }
 
 # Help text by model path. The YAML key and the default are appended automatically.
@@ -184,6 +186,12 @@ HELP = {
     "blocksci.storage_report_uri": "with --blocksci-restore-index: S3 object receiving the kept copy's size",
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
     "pbs.bitcoin_datadir": "Bitcoin datadir the PBS BlockSci stage reads",
+    "external.bitcoin_datadir": "Bitcoin datadir to analyze",
+    "external.baseline": "baseline to compare the detections against",
+    "external.false_cjtxs": "false_cjtxs.json applied to the baseline (repeatable)",
+    "external.min_free_gb": "free space the run directory needs, in GiB (default: 20)",
+    "external.resume": "resume the external analysis of --run-id",
+    "external.network": "chain of the external Bitcoin datadir",
     "joinmarket.detector": "deprecated subset-matching JoinMarket scan of the report; definite matches more strictly",
     "joinmarket.min_base_fee": (
         "deprecated subset-matching scan: smallest fee allowance of one participant, in satoshis"

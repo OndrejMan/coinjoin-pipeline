@@ -24,6 +24,7 @@ from exporters.artifact_paths import (
 from exporters.common import file_sha256, load_json
 
 from coinjoin_pipeline.execution.run_context import is_run_dir as has_marker
+from coinjoin_pipeline.manifest import atomic_write
 
 StageStatus = Literal["missing", "stale", "present"]
 ReportStatus = Literal[
@@ -149,3 +150,39 @@ def discover_runs(runs_root: Path) -> list[RunState]:
         status = report_status(path)
         states.append(RunState(path, mode_for_run(path, manifest), stage_state(path, status), status, manifest))
     return states
+
+
+def create_external_manifest(
+    run_dir: Path,
+    bitcoin_datadir: Path,
+    baseline: Path,
+    network: str,
+    coinjoin_type: str,
+    false_cjtxs: list[Path] | None = None,
+) -> RunManifest:
+    return {
+        "schema_version": 1,
+        "mode": "external",
+        "run_id": run_dir.name,
+        "network": network,
+        "coinjoin_type": coinjoin_type,
+        "inputs": {
+            "bitcoin_datadir": str(bitcoin_datadir.resolve()),
+            "baseline": str(baseline.resolve()),
+            "baseline_sha256": file_sha256(baseline),
+            "false_cjtxs": [
+                {
+                    "path": str(path.resolve()),
+                    "sha256": file_sha256(path),
+                }
+                for path in (false_cjtxs or [])
+            ],
+        },
+    }
+
+
+def write_manifest(run_dir: Path, manifest: RunManifest) -> None:
+    target = run_dir / RUN_MANIFEST
+    if target.exists():
+        raise FileExistsError(f"Run manifest already exists: {target}")
+    atomic_write(target, manifest)
