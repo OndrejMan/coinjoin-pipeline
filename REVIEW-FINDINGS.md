@@ -8,6 +8,55 @@ Závažnost: **S** střední (může dát špatný výsledek nebo zablokovat bě
 (čitelnost, kosmetika, drobná nekonzistence). Jistota: *ověřeno* (přečteno v kódu a dohledáno
 všechna místa), *podezření* (vyplývá z kódu, neověřeno během).
 
+## Stav oprav (2026-11-12)
+
+Opravy jsou nové commity nad historií ve větvi `clean-history`; existující commity jsem neměnil.
+Čísla odkazují na položky v sekcích níže.
+
+**Opraveno**
+
+- Bugy 1 — úklid při přerušení hledá kontejnery podle labelu Compose projektu
+  („fix(cleanup): stop the Compose project's containers when the CLI is interrupted“).
+  Při tom se ukázalo, že `tests/test-wrapper-signal-cleanup.sh` vždy padal na případu TERM:
+  oba případy běžely ve stejné minutě a druhý narazil na kolizi run ID
+  („fix(test): give each signal-cleanup case its own run ID“).
+- Nesrovnalosti 9 (komentář v `delete.sh`), 18 (`zstd` v kombinovaném jobu), 24 a 25 (nápověda
+  `--blocksci-script` a `--distributor-startup-timeout`), 26 (epilog utilit s vlastním `--help`),
+  27 (exit kódy 3/4), 28 (funkce za `__main__`), 37 (README: šest jobů mainnetu).
+- Zbytečný kód 1 (`unified_report.py`), 3 (Namespace v S3 Jobu), 6 a 7 (`report_here` v
+  kombinovaném BlockSci jobu), 9 (`walltime_to_seconds`), 11 (`check_images`), 12 (volumy
+  v `delete.sh`), 14 (`--build`), 15 (komentář v `compose.yaml`), 16 a 17 (hlášky o starém
+  wrapperu a přejmenování), 18 (aliasy `$EMULATOR_IMAGE*`), 19 (`TARGET_DETAIL_LIMIT`),
+  20 (`skipped_txids` ve fixturách), 21 (`pbs_submission_dir`).
+- Overengineering 2 (`shell_value`; `shell_assignment` zůstal).
+- Refaktoring 4 (`BlockSciWorkflow`), 9 (`PBS_SCRATCH_TYPES`/`PBS_MULTIJOB_LOCATIONS`; literály teď
+  žijí v `stages.py` a `pbs/defaults.py` a konfigurace je importuje, jinak by vznikl cyklický
+  import), 10 (kořeny běhů v kontejneru).
+- Zlepšení 3 (`process.run` vypíše důvod), 4 (formátování `images.py` a `storage/s3.py`),
+  10 (importy v `kubernetes.py`), 11 (timeout uploaderu jako deadline; se zpomaleným kubectl
+  trval 5s timeout 18 s, teď 6 s).
+- Navíc: commit nástrojů přestavby dostal `.peel/` pod `ruff check .`, opraveno v „style(history): …“.
+
+**Nepotvrdilo se**
+
+- Nesrovnalosti 1 — volby `kubernetes.btc_node_image` a `image_pull_policy` nejsou tiše
+  ignorované: `option_rules` je mimo S3 emulaci výslovně odmítne a nápověda je uvádí jako S3-only.
+- Zbytečný kód 4 — sdílená hlavička `k8s_s3_access.sh` funkci `write_s3_credentials` jen
+  definuje; preflight i uploader ji volají každý jednou.
+
+**Ponecháno záměrně / k rozhodnutí**
+
+- Bugy 2 — výchozí akce `full-run` je dokumentovaná (i pro `runIt.sh`); změna je na tobě.
+- Bugy 3 — povinné `kinit -R` u `pbs-from-s3`/`mainnet-sync` je popsané jako kontrakt
+  v `docs/pbs-stage-contract.md:408`; změna je rozhodnutí o provozu na MetaCentru.
+- Zbytečný kód 5, 8, 10 — fallbacky image chrání volání mimo `RunContext` (testy a přímé volání
+  knihoven); přínos odstranění je malý.
+- Refaktoring 11 — `embedded_file` je inverze `write_files` a sdílí s ním `_delimiter`.
+- Zlepšení 13 — `restore_archive` čte archiv z vlastního bucketu a ověřuje SHA-256; tvrdší
+  kontrola členů zůstává jako zlepšení.
+
+Ostatní položky jsou dál otevřené.
+
 ## Potenciální bugy
 
 1. **S, ověřeno** — `src/coinjoin_pipeline/execution/containers.py:cleanup_peer_containers` +
