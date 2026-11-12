@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 # Tasks that may read the index of another run (--blocksci-cache-source-run-id) without writing to it.
 READ_ONLY_CACHE_TASKS = frozenset({"script", "notebook"})
 PERSISTENT_INDEX_TASKS = frozenset({"parse", "update", "backup"}) | READ_ONLY_CACHE_TASKS
+# The jobs that only maintain the index; their state can live at one fixed S3 prefix.
+INDEX_STATE_TASKS = ("parse", "update", "backup")
 
 
 def _supplied(config: PipelineConfiguration, path: str, value: object) -> bool:
@@ -45,6 +47,10 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
     ):
         if _supplied(config, f"pbs.{stage.replace('-', '_')}.multijob", resources.multijob):
             errors.append(f"--pbs-{stage}-multijob is supported only for the BlockSci stage")
+    if blocksci.index_state_uri and (not index_dir or blocksci.task not in INDEX_STATE_TASKS):
+        errors.append(
+            "--blocksci-index-state-uri requires --blocksci-index-dir and --blocksci-task parse, update or backup"
+        )
     if not index_dir:
         # Without an index directory these would be dropped silently: the job uses the S3 cache.
         errors.extend(
