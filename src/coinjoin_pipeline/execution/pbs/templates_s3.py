@@ -31,6 +31,7 @@ from coinjoin_pipeline.configuration import (
 )
 from coinjoin_pipeline.execution.coinjoin_tools import (
     RESEARCH_PROGRAMS,
+    WORKFLOW_SCRIPTS,
     command as coinjoin_tools_command,
     command_argv,
     uses_run_input,
@@ -123,6 +124,8 @@ def render_coinjoin_tools_s3_pbs(
         files["coinjoin_research.py"] = (EXPORTERS_ROOT / "coinjoin_research.py").read_text(encoding="utf-8")
         if program == "update_txids_with_wabisator":
             files["wabisator_source.py"] = template("wabisator_source.txt")
+    if program in WORKFLOW_SCRIPTS:
+        files = {f"{program}.sh": WORKFLOW_SCRIPTS[program].read_text(encoding="utf-8")}
     return render_python_stage(
         "coinjoin-analysis",
         target,

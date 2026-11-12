@@ -38,10 +38,17 @@ PROGRAM_ACTIONS = {
     "analyze_tx_size": (),
     "generate_llm_inputs": (),
     "update_txids_with_wabisator": (),
+    # The CRoCS daily workflow over a Dumplings snapshot; its operations are the protocols to process.
+    "coinjoin_statistics": ("wasabi2", "wasabi1", "joinmarket"),
 }
 POSITIONAL_PROGRAMS = frozenset({"scan_results_plot", "file_check", "visualize_coordinators", "perf_processing"})
 RESEARCH_PROGRAMS = frozenset({"analyze_tx_size", "generate_llm_inputs", "update_txids_with_wabisator"})
-MAINNET_PROGRAMS = frozenset({"parse_dumplings", "visualize_coordinators", "update_txids_with_wabisator"})
+# Sequences of existing coinjoin-analysis commands, run by a shipped shell script.
+WORKFLOW_PROGRAMS = frozenset({"coinjoin_statistics"})
+WORKFLOW_SCRIPTS = {"coinjoin_statistics": Path(__file__).parent / "pbs/templates/coinjoin_statistics.sh"}
+MAINNET_PROGRAMS = frozenset(
+    {"parse_dumplings", "visualize_coordinators", "update_txids_with_wabisator", "coinjoin_statistics"}
+)
 EMULATION_PROGRAMS = frozenset({"parse_cj_logs", "generate_llm_inputs"})
 RESEARCH_FIELDS = {
     "analyze_tx_size": {"txid", "tx_hex", "transaction_file", "input_indices", "output_indices", "allow_network"},
@@ -112,7 +119,7 @@ def relative_path(value: str) -> bool:
 
 def needs_external_input(options: CoinjoinAnalysisConfiguration) -> bool:
     return (
-        options.program in {"parse_dumplings", *POSITIONAL_PROGRAMS}
+        options.program in {"parse_dumplings", *POSITIONAL_PROGRAMS, *WORKFLOW_PROGRAMS}
         or options.actions == ("collect_local",)
         or (options.program == "ww2_analyze_client" and options.actions != ("process_emulations",))
     )
@@ -183,6 +190,11 @@ def _operation_errors(options: CoinjoinAnalysisConfiguration) -> list[str]:
         errors.append("--analysis-filename is only supported by scan_results_plot")
     if program in POSITIONAL_PROGRAMS and (options.env_vars or options.load_config):
         errors.append(f"{program} has no --env_vars or --load-config option")
+    if program in WORKFLOW_PROGRAMS:
+        if options.env_vars or options.load_config or options.target_paths:
+            errors.append(f"{program} sets its own switches and paths; choose only its protocols")
+        if len(set(options.actions)) != len(options.actions):
+            errors.append(f"{program} lists each protocol once")
     if options.load_config and program not in {"parse_cj_logs", "parse_dumplings"}:
         errors.append("--analysis-load-config is supported by parse_cj_logs and parse_dumplings")
     return errors
@@ -238,6 +250,8 @@ def command_argv(options: CoinjoinAnalysisConfiguration, run_id: str) -> list[st
         for path in paths:
             argv.extend(["--target-path", path])
         return argv
+    if options.program in WORKFLOW_PROGRAMS:
+        return ["bash", f"/work/{options.program}.sh", *options.actions]
     default = (
         run_id if options.program == "ww2_analyze_client" and not (options.input_uri or options.input_dir) else "."
     )
@@ -314,6 +328,8 @@ def run_local(config: PipelineConfiguration, run_dir: Path) -> Path:
             shutil.copytree(data, experiment / "data", dirs_exist_ok=True)
     if options.program in RESEARCH_PROGRAMS:
         shutil.copyfile(EXPORTERS_ROOT / "coinjoin_research.py", output / "coinjoin_research.py")
+    if options.program in WORKFLOW_SCRIPTS:
+        shutil.copyfile(WORKFLOW_SCRIPTS[options.program], output / f"{options.program}.sh")
     if options.program == "update_txids_with_wabisator":
         shutil.copyfile(Path(__file__).parent / "pbs/templates/wabisator_source.txt", output / "wabisator_source.py")
     (output / "invocation.json").write_text(
