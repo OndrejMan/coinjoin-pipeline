@@ -56,6 +56,7 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
         ("artifacts.credentials_file", validate_credentials_file),
         ("artifacts.profile", validate_s3_profile),
         ("run_id", validate_run_id),
+        ("blocksci.cache_source_run_id", validate_run_id),
     ):
         value = config_value(config, path)
         if value is not None:

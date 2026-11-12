@@ -118,6 +118,7 @@ class BlockSciConfiguration(ConfigurationModel):
     workflow: BlockSciWorkflow = option("combined", name="blocksci_workflow")
     task: BlockSciTask = option("detect", name="blocksci_task")
     script: str | None = option(None, name="blocksci_script")
+    cache_source_run_id: str | None = option(None, name="blocksci_cache_source_run_id")
     notebook_port: int = option(8888, name="blocksci_notebook_port", minimum=1)
     notebooks_dir: str | None = option(None, name="blocksci_notebooks_dir")
     # Script task only: the last height the analysis may see (Blockchain(config, pin_height + 1))

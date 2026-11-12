@@ -136,7 +136,12 @@ def render_blocksci_analyze_s3_pbs(
     mode: str = "blocksci-analyze",
     blocksci: BlockSciConfiguration = BlockSciConfiguration(),
 ) -> str:
-    """Render analysis, custom-script, or notebook work over a cached index."""
+    """Render analysis, custom-script, or notebook work over a cached index.
+
+    With ``blocksci.cache_source_run_id`` the index comes read-only from that run's cache
+    while outputs, markers, and logs stay under the target run, so several analyses
+    can share one published index without touching it.
+    """
     if mode not in MODE_OUTPUTS:
         raise PBSError(f"Unsupported reusable BlockSci mode: {mode}")
     return render_python_stage(
@@ -147,6 +152,8 @@ def render_blocksci_analyze_s3_pbs(
         {
             **analysis_mode_settings(mode, blocksci),
             "command": command,
+            "source_run_id": blocksci.cache_source_run_id,
+            "artifact_uri": validate_artifact_uri(target.artifact_uri),
         },
         job="blocksci-analysis",
         extra_files=(NOTEBOOK_SERVER,) if mode == "blocksci-notebook" else (),

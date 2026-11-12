@@ -134,6 +134,7 @@ HELP = {
     "blocksci.workflow": "combined parses and detects in one job; reusable keeps the index; cached reuses one",
     "blocksci.task": "what the BlockSci job does; detect is the regular analysis",
     "blocksci.script": "Python script of --blocksci-task script",
+    "blocksci.cache_source_run_id": "run whose BlockSci index cache this task reads",
     "blocksci.notebook_port": "preferred Jupyter port of --blocksci-task notebook (1024-65535)",
     "blocksci.notebooks_dir": "notebook directory of --blocksci-task notebook",
     "blocksci.pin_height": "script task: the last height the analysis may see",

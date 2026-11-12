@@ -98,4 +98,6 @@ class BlocksciSettings(CommandSettings):
 
 
 class BlocksciAnalysisSettings(CommandSettings, AnalysisModeSettings):
-    """Detection, a user script or a notebook over this run's index."""
+    # The run whose S3 cache is read, by default this one.
+    source_run_id: str | None
+    artifact_uri: str

@@ -18,7 +18,7 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import cast
 
-from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, BLOCKSCI_PARSE_DIR, STAGED_EXPORTERS_DIR
+from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, BLOCKSCI_DIR, BLOCKSCI_PARSE_DIR, STAGED_EXPORTERS_DIR
 
 from coinjoin_pipeline.execution.pbs.blocksci_index import (
     container_run,
@@ -148,13 +148,18 @@ def blocksci_analysis(stage: Stage) -> None:
     if settings["output"].get("notebooks_dir") and not output.is_dir():
         raise StageFailure(f"BlockSci notebooks directory does not exist on the compute node: {output}")
     output.mkdir(parents=True, exist_ok=True)
-    restore_index(
-        stage,
-        stage.work / BLOCKSCI_PARSE_DIR,
-        f"{stage.run_prefix}/{BLOCKSCI_PARSE_DIR}",
-        stage.run_id,
-        "BlockSci index",
-    )
+    cache_run = settings.get("source_run_id") or stage.run_id
+    prefix = f"{settings['artifact_uri']}/{cache_run}/{BLOCKSCI_PARSE_DIR}"
+    cache = stage.work / BLOCKSCI_PARSE_DIR
+    restore_index(stage, cache, prefix, cache_run, "BlockSci index")
+    if settings.get("source_run_id"):
+        # Record which published index the outputs were computed from.
+        shutil.copyfile(cache / "manifest.json", output / "blocksci-cache-manifest.json")
+        (output / "blocksci-source.json").write_text(
+            json.dumps({"source_run_id": cache_run}, separators=(",", ":")) + "\n"
+        )
+        parsed = f"{BLOCKSCI_DIR}/parsed"
+        binds.append(f"{stage.work / parsed}:{container_run(stage)}/{parsed}:ro")
     if settings.get("user_script"):
         script = Path(str(settings["user_script"]))
         shutil.copyfile(script, output / "script.py")

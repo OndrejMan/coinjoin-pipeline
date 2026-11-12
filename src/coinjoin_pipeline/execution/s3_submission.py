@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from exporters.artifact_paths import BASELINE_FILE
+from exporters.artifact_paths import BASELINE_FILE, BLOCKSCI_PARSE_DIR
 
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution.locks import acquire_lock, ensure_no_active_s3_pbs_submission, pbs_submit_lock_path
@@ -42,6 +42,7 @@ from coinjoin_pipeline.storage.s3 import (
     ArtifactTransportError,
     S3Target,
     clear_s3_stage_markers,
+    ensure_empty_run_prefix,
     run_prefix_uri,
     s3_access_preflight,
     s3_object_exists,
@@ -204,6 +205,16 @@ def _submit_s3_pbs_stages(args: PipelineConfiguration, submitted_jobs: list[tupl
     target = S3Target.from_args(args)
     access = target.access
     plan = s3_full_run_plan_from_args(args)
+    source_run_id = args.blocksci.cache_source_run_id
+    # Update and read-only analyses both start a fresh run from another run's published cache.
+    if source_run_id and not args.dry_run:
+        s3_access_preflight(access, target.artifact_uri)
+        if not s3_object_exists(
+            access,
+            f"{run_prefix_uri(target.artifact_uri, source_run_id)}/{BLOCKSCI_PARSE_DIR}/manifest.json",
+        ):
+            raise ArtifactTransportError(f"source BlockSci cache manifest does not exist for run {source_run_id}")
+        ensure_empty_run_prefix(access, target.artifact_uri, target.run_id)
     reads_baseline = any(stage.kind in (StageKind.REPORT, StageKind.MAPPINGS) for stage in plan.stages)
     if not args.dry_run and not args.stages.analysis and reads_baseline:
         s3_access_preflight(access, target.artifact_uri)

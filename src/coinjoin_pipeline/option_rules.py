@@ -13,6 +13,9 @@ from .storage.s3 import RUN_ID_RULE, is_valid_run_id
 if TYPE_CHECKING:
     from .configuration import PipelineConfiguration, PBSResourceConfiguration
 
+# Tasks that may read the index of another run (--blocksci-cache-source-run-id) without writing to it.
+READ_ONLY_CACHE_TASKS = frozenset({"script", "notebook"})
+
 
 def _supplied(config: PipelineConfiguration, path: str, value: object) -> bool:
     """Explicit false/null is inactive; zero and empty strings remain supplied."""
@@ -81,6 +84,7 @@ def _action_errors(config: PipelineConfiguration) -> list[str]:
         *_driver_errors(config),
         *_pbs_stage_errors(config, stages),
         *_blocksci_task_errors(config, stages),
+        *_cache_source_errors(config),
         *_height_errors(config),
         *_s3_errors(config, stages),
         *_remaining_errors(config, stages),
@@ -101,8 +105,12 @@ def _run_selection_errors(config: PipelineConfiguration) -> list[str]:
         and not _supplied(config, "yes", config.yes)
     ):
         errors.append("clean is destructive; pass --yes or --dry-run")
-    if config.run_id is not None and not is_valid_run_id(config.run_id):
-        errors.append(f"--run-id {RUN_ID_RULE}")
+    for flag, run_id in (
+        ("--run-id", config.run_id),
+        ("--blocksci-cache-source-run-id", config.blocksci.cache_source_run_id),
+    ):
+        if run_id is not None and not is_valid_run_id(run_id):
+            errors.append(f"{flag} {RUN_ID_RULE}")
     return errors
 
 
@@ -172,6 +180,22 @@ def _blocksci_task_errors(config: PipelineConfiguration, stages: _PbsStages) -> 
         ):
             if _supplied(config, path, value):
                 errors.append(f"{flag} requires --blocksci-task notebook")
+    return errors
+
+
+def _cache_source_errors(config: PipelineConfiguration) -> list[str]:
+    """Rules for reading the index of another run (--blocksci-cache-source-run-id)."""
+    errors: list[str] = []
+    blocksci = config.blocksci
+    source_run_id = blocksci.cache_source_run_id
+    if blocksci.task in READ_ONLY_CACHE_TASKS and source_run_id:
+        # The analysis only reads the source cache; its outputs and markers belong to its own run.
+        if blocksci.workflow != "cached":
+            errors.append("--blocksci-cache-source-run-id with an analysis task requires --blocksci-workflow cached")
+        if config.run_id == source_run_id:
+            errors.append("--blocksci-cache-source-run-id must differ from target --run-id")
+    elif source_run_id:
+        errors.append("--blocksci-cache-source-run-id requires --blocksci-task script or notebook")
     return errors
 
 
