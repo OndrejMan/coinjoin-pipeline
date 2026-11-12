@@ -1,8 +1,9 @@
 mkdir -p "/artifacts/$RUN_ID/.k8s"
 write_s3_credentials
-remaining="$EMULATION_TIMEOUT_SECONDS"
+# A deadline, not a countdown of the sleeps: the two kubectl calls per poll take time too.
+deadline=$((SECONDS + EMULATION_TIMEOUT_SECONDS))
 while [ ! -f /artifacts/.controller.done ] && [ ! -f /artifacts/.controller.failed ]; do
-  if [ "$remaining" -le 0 ]; then
+  if [ "$SECONDS" -ge "$deadline" ]; then
     printf 'controller exceeded emulation timeout (%ss)\n' "$EMULATION_TIMEOUT_SECONDS" >&2
     printf 'failed\n' > /artifacts/.controller.failed
     break
@@ -26,7 +27,6 @@ while [ ! -f /artifacts/.controller.done ] && [ ! -f /artifacts/.controller.fail
       ;;
   esac
   sleep 2
-  remaining=$((remaining - 2))
 done
 if [ -f /artifacts/.controller.failed ]; then
   printf 'failed\n' > "/artifacts/$RUN_ID/.k8s/upload.failed"
