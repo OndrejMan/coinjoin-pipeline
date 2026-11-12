@@ -1,5 +1,6 @@
 """The external comparison judges only heights BlockSci scanned (plan F3)."""
 
+from coinjoin_pipeline.context import resolve_run_images
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.pbs.commands import blocksci_external_report_pbs_command
 from exporters.normalization import restrict_baseline_to_window
@@ -44,7 +45,7 @@ def test_without_heights_the_report_says_so_instead_of_dropping_everything():
 def test_the_external_command_passes_the_window_and_threshold():
     command = blocksci_external_report_pbs_command(
         "mainnet-compare",
-        PipelineConfiguration.from_flat(
+        resolve_run_images(PipelineConfiguration.from_flat(
             {
                 "coinjoin_type": "wasabi2",
                 "min_input_count": 15,
@@ -52,7 +53,7 @@ def test_the_external_command_passes_the_window_and_threshold():
                 "blocksci_scan_start_height": 741213,
                 "blocksci_scan_end_height": 850001,
             }
-        ),
+        ))[0],
     )
 
     assert "--min-input-count 15" in command

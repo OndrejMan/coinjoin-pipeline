@@ -7,6 +7,7 @@ import subprocess
 
 import pytest
 
+from coinjoin_pipeline.context import resolve_run_images
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution import coinjoin_tools
 from coinjoin_pipeline.execution.pbs.scripts import embedded_file
@@ -195,7 +196,7 @@ def test_local_run_copies_the_workflow_script(monkeypatch, tmp_path):
     source = tmp_path / "snapshot"
     source.mkdir()
     (source / "Wasabi2CoinJoins.txt").write_text("")
-    model = PipelineConfiguration.from_mapping(
+    model = resolve_run_images(PipelineConfiguration.from_mapping(
         {
             "action": "coinjoin-analysis",
             "run_dir": "r1",
@@ -206,7 +207,7 @@ def test_local_run_copies_the_workflow_script(monkeypatch, tmp_path):
                 "input_dir": str(source),
             },
         }
-    )
+    ))[0]
     model.validate()
     seen = {}
 

@@ -13,7 +13,8 @@ from coinjoin_pipeline.execution.pbs_settings import (
 )
 
 
-@pytest.mark.parametrize("option", ["pbs_blocksci_image", "pbs_image", "default"])
+# The default image comes from RunContext (images.blocksci), covered by the registry test below.
+@pytest.mark.parametrize("option", ["pbs_blocksci_image", "pbs_image"])
 @pytest.mark.parametrize(
     "reference,expected",
     [
@@ -29,12 +30,8 @@ from coinjoin_pipeline.execution.pbs_settings import (
         ("blocksci.sif", "blocksci.sif"),
     ],
 )
-def test_pbs_image_normalizes_registry_references_only(monkeypatch, option, reference, expected):
-    from coinjoin_pipeline.execution import pbs_settings
-
-    args = configuration(**({option: reference} if option != "default" else {}))
-    if option == "default":
-        monkeypatch.setattr(pbs_settings, "default_pbs_image", lambda component, registry=None: reference)
+def test_pbs_image_normalizes_registry_references_only(option, reference, expected):
+    args = configuration(**{option: reference})
     assert pbs_image(args, "blocksci") == expected
     assert with_singularity_scheme(reference) == expected
 

@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 from typing import Literal, get_args
 
-from coinjoin_pipeline.images import default_image
 
 # MetaCentrum's scratch_local is a spinning disk on most nodes; the SSD scratch keeps
 # downloading, checksumming and unpacking from bounding every stage.
@@ -47,20 +46,6 @@ MAINNET_SYNC_RESOURCES = {
     "pack": PBSResources(4, "3gb", "20gb", "24:00:00"),
     "clear": PBSResources(1, "2gb", "1gb", "02:00:00"),
 }
-
-# The image component behind each PBS image option.
-PBS_IMAGE_COMPONENTS = {
-    "blocksci": "blocksci",
-    "coinjoin_analysis": "coinjoin_analysis",
-    "mappings_enumerator": "mappings",
-    "sake": "sake",
-}
-
-
-def default_pbs_image(component: str, registry: str | None = None) -> str:
-    """The Singularity reference of one PBS component's released image in that registry."""
-    return f"docker://{default_image(PBS_IMAGE_COMPONENTS[component], registry)}"
-
 
 BLOCKSCI_IMAGE_PYTHON_COMMAND = (
     "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3"

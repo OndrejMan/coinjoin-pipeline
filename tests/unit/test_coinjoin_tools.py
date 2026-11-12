@@ -9,6 +9,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from coinjoin_pipeline.context import resolve_run_images
 from coinjoin_pipeline.arguments import load_configuration
 from coinjoin_pipeline.configuration import ConfigurationError, PipelineConfiguration
 from coinjoin_pipeline.execution import coinjoin_tools
@@ -22,7 +23,7 @@ def config(options, **overrides):
     options = {**options}
     if "data_mode" not in options and options.get("program") in coinjoin_tools.MAINNET_PROGRAMS:
         options["data_mode"] = "mainnet"
-    return PipelineConfiguration.from_mapping(
+    return resolve_run_images(PipelineConfiguration.from_mapping(
         {
             "action": "pbs-from-s3",
             "run_id": "r1",
@@ -37,7 +38,7 @@ def config(options, **overrides):
             "coinjoin_analysis": options,
             **overrides,
         }
-    )
+    ))[0]
 
 
 @pytest.mark.parametrize(

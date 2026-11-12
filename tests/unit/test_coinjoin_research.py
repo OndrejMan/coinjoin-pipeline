@@ -14,6 +14,7 @@ import pytest
 
 from exporters import coinjoin_research as research
 
+from coinjoin_pipeline.context import resolve_run_images
 from coinjoin_pipeline.arguments import load_configuration
 from coinjoin_pipeline.configuration import PipelineConfiguration, ConfigurationError
 from coinjoin_pipeline.execution.coinjoin_tools import command_argv
@@ -220,7 +221,7 @@ def test_llm_refuses_missing_ground_truth_before_loading_the_generator(workspace
 def test_local_refresh_stages_its_helper_even_when_the_image_omits_scripts(monkeypatch, tmp_path):
     run = tmp_path / "r1"
     run.mkdir()
-    config = PipelineConfiguration.from_mapping(
+    config = resolve_run_images(PipelineConfiguration.from_mapping(
         {
             "action": "coinjoin-analysis",
             "run_dir": "r1",
@@ -230,7 +231,7 @@ def test_local_refresh_stages_its_helper_even_when_the_image_omits_scripts(monke
                 "research": {"allow_network": True},
             },
         }
-    )
+    ))[0]
     config.validate()
 
     def execute(argv, **kwargs):

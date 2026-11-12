@@ -6,6 +6,7 @@ from unittest import mock
 
 import pytest
 
+from coinjoin_pipeline.context import resolve_run_images
 from coinjoin_pipeline.arguments import load_configuration
 from coinjoin_pipeline.configuration import ConfigurationError
 from coinjoin_pipeline.context import resolve_configuration
@@ -87,7 +88,7 @@ def test_an_invalid_option_value_is_refused(option, value) -> None:
 
 
 def test_the_job_renders_the_configured_options_not_the_environment(monkeypatch, tmp_path) -> None:
-    config = resolve_configuration(
+    config = resolve_run_images(resolve_configuration(
         load_configuration(
             [
                 *S3_EMULATE,
@@ -101,7 +102,7 @@ def test_the_job_renders_the_configured_options_not_the_environment(monkeypatch,
                 "Never",
             ]
         )
-    )
+    ))[0]
     # Set only after resolution: the Job must not read the process environment.
     monkeypatch.setenv("COINJOIN_BTC_NODE_IMAGE", "btc-node:env")
 
@@ -114,7 +115,7 @@ def test_the_job_renders_the_configured_options_not_the_environment(monkeypatch,
 
 
 def test_unset_options_leave_the_emulator_defaults(tmp_path) -> None:
-    environment = _controller_environment(resolve_configuration(load_configuration(S3_EMULATE)), tmp_path)
+    environment = _controller_environment(resolve_run_images(resolve_configuration(load_configuration(S3_EMULATE)))[0], tmp_path)
 
     for variable in (
         "COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT",

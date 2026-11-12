@@ -5,11 +5,11 @@ from __future__ import annotations
 from dataclasses import fields
 from typing import TYPE_CHECKING
 
+from coinjoin_pipeline.configuration import required
 from coinjoin_pipeline.execution.pbs.defaults import (
     DEFAULT_RESOURCES,
     PBS_QUEUE_MARGIN_SECONDS,
     PBSResources,
-    default_pbs_image,
 )
 from coinjoin_pipeline.execution.pbs.validation import walltime_to_seconds
 
@@ -40,11 +40,9 @@ def with_singularity_scheme(image: str) -> str:
 
 
 def pbs_image(args: PipelineConfiguration, component: str) -> str:
-    """The Singularity reference of one component: its own override, the shared one, the default."""
-    image = (
-        getattr(args.pbs, f"{component}_image") or args.pbs.image or default_pbs_image(component, args.images.registry)
-    )
-    return with_singularity_scheme(image)
+    """The Singularity reference of one component, which RunContext resolves for every run."""
+    image = getattr(args.pbs, f"{component}_image") or args.pbs.image
+    return with_singularity_scheme(required(image, f"pbs.{component}_image"))
 
 
 def stage_pbs_resources(

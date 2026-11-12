@@ -8,6 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from coinjoin_pipeline.context import resolve_run_images
 from coinjoin_pipeline.configuration import BlockSciConfiguration, PipelineConfiguration
 from types import SimpleNamespace
 from unittest import mock
@@ -205,7 +206,7 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     )
     command = blocksci_analysis_pbs_command(
         "run-1",
-        PipelineConfiguration.from_flat(
+        resolve_run_images(PipelineConfiguration.from_flat(
             {
                 "coinjoin_type": "wasabi2",
                 "min_input_count": 2,
@@ -214,7 +215,7 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
                 "joinmarket_percentage_fee": 4e-05,
                 "joinmarket_max_depth": 200000,
             }
-        ),
+        ))[0],
     )
     analyze = settings_of(render_blocksci_analyze_s3_pbs(**COMMON, image="docker://blocksci", command=command))
 
@@ -439,7 +440,7 @@ def test_s3_bitcoin_archive_parse_uploads_failure_log_before_marker(
 def test_cached_external_task_downloads_dumplings_baseline_and_uploads_report() -> None:
     command = blocksci_external_report_pbs_command(
         "run-1",
-        PipelineConfiguration.from_flat(
+        resolve_run_images(PipelineConfiguration.from_flat(
             {
                 "coinjoin_type": "joinmarket",
                 "min_input_count": None,
@@ -448,7 +449,7 @@ def test_cached_external_task_downloads_dumplings_baseline_and_uploads_report() 
                 "joinmarket_percentage_fee": 4e-05,
                 "joinmarket_max_depth": 200000,
             }
-        ),
+        ))[0],
     )
     settings = settings_of(
         render_blocksci_analyze_s3_pbs(
@@ -1105,7 +1106,7 @@ def test_s3_pbs_scratch_type_selects_the_scratch_resource() -> None:
 def test_read_only_source_cache_feeds_an_analysis_of_another_run() -> None:
     command = blocksci_external_report_pbs_command(
         "run-1",
-        PipelineConfiguration.from_flat(
+        resolve_run_images(PipelineConfiguration.from_flat(
             {
                 "coinjoin_type": "wasabi2",
                 "min_input_count": 15,
@@ -1114,7 +1115,7 @@ def test_read_only_source_cache_feeds_an_analysis_of_another_run() -> None:
                 "joinmarket_percentage_fee": 4e-05,
                 "joinmarket_max_depth": 200000,
             }
-        ),
+        ))[0],
     )
     settings = settings_of(
         render_blocksci_analyze_s3_pbs(

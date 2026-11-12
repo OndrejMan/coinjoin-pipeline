@@ -15,9 +15,9 @@ from uuid import uuid4
 
 from exporters.artifact_paths import COINJOIN_ANALYSIS_DIR, COINJOIN_ANALYSIS_TOOLS_DIR, EMULATOR_DIR
 
+from coinjoin_pipeline.configuration import required
 from coinjoin_pipeline.storage.s3 import validate_artifact_uri
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
-from coinjoin_pipeline.images import image_names
 
 if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import CoinjoinAnalysisConfiguration, PipelineConfiguration
@@ -284,10 +284,7 @@ def run_local(config: PipelineConfiguration, run_dir: Path) -> Path:
     # Named like a PBS result (UTC time, then the job), so both sort by when they ran.
     result_id = f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-local-{uuid4().hex[:8]}"
     output = run_dir / COINJOIN_ANALYSIS_TOOLS_DIR / str(options.program) / result_id
-    image = (
-        config.images.coinjoin_analysis
-        or f"{image_names(config.images.registry)['coinjoin_analysis']}:{config.images.version or 'latest'}"
-    )
+    image = required(config.images.coinjoin_analysis, "images.coinjoin_analysis")
     analyzer = command_argv(options, run_dir.name)
     argv = [
         config.runtime,

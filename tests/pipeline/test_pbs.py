@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from coinjoin_pipeline.context import resolve_run_images
 from coinjoin_pipeline.configuration import MappingsConfiguration, PipelineConfiguration
 from unittest import mock
 
@@ -375,7 +376,7 @@ class PBSTemplateTest(unittest.TestCase):
         run_dir = Path("/storage/run-a")
         command = blocksci_pbs_command(
             run_dir.name,
-            PipelineConfiguration.from_flat(
+            resolve_run_images(PipelineConfiguration.from_flat(
                 {
                     "coinjoin_type": "joinmarket",
                     "min_input_count": 1,
@@ -384,7 +385,7 @@ class PBSTemplateTest(unittest.TestCase):
                     "joinmarket_percentage_fee": 4e-05,
                     "joinmarket_max_depth": 200000,
                 }
-            ),
+            ))[0],
         )
         self.assertIn("worker.py run", command)
         self.assertIn("--report" if "worker.py run" in command else "worker.py report", command)
@@ -398,7 +399,7 @@ class PBSTemplateTest(unittest.TestCase):
     def test_blocksci_pbs_command_runs_custom_script_before_report(self):
         command = blocksci_pbs_command(
             "run-a",
-            PipelineConfiguration.from_flat(
+            resolve_run_images(PipelineConfiguration.from_flat(
                 {
                     "coinjoin_type": "joinmarket",
                     "min_input_count": 1,
@@ -407,7 +408,7 @@ class PBSTemplateTest(unittest.TestCase):
                     "joinmarket_percentage_fee": 4e-05,
                     "joinmarket_max_depth": 200000,
                 }
-            ),
+            ))[0],
             blocksci_script="/runs/emulation/logs/run-a/.pipeline/blocksci-script.py",
         )
 
@@ -417,7 +418,7 @@ class PBSTemplateTest(unittest.TestCase):
     def test_blocksci_pbs_command_can_defer_report(self):
         command = blocksci_pbs_command(
             "run-a",
-            PipelineConfiguration.from_flat(
+            resolve_run_images(PipelineConfiguration.from_flat(
                 {
                     "coinjoin_type": "joinmarket",
                     "min_input_count": 1,
@@ -426,7 +427,7 @@ class PBSTemplateTest(unittest.TestCase):
                     "joinmarket_percentage_fee": 4e-05,
                     "joinmarket_max_depth": 200000,
                 }
-            ),
+            ))[0],
             include_report=False,
         )
 
@@ -436,7 +437,7 @@ class PBSTemplateTest(unittest.TestCase):
     def test_blocksci_pbs_command_can_persist_analysis_for_lightweight_report(self):
         command = blocksci_pbs_command(
             "run-a",
-            PipelineConfiguration.from_flat(
+            resolve_run_images(PipelineConfiguration.from_flat(
                 {
                     "coinjoin_type": "wasabi2",
                     "min_input_count": None,
@@ -445,7 +446,7 @@ class PBSTemplateTest(unittest.TestCase):
                     "joinmarket_percentage_fee": 4e-05,
                     "joinmarket_max_depth": 200000,
                 }
-            ),
+            ))[0],
             include_report=False,
         )
 
@@ -461,13 +462,13 @@ class PBSTemplateTest(unittest.TestCase):
         # --cleanenv drops the image variables, so provenance must travel as options.
         command = blocksci_pbs_command(
             "run-a",
-            PipelineConfiguration.from_flat(
+            resolve_run_images(PipelineConfiguration.from_flat(
                 {
                     "pbs_blocksci_image": "ghcr.io/x/blocksci@sha256:" + "b" * 64,
                     "emulator_image": "ghcr.io/x/emulator:v1",
                     "uploader_image": "ghcr.io/x/uploader:v1",
                 }
-            ),
+            ))[0],
             include_report=False,
         )
 

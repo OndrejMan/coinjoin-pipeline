@@ -10,6 +10,7 @@ import sys
 
 import pytest
 
+from coinjoin_pipeline.context import resolve_run_images
 from coinjoin_pipeline.configuration import ConfigurationError, PipelineConfiguration
 from coinjoin_pipeline.context import resolve_configuration
 from coinjoin_pipeline.execution import mainnet_jobs, mainnet_runtime, mainnet_sync, mainnet_worker, s3_markers
@@ -30,7 +31,7 @@ from coinjoin_pipeline.execution.mainnet_worker import (
 
 @pytest.fixture
 def config(tmp_path):
-    return resolve_configuration(
+    return resolve_run_images(resolve_configuration(
         PipelineConfiguration.from_mapping(
             {
                 "action": "mainnet-sync",
@@ -51,7 +52,7 @@ def config(tmp_path):
                 "blocksci": {"index_dir": str(tmp_path / "index"), "index_backup_uri": "s3://local/index"},
             }
         )
-    )
+    ))[0]
 
 
 def test_restore_check_never_touches_the_working_dataset_or_sync_state(config):
