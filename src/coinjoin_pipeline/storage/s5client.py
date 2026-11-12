@@ -49,6 +49,14 @@ def pipe(stream: IO[bytes] | None) -> IO[bytes]:
     return stream
 
 
+def stream_sha256(stream: IO[bytes]) -> str:
+    """SHA-256 of everything left in stream."""
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: stream.read(CHUNK), b""):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
 def tree_bytes(root: Path, members: Sequence[str]) -> dict[str, int]:
     """Apparent size of each backup member, as tar reads it; links are not followed."""
     sizes = {}

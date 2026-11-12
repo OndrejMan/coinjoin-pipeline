@@ -1,4 +1,4 @@
-"""Manual restore → Core/Dumplings → BlockSci → checkpoint PBS chain over a shared working directory."""
+"""Manual restore → Core/Dumplings → BlockSci → checkpoint → pack PBS chain over a shared working directory."""
 
 from __future__ import annotations
 
@@ -186,6 +186,7 @@ def sync_settings(config: PipelineConfiguration, stage: str, budget: PBSResource
         }.get(stage),
         # Past the walltime the job is gone, so its lock entry may be cleared.
         "index_lock_seconds": walltime_to_seconds(budget.walltime) + 600,
+        "walltime_seconds": walltime_to_seconds(budget.walltime),
     }
 
 

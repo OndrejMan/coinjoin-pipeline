@@ -234,6 +234,7 @@ class PBSConfiguration(ConfigurationModel):
     producer: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     restore: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     checkpoint: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
+    pack: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
 
 
 @dataclass(frozen=True, slots=True)

@@ -39,6 +39,8 @@ MAINNET_SYNC_RESOURCES = {
     "producer": PBSResources(2, "8gb", "20gb", "24:00:00"),
     "blocksci": PBSResources(4, "64gb", "20gb", "24:00:00"),
     "checkpoint": PBSResources(4, "4gb", "20gb", "12:00:00"),
+    # One file per CPU at zstd -19: slow, but each file needs well under 1 GB.
+    "pack": PBSResources(4, "3gb", "20gb", "24:00:00"),
 }
 
 DEFAULT_PBS_IMAGES = {
