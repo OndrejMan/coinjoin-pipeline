@@ -53,10 +53,14 @@ run_signal_case() {
   : >"${stage_pid_file}"
   local output="${TMP_DIR}/wrapper-${signal}.out"
   : >"${docker_log}"
+  # Both cases start within the same minute, so they would derive the same run
+  # id; a run that already records a launch refuses a second one.
+  local runs_root="${LOGS_ROOT}/${signal}"
+  mkdir -p "${runs_root}"
 
   # Build the invocation from the same function the production path uses.
   local command_file="${TMP_DIR}/command-${signal}.sh"
-  python3 - "${command_file}" "${LOGS_ROOT}" <<'PY'
+  python3 - "${command_file}" "${runs_root}" <<'PY'
 import sys
 from pathlib import Path
 
