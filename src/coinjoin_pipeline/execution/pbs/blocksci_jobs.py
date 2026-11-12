@@ -128,7 +128,7 @@ class WrittenIndex:
         extra = {**extra, "pbs_resources": cast(IndexWriterSettings, stage.settings)["pbs_resources"]}
         manifest = index_manifest(stage.run_id, stage.settings["image_name"], source_kind, network, max_block, extra)
         stage.log("archiving reusable index")
-        self.store.publish(stage.work / BLOCKSCI_CONFIG_FILE, manifest)
+        self.store.publish(stage.work / BLOCKSCI_CONFIG_FILE, manifest, in_place=False)
         self.store.backup(threads=stage.settings["ncpus"])
         stage.log("reusable cache upload complete")
 
