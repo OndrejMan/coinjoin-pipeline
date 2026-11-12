@@ -19,6 +19,7 @@ from exporters.comparison import (
 )
 from exporters.parameters import Detector
 from exporters.report_types import TransactionRecord
+from exporters.scenario import build_scenario_checks
 
 MATCHED = "matched_by_both"
 MISSED = "missed_by_blocksci"
@@ -90,6 +91,8 @@ def build_summary(
     transactions: JsonObject,
     coinjoin_analysis: dict[str, TransactionRecord],
     blocksci_records: dict[str, TransactionRecord],
+    coinjoin_type: str,
+    scenario: JsonObject | None,
     emulator_data: JsonObject | None,
 ) -> JsonObject:
     statuses = Counter(transaction["comparison"]["status"] for transaction in transactions.values())
@@ -107,6 +110,7 @@ def build_summary(
             1.0 if coinjoin_analysis_count == 0 else 0.0,
         ),
         "coinjoin_analysis_coverage_by_blocksci": compute_rate(statuses[MATCHED], coinjoin_analysis_count, 1.0),
+        "scenario_checks": build_scenario_checks(scenario, coinjoin_analysis, coinjoin_type),
     }
     if emulator_data:
         emulator_summary = emulator_data.get("summary") or {}
@@ -140,7 +144,14 @@ def build_report(
         if independent_emulator_labels
         else None
     )
-    summary = build_summary(transactions, coinjoin_analysis, blocksci_records, emulator_data)
+    summary = build_summary(
+        transactions,
+        coinjoin_analysis,
+        blocksci_records,
+        coinjoin_type,
+        scenario,
+        emulator_data,
+    )
     divergences = build_divergences(transactions)
     summary["divergence_counts"] = {name: len(items) for name, items in divergences.items()}
     return {
