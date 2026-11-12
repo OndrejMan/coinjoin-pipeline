@@ -133,6 +133,7 @@ services:
         - ACTIVE_RUN_ID=${ACTIVE_RUN_ID:-}
         - BLOCKSCI_COINJOIN_TYPE=${BLOCKSCI_COINJOIN_TYPE:-wasabi2}
         - BLOCKSCI_MIN_INPUT_COUNT=${BLOCKSCI_MIN_INPUT_COUNT:-default}
+        - BLOCKSCI_EXPORT_REPORT=${BLOCKSCI_EXPORT_REPORT:-true}
       depends_on:
         manager:
           condition: service_completed_successfully # Wait for simulation to finish
@@ -145,7 +146,11 @@ services:
         - "-c"
         - |
           set -eu
-          python3 /mnt/exporters/worker.py run --share-output --report
+          set --
+          if [ "${BLOCKSCI_EXPORT_REPORT:-true}" = "true" ]; then
+            set -- --report
+          fi
+          python3 /mnt/exporters/worker.py run --share-output "$$@"
 
   coinjoin_analysis:
       profiles: ["analysis"]

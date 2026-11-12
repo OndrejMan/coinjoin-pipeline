@@ -78,6 +78,7 @@ class PipelineConfiguration(ConfigurationModel):
     run_timezone: str = option("Europe/Prague", name="run_timezone")
     min_input_count: int | None = option(None, name="min_input_count", minimum=1)
     dry_run: bool = option(False, name="dry_run")
+    parallel: bool = option(False, name="parallel", actions=("full-run",))
     all_runs: bool = option(False, name="all_runs", actions=("coinjoin-analysis",))
     analysis_action: AnalysisAction = option("collect_docker", name="analysis_action", actions=("coinjoin-analysis",))
     images: ImageConfiguration = field(default_factory=ImageConfiguration)

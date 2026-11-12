@@ -11,8 +11,10 @@ from pathlib import Path
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution.pipeline_logging import captured_pipeline_stage, exit_with_error
 from coinjoin_pipeline.execution.run_context import detect_active_run, run_dir_under_root
+from coinjoin_pipeline.execution.workflow import SharedStorageStageRunner, shared_storage_analysis_plan
 
 from . import containers, settings
+from .stage_executor import execute_analysis
 
 
 def _emulate(args: PipelineConfiguration, logs_root: Path) -> Path:
@@ -58,5 +60,8 @@ def run_configuration(args: PipelineConfiguration, logs_root: Path) -> None:
 
 
 def run_analysis(args: PipelineConfiguration, run_dir: Path, logs_root: Path) -> None:
-    with captured_pipeline_stage(logs_root, "Analysis", run_dir):
-        containers.run_script(settings.ANALYSIS_SCRIPT, config=args, active_run_id=run_dir.name)
+    graph = shared_storage_analysis_plan(args)
+    runner = SharedStorageStageRunner(args, run_dir)
+    name = "Parallel analysis" if args.parallel else "Serial analysis"
+    with captured_pipeline_stage(logs_root, name, run_dir):
+        execute_analysis(graph, runner, max_workers=max(1, len(graph)) if args.parallel else 1)

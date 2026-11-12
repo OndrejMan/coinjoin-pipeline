@@ -259,6 +259,18 @@ def run_coinjoin_analysis_docker_stage(active_run_id: str, analysis_action: str 
     )
 
 
+def run_blocksci_docker_stage(args: PipelineConfiguration, run_dir: Path, *, include_report: bool) -> None:
+    """Run only BlockSci through Compose, optionally deferring the unified report."""
+    env = compose_env(args, run_dir.name)
+    env["BLOCKSCI_EXPORT_REPORT"] = "true" if include_report else "false"
+    compose_cmd = compose_base_command(env)
+    run_command(
+        [*compose_cmd, "--profile", "analysis", "run", "--rm", "--no-deps", "blocksci"],
+        cwd=settings.ROOT_DIR,
+        env=env,
+    )
+
+
 def container_run_pull_args(image: str, env_name: str) -> list[str]:
     pull_policy = os.environ.get(env_name)
     if not pull_policy:
