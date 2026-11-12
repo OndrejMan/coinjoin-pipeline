@@ -127,6 +127,14 @@ class UnifiedReportSettings(CommandSettings):
     downloads: list[str]
 
 
+class DumplingsBaselineSettings(CommandSettings):
+    dumplings_uri: str
+    mix_id: str
+    false_cjtxs: str
+    # Run-relative path of the manifest copy the report reads.
+    snapshot_file: str
+
+
 class MappingsSettings(TypedDict):
     """The shell shared with the shared-storage job, and its images."""
 

@@ -33,6 +33,7 @@ SCENARIO_FILE = EMULATOR_DIR + "/scenario.json"
 EMULATOR_DATA_DIR = EMULATOR_DIR + "/data"
 ROUND_EVENTS_FILE = EMULATOR_DATA_DIR + "/joinmarket_round_events.json"
 BASELINE_FILE = COINJOIN_ANALYSIS_DIR + "/coinjoin_tx_info.json"
+FALSE_CJTXS_FILE = COINJOIN_ANALYSIS_DIR + "/false_cjtxs.json"
 # Every false-positive sidecar, including the numbered copies of extra inputs.
 FALSE_CJTXS_GLOB = "false_cjtxs.json*"
 # External baselines only: the Dumplings state the baseline was parsed from.
