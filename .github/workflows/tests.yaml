@@ -89,3 +89,111 @@ jobs:
 
       - name: Run static checks
         run: uv run lint --check
+
+  podman-wrapper:
+    runs-on: [self-hosted, x64]
+    needs: configuration-unit-tests
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Python
+        run: |
+          python3 --version
+          python3 - <<'PY'
+          import sys
+
+          if sys.version_info[:2] != (3, 14):
+              raise SystemExit(f"Expected Python 3.14, got {sys.version}")
+          PY
+
+      - name: Run runIt overactive-local dry test
+        run: ./tests/test-runIt-overactive-local.sh
+
+      - name: Run Podman wrapper dry test
+        run: ./tests/test-podman-no-host-docker.sh
+
+  docker-overactive-local:
+    runs-on: [self-hosted, x64]
+    needs: podman-wrapper
+    env:
+      KUBECTL_VERSION: v1.35.6
+      K3D_VERSION: v5.9.0
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run overactive-local through real Docker
+        env:
+          CONTAINER_RUNTIME: docker
+          EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-docker-emulation-logs
+        run: ./tests/test-runIt-overactive-local-docker.sh
+
+  podman-overactive-local:
+    runs-on: [self-hosted, x64]
+    needs: podman-wrapper
+    if: needs.gate.outputs.should-run == 'true'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR for Podman
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Run complete overactive-local pipeline through real Podman
+        env:
+          CONTAINER_RUNTIME: podman
+          EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-podman-emulation-logs
+        run: ./tests/test-runIt-overactive-local-podman.sh
+
+  docker-joinmarket:
+    runs-on: [self-hosted, x64]
+    needs: podman-wrapper
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run JoinMarket through real Docker with upstream images
+        env:
+          CONTAINER_RUNTIME: docker
+          EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-joinmarket-emulation-logs
+        run: ./tests/test-runIt-joinmarket-local-docker.sh
+
+  docker-parallel:
+    runs-on: [self-hosted, x64]
+    needs: podman-wrapper
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run overactive-local through real Docker with --parallel
+        env:
+          CONTAINER_RUNTIME: docker
+          EMULATION_LOGS_DIR: ${{ runner.temp }}/coinjoin-pipeline-parallel-emulation-logs
+        run: ./tests/test-runIt-parallel-local-docker.sh
