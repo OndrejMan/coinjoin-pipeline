@@ -111,10 +111,6 @@ def report_dir(run_dir: Path) -> Path:
     return run_dir / REPORT_DIR
 
 
-def mappings_dir(run_dir: Path) -> Path:
-    return _tool_dir(run_dir, MAPPINGS_DIR)
-
-
 def report_input_files(run_dir: Path) -> list[str]:
     """Relative paths of the report inputs present in ``run_dir``."""
     present = [name for name in REPORT_INPUT_FILES if (run_dir / name).is_file()]

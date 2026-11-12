@@ -122,8 +122,3 @@ def validated_s3_uri(value: str, description: str) -> str:
         return validate_artifact_uri(value)
     except ValueError as error:
         raise PBSError(f"Invalid {description}: {error}") from error
-
-
-def download_run_directory(name: str) -> str:
-    """Sync one run directory from the run prefix into the job's run work tree."""
-    return f's5 sync "$RUN_PREFIX/{name}/*" "$RUN_WORK/{name}/"'

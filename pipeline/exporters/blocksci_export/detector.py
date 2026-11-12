@@ -12,13 +12,11 @@ from typing import Protocol, cast
 
 from exporters.common import (
     DEFAULT_CLUSTER_MAX_DISTANCE,
-    JsonObject,
     coerce_sats,
     safe_attr,
     to_json_text,
     transaction_metrics,
 )
-from exporters.emulator_data import wallet_address_labels
 from exporters.integration_diagnostics import Blockchain
 from exporters.parameters import Detector
 from exporters.report_types import IORecord, TransactionRecord
@@ -384,28 +382,6 @@ def export_blocksci_mix_events(
 def build_default_coinjoin_clustering_heuristic() -> ClusteringHeuristic:
     coinjoin_heuristics = _require_blocksci().heuristics.coinjoin
     return coinjoin_heuristics.one_output_consolidation_2hops & coinjoin_heuristics.two_equal_output_consolidation_1hop
-
-
-def export_blocksci_cluster_assignments(
-    config_path: Path,
-    emulator_data: JsonObject | None,
-    coinjoin_txids: Iterable[str],
-    output_dir: Path,
-    max_distance: int = DEFAULT_CLUSTER_MAX_DISTANCE,
-) -> tuple[dict[str, str] | None, str | None]:
-    if blocksci is None:
-        return None, "BlockSci Python module is required for clustering evaluation."
-    labels_by_address = wallet_address_labels(emulator_data)
-    if not labels_by_address:
-        return None, "No emulator wallet address labels are available for clustering evaluation."
-
-    return export_blocksci_cluster_assignments_for_addresses(
-        config_path,
-        labels_by_address,
-        coinjoin_txids,
-        output_dir,
-        max_distance,
-    )
 
 
 def _run_coinjoin_clustering(

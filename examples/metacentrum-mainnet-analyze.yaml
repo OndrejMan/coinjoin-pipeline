@@ -35,12 +35,6 @@ blocksci:
   scan_start_height: 392300
   scan_end_height: 850001
 
-joinmarket:
-  detector: definite
-  min_base_fee: 5000
-  percentage_fee: 0.00004
-  max_depth: 200000
-
 pbs:
   blocksci:
     ncpus: 8

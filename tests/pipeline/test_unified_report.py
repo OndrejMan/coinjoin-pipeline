@@ -26,13 +26,13 @@ else:
 
 from exporters.blocksci_export import detector as unified_report
 from exporters.blocksci_export.detector import (
-    export_blocksci_cluster_assignments,
+    export_blocksci_cluster_assignments_for_addresses,
     export_blocksci_records,
 )
 from exporters.cli import parse_args
 from exporters.common import SCHEMA_VERSION, save_json, sha256_json
 from exporters.comparison import evaluate_cluster_assignments
-from exporters.emulator_data import build_emulator_data, load_wasabi_round_labels
+from exporters.emulator_data import build_emulator_data, load_wasabi_round_labels, wallet_address_labels
 from exporters.heuristics import (
     WASABI2_BLOCKSCI_DENOMINATIONS,
     explain_joinmarket_heuristic,
@@ -1795,16 +1795,18 @@ class UnifiedReportTest(unittest.TestCase):
             cluster=types.SimpleNamespace(CoinjoinClusterManager=FakeCoinjoinClusterManager),
         )
         try:
-            predicted, error = export_blocksci_cluster_assignments(
+            predicted, error = export_blocksci_cluster_assignments_for_addresses(
                 Path("/tmp/config.json"),
-                {
-                    "transactions": {
-                        "tx": {
-                            "inputs": [{"address": "known-a", "wallet_name": "wallet-a"}],
-                            "outputs": [{"address": "unknown-a", "wallet_name": "wallet-b"}],
+                wallet_address_labels(
+                    {
+                        "transactions": {
+                            "tx": {
+                                "inputs": [{"address": "known-a", "wallet_name": "wallet-a"}],
+                                "outputs": [{"address": "unknown-a", "wallet_name": "wallet-b"}],
+                            }
                         }
                     }
-                },
+                ),
                 ["cj-b", "cj-a", "cj-b"],
                 Path("/tmp/clusters"),
             )
@@ -1864,16 +1866,18 @@ class UnifiedReportTest(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 output_dir = Path(tmpdir) / "missing" / "joinmarket_emulator_report"
-                predicted, error = export_blocksci_cluster_assignments(
+                predicted, error = export_blocksci_cluster_assignments_for_addresses(
                     Path("/tmp/config.json"),
-                    {
-                        "transactions": {
-                            "tx": {
-                                "inputs": [{"address": "known-a", "wallet_name": "wallet-a"}],
-                                "outputs": [],
+                    wallet_address_labels(
+                        {
+                            "transactions": {
+                                "tx": {
+                                    "inputs": [{"address": "known-a", "wallet_name": "wallet-a"}],
+                                    "outputs": [],
+                                }
                             }
                         }
-                    },
+                    ),
                     ["cj"],
                     output_dir,
                 )
@@ -1887,16 +1891,18 @@ class UnifiedReportTest(unittest.TestCase):
         previous_blocksci = unified_report.blocksci
         unified_report.blocksci = types.SimpleNamespace()
         try:
-            predicted, error = export_blocksci_cluster_assignments(
+            predicted, error = export_blocksci_cluster_assignments_for_addresses(
                 Path("/tmp/config.json"),
-                {
-                    "transactions": {
-                        "tx": {
-                            "inputs": [{"address": "a", "wallet_name": "w"}],
-                            "outputs": [],
+                wallet_address_labels(
+                    {
+                        "transactions": {
+                            "tx": {
+                                "inputs": [{"address": "a", "wallet_name": "w"}],
+                                "outputs": [],
+                            }
                         }
                     }
-                },
+                ),
                 [],
                 Path("/tmp/clusters"),
             )
@@ -1917,16 +1923,18 @@ class UnifiedReportTest(unittest.TestCase):
             cluster=types.SimpleNamespace(CoinjoinClusterManager=types.SimpleNamespace()),
         )
         try:
-            predicted, error = export_blocksci_cluster_assignments(
+            predicted, error = export_blocksci_cluster_assignments_for_addresses(
                 Path("/tmp/config.json"),
-                {
-                    "transactions": {
-                        "tx": {
-                            "inputs": [{"address": "a", "wallet_name": "w"}],
-                            "outputs": [],
+                wallet_address_labels(
+                    {
+                        "transactions": {
+                            "tx": {
+                                "inputs": [{"address": "a", "wallet_name": "w"}],
+                                "outputs": [],
+                            }
                         }
                     }
-                },
+                ),
                 ["cj"],
                 Path("/tmp/clusters"),
             )

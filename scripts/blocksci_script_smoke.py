@@ -38,16 +38,7 @@ def tx_record(tx) -> dict:
 
 
 def detect(chain, coinjoin_type: str, min_input_count: int | None) -> list:
-    if coinjoin_type == "joinmarket":
-        txes, _skipped = chain.scan_coinjoins_by_subset_matching(
-            0,
-            len(chain),
-            os.environ["JOINMARKET_DETECTOR"],
-            int(os.environ["JOINMARKET_MIN_BASE_FEE"]),
-            float(os.environ["JOINMARKET_PERCENTAGE_FEE"]),
-            int(os.environ["JOINMARKET_MAX_DEPTH"]),
-        )
-        return list(txes)
+    """The protocol heuristic of coinjoin_type, as the report and the mainnet scan use it."""
     if min_input_count is None:
         return list(chain.filter_coinjoin_txes_raw(0, len(chain), coinjoin_type))
     return list(chain.filter_coinjoin_txes_raw(0, len(chain), coinjoin_type, min_input_count))
