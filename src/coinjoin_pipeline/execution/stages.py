@@ -12,8 +12,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
+from coinjoin_pipeline.configuration import BlockSciWorkflow
+
 RunnerName = Literal["local", "kubernetes", "pbs"]
-BlockSciWorkflow = Literal["combined", "reusable", "cached"]
 
 
 class StageKind(Enum):
