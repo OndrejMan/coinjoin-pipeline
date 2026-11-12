@@ -24,7 +24,7 @@ from .arguments import (
 )
 from .configuration import ImageConfiguration, PipelineConfiguration
 from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, fail
-from .context import RunContext
+from .context import RunContext, runs_root
 from .doctor import check as doctor_check
 from .doctor import required_capabilities, required_image_components, validate_arguments
 from .images import DEFAULT_VERSION, Images, image_names
@@ -87,8 +87,10 @@ def _utility(argv: list[str]) -> int | None:
     if action == "version":
         print_version()
         return EXIT_OK
-    context = RunContext.prepare(PipelineConfiguration.from_flat(supplied), shlex.join(["cjp", *argv]))
-    root = context.config.runs_path
+    config = PipelineConfiguration.from_flat(supplied)
+    reproduction = shlex.join(["cjp", *argv])
+    # Only pull, doctor and runs validate need images; the others read the runs root alone.
+    root = runs_root(config)
     if action in {"watch", "status", "stop", "download-report", "clean-s3"}:
         module = importlib.import_module(f"coinjoin_pipeline.{action.replace('-', '_')}")
         return module.main(remaining, runs_root=root)
@@ -98,17 +100,9 @@ def _utility(argv: list[str]) -> int | None:
         if action == "runs" and remaining[:1] == ["validate"]:
             # An explicit image overrides the report's; otherwise it only replaces a missing one.
             flag = "--blocksci-image" if "blocksci_image" in supplied else "--default-blocksci-image"
-            remaining.extend([flag, context.images.blocksci])
-        return research_main(
-            [
-                "--runs-root",
-                str(root),
-                "--runtime",
-                context.config.runtime,
-                action,
-                *remaining,
-            ]
-        )
+            remaining.extend([flag, RunContext.prepare(config, reproduction).images.blocksci])
+        return research_main(["--runs-root", str(root), "--runtime", config.runtime, action, *remaining])
+    context = RunContext.prepare(config, reproduction)
     if remaining:
         return fail(f"unexpected arguments for {action}: {' '.join(remaining)}; see cjp {action} --help")
     if action == "pull":

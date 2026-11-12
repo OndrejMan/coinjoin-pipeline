@@ -28,13 +28,17 @@ from .storage.s3 import (
 )
 
 
+def runs_root(config: PipelineConfiguration) -> Path:
+    """The configured runs root, else the default one, as an absolute path."""
+    return Path(config.runs_root).expanduser().resolve() if config.runs_root else default_runs_root()
+
+
 def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguration:
     try:
         ZoneInfo(config.run_timezone)
     except (KeyError, ValueError) as error:
         raise ConfigurationError(f"invalid run timezone: {config.run_timezone}") from error
-    root = Path(config.runs_root).expanduser().resolve() if config.runs_root else default_runs_root()
-    config = replace(config, runs_root=str(root))
+    config = replace(config, runs_root=str(runs_root(config)))
     provided = set(config.provided)
     for stage in ("analysis", "blocksci", "mappings"):
         path = f"stages.{stage}"

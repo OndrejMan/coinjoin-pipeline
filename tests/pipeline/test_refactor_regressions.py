@@ -372,3 +372,9 @@ def test_pbs_resume_failure_does_not_rewrite_original_launcher_manifest(tmp_path
             == 5
         )
     assert manifest.read_text() == original
+
+
+def test_utilities_that_read_only_the_runs_root_resolve_no_images(tmp_path):
+    with mock.patch.object(cli.RunContext, "prepare", side_effect=AssertionError("images resolved")):
+        assert cli.main(["runs", "list", "--runs-root", str(tmp_path)]) == 0
+        assert cli.main(["scenarios", "list"]) == 0
