@@ -167,7 +167,7 @@ def qdel_pbs_job(job_id: str) -> bool:
 
 
 def pbs_job_probe(job_id: str) -> Callable[[], str]:
-    """Build a qstat-backed liveness probe of one PBS job."""
+    """Build a qstat-backed liveness probe for ``wait_for_s3_marker``."""
 
     def probe() -> str:
         state = qstat_job_state(job_id)

@@ -9,8 +9,10 @@ from typing import TYPE_CHECKING
 from coinjoin_pipeline.execution.pbs.defaults import (
     DEFAULT_PBS_IMAGES,
     DEFAULT_RESOURCES,
+    PBS_QUEUE_MARGIN_SECONDS,
     PBSResources,
 )
+from coinjoin_pipeline.execution.pbs.validation import walltime_to_seconds
 from coinjoin_pipeline.paths import CONTAINER_ROOT
 from coinjoin_pipeline.images import in_registry
 
@@ -86,3 +88,8 @@ def stage_pbs_resources(
         return next(value for source in sources if (value := getattr(source, name)) is not None)
 
     return PBSResources(**{item.name: pick(item.name) for item in fields(PBSResources)})  # type: ignore[arg-type]
+
+
+def pbs_wait_timeout(walltime: str) -> int:
+    """Return the stage walltime plus the established one-hour queue margin."""
+    return walltime_to_seconds(walltime) + PBS_QUEUE_MARGIN_SECONDS
