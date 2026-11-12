@@ -91,7 +91,7 @@ def _utility(argv: list[str]) -> int | None:
     reproduction = shlex.join(["cjp", *argv])
     # Only pull and doctor need images; the others read the runs root alone.
     root = runs_root(config)
-    if action in {"watch", "status", "download-report", "clean-s3"}:
+    if action in {"watch", "status", "stop", "download-report", "clean-s3"}:
         module = importlib.import_module(f"coinjoin_pipeline.{action.replace('-', '_')}")
         return module.main(remaining, runs_root=root)
     context = RunContext.prepare(config, reproduction)

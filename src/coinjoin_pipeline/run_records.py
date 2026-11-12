@@ -58,6 +58,10 @@ def add_record_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="Print one JSON object instead of text.")
 
 
+#: Resources an S3 emulation creates under the run label. The Role and RoleBinding
+#: carry no run label; owner references on the Job remove them.
+RUN_RESOURCE_TYPES = "jobs,pods,services,configmaps,serviceaccounts"
+
 QUEUED = "queued"
 RUNNING = "running"
 FINISHED = "finished"
