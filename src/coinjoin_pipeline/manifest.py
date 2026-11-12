@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+import uuid
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -86,6 +87,8 @@ def pipeline_source() -> dict[str, object]:
 def initial_manifest(**values: object) -> dict[str, object]:
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,
+        # Tells this invocation's record apart from earlier ones over the same run.
+        "launch_id": uuid.uuid4().hex,
         "cli_version": __version__,
         "pipeline_source": pipeline_source(),
         "created_at": datetime.now(timezone.utc).isoformat(),

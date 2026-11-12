@@ -31,7 +31,7 @@ from .images import DEFAULT_VERSION, Images, image_names
 from .manifest import environment_snapshot, initial_manifest, mark_finished
 from .paths import PIPELINE_ROOT
 from .process import run
-from .runs import store_host_manifest
+from .runs import read_host_manifest, store_host_manifest
 
 
 def print_version() -> None:
@@ -162,14 +162,28 @@ def preflight_errors(context: RunContext) -> list[str]:
 def start_host_manifest(
     context: RunContext, original: list[str], reproduction: str
 ) -> tuple[Path | None, dict[str, object]]:
-    """Create the runs root and record the launch in the run's manifest when the run has a directory."""
+    """Create the runs root and record the launch in the run's manifest when the run has a directory.
+
+    The command lock comes first, so a second command on a running run fails before it
+    touches the run's record. A new run refuses a run ID that already records a launch.
+    """
     config = context.config
     root = config.runs_path
     for path in (root, root / ".notebooks"):
         path.mkdir(parents=True, exist_ok=True)
+    if config.action != "external analyze":
+        from .execution.locks import acquire_lock, command_lock_path
+
+        # The orchestrator takes the same lock again; this process already holds it.
+        acquire_lock(command_lock_path(config, root))
     target = None
     if context.run_dir is not None and (config.run_dir or config.action in {"emulate", "full-run"}):
         target = context.run_dir / RUN_MANIFEST
+    if target and not config.run_dir and not config.resume_run and "host_launcher" in read_host_manifest(target):
+        raise ValueError(
+            f"run {config.run_id} already records a launch in {target}; start the new run "
+            "under a fresh --run-id, or continue an S3 full-run with --resume-run"
+        )
     effective = asdict(config)
     effective.pop("_provided", None)
     manifest = initial_manifest(
@@ -231,6 +245,10 @@ def main(argv: list[str] | None = None) -> int:
         if target and manifest is not None:
             mark_finished(manifest, code)
             store_host_manifest(target, manifest)
+        from .execution.locks import close_locks
+
+        # A command refused before execution still holds the lock start_host_manifest took.
+        close_locks()
     return code
 
 

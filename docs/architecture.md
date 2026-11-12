@@ -33,9 +33,13 @@ used only in validation messages.
 `context.py` resolves run ID, output root and image selection, and restores
 environment, bytecode policy, signal handlers and locks after execution.
 `research_manifest.json` records top-level schema, mode and run ID, with the
-redacted launcher record under `host_launcher`. External import manifests keep
-their input provenance. The report's manifest remains a distinct analytical
-artifact with image digests and exporter hashes.
+redacted launcher record of the latest invocation under `host_launcher`. A later
+invocation over the same run (`--resume-run`, a stage with `--run-dir`) moves the
+previous record to `earlier_host_launchers`. The record is written only once the
+command lock is held, and a new run refuses a run ID that already records a
+launch. External import manifests keep their input provenance. The report's
+manifest remains a distinct analytical artifact with image digests and exporter
+hashes.
 
 On the S3 path nothing can inspect an image afterwards: the MetaCentrum frontend
 and PBS nodes have no Docker. `registry.py` therefore pins each tag to its current

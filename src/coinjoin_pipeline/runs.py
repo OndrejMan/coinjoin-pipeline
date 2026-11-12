@@ -51,18 +51,44 @@ def run_id_for(config: PipelineConfiguration) -> str:
     return f"{timestamp}_{slug}"
 
 
-def store_host_manifest(target: Path, manifest: dict[str, object]) -> None:
+def read_host_manifest(target: Path) -> dict[str, object]:
+    """The run's manifest, empty when it is missing or unreadable."""
     try:
         existing = json.loads(target.read_text(encoding="utf-8")) if target.is_file() else {}
     except (OSError, json.JSONDecodeError):
         existing = {}
-    if not isinstance(existing, dict):
-        existing = {}
+    return existing if isinstance(existing, dict) else {}
+
+
+def store_host_manifest(target: Path, manifest: dict[str, object]) -> None:
+    """Record one invocation in the run's manifest without losing the earlier ones.
+
+    ``host_launcher`` is the latest invocation over the run. A new invocation moves the
+    previous record to ``earlier_host_launchers`` (oldest first); an invocation updates
+    its own record, found by ``launch_id``, wherever it is by then.
+    """
+    existing = read_host_manifest(target)
     existing.setdefault("schema_version", 1)
     existing.setdefault(
         "mode",
         "external" if manifest.get("action") == "external analyze" else "emulator",
     )
     existing.setdefault("run_id", target.parent.name)
-    existing["host_launcher"] = manifest
+    launch_id = manifest.get("launch_id")
+    recorded = existing.get("earlier_host_launchers")
+    earlier = list(recorded) if isinstance(recorded, list) else []
+    position = next(
+        (index for index, item in enumerate(earlier) if isinstance(item, dict) and item.get("launch_id") == launch_id),
+        None,
+    )
+    if position is not None:
+        # A later invocation took the run over in between; it stays the latest.
+        earlier[position] = manifest
+    else:
+        current = existing.get("host_launcher")
+        if isinstance(current, dict) and current.get("launch_id") != launch_id:
+            earlier.append(current)
+        existing["host_launcher"] = manifest
+    if earlier:
+        existing["earlier_host_launchers"] = earlier
     atomic_write(target, existing)

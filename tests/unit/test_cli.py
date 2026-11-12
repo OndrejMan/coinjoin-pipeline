@@ -1,3 +1,4 @@
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -15,7 +16,7 @@ from coinjoin_pipeline.doctor import (
 )
 from coinjoin_pipeline.images import resolve_images
 from coinjoin_pipeline.manifest import redact
-from coinjoin_pipeline.runs import run_id_for
+from coinjoin_pipeline.runs import run_id_for, store_host_manifest
 from coinjoin_pipeline.storage.s3 import validate_run_id
 
 
@@ -143,6 +144,88 @@ def test_dry_run_does_not_overwrite_manifest_or_preflight_runtime(tmp_path):
     assert execute.call_args.args[0].config.dry_run
     assert manifest.read_text() == '{"evidence": true}'
     assert not (tmp_path / ".notebooks").exists()
+
+
+S3_FULL_RUN = [
+    "full-run",
+    "--engine",
+    "wasabi",
+    "--driver",
+    "kubernetes",
+    "--artifact-backend",
+    "s3",
+    "--s3-secret-name",
+    "coinjoin-s3",
+    "--reuse-namespace",
+    "--artifact-uri",
+    "s3://bucket/runs",
+    "--s3-endpoint-url",
+    "https://s3.example",
+    "--s3-credentials-file",
+    "/tmp/credentials",
+    "--s3-profile",
+    "test",
+    "--run-id",
+    "run-a",
+]
+ORIGINAL_LAUNCH = {"host_launcher": {"status": "completed", "evidence": "original"}}
+
+
+def recorded_run(root: Path) -> Path:
+    manifest = root / "run-a/research_manifest.json"
+    manifest.parent.mkdir()
+    manifest.write_text(json.dumps(ORIGINAL_LAUNCH))
+    return manifest
+
+
+def test_resume_keeps_the_original_launch_record(tmp_path):
+    manifest = recorded_run(tmp_path)
+    with (
+        mock.patch.object(cli, "doctor_check", return_value=[]),
+        mock.patch.object(cli, "execute") as execute,
+    ):
+        assert cli.main([*S3_FULL_RUN, "--runs-root", str(tmp_path), "--resume-run"]) == 0
+    execute.assert_called_once()
+    data = json.loads(manifest.read_text())
+    assert data["earlier_host_launchers"] == [ORIGINAL_LAUNCH["host_launcher"]]
+    assert data["host_launcher"]["status"] == "completed"
+    assert data["host_launcher"]["configuration"]["resume_run"] is True
+
+
+def test_new_run_refuses_a_run_id_that_records_a_launch(tmp_path, capsys):
+    manifest = recorded_run(tmp_path)
+    with (
+        mock.patch.object(cli, "doctor_check", return_value=[]),
+        mock.patch.object(cli, "execute") as execute,
+    ):
+        assert cli.main([*S3_FULL_RUN, "--runs-root", str(tmp_path)]) == 2
+    execute.assert_not_called()
+    assert json.loads(manifest.read_text()) == ORIGINAL_LAUNCH
+    assert "--resume-run" in capsys.readouterr().err
+
+
+def test_command_on_a_locked_run_leaves_its_record_alone(tmp_path):
+    manifest = recorded_run(tmp_path)
+    with (
+        (tmp_path / "run-a/.pipeline.lock").open("a") as running,
+        mock.patch.object(cli, "doctor_check", return_value=[]),
+        mock.patch.object(cli, "execute") as execute,
+    ):
+        # The process that still drives the run holds its lock.
+        fcntl.flock(running.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert cli.main([*S3_FULL_RUN, "--runs-root", str(tmp_path), "--resume-run"]) == 5
+    execute.assert_not_called()
+    assert json.loads(manifest.read_text()) == ORIGINAL_LAUNCH
+
+
+def test_an_invocation_updates_its_own_record_after_another_took_over(tmp_path):
+    target = tmp_path / "run-a/research_manifest.json"
+    store_host_manifest(target, {"launch_id": "first", "status": "prepared"})
+    store_host_manifest(target, {"launch_id": "second", "status": "prepared"})
+    store_host_manifest(target, {"launch_id": "first", "status": "completed"})
+    data = json.loads(target.read_text())
+    assert data["host_launcher"] == {"launch_id": "second", "status": "prepared"}
+    assert data["earlier_host_launchers"] == [{"launch_id": "first", "status": "completed"}]
 
 
 @pytest.mark.parametrize(
