@@ -35,6 +35,11 @@ def field_type(path: str):
 
 
 CONFIGURATION_FLAGS = ("--from-configuration",)
+# Host commands that need no experiment.
+UTILITIES = ("doctor",)
+UTILITY_SUMMARIES = {
+    "doctor": "check the container runtime, the runs root and the default images",
+}
 ACTION_SUMMARIES = {
     "full-run": "emulate a new run, then analyze it and export its report",
     "emulate": "emulate a new run only",
@@ -122,10 +127,17 @@ def action_index(argv: list[str]) -> int | None:
     return None
 
 
+def action_word(argv: list[str]) -> str | None:
+    index = action_index(argv)
+    return None if index is None else argv[index]
+
+
 def _epilog() -> str:
-    width = max(map(len, ACTION_SUMMARIES))
+    width = max(map(len, (*ACTION_SUMMARIES, *UTILITY_SUMMARIES)))
     lines = ["actions:"]
     lines += [f"  {name:<{width}}  {summary}" for name, summary in ACTION_SUMMARIES.items()]
+    lines += ["", "utilities:"]
+    lines += [f"  {name:<{width}}  {summary}" for name, summary in UTILITY_SUMMARIES.items()]
     lines += [
         "",
         "examples:",
@@ -141,11 +153,12 @@ def _epilog() -> str:
     return "\n".join(lines)
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(paths: set[str] | None = None, *, add_help: bool = True) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cjp",
-        usage=("cjp ACTION [OPTIONS]\n       cjp run CONFIG.yaml [OPTIONS]"),
+        usage=("cjp ACTION [OPTIONS]\n       cjp run CONFIG.yaml [OPTIONS]\n       cjp UTILITY [UTILITY OPTIONS]"),
         description="Run a CoinJoin experiment from YAML or explicit options.",
+        add_help=add_help,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_epilog(),
     )
@@ -159,6 +172,8 @@ def build_parser() -> argparse.ArgumentParser:
     # Created in SECTIONS order, which is the order --help lists them in.
     groups = {section: parser.add_argument_group(title, text) for section, (title, text) in SECTIONS.items()}
     for path, destination, item in option_specs():
+        if paths is not None and path not in paths:
+            continue
         section = path.split(".", 1)[0] if "." in path else ""
         annotation = field_type(path)
         options: dict[str, object] = {
@@ -180,7 +195,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _canonical_action(action: str) -> str:
     if action not in get_args(PipelineAction):
-        raise ConfigurationError(f"unknown action {action!r}; choose one of: {', '.join(get_args(PipelineAction))}")
+        raise ConfigurationError(
+            f"unknown action {action!r}; choose one of: {', '.join(get_args(PipelineAction))}, "
+            f"or a utility: {', '.join(UTILITIES)}"
+        )
     return action
 
 

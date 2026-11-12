@@ -6,15 +6,20 @@ import os
 import shlex
 import subprocess
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from pathlib import Path
 
 from exporters.artifact_paths import RUN_MANIFEST
 
 from .arguments import (
+    CONFIGURATION_FLAGS,
+    UTILITIES,
+    UTILITY_SUMMARIES,
+    action_word,
     build_parser,
     load_configuration,
 )
+from .configuration import ImageConfiguration, PipelineConfiguration
 from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, fail
 from .context import RunContext
 from .doctor import check as doctor_check
@@ -36,6 +41,39 @@ def use_line_buffered_output() -> None:
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
             reconfigure(line_buffering=True)
+
+
+# The host options every utility accepts before or after its name.
+UTILITY_OPTIONS = frozenset({"runtime", "runs_root", *("images." + item.name for item in fields(ImageConfiguration))})
+
+
+def utility_usage(action: str) -> str:
+    return (
+        f"usage: cjp {action} [--runtime {{docker,podman}}] [--runs-root DIR] "
+        "[--version TAG] [--local-build] [--<component>-image IMAGE]\n\n"
+        f"{UTILITY_SUMMARIES[action].capitalize()}."
+    )
+
+
+def _utility(argv: list[str]) -> int | None:
+    values, remaining = build_parser(set(UTILITY_OPTIONS), add_help=False).parse_known_args(argv)
+    supplied = vars(values)
+    action = supplied.pop("action", None)
+    supplied.pop("from_configuration", None)
+    if action not in UTILITIES:
+        return None
+    if remaining[:1] in (["-h"], ["--help"]):
+        print(utility_usage(action))
+        return EXIT_OK
+    context = RunContext.prepare(PipelineConfiguration.from_flat(supplied))
+    root = context.config.runs_path
+    if remaining:
+        return fail(f"unexpected arguments for {action}: {' '.join(remaining)}; see cjp {action} --help")
+    errors = doctor_check(context.config.runtime, root, context.images)
+    if errors:
+        return fail(*errors)
+    print(f"doctor OK: runtime={context.config.runtime} output={root}")
+    return EXIT_OK
 
 
 def print_dry_run_context(context: RunContext) -> None:
@@ -122,6 +160,13 @@ def main(argv: list[str] | None = None) -> int:
     manifest = None
     code = EXIT_FAILURE
     try:
+        if (
+            not any(value.split("=", 1)[0] in CONFIGURATION_FLAGS for value in original)
+            and action_word(original) != "run"
+        ):
+            result = _utility(original)
+            if result is not None:
+                return result
         reproduction = shlex.join(["coinjoin-pipeline", *original])
         context = RunContext.prepare(load_configuration(original))
         config = context.config
