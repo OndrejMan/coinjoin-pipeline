@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 # Where the project's images are published.
 DEFAULT_REGISTRY = "ghcr.io/ondrejman"
@@ -32,6 +32,8 @@ IMAGE_RE = re.compile(
 @dataclass(frozen=True)
 class Images:
     emulator: str
+    def as_dict(self) -> dict[str, str]:
+        return asdict(self)
 
 
 def validate_version(version: str) -> None:
