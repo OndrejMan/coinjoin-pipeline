@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import replace
 
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
-from coinjoin_pipeline.execution import settings
 from coinjoin_pipeline.execution.scenarios import scenario_source_path
 from coinjoin_pipeline.execution.kubernetes import (
     apply_s3_emulation_resources,
@@ -13,6 +12,7 @@ from coinjoin_pipeline.execution.kubernetes import (
     resolve_kubeconfig,
 )
 from coinjoin_pipeline.execution.pbs_settings import resolve_uploader_image
+from coinjoin_pipeline.images import default_image
 from coinjoin_pipeline.paths import SCENARIOS_ROOT
 from coinjoin_pipeline.registry import pinned_reference
 
@@ -25,7 +25,7 @@ def pin_emulation_images(args: PipelineConfiguration) -> PipelineConfiguration:
     """
     images = replace(
         args.images,
-        emulator=pinned_reference(args.images.emulator or settings.DEFAULT_EMULATOR_IMAGE),
+        emulator=pinned_reference(args.images.emulator or default_image("emulator", args.images.registry)),
         uploader=pinned_reference(resolve_uploader_image(args)),
     )
     return replace(args, images=images)
@@ -50,7 +50,7 @@ def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
         scenario_json=scenario_path.read_text(encoding="utf-8"),
         engine=args.engine,
         image_prefix=args.kubernetes.image_prefix,
-        emulator_image=args.images.emulator or settings.DEFAULT_EMULATOR_IMAGE,
+        emulator_image=args.images.emulator or default_image("emulator", args.images.registry),
         uploader_image=resolve_uploader_image(args),
         artifact_uri=required(args.artifacts.uri, "--artifact-uri"),
         endpoint_url=required(args.artifacts.endpoint_url, "--s3-endpoint-url"),

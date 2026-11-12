@@ -104,6 +104,9 @@ def resolve_images(
     return Images(**resolved)
 
 
-# The names in the registry $COINJOIN_IMAGE_REGISTRY names (else the project's own), for the
-# defaults that are read before a configuration exists; a run resolves images.registry.
-IMAGE_NAMES = image_names()
+def default_image(component: str, registry: str | None = None) -> str:
+    """The released image of one component in that registry, resolved when it is needed.
+
+    A module constant would fix the registry at import, before a configuration names one.
+    """
+    return f"{image_names(registry)[component]}:{DEFAULT_VERSION}"

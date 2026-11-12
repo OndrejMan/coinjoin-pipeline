@@ -107,6 +107,18 @@ def test_runs_validate_preserves_explicit_image_override(tmp_path):
     assert validate.call_args.args[0].blocksci_image == "blocksci:chosen"
 
 
+def test_runs_validate_falls_back_to_the_configured_registry(tmp_path, monkeypatch):
+    monkeypatch.delenv("COINJOIN_IMAGE_REGISTRY", raising=False)
+    monkeypatch.delenv("BLOCKSCI_IMAGE", raising=False)
+    with mock.patch.object(research, "validate_existing_run") as validate:
+        arguments = ["runs", "validate", "--run-dir", "run-a", "--runs-root", str(tmp_path)]
+        assert cli.main([*arguments, "--image-registry", "ghcr.io/fork"]) == 0
+    selected = validate.call_args.args[0]
+    # Only a fallback: the image the report recorded still wins.
+    assert selected.blocksci_image is None
+    assert selected.default_blocksci_image == "ghcr.io/fork/blocksci-complete:latest"
+
+
 def test_utility_help_belongs_to_selected_command(capsys):
     assert cli.main(["watch", "--help"]) == 0
     assert "--pbs-only" in capsys.readouterr().out

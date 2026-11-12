@@ -38,7 +38,7 @@ from coinjoin_pipeline.execution.runtime import (
     container_runtime,
 )
 from coinjoin_pipeline.execution.s3_staging import ensure_local_exporters
-from coinjoin_pipeline.images import validate_image
+from coinjoin_pipeline.images import default_image, validate_image
 from coinjoin_pipeline.storage.s3 import ArtifactTransportError
 
 from . import settings
@@ -205,9 +205,10 @@ def compose_env(
     env["BLOCKSCI_JOINMARKET_PERCENTAGE_FEE"] = str(detector.percentage_fee)
     env["BLOCKSCI_JOINMARKET_MAX_DEPTH"] = str(detector.max_depth)
     env["RUN_TIMEZONE"] = config.run_timezone
-    env.setdefault("BLOCKSCI_IMAGE", settings.DEFAULT_BLOCKSCI_IMAGE)
-    env.setdefault("COINJOIN_ANALYSIS_IMAGE", settings.DEFAULT_COINJOIN_ANALYSIS_IMAGE)
-    env.setdefault("COINJOIN_EMULATOR_IMAGE", settings.DEFAULT_EMULATOR_IMAGE)
+    registry = config.images.registry
+    env.setdefault("BLOCKSCI_IMAGE", default_image("blocksci", registry))
+    env.setdefault("COINJOIN_ANALYSIS_IMAGE", default_image("coinjoin_analysis", registry))
+    env.setdefault("COINJOIN_EMULATOR_IMAGE", default_image("emulator", registry))
     scenario = config.scenario if include_scenario else None
     if scenario:
         source = scenario_source_path(scenario, scenarios_dir, config.engine)

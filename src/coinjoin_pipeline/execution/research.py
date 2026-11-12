@@ -36,7 +36,7 @@ from coinjoin_pipeline.execution.scenarios import (
     resolve_scenario,
     validate_scenario,
 )
-from coinjoin_pipeline.execution.settings import DEFAULT_BLOCKSCI_IMAGE
+from coinjoin_pipeline.images import default_image
 from coinjoin_pipeline.paths import PIPELINE_ROOT, default_runs_root
 from coinjoin_pipeline.storage.s3 import validate_run_id
 
@@ -146,7 +146,7 @@ def validate_existing_run(args: argparse.Namespace) -> None:
     run_manifest = report.get("run_manifest")
     images = run_manifest.get("images", {}) if isinstance(run_manifest, dict) else {}
     image = args.blocksci_image or (images.get("blocksci") if isinstance(images, dict) else None)
-    image = image or DEFAULT_BLOCKSCI_IMAGE
+    image = image or args.default_blocksci_image or default_image("blocksci")
     runtime_check(args.runtime)
     blocksci_check = (
         "import blocksci; "
@@ -303,6 +303,8 @@ def parser() -> argparse.ArgumentParser:
     validate = run_commands.add_parser("validate", help="Check one run's report inputs in the BlockSci image.")
     validate.add_argument("--run-dir", required=True, help="Run directory, absolute or below the runs root.")
     validate.add_argument("--blocksci-image", help="BlockSci image to validate with.")
+    # cjp passes the BlockSci image its own image options resolve to, for a report that names none.
+    validate.add_argument("--default-blocksci-image", help=argparse.SUPPRESS)
     scenarios = subcommands.add_parser("scenarios", help="List, show and validate emulator scenarios.")
     scenario_commands = scenarios.add_subparsers(dest="scenarios_command", required=True)
     list_scenarios = scenario_commands.add_parser("list", help="The packaged scenarios.")

@@ -19,6 +19,7 @@ from coinjoin_pipeline.execution.run_context import pipeline_run_id_env
 from coinjoin_pipeline.execution.runtime import (
     container_runtime,
 )
+from coinjoin_pipeline.images import default_image
 
 from . import containers, scenarios, settings
 
@@ -76,7 +77,7 @@ def run_kubernetes_emulation(
         local_build=local_build,
     )
     runtime = container_runtime()
-    emulator_image = os.environ.get("COINJOIN_EMULATOR_IMAGE", settings.DEFAULT_EMULATOR_IMAGE)
+    emulator_image = os.environ.get("COINJOIN_EMULATOR_IMAGE") or default_image("emulator", config.images.registry)
     storage_uid = os.environ.get("KUBERNETES_STORAGE_UID", str(os.getuid()))
     storage_gid = os.environ.get("KUBERNETES_STORAGE_GID", str(os.getgid()))
     emulator_network = os.environ.get("KUBERNETES_EMULATOR_CONTAINER_NETWORK", "").strip()
@@ -188,7 +189,7 @@ def populate_btc_data_volume(btc_data_dir: Path) -> None:
     """
     volume_name = f"{containers.compose_env()[settings.COMPOSE_PROJECT_ENV]}_btc_data"
     runtime = container_runtime()
-    helper_image = os.environ.get("COINJOIN_EMULATOR_IMAGE", settings.DEFAULT_EMULATOR_IMAGE)
+    helper_image = os.environ.get("COINJOIN_EMULATOR_IMAGE") or default_image("emulator")
     subprocess.run(
         [runtime, "volume", "create", volume_name],
         stdout=subprocess.DEVNULL,

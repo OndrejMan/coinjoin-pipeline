@@ -95,8 +95,10 @@ def _utility(argv: list[str]) -> int | None:
     if action in {"runs", "scenarios"}:
         from .execution.research import main as research_main
 
-        if action == "runs" and remaining[:1] == ["validate"] and "blocksci_image" in supplied:
-            remaining.extend(["--blocksci-image", context.images.blocksci])
+        if action == "runs" and remaining[:1] == ["validate"]:
+            # An explicit image overrides the report's; otherwise it only replaces a missing one.
+            flag = "--blocksci-image" if "blocksci_image" in supplied else "--default-blocksci-image"
+            remaining.extend([flag, context.images.blocksci])
         return research_main(
             [
                 "--runs-root",
