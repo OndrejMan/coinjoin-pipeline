@@ -19,6 +19,7 @@ from exporters.artifact_paths import BASELINE_FILE, FALSE_CJTXS_FILE, REPORT_FIL
 from exporters.common import load_json
 
 from coinjoin_pipeline.configuration import ContainerRuntime
+from coinjoin_pipeline.console import EXIT_ABORTED, EXIT_FAILURE, EXIT_REPORT_INVALID, EXIT_USAGE
 from coinjoin_pipeline.execution.locks import acquire_lock
 from coinjoin_pipeline.execution.pbs.commands import detector_arguments
 from coinjoin_pipeline.execution.run_catalog import (
@@ -131,16 +132,16 @@ def validate_existing_run(args: argparse.Namespace) -> None:
     runs_root = args.runs_root.expanduser().resolve()
     run_dir = (runs_root / args.run_dir).resolve()
     if not run_dir.is_dir():
-        raise ExitError(f"Run directory not found: {run_dir}", 3)
+        raise ExitError(f"Run directory not found: {run_dir}", EXIT_ABORTED)
     if mode_for_run(run_dir) != "emulator":
         raise ValueError("Container-backed validation currently applies only to emulator runs")
     status = report_status(run_dir)
     stages = stage_state(run_dir, status)
     missing = [name for name in ("emulation", "baseline", "blocksci", "report") if stages[name] == "missing"]
     if missing:
-        raise ExitError(f"Run is incomplete; missing stages: {', '.join(missing)}", 3)
+        raise ExitError(f"Run is incomplete; missing stages: {', '.join(missing)}", EXIT_ABORTED)
     if status != "complete":
-        raise ExitError(f"Report validation failed: {status}", 4)
+        raise ExitError(f"Report validation failed: {status}", EXIT_REPORT_INVALID)
     report = load_json(run_dir / REPORT_FILE)
     run_manifest = report.get("run_manifest")
     images = run_manifest.get("images", {}) if isinstance(run_manifest, dict) else {}
@@ -332,10 +333,10 @@ def main(argv: list[str] | None = None) -> int:
         return error.code
     except subprocess.CalledProcessError as error:
         print(f"ERROR: {error}", file=sys.stderr)
-        return 5
+        return EXIT_FAILURE
     except (OSError, ValueError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     return 0
 
 
