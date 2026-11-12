@@ -313,11 +313,7 @@ def _epilog() -> str:
 def build_parser(paths: set[str] | None = None, *, add_help: bool = True) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cjp",
-        usage=(
-            "cjp ACTION [OPTIONS]\n"
-            "       cjp run CONFIG.yaml [OPTIONS]\n"
-            "       cjp UTILITY [UTILITY OPTIONS]"
-        ),
+        usage=("cjp ACTION [OPTIONS]\n       cjp run CONFIG.yaml [OPTIONS]\n       cjp UTILITY [UTILITY OPTIONS]"),
         description="Run a CoinJoin experiment from YAML or explicit options.",
         add_help=add_help,
         formatter_class=argparse.RawDescriptionHelpFormatter,
