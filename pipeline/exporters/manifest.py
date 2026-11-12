@@ -99,9 +99,10 @@ def build_run_manifest(
                 os.environ.get("COINJOIN_EMULATOR_GIT_COMMIT"),
             ),
         },
-        # The report container mounts the exporters without their checkout's .git,
-        # so no commit can be read there. The tree hash names the exact code that
-        # produced the report in every case. Informational only — nothing branches on it.
+        # The report container sees the exporters without their checkout's .git (a
+        # mount locally, a download from S3 on PBS), so no commit can be read there.
+        # The tree hash names the exact code that produced the report in every case.
+        # Informational only — nothing branches on it.
         "source_trees": {
             "exporters_sha256": tree_sha256(exporters_root),
         },

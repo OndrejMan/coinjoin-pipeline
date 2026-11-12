@@ -64,6 +64,13 @@ extend-select = ["ANN401", "TID251"]
 
 [tool.ruff.per-file-target-version]
 "pipeline/exporters/**/*.py" = "py38"
+# Shipped into PBS jobs and run with the compute node's python3.
+"src/coinjoin_pipeline/storage/s5client.py" = "py38"
+"src/coinjoin_pipeline/execution/pbs/stage_runtime.py" = "py38"
+"src/coinjoin_pipeline/execution/pbs/stage.py" = "py38"
+"src/coinjoin_pipeline/execution/pbs/stage_settings.py" = "py38"
+"src/coinjoin_pipeline/execution/pbs/blocksci_jobs.py" = "py38"
+"src/coinjoin_pipeline/execution/pbs/apptainer.py" = "py38"
 
 [tool.pylint.main]
 fail-under = 10

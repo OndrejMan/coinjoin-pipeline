@@ -1,19 +1,57 @@
-"""s5cmd access of the frontend."""
+"""s5cmd access shared by the frontend and the self-contained PBS workers.
+
+Standard library only and Python 3.8 syntax: a PBS job copies this file next to its
+worker script and runs it with the node's ``python3``.
+"""
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
+from typing import IO
+
+# What the frontend needs from s5cmd: it stages the exporters with `sync --exclude` (2.1).
+FRONTEND_S5CMD_VERSION = (2, 1)
+S5CMD_VERSION = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
 
 
 class S5Error(RuntimeError):
     """An s5cmd call failed for a reason other than a missing object."""
 
 
+def s5cmd_version() -> tuple[int, ...] | None:
+    """Best-effort version of the s5cmd on PATH; None when it cannot be determined."""
+    try:
+        result = subprocess.run(
+            ["s5cmd", "version"], check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+        )
+    except OSError:
+        return None
+    match = S5CMD_VERSION.search(result.stdout or "")
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def older_s5cmd(minimum: tuple[int, ...]) -> str | None:
+    """The s5cmd version when it is older than minimum.
+
+    An unparsable version passes, so a vendored build cannot block a run it would handle.
+    """
+    found = s5cmd_version()
+    return ".".join(str(part) for part in found) if found is not None and found < minimum else None
+
+
 def no_object_found(result: subprocess.CompletedProcess) -> bool:
     """s5cmd's answer to a listing that matched nothing; its exit status is nonzero."""
     return "no object found" in ((result.stderr or "") + (result.stdout or "")).lower()
+
+
+def pipe(stream: IO[bytes] | None) -> IO[bytes]:
+    """The pipe a process was started with; every caller asked for one."""
+    if stream is None:
+        raise RuntimeError("The process has no pipe to stream through")
+    return stream
 
 
 class S5Client:

@@ -26,3 +26,7 @@ class PBSResources:
 DEFAULT_RESOURCES = {
     "blocksci": PBSResources(8, "64gb", "100gb", "24:00:00"),
 }
+
+BLOCKSCI_IMAGE_PYTHON_COMMAND = (
+    "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3"
+)

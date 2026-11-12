@@ -1,4 +1,7 @@
-"""S3 run targets, their validation, and the frontend's s5cmd access to them."""
+"""S3 run targets, their validation, and the frontend's s5cmd access to them.
+
+Exporter staging lives in ``execution/s3_staging.py``.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +15,7 @@ from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import urlparse
 
 from coinjoin_pipeline.configuration import required
-from coinjoin_pipeline.storage.s5client import S5Client, S5Error, no_object_found
+from coinjoin_pipeline.storage.s5client import FRONTEND_S5CMD_VERSION, S5Client, S5Error, no_object_found, older_s5cmd
 
 if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import PipelineConfiguration
@@ -62,6 +65,11 @@ class S3Target:
     def run_prefix(self) -> str:
         """Where this run's markers, staged exporters and outputs live."""
         return run_prefix_uri(self.artifact_uri, self.run_id)
+
+    @property
+    def log_prefix(self) -> str:
+        """Where this run's logs live."""
+        return f"{self.run_prefix}/logs"
 
     @classmethod
     def from_args(cls, args: "PipelineConfiguration") -> "S3Target":
@@ -150,10 +158,25 @@ def s3_prefix_has_objects(access: S3Access, prefix: str) -> bool:
     return bool(s3_listing(access, f"{prefix}/*"))
 
 
+def require_s5cmd_version() -> None:
+    """Reject a frontend s5cmd too old for `sync --exclude`, which stages the exporters.
+
+    Only the frontend binary is checked here: the uploader runs a pinned image and a PBS
+    node its own s5cmd.
+    """
+    found = older_s5cmd(FRONTEND_S5CMD_VERSION)
+    if found is not None:
+        raise ArtifactTransportError(
+            f"s5cmd on the frontend is too old for this pipeline: found {found}, need 2.1 or newer "
+            "(sync --exclude support)"
+        )
+
+
 def s3_access_preflight(access: S3Access, artifact_uri: str) -> None:
     """Fail fast when s5cmd, the credentials file, or the endpoint is unusable."""
     if shutil.which("s5cmd") is None:
         raise ArtifactTransportError("s5cmd is required on the frontend PATH for S3-compatible full-run")
+    require_s5cmd_version()
     if not Path(access.credentials_file).is_file():
         raise ArtifactTransportError(f"S3 credentials file not found: {access.credentials_file}")
     result = run_s5cmd(access, "ls", f"{artifact_uri}/*")

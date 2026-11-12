@@ -13,6 +13,16 @@ EXPORTERS_ROOT = PIPELINE_ROOT / "exporters"
 SCENARIOS_ROOT = PROJECT_ROOT / "scenarios"
 CONTAINER_ROOT = PROJECT_ROOT / "container"
 
+# Exporter files the compute-node jobs execute (the BlockSci worker) or import. A
+# staging step that misses one is useless; checking them turns a late node-side
+# failure into a frontend error.
+REQUIRED_EXPORTERS = (
+    "worker.py",
+    "parameters.py",
+    "analysis_artifact.py",
+    "blocksci_export/analysis.py",
+)
+
 
 def scenarios_dir() -> Path:
     """The scenario catalogue: $SCENARIOS_DIR, which the stages read too, else the packaged one."""

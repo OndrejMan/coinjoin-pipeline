@@ -1,6 +1,6 @@
 """Declarative stage plans for the CoinJoin analysis pipeline.
 
-No Docker, Kubernetes or subprocess code lives here: this is the dependency
+No Docker, Kubernetes, PBS or subprocess code lives here: this is the dependency
 graph, defined once, which the local executor runs in order.
 """
 
