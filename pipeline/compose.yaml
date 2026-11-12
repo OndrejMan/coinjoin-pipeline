@@ -1,6 +1,6 @@
 # EXPERIMENTAL: local Docker path. Not part of the Kubernetes → S3 → PBS path that the thesis results come from.
 services:
-  # The Python Manager that controls the emulator
+  # The Docker daemon the emulator starts its CoinJoin containers in.
   dind:
       profiles: ["emulate"]
       image: docker:29-dind
@@ -17,9 +17,8 @@ services:
       environment:
         - DOCKER_TLS_CERTDIR= # Disables TLS for easier local networking
       volumes:
-        # Mount the data into the DinD container so it knows the paths
-        # - ./daemon.json:/etc/docker/daemon.json:ro # <--- Mount the config file
-        - btc_data:/home/bitcoin/data:rw # Named container volume
+        # The regtest data the btc-node container writes, shared with the manager and BlockSci.
+        - btc_data:/home/bitcoin/data:rw
         - dind_cache:/var/lib/docker
       healthcheck:
         test: ["CMD", "docker", "-H", "tcp://127.0.0.1:2375", "info"]
@@ -97,6 +96,7 @@ services:
                     echo 'Image prefetching complete!'
                     "
 
+  # The Python manager that controls the emulator.
   manager:
     profiles: ["emulate"]
     image: ${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/emulator-manager:latest}
