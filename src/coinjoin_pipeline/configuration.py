@@ -33,6 +33,7 @@ PipelineAction = Literal[
     "analyze",
     "export",
     "coinjoin-analysis",
+    "initialize",
     "clean",
 ]
 Engine = Literal["wasabi", "joinmarket"]

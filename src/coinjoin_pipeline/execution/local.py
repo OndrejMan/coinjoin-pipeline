@@ -57,6 +57,9 @@ def run_configuration(args: PipelineConfiguration, logs_root: Path) -> None:
             containers.run_export_only(args)
     elif action == "coinjoin-analysis":
         containers.run_coinjoin_analysis(args.run_dir, args.all_runs, args.analysis_action)
+    elif action == "initialize":
+        with captured_pipeline_stage(logs_root, "Initialize container images", logs_root / "_maintenance"):
+            containers.initialize_images()
 
 
 def run_analysis(args: PipelineConfiguration, run_dir: Path, logs_root: Path) -> None:

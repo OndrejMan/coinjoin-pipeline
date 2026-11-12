@@ -41,6 +41,7 @@ ACTION_SUMMARIES = {
     "analyze": "BlockSci analysis of --run-dir",
     "export": "unified report of --run-dir",
     "coinjoin-analysis": "baseline coinjoin-analysis of --run-dir or --all-runs",
+    "initialize": "pull the emulation and analysis images through Compose",
     "clean": "remove the local pipeline containers and volumes (needs --yes)",
 }
 
