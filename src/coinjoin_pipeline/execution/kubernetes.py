@@ -11,9 +11,8 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from coinjoin_pipeline.paths import EXECUTION_ROOT
 from coinjoin_pipeline.execution.probes import PROBE_QUEUED, PROBE_RUNNING, PROBE_TERMINAL, PROBE_UNKNOWN
-from coinjoin_pipeline.paths import REQUIRED_EXPORTERS
+from coinjoin_pipeline.paths import EXECUTION_ROOT, REQUIRED_EXPORTERS
 
 S3_CONTROLLER_RESOURCE_REQUESTS = {"cpu": "250m", "memory": "512Mi"}
 S3_CONTROLLER_RESOURCE_LIMITS = {"cpu": "1", "memory": "1Gi"}
