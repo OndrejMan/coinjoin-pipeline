@@ -208,6 +208,7 @@ class PBSConfiguration(ConfigurationModel):
     coinjoin_analysis_image: str | None = option(None, name="pbs_coinjoin_analysis_image")
     mappings_enumerator_image: str | None = option(None, name="pbs_mappings_enumerator_image")
     sake_image: str | None = option(None, name="pbs_sake_image")
+    bitcoin_datadir: str | None = option(None, name="pbs_bitcoin_datadir")
     analysis: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     blocksci: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     mappings: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)

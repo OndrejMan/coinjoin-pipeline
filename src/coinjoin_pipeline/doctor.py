@@ -77,6 +77,15 @@ def validate_arguments(config: PipelineConfiguration, runs_root: Path) -> list[s
         kubeconfig = resolve_kubeconfig(config.kubernetes.kubeconfig)
         if not kubeconfig.is_file():
             errors.append(f"kubeconfig not found: {kubeconfig}")
+    pbs_datadir = config.pbs.bitcoin_datadir
+    if config.stages.blocksci and pbs_datadir:
+        kubernetes_fills_it = (
+            config.driver == "kubernetes"
+            and config.action in {"full-run", "emulate"}
+            and not config.kubernetes.copy_to_host
+        )
+        if not kubernetes_fills_it and not (Path(pbs_datadir).expanduser() / "regtest/blocks").is_dir():
+            errors.append(f"PBS Bitcoin datadir must contain regtest/blocks: {pbs_datadir}")
     if config.run_dir:
         selected = Path(config.run_dir).expanduser()
         if not selected.is_absolute():

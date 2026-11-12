@@ -27,8 +27,12 @@ from . import local
 
 def _print_dry_run(args: PipelineConfiguration) -> bool:
     """Print dry-run intent and return whether dispatch must continue."""
-    use_pbs_dry_run = args.action == "pbs-from-s3" or (
-        args.action in ("emulate", "full-run") and args.artifacts.backend == "s3"
+    use_pbs_dry_run = (
+        args.action == "analyze"
+        and args.stages.blocksci
+        or (args.action == "coinjoin-analysis" and args.stages.analysis)
+        or (args.action == "pbs-from-s3")
+        or (args.action in ("emulate", "full-run") and args.artifacts.backend == "s3")
     )
     if not args.dry_run:
         return True

@@ -171,6 +171,7 @@ HELP = {
     "blocksci.dumplings_dir": "notebook task over an index read in place: Scanner/ read in place, seen at /mnt/dumplings",
     "blocksci.storage_report_uri": "with --blocksci-restore-index: S3 object receiving the kept copy's size",
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
+    "pbs.bitcoin_datadir": "Bitcoin datadir the PBS BlockSci stage reads",
     **{
         f"images.{component}": f"{component.replace('_', '-')} image (also ${variable})"
         for component, variable in IMAGE_ENVIRONMENT.items()

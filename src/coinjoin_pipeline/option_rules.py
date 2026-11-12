@@ -136,15 +136,22 @@ def _general_errors(config: PipelineConfiguration) -> list[str]:
             value = config_value(config, path)
             if value is not None and value is not False:
                 errors.append(f"{cli_flag(destination)} is not supported for {config.action}")
+    if config.all_runs and config.stages.analysis:
+        errors.append("--all-runs is not supported with --analysis-pbs; select one run")
     if not 1024 <= config.blocksci.notebook_port <= 65535:
         errors.append("--blocksci-notebook-port must be between 1024 and 65535")
     if config.artifacts.backend == "s3" and config.action != "pbs-from-s3":
         for flag, value in (
             ("--kubernetes-btc-datadir", config.kubernetes.btc_datadir),
+            ("--pbs-bitcoin-datadir", config.pbs.bitcoin_datadir),
             ("--copy-to-host", config.kubernetes.copy_to_host),
         ):
             if value:
                 errors.append(f"Kubernetes S3-compatible mode does not support shared Bitcoin storage ({flag})")
+    if config.driver == "kubernetes" and config.stages.blocksci and not config.kubernetes.copy_to_host:
+        first, second = config.kubernetes.btc_datadir, config.pbs.bitcoin_datadir
+        if first and second and Path(first).expanduser().resolve() != Path(second).expanduser().resolve():
+            errors.append("Kubernetes and PBS Bitcoin datadirs must identify the same directory")
     return errors
 
 
@@ -231,8 +238,8 @@ def _driver_errors(config: PipelineConfiguration) -> list[str]:
 def _pbs_stage_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
     errors: list[str] = []
     for flag, enabled, permitted in (
-        ("--analysis-pbs", stages.analysis, ("full-run", "pbs-from-s3")),
-        ("--blocksci-pbs", stages.blocksci, ("full-run", "pbs-from-s3")),
+        ("--analysis-pbs", stages.analysis, ("full-run", "coinjoin-analysis", "pbs-from-s3")),
+        ("--blocksci-pbs", stages.blocksci, ("full-run", "analyze", "pbs-from-s3")),
         ("--mappings-pbs", stages.mappings, ("full-run", "pbs-from-s3")),
     ):
         if enabled and config.action not in permitted:
