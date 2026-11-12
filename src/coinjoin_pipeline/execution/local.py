@@ -8,18 +8,22 @@ from __future__ import annotations
 from pathlib import Path
 
 from coinjoin_pipeline.configuration import PipelineConfiguration
+from coinjoin_pipeline.execution.pipeline_logging import captured_pipeline_stage, exit_with_error
 from coinjoin_pipeline.execution.run_context import detect_active_run
 
 from . import containers, settings
 
 
 def _emulate(args: PipelineConfiguration, logs_root: Path) -> Path:
-    """Run the emulator on Docker and return the run it created."""
-    containers.run_script(settings.EMULATE_SCRIPT, config=args)
+    """Run the emulator on Docker and file its log under the run it created."""
+    with captured_pipeline_stage(logs_root, "Docker emulation") as log:
+        containers.run_script(settings.EMULATE_SCRIPT, config=args)
     active_run = detect_active_run(logs_root)
     if active_run is None:
-        raise RuntimeError("Emulator did not produce the expected run directory.")
+        log.relocate(logs_root / "_failed")
+        exit_with_error(RuntimeError("Emulator did not produce the expected run directory."))
     print(f"Active run: {active_run.name}")
+    log.relocate_to_run(active_run)
     return active_run
 
 

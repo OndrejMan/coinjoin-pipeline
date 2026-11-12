@@ -9,7 +9,8 @@ EXIT_USAGE = 2
 EXIT_FAILURE = 5
 EXIT_INTERRUPTED = 130
 
-# Execution reports a failed run with EXIT_FAILURE, and a failed local container
+# Execution reports a failed run ("[ERROR] ...") with EXIT_FAILURE
+# (execution/pipeline_logging.exit_with_error), and a failed local container
 # may pass its own exit code through.
 EXIT_CODES = (
     (EXIT_OK, "success"),
