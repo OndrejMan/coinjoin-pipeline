@@ -98,7 +98,7 @@ SECTIONS = {
         "A stage-specific --pbs-<stage>-* value overrides the shared --pbs-* fallback, "
         "which overrides the stage's default.",
     ),
-    "mainnet": ("mainnet-sync", "Only for action mainnet-sync."),
+    "mainnet": ("mainnet-sync", "Only for action mainnet-sync; see docs/mainnet-synchronization.md."),
     "external": ("external-analyze", "Only for `cjp external-analyze`."),
 }
 
