@@ -21,6 +21,7 @@ from exporters.manifest import build_run_manifest, compare_run_manifests
 from exporters.parameters import Detector, ReportImages
 from exporters.report_types import TransactionRecord
 from exporters.scenario import build_scenario_checks
+from exporters.script_metadata import enrich_records_with_script_metadata, load_exported_block_script_metadata
 
 MATCHED = "matched_by_both"
 MISSED = "missed_by_blocksci"
@@ -137,6 +138,10 @@ def build_report(
 ) -> JsonObject:
     """The unified report. Every top-level key is always present, null when it does not apply."""
     coinjoin_type, min_input_count = detector.coinjoin_type, detector.min_input_count
+    # One read of the exported blocks serves both analyzers' records.
+    script_index = load_exported_block_script_metadata(run_dir)
+    enrich_records_with_script_metadata(coinjoin_analysis, run_dir, script_index)
+    enrich_records_with_script_metadata(blocksci_records, run_dir, script_index)
     transactions = compare_transactions(coinjoin_analysis, blocksci_records)
 
     independent_emulator_labels = bool(

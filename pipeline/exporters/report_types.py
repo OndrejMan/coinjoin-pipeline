@@ -34,6 +34,11 @@ class IORecord(_IORecordFields, total=False):
     prev_txid: str | None
     spending_tx: str | None
     spend_by_tx: str | None
+    # Added from the exported blocks by script_metadata.apply_script_metadata.
+    script_type: str
+    script_asm: str
+    script_hex: str
+    address_type: str
 
 
 class TransactionMetrics(TypedDict):

@@ -1289,9 +1289,9 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertIn("## Notable Divergences", markdown)
         self.assertIn("- tx: [txA](http://localhost:3002/tx/txA)", markdown)
         self.assertIn("#### Inputs", markdown)
-        self.assertIn("| 0 | 150,000 | input-a | wallet-000 |", markdown)
+        self.assertIn("| 0 | 150,000 | input-a | - | - | wallet-000 |", markdown)
         self.assertIn("#### Outputs", markdown)
-        self.assertIn("| 0 | 100,000 | output-a0 | wallet-000 |", markdown)
+        self.assertIn("| 0 | 100,000 | output-a0 | - | - | wallet-000 |", markdown)
 
     def test_existing_block_height_is_not_overwritten_by_exported_blocks(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1317,6 +1317,85 @@ class UnifiedReportTest(unittest.TestCase):
             markdown,
         )
         self.assertNotIn("| _12 |", markdown)
+
+    def test_exported_block_script_metadata_maps_taproot_to_witness_unknown(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
+            block_dir.mkdir(parents=True)
+            (block_dir / "block_226.json").write_text(
+                json.dumps(
+                    {
+                        "height": 226,
+                        "tx": [
+                            {
+                                "txid": "prevA",
+                                "vout": [
+                                    {
+                                        "value": 0.0015,
+                                        "n": 0,
+                                        "scriptPubKey": {
+                                            "asm": "0 1111111111111111111111111111111111111111",
+                                            "hex": "00141111111111111111111111111111111111111111111111",
+                                            "address": "input-a",
+                                            "type": "witness_v0_keyhash",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "txid": "txA",
+                                "vin": [{"txid": "prevA", "vout": 0}],
+                                "vout": [
+                                    {
+                                        "value": 0.001,
+                                        "n": 0,
+                                        "scriptPubKey": {
+                                            "asm": "0 2222222222222222222222222222222222222222",
+                                            "hex": "00142222222222222222222222222222222222222222222222",
+                                            "address": "output-a0",
+                                            "type": "witness_v0_keyhash",
+                                        },
+                                    },
+                                    {
+                                        "value": 0.0005,
+                                        "n": 1,
+                                        "scriptPubKey": {
+                                            "asm": "1 3333333333333333333333333333333333333333333333333333333333333333",
+                                            "hex": (
+                                                "51203333333333333333333333333333333333333333333333333333333333333333"
+                                            ),
+                                            "address": (
+                                                "bcrt1pxvenxvenxvenxvenxvenxvenxvenxvenxvenxvenxvenxvenxvenxves3r4aqc"
+                                            ),
+                                            "type": "witness_v1_taproot",
+                                        },
+                                    },
+                                ],
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_fixture_with_block_height(226))
+            report = build_report(
+                run_dir, coinjoin_analysis, blocksci_fixture("txB"), Detector("wasabi2", min_input_count=1)
+            )
+
+        tx_record = report["transactions"]["txA"]["coinjoin_analysis"]
+        self.assertEqual(tx_record["inputs"][0]["script_type"], "witness_v0_keyhash")
+        self.assertEqual(tx_record["inputs"][0]["address_type"], "WITNESS_PUBKEYHASH")
+        self.assertEqual(tx_record["outputs"][0]["address_type"], "WITNESS_PUBKEYHASH")
+        self.assertEqual(tx_record["outputs"][1]["script_type"], "witness_v1_taproot")
+        self.assertEqual(tx_record["outputs"][1]["address_type"], "WITNESS_UNKNOWN")
+
+        markdown = render_report(report)
+        self.assertIn(
+            "| 1 | 50,000 | output-a1 | witness_v1_taproot | WITNESS_UNKNOWN |",
+            markdown,
+        )
 
     def test_build_report_field_mismatch(self):
         with tempfile.TemporaryDirectory() as tmpdir:
