@@ -1,4 +1,4 @@
-"""Submit one S3 PBS graph: the stage adapters and their marker resets."""
+"""Submit one S3 PBS graph: the stage adapters, marker resets, job bookkeeping and rollback."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from coinjoin_pipeline.execution.pbs_settings import (
     pbs_image,
     stage_pbs_resources,
 )
+from coinjoin_pipeline.execution.s3_markers import rollback_s3_pbs_submissions
 from coinjoin_pipeline.execution.stages import StageGraph, StageKind, StagePlan, s3_full_run_plan
 from coinjoin_pipeline.storage.s3 import (
     S3Target,
@@ -32,13 +33,14 @@ class S3StageRunner:
 
     ``StagePlan`` carries only logical identity, runner, and dependencies; this
     adapter is the one place that turns a stage kind into a rendered PBS job.
-    Every job goes through ``_submit``, so none can skip the reset of the stale
-    markers a previous attempt left.
+    Every job goes through ``_submit``, so none can skip the marker reset its
+    wait depends on or the bookkeeping that rollback and dependencies read.
     """
 
     args: PipelineConfiguration
     target: S3Target
     plan: StageGraph
+    submitted_jobs: list[tuple[str, str]]
     jobs: dict[str, str] = field(default_factory=dict)
 
     def submit_all(self) -> None:
@@ -56,6 +58,7 @@ class S3StageRunner:
             clear_s3_stage_markers(self.target.access, self.target.run_prefix, stage.name)
         job_id = submit_pbs_job(PBSJobSpec(stage.name, script), self.args.dry_run)
         if job_id:
+            self.submitted_jobs.append((stage.name, job_id))
             self.jobs[stage.name] = job_id
 
     def _blocksci(self) -> dict:
@@ -79,9 +82,19 @@ class S3StageRunner:
 
 
 def submit_s3_pbs_graph(args: PipelineConfiguration) -> dict[str, str]:
-    """Submit one S3 PBS graph; return job IDs by stage."""
+    """Submit one S3 PBS graph and roll it back on submit failure; return job IDs by stage."""
+    submitted_jobs: list[tuple[str, str]] = []
+    try:
+        return _submit_s3_pbs_stages(args, submitted_jobs)
+    except BaseException:
+        rollback_s3_pbs_submissions(submitted_jobs)
+        raise
+
+
+def _submit_s3_pbs_stages(args: PipelineConfiguration, submitted_jobs: list[tuple[str, str]]) -> dict[str, str]:
+    """Submit the concrete S3 PBS DAG while preserving marker semantics."""
     target = S3Target.from_args(args)
     plan = s3_full_run_plan_from_args(args)
-    runner = S3StageRunner(args, target, plan)
+    runner = S3StageRunner(args, target, plan, submitted_jobs)
     runner.submit_all()
     return runner.jobs
