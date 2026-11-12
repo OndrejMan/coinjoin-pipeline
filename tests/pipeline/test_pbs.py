@@ -221,6 +221,13 @@ class PBSStdinSubmissionTest(unittest.TestCase):
         self.assertEqual(run.call_args.args[0], ["qsub", "-W", "depend=afterok:8.server"])
         self.assertEqual(run.call_args.kwargs["input"], "#PBS -N stage\ntrue\n")
 
+    def test_a_hung_qsub_fails_instead_of_blocking_the_frontend(self):
+        hung = subprocess.TimeoutExpired(["qsub"], 120)
+        with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run", side_effect=hung) as run:
+            with self.assertRaisesRegex(PBSError, "did not answer within 120 s.*check qstat"):
+                submit_pbs("#PBS -N stage\ntrue\n")
+        self.assertEqual(run.call_args.kwargs["timeout"], 120)
+
     def test_submit_pbs_stdin_supports_multiple_dependencies(self):
         with mock.patch("coinjoin_pipeline.execution.pbs.submission.subprocess.run") as run:
             run.return_value = mock.Mock(returncode=0, stdout="10.server\n", stderr="")

@@ -28,6 +28,9 @@ from .validation import (
     require_safe_pbs_token,
 )
 
+# Longer than qstat/qdel: MetaCentrum's qsub can take a while when the server is busy.
+QSUB_TIMEOUT_SECONDS = 120
+
 
 def qstat_job_state(job_id: str) -> str | None:
     """The job's qstat state, ``LEFT_SCHEDULER`` once PBS no longer knows it, None when qstat cannot tell."""
@@ -70,14 +73,22 @@ def submit_pbs(script: Path | str, dependencies: Sequence[str] = ()) -> str:
     command = qsub_command(dependencies)
     if isinstance(script, Path):
         command.append(str(script))
-    result = subprocess.run(
-        command,
-        check=False,
-        text=True,
-        input=None if isinstance(script, Path) else script,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            text=True,
+            input=None if isinstance(script, Path) else script,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=QSUB_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        # The caller still holds its submit lock; failing frees it, waiting forever would not.
+        raise PBSError(
+            f"qsub did not answer within {QSUB_TIMEOUT_SECONDS} s; the server may still have accepted "
+            "the job, so check qstat before submitting again"
+        ) from error
     if result.returncode != 0:
         raise PBSError(f"qsub failed (exit {result.returncode}): {result.stderr.strip()}")
     return _parse_qsub_job_id(result.stdout)
