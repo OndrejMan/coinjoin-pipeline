@@ -201,13 +201,14 @@ class StageConfiguration(ConfigurationModel):
 
 @dataclass(frozen=True, slots=True)
 class PBSResourceConfiguration(ConfigurationModel):
-    ncpus: int | None = option(None, name="ncpus", minimum=1)
-    mem: str | None = option(None, name="mem")
-    scratch: str | None = option(None, name="scratch")
-    scratch_type: PBSScratchType | None = option(None, name="scratch_type")
-    walltime: str | None = option(None, name="walltime")
+    # One model serves every PBS stage, so option_specs names each flag after its path.
+    ncpus: int | None = option(None, minimum=1)
+    mem: str | None = option(None)
+    scratch: str | None = option(None)
+    scratch_type: PBSScratchType | None = option(None)
+    walltime: str | None = option(None)
     # MetaCentrum multijob scratch that outlives one job; only the BlockSci stage uses it.
-    multijob: PBSMultijob | None = option(None, name="multijob")
+    multijob: PBSMultijob | None = option(None)
 
     @property
     def configured(self) -> bool:
@@ -393,6 +394,13 @@ def require_mapping(value, location):
     return value
 
 
+def without_none(annotation):
+    """``X`` of ``X | None``; any other annotation unchanged."""
+    if get_origin(annotation) in (Union, UnionType):
+        return next(item for item in get_args(annotation) if item is not NoneType)
+    return annotation
+
+
 def decode_value(annotation, value, location):
     if is_dataclass(annotation):
         return decode_model(annotation, value, location)
@@ -400,8 +408,7 @@ def decode_value(annotation, value, location):
     if origin in (Union, UnionType):
         if value is None and NoneType in arguments:
             return None
-        annotation = next(item for item in arguments if item is not NoneType)
-        return decode_value(annotation, value, location)
+        return decode_value(without_none(annotation), value, location)
     if origin is Literal:
         if value not in arguments or isinstance(value, bool):
             raise ConfigurationError(f"{described(location)} must be one of: {', '.join(map(str, arguments))}")

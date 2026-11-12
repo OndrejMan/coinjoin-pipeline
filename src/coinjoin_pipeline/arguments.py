@@ -6,8 +6,7 @@ import argparse
 from dataclasses import MISSING, Field
 from functools import lru_cache
 from pathlib import Path
-from types import NoneType, UnionType
-from typing import Literal, Union, get_args, get_origin, get_type_hints
+from typing import Literal, get_args, get_origin, get_type_hints
 
 import yaml
 
@@ -19,6 +18,7 @@ from .configuration import (
     option_routes,
     option_specs,
     set_mapping_path,
+    without_none,
 )
 from .console import EXIT_CODES
 from .images import IMAGE_ENVIRONMENT
@@ -29,12 +29,10 @@ def field_type(path: str):
     model = PipelineConfiguration
     for part in path.split("."):
         model = get_type_hints(model)[part]
-    if get_origin(model) in (Union, UnionType):
-        model = next(item for item in get_args(model) if item is not NoneType)
-    return model
+    return without_none(model)
 
 
-CONFIGURATION_FLAGS = ("--from-configuration",)
+CONFIGURATION_FLAG = "--from-configuration"
 # Host commands that need no experiment; DELEGATING_UTILITIES parse their own arguments.
 UTILITIES = (
     "version",
@@ -306,7 +304,7 @@ def _metavar(path: str) -> str:
 
 def action_index(argv: list[str]) -> int | None:
     """Return the position of the action word, skipping options and their values."""
-    takes_value = set(CONFIGURATION_FLAGS)
+    takes_value = {CONFIGURATION_FLAG}
     for path, destination, _ in option_specs():
         if field_type(path) is not bool:
             takes_value.add(cli_flag(destination))
@@ -362,7 +360,7 @@ def build_parser(paths: set[str] | None = None, *, add_help: bool = True) -> arg
     )
     parser.add_argument("action", nargs="?", default=argparse.SUPPRESS, help="execution action (listed below)")
     parser.add_argument(
-        *CONFIGURATION_FLAGS,
+        CONFIGURATION_FLAG,
         type=Path,
         metavar="CONFIG.yaml",
         help="load an experiment from YAML (same as `cjp run CONFIG.yaml`)",
@@ -391,7 +389,8 @@ def build_parser(paths: set[str] | None = None, *, add_help: bool = True) -> arg
     return parser
 
 
-def _canonical_action(action: str) -> str:
+def _known_action(action: str) -> str:
+    """The action, once checked against the pipeline's actions."""
     if action not in get_args(PipelineAction):
         raise ConfigurationError(
             f"unknown action {action!r}; choose one of: {', '.join(get_args(PipelineAction))}, "
@@ -411,7 +410,7 @@ def load_configuration(argv: list[str]) -> PipelineConfiguration:
             elif not tail or tail[0].startswith("-"):
                 raise ConfigurationError("run requires a YAML configuration path: cjp run CONFIG.yaml")
             else:
-                argv = [*head, "--from-configuration", tail[0], *tail[1:]]
+                argv = [*head, CONFIGURATION_FLAG, tail[0], *tail[1:]]
     parsed = vars(build_parser().parse_args(argv))
     path = parsed.pop("from_configuration", None)
     data = {}
@@ -433,6 +432,6 @@ def load_configuration(argv: list[str]) -> PipelineConfiguration:
     routes = option_routes()
     for key, value in parsed.items():
         if key == "action":
-            value = _canonical_action(value)
+            value = _known_action(value)
         set_mapping_path(data, routes[key], value)
     return PipelineConfiguration.from_mapping(data)

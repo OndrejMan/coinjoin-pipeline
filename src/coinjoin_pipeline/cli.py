@@ -14,7 +14,7 @@ from exporters.artifact_paths import RUN_MANIFEST
 
 from . import MANIFEST_SCHEMA_VERSION, __version__
 from .arguments import (
-    CONFIGURATION_FLAGS,
+    CONFIGURATION_FLAG,
     DELEGATING_UTILITIES,
     UTILITIES,
     UTILITY_SUMMARIES,
@@ -213,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     code = EXIT_FAILURE
     try:
         if (
-            not any(value.split("=", 1)[0] in CONFIGURATION_FLAGS for value in original)
+            not any(value.split("=", 1)[0] == CONFIGURATION_FLAG for value in original)
             and action_word(original) != "run"
         ):
             result = _utility(original)
