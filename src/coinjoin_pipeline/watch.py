@@ -18,9 +18,10 @@ from typing import Iterator, TextIO
 from .configuration import KubernetesConfiguration
 from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, fail
 from .execution.kubernetes import kubectl_command, resolve_kubeconfig
-from .execution.pbs.defaults import MAINNET_SYNC_RESOURCES, PBS_TERMINAL_STATES
-from .execution.pbs.status import job_details
-from .execution.pbs.submission import read_pbs_job_id
+from .execution.pbs.defaults import MAINNET_SYNC_RESOURCES
+from .execution.pbs.status import job_details, job_phase
+from .execution.pbs.submission import recorded_pbs_job_ids
+from .execution.probes import PROBE_TERMINAL
 from .paths import default_runs_root
 from .storage.s3 import RUN_ID_RULE, is_valid_run_id
 
@@ -222,18 +223,6 @@ def _job_ids_from_frontend_log(path: Path) -> dict[str, str]:
     return jobs
 
 
-def _job_ids_from_run_dir(path: Path) -> dict[str, str]:
-    marker_dir = path / ".pbs"
-    jobs: dict[str, str] = {}
-    if not marker_dir.is_dir():
-        return jobs
-    for jobid_path in sorted(marker_dir.glob("*.jobid")):
-        job_id = read_pbs_job_id(path, jobid_path.stem)
-        if job_id:
-            jobs[jobid_path.stem] = job_id
-    return jobs
-
-
 def _parse_pbs_job_specs(values: list[str]) -> dict[str, str]:
     jobs: dict[str, str] = {}
     for value in values:
@@ -315,8 +304,9 @@ def _pbs_reader(
             except (FileNotFoundError, RuntimeError) as error:
                 messages.put((name, f"qstat unavailable: {error}"))
                 break
-            terminal_idle_polls = 0 if emitted or last_state not in PBS_TERMINAL_STATES else terminal_idle_polls + 1
-            if last_state in PBS_TERMINAL_STATES and terminal_idle_polls >= 2:
+            terminal = job_phase(last_state) == PROBE_TERMINAL
+            terminal_idle_polls = 0 if emitted or not terminal else terminal_idle_polls + 1
+            if terminal and terminal_idle_polls >= 2:
                 break
             stop.wait(2)
     finally:
@@ -465,7 +455,7 @@ def _frontend_log(args: argparse.Namespace, watch_pbs: bool) -> Path | None:
 def _pbs_sources(args: argparse.Namespace, runs_root: Path | None, frontend_log: Path | None) -> dict[str, PbsJob]:
     root = runs_root.expanduser().resolve() if runs_root else default_runs_root()
     run_dir = args.run_dir.expanduser().resolve() if args.run_dir else root / args.run_id
-    job_ids = _job_ids_from_run_dir(run_dir)
+    job_ids = recorded_pbs_job_ids(run_dir)
     if frontend_log is not None:
         job_ids.update(_job_ids_from_frontend_log(frontend_log))
     try:

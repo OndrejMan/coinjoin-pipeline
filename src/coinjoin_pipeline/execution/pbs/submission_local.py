@@ -12,17 +12,17 @@ from pathlib import Path
 from exporters.artifact_paths import BASELINE_FILE
 
 from coinjoin_pipeline.configuration import MappingsConfiguration
+from coinjoin_pipeline.execution.probes import PROBE_QUEUED, PROBE_RUNNING, PROBE_TERMINAL
 
 from . import submission
 from .defaults import (
-    PBS_ACTIVE_STATES,
-    PBS_TERMINAL_STATES,
     POLL_INTERVAL_SECONDS,
     STAGE_LOG_SETTLE_SECONDS,
     STAGE_LOG_TAIL_LINES,
     DEFAULT_RESOURCES,
     PBSResources,
 )
+from .status import job_phase
 from .templates_local import render_blocksci_pbs, render_coinjoin_analysis_pbs, render_mappings_pbs
 from .validation import (
     PBSError,
@@ -108,8 +108,9 @@ def wait_for_pbs_marker(
             return
         # Not polled during the grace cycle: the terminal state already landed.
         state = submission.qstat_job_state(job_id) if job_id and terminal_state_seen is None else None
+        phase = job_phase(state) if state is not None else None
         if deadline is not None and time.monotonic() >= deadline:
-            if state not in PBS_ACTIVE_STATES:
+            if phase not in (PROBE_QUEUED, PROBE_RUNNING):
                 raise PBSError(f"Timed out waiting for PBS stage marker: {stage}")
             # The job is verifiably alive (queued or running); shared-cluster
             # queue time must not be counted against the walltime budget.
@@ -125,9 +126,9 @@ def wait_for_pbs_marker(
             report_stage_log(run_dir, stage)
             raise PBSError(f"PBS stage ended without marker: {stage} (job {job_id}, state {terminal_state_seen})")
         if job_id:
-            if state in PBS_TERMINAL_STATES or state == "MISSING":
+            if phase == PROBE_TERMINAL:
                 terminal_state_seen = state
-            elif state is not None and state not in PBS_ACTIVE_STATES:
+            elif state is not None and phase is None:
                 raise PBSError(f"PBS stage has unexpected qstat state: {stage} (job {job_id}, state {state})")
         time.sleep(poll_interval)
 

@@ -16,9 +16,9 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from .execution.kubernetes import RUN_ID_LABEL, S3_EMULATION_APP_LABEL, kubectl
-from .execution.pbs.defaults import PBS_ACTIVE_STATES, PBS_QUEUED_STATES, PBS_TERMINAL_STATES
-from .execution.pbs.status import parse_qstat
-from .execution.pbs.submission import read_pbs_job_id
+from .execution.pbs.status import LEFT_SCHEDULER, PBS_COMMAND_TIMEOUT_SECONDS, job_phase, parse_qstat
+from .execution.pbs.submission import recorded_pbs_job_ids
+from .execution.probes import PROBE_RUNNING, PROBE_TERMINAL
 from .execution.pbs.validation import PBSError, require_safe_pbs_token
 from .storage.s3 import S3Access, run_prefix_uri, s3_object_exists, stage_marker_uri, upload_marker_uri
 
@@ -40,18 +40,15 @@ def recorded_jobs(run_ids: Iterable[str], roots: Iterable[Path]) -> tuple[dict[s
         found: dict[str, str] = {}
         for root in roots:
             run_dir = root / run_id
-            for path in sorted((run_dir / ".pbs").glob("*.jobid")):
-                if path.stem in found:
-                    continue
-                job_id = read_pbs_job_id(run_dir, path.stem)
-                if not job_id:
+            for stage, job_id in recorded_pbs_job_ids(run_dir).items():
+                if stage in found:
                     continue
                 try:
                     require_safe_pbs_token(job_id, "PBS job ID")
                 except PBSError:
-                    warnings.append(f"Invalid PBS job ID in {path}; check that job manually.")
+                    warnings.append(f"Invalid PBS job ID in {run_dir / '.pbs' / stage}.jobid; check that job manually.")
                     continue
-                found[path.stem] = job_id
+                found[stage] = job_id
         jobs[run_id] = found
     return jobs, warnings
 
@@ -73,7 +70,7 @@ def scheduler_states(user: str | None = None) -> dict[str, str] | None:
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=30,
+            timeout=PBS_COMMAND_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -89,15 +86,12 @@ def scheduler_states(user: str | None = None) -> dict[str, str] | None:
 
 
 def job_state(job_id: str, states: dict[str, str]) -> str:
-    """``queued``, ``running`` or ``finished`` for one job of a ``scheduler_states`` listing."""
-    state = states.get(_short(job_id))
-    if state is None or state in PBS_TERMINAL_STATES:
-        return FINISHED
-    if state in PBS_QUEUED_STATES:
-        return QUEUED
-    if state in PBS_ACTIVE_STATES:
-        return RUNNING
-    return QUEUED
+    """``queued``, ``running`` or ``finished`` for one job of a ``scheduler_states`` listing.
+
+    A job missing from the listing has left the queue; an undocumented state still holds its place there.
+    """
+    phase = job_phase(states.get(_short(job_id), LEFT_SCHEDULER))
+    return {PROBE_TERMINAL: FINISHED, PROBE_RUNNING: RUNNING}.get(phase or "", QUEUED)
 
 
 def emulation_job_state(job: dict) -> str:

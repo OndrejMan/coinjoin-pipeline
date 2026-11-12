@@ -10,14 +10,16 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from coinjoin_pipeline.execution.probes import PROBE_QUEUED, PROBE_RUNNING, PROBE_TERMINAL, PROBE_UNKNOWN
+from coinjoin_pipeline.execution.probes import PROBE_UNKNOWN
 
-from .defaults import (
-    PBS_ACTIVE_STATES,
-    PBS_QUEUED_STATES,
-    PBS_TERMINAL_STATES,
+from .status import (
+    LEFT_SCHEDULER,
+    PBS_COMMAND_TIMEOUT_SECONDS,
+    PBSQueryError,
+    job_details,
+    job_left_scheduler,
+    job_phase,
 )
-from .status import PBSQueryError, job_details, job_left_scheduler
 from .validation import (
     PBSError,
     require_qsub,
@@ -26,11 +28,12 @@ from .validation import (
 
 
 def qstat_job_state(job_id: str) -> str | None:
+    """The job's qstat state, ``LEFT_SCHEDULER`` once PBS no longer knows it, None when qstat cannot tell."""
     try:
         fields = job_details(job_id)
     except (PBSQueryError, FileNotFoundError):
         return None
-    return "MISSING" if fields is None else fields.get("job_state")
+    return LEFT_SCHEDULER if fields is None else fields.get("job_state")
 
 
 def _parse_qsub_job_id(stdout: str) -> str:
@@ -91,6 +94,16 @@ def read_pbs_job_id(run_dir: Path, stage: str) -> str | None:
     return path.read_text(encoding="utf-8").strip() or None
 
 
+def recorded_pbs_job_ids(run_dir: Path) -> dict[str, str]:
+    """Every recorded job ID of the run by stage; the files are never pruned, so finished jobs stay."""
+    jobs: dict[str, str] = {}
+    for path in sorted((run_dir / ".pbs").glob("*.jobid")):
+        job_id = read_pbs_job_id(run_dir, path.stem)
+        if job_id:
+            jobs[path.stem] = job_id
+    return jobs
+
+
 def persist_pbs_job_id(run_dir: Path, stage: str, job_id: str) -> None:
     """Record a submitted job ID atomically.
 
@@ -121,13 +134,17 @@ def qdel_error(job_id: str) -> str | None:
     """
     if shutil.which("qdel") is None:
         return f"qdel unavailable; cannot cancel PBS job {job_id}"
-    result = subprocess.run(
-        ["qdel", job_id],
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    try:
+        result = subprocess.run(
+            ["qdel", job_id],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=PBS_COMMAND_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return f"qdel {job_id} timed out after {PBS_COMMAND_TIMEOUT_SECONDS} s"
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
         if job_left_scheduler(stderr):
@@ -155,15 +172,12 @@ def pbs_job_probe(job_id: str) -> Callable[[], str]:
 
     def probe() -> str:
         state = qstat_job_state(job_id)
-        if state in PBS_TERMINAL_STATES or state == "MISSING":
-            return PROBE_TERMINAL
         if state is None:
             return PROBE_UNKNOWN
-        if state in PBS_QUEUED_STATES:
-            return PROBE_QUEUED
-        if state in PBS_ACTIVE_STATES:
-            return PROBE_RUNNING
-        raise PBSError(f"PBS job has unexpected qstat state: {job_id} (state {state})")
+        phase = job_phase(state)
+        if phase is None:
+            raise PBSError(f"PBS job has unexpected qstat state: {job_id} (state {state})")
+        return phase
 
     return probe
 

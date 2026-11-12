@@ -115,12 +115,24 @@ class PBSJobProbeTest(unittest.TestCase):
 
 
 class PBSStateSetParityTest(unittest.TestCase):
-    """The watcher and the submitter must classify PBS job states from one set."""
+    """Every client of the scheduler must classify PBS job states by one function."""
 
-    def test_watch_uses_the_submitter_terminal_states(self):
-        from coinjoin_pipeline.watch import PBS_TERMINAL_STATES as watched
+    def test_clients_classify_states_by_job_phase(self):
+        from coinjoin_pipeline import run_records, watch
+        from coinjoin_pipeline.execution.pbs import status, submission, submission_local
 
-        self.assertIs(watched, PBS_TERMINAL_STATES)
+        for client in (watch, run_records, submission, submission_local):
+            with self.subTest(client=client.__name__):
+                self.assertIs(client.job_phase, status.job_phase)
+
+    def test_status_keeps_an_undocumented_state_in_the_queue(self):
+        from coinjoin_pipeline.run_records import FINISHED, QUEUED, RUNNING, job_state
+
+        states = {"1": "R", "2": "Q", "3": "F", "5": "Z"}
+        self.assertEqual(
+            [job_state(f"{number}.server", states) for number in range(1, 6)],
+            [RUNNING, QUEUED, FINISHED, FINISHED, QUEUED],
+        )
 
 
 class PBSQdelTest(unittest.TestCase):

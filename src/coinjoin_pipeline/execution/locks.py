@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TextIO
 
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
-from coinjoin_pipeline.execution.pbs.submission import pbs_job_probe, read_pbs_job_id
+from coinjoin_pipeline.execution.pbs.submission import pbs_job_probe, recorded_pbs_job_ids
 from coinjoin_pipeline.execution.run_context import run_dir_under_root
 from coinjoin_pipeline.execution.probes import PROBE_QUEUED, PROBE_RUNNING, PROBE_UNKNOWN
 
@@ -79,13 +79,10 @@ def command_lock_path(args: PipelineConfiguration, logs_root: Path) -> Path:
 def ensure_no_active_s3_pbs_submission(run_dir: Path) -> None:
     """Refuse a second S3 PBS graph while a recorded job is still active."""
     active: list[str] = []
-    for jobid_path in sorted((run_dir / ".pbs").glob("*.jobid")):
-        job_id = read_pbs_job_id(run_dir, jobid_path.stem)
-        if not job_id:
-            continue
+    for stage, job_id in recorded_pbs_job_ids(run_dir).items():
         state = pbs_job_probe(job_id)()
         if state in (PROBE_QUEUED, PROBE_RUNNING, PROBE_UNKNOWN):
-            active.append(f"{jobid_path.stem}={job_id} ({state})")
+            active.append(f"{stage}={job_id} ({state})")
     if active:
         raise RuntimeError(
             f"An earlier pbs-from-s3 graph for this run is still active or cannot be verified: {', '.join(active)}"
