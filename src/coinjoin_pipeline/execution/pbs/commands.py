@@ -13,7 +13,7 @@ from coinjoin_pipeline.registry import pinned_reference
 from coinjoin_pipeline.storage.s3 import shell_assignment
 
 from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND
-from .validation import require_safe_image
+from .validation import require_notebook_port, require_safe_image
 
 
 def blocksci_pbs_command(run_id: str, config: PipelineConfiguration, include_report: bool = True) -> str:
@@ -69,6 +69,11 @@ def blocksci_script_pbs_command(
         environment["SCAN_END_HEIGHT"] = str(config.blocksci.scan_end_height)
     assignments = " ".join(shell_assignment(name, value) for name, value in environment.items())
     return f"{assignments} {BLOCKSCI_IMAGE_PYTHON_COMMAND} /mnt/user-analysis.py"
+
+
+def blocksci_notebook_pbs_command(notebook_port: int) -> str:
+    """Build notebook execution without rebuilding or reparsing BlockSci."""
+    return f"{BLOCKSCI_IMAGE_PYTHON_COMMAND} /mnt/blocksci_notebook.py {require_notebook_port(notebook_port)}"
 
 
 def blocksci_export_pbs_command(

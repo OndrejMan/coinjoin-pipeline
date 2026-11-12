@@ -39,6 +39,8 @@ def _general_errors(config: PipelineConfiguration) -> list[str]:
             value = config_value(config, path)
             if value is not None and value is not False:
                 errors.append(f"{cli_flag(destination)} is not supported for {config.action}")
+    if not 1024 <= config.blocksci.notebook_port <= 65535:
+        errors.append("--blocksci-notebook-port must be between 1024 and 65535")
     if config.artifacts.backend == "s3" and config.action != "pbs-from-s3":
         for flag, value in (
             ("--kubernetes-btc-datadir", config.kubernetes.btc_datadir),
@@ -163,6 +165,13 @@ def _blocksci_task_errors(config: PipelineConfiguration, stages: _PbsStages) -> 
         errors.append("--blocksci-task script requires --blocksci-script")
     if action == "pbs-from-s3" and task != "script" and _supplied(config, "blocksci.script", blocksci.script):
         errors.append("--blocksci-script requires --blocksci-task script")
+    if task != "notebook":
+        for flag, path, value in (
+            ("--blocksci-notebooks-dir", "blocksci.notebooks_dir", blocksci.notebooks_dir),
+            ("--blocksci-notebook-port", "blocksci.notebook_port", blocksci.notebook_port),
+        ):
+            if _supplied(config, path, value):
+                errors.append(f"{flag} requires --blocksci-task notebook")
     return errors
 
 

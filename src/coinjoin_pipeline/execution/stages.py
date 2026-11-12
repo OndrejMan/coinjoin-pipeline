@@ -35,7 +35,7 @@ class StageKind(Enum):
 
 
 #: Several stage names share one PBS budget: every BlockSci job is budgeted
-#: as ``blocksci`` whether it parses or analyzes.
+#: as ``blocksci`` whether it parses, analyzes, or runs a notebook.
 RESOURCE_GROUPS: dict[StageKind, str] = {
     StageKind.BASELINE: "analysis",
     StageKind.MAPPINGS: "mappings",

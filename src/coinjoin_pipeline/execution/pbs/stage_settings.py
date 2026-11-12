@@ -17,6 +17,10 @@ class _OutputDirectory(TypedDict):
 class OutputSettings(_OutputDirectory, total=False):
     """Where an analysis over an index writes."""
 
+    # A notebook writes to the submitting user's home, or to notebooks_dir.
+    notebook: bool
+    notebooks_dir: str
+
 
 class InputSettings(TypedDict):
     """One download before an analysis: a run directory."""
@@ -32,9 +36,10 @@ class _AnalysisIO(TypedDict):
 
 
 class AnalysisModeSettings(_AnalysisIO, total=False):
-    """What detection or a user script needs (analysis_modes)."""
+    """What detection, a user script or a notebook needs (analysis_modes)."""
 
     user_script: str
+    connection_help: list[str]
 
 
 class _CommonSettings(TypedDict):
@@ -93,4 +98,4 @@ class BlocksciSettings(CommandSettings):
 
 
 class BlocksciAnalysisSettings(CommandSettings, AnalysisModeSettings):
-    """Detection or a user script over this run's index."""
+    """Detection, a user script or a notebook over this run's index."""

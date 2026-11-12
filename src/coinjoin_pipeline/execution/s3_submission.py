@@ -11,6 +11,7 @@ from coinjoin_pipeline.execution.locks import acquire_lock, ensure_no_active_s3_
 from coinjoin_pipeline.execution.pbs.commands import (
     blocksci_analysis_pbs_command,
     blocksci_export_pbs_command,
+    blocksci_notebook_pbs_command,
     blocksci_parse_pbs_command,
     blocksci_pbs_command,
     blocksci_script_pbs_command,
@@ -142,7 +143,7 @@ class S3StageRunner:
         self._submit(stage, script)
 
     def _blocksci_work(self, stage: StagePlan) -> None:
-        task = self.args.blocksci.task
+        blocksci, task = self.args.blocksci, self.args.blocksci.task
         if stage.name == "blocksci":
             # A detect run keeps the report in its own stage; any other combined run reports in place.
             report_here = not (self.args.stages.blocksci and task == "detect")
@@ -157,6 +158,7 @@ class S3StageRunner:
         commands = {
             "detect": lambda: blocksci_analysis_pbs_command(self.target.run_id, self.args),
             "script": lambda: blocksci_script_pbs_command(self.target.run_id, self.args),
+            "notebook": lambda: blocksci_notebook_pbs_command(blocksci.notebook_port),
         }
         script = render_blocksci_analyze_s3_pbs(
             **self._blocksci(), **self._index(), command=commands[task](), mode=stage.name

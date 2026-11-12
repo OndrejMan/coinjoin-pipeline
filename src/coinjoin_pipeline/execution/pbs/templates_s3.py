@@ -10,6 +10,7 @@ settings; the work itself is ``analyzer_jobs``', ``blocksci_jobs``' and
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Union
 
 from exporters.artifact_paths import (
@@ -58,6 +59,8 @@ from .validation import (
     require_safe_pbs_token,
 )
 
+# Standalone helpers some jobs ship besides the worker.
+NOTEBOOK_SERVER = Path(__file__).parent / "templates/blocksci_notebook.py"
 BLOCKSCI = DEFAULT_RESOURCES["blocksci"]
 # The fields one job adds to the common StageSettings; its job function reads them.
 JobSettings = Union[
@@ -133,7 +136,7 @@ def render_blocksci_analyze_s3_pbs(
     mode: str = "blocksci-analyze",
     blocksci: BlockSciConfiguration = BlockSciConfiguration(),
 ) -> str:
-    """Render analysis or custom-script work over a cached index."""
+    """Render analysis, custom-script, or notebook work over a cached index."""
     if mode not in MODE_OUTPUTS:
         raise PBSError(f"Unsupported reusable BlockSci mode: {mode}")
     return render_python_stage(
@@ -146,6 +149,7 @@ def render_blocksci_analyze_s3_pbs(
             "command": command,
         },
         job="blocksci-analysis",
+        extra_files=(NOTEBOOK_SERVER,) if mode == "blocksci-notebook" else (),
     )
 
 
@@ -157,6 +161,7 @@ def render_python_stage(
     settings: JobSettings,
     *,
     job: str | None = None,
+    extra_files: tuple[Path, ...] = (),
 ) -> str:
     """The job script: write the worker's modules and settings.json to scratch and run ``stage_runtime``.
 
@@ -187,7 +192,7 @@ def render_python_stage(
         # One flat object: the worker reads it as StageSettings and as the job's own type.
         "settings.json": json.dumps({**common, **settings, **image_settings}, indent=2),
         "run.py": launcher("coinjoin_pipeline.execution.pbs.stage_runtime"),
-        **package_files(*STAGE_RUNTIME_MODULES),
+        **package_files(*STAGE_RUNTIME_MODULES, *extra_files),
     }
     return "\n".join(
         (
