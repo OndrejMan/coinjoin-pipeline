@@ -35,6 +35,11 @@ Opravy jsou nové commity nad historií ve větvi `clean-history`; existující 
 - Zlepšení 3 (`process.run` vypíše důvod), 4 (formátování `images.py` a `storage/s3.py`),
   10 (importy v `kubernetes.py`), 11 (timeout uploaderu jako deadline; se zpomaleným kubectl
   trval 5s timeout 18 s, teď 6 s).
+- Bugy 2 — YAML konfigurace musí uvést `action` („feat(config): require an action in YAML
+  configurations“); příkazová řádka si výchozí `full-run` nechává. Lab i všechny příklady ji uvádí.
+- Bugy 3 — obnovitelný Kerberos ticket vyžaduje už jen S3 `full-run`; `pbs-from-s3` a
+  `mainnet-sync` stačí platný ticket („fix(pbs): require a renewable Kerberos ticket only for the
+  S3 full-run“, včetně úpravy kontraktu v `docs/pbs-stage-contract.md`).
 - Navíc: commit nástrojů přestavby dostal `.peel/` pod `ruff check .`, opraveno v „style(history): …“.
 
 **Nepotvrdilo se**
@@ -46,9 +51,6 @@ Opravy jsou nové commity nad historií ve větvi `clean-history`; existující 
 
 **Ponecháno záměrně / k rozhodnutí**
 
-- Bugy 2 — výchozí akce `full-run` je dokumentovaná (i pro `runIt.sh`); změna je na tobě.
-- Bugy 3 — povinné `kinit -R` u `pbs-from-s3`/`mainnet-sync` je popsané jako kontrakt
-  v `docs/pbs-stage-contract.md:408`; změna je rozhodnutí o provozu na MetaCentru.
 - Zbytečný kód 5, 8, 10 — fallbacky image chrání volání mimo `RunContext` (testy a přímé volání
   knihoven); přínos odstranění je malý.
 - Refaktoring 11 — `embedded_file` je inverze `write_files` a sdílí s ním `_delimiter`.
