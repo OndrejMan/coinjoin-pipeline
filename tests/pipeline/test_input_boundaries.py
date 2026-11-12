@@ -1,3 +1,6 @@
+"""What the CLI, the report worker and the PBS submission accept at their boundaries, and what
+the report records about the images that produced a run."""
+
 import json
 import shlex
 from pathlib import Path

@@ -1,3 +1,6 @@
+"""The execution layer: Compose environments, local and Kubernetes launches, run directories,
+scenario paths and the S3 full-run orchestration."""
+
 import io
 import os
 import subprocess
