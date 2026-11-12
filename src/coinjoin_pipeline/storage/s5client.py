@@ -31,10 +31,36 @@ CHUNK = 8 * 1024 * 1024
 # 50 MiB ends at 488 GiB, within reach of the archived index of the whole chain.
 PIPE_PART_SIZE_MIB = 256
 SHA256 = re.compile(r"[0-9a-f]{64}")
+# What each side needs from s5cmd: the frontend stages the exporters with `sync --exclude`
+# (2.1); only the PBS jobs stream an archive, through `pipe` (2.2).
+FRONTEND_S5CMD_VERSION = (2, 1)
+PIPE_S5CMD_VERSION = (2, 2)
+S5CMD_VERSION = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
 
 
 class S5Error(RuntimeError):
     """An s5cmd call failed for a reason other than a missing object."""
+
+
+def s5cmd_version() -> tuple[int, ...] | None:
+    """Best-effort version of the s5cmd on PATH; None when it cannot be determined."""
+    try:
+        result = subprocess.run(
+            ["s5cmd", "version"], check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+        )
+    except OSError:
+        return None
+    match = S5CMD_VERSION.search(result.stdout or "")
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def older_s5cmd(minimum: tuple[int, ...]) -> str | None:
+    """The s5cmd version when it is older than minimum.
+
+    An unparsable version passes, so a vendored build cannot block a run it would handle.
+    """
+    found = s5cmd_version()
+    return ".".join(str(part) for part in found) if found is not None and found < minimum else None
 
 
 def no_object_found(result: subprocess.CompletedProcess) -> bool:
@@ -186,8 +212,11 @@ class S5Client:
         """Stream ``tar -C root members | zstd`` to uri; the archive's SHA-256 and size.
 
         Hashed and measured on the way, so nothing is read back. s5cmd needs ``pipe``
-        (2.2 or later); every node and image the pipeline runs on has 2.3.
+        (PIPE_S5CMD_VERSION), checked before anything is packed.
         """
+        found = older_s5cmd(PIPE_S5CMD_VERSION)
+        if found is not None:
+            raise S5Error(f"s5cmd {found} cannot stream an archive: `s5cmd pipe` needs 2.2 or newer")
         digest, size = hashlib.sha256(), 0
         with contextlib.ExitStack() as stack:
             tar = stack.enter_context(

@@ -124,7 +124,8 @@ All S3 parsers publish `blocksci-parse_data/` as a zstd archive, manifest and
 SHA-256; `combined` and `reusable` differ only in job arrangement. The working
 `blocksci_data/` stays on job scratch. `S5Client` shares the streaming
 upload/restore with the persistent index backup and the mainnet checkpoints;
-uploads need `s5cmd pipe` (2.2 or later). Consumers run only after verification.
+uploads need `s5cmd pipe` (2.2 or later), which the PBS job checks before it packs anything; the frontend
+never streams an archive and needs 2.1 for `sync --exclude`. Consumers run only after verification.
 Persistent mainnet indexes still stay in shared storage and are read/updated in
 place; emulations do not introduce a persistent working copy.
 

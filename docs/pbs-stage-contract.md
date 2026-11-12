@@ -103,8 +103,8 @@ A run's index is a backup in the format of the persistent index's (below): the
 parser's `blocksci_data/` gets `files.txt` and `manifest.json` like a persistent
 index, and `S5Client.replace_backup` publishes it, so run caches, the persistent
 index backup and the mainnet checkpoints share one writer and one reader. Upload
-hashes the compressed stream on its way into `s5cmd pipe` (s5cmd 2.2 or later; nodes and
-images have 2.3). The checksum uploads after the archive and the manifest uploads last.
+hashes the compressed stream on its way into `s5cmd pipe` (s5cmd 2.2 or later, checked by the job
+before it packs anything; the frontend never streams and needs only 2.1 for `sync --exclude`). The checksum uploads after the archive and the manifest uploads last.
 Before replacing an index, the old completion manifest is removed. Restore
 fetches only the manifest first and checks its run and image, then
 `IndexStore.restore` extracts the archive beside the index while hashing it. An

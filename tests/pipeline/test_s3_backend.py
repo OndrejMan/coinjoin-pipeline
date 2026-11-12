@@ -738,14 +738,24 @@ def test_unified_report_image_keeps_existing_uri_schemes(reference: str, expecte
 def test_frontend_rejects_an_s5cmd_without_exclude_support() -> None:
     from coinjoin_pipeline.storage.s3 import require_s5cmd_version
 
-    with mock.patch("coinjoin_pipeline.storage.s3.s5cmd_version", return_value=(2, 0, 0)):
+    with mock.patch("coinjoin_pipeline.storage.s5client.s5cmd_version", return_value=(2, 0, 0)):
         with pytest.raises(ArtifactTransportError, match="too old"):
             require_s5cmd_version()
-    # New enough, and an unparsable version must not block a run.
-    with mock.patch("coinjoin_pipeline.storage.s3.s5cmd_version", return_value=(2, 3, 0)):
-        require_s5cmd_version()
-    with mock.patch("coinjoin_pipeline.storage.s3.s5cmd_version", return_value=None):
-        require_s5cmd_version()
+    # The frontend never streams an archive, so 2.1 is enough; an unparsable version must not block a run.
+    for version in ((2, 1, 0), None):
+        with mock.patch("coinjoin_pipeline.storage.s5client.s5cmd_version", return_value=version):
+            require_s5cmd_version()
+
+
+def test_a_job_refuses_to_stream_an_archive_without_s5cmd_pipe(tmp_path) -> None:
+    from coinjoin_pipeline.storage.s5client import S5Client, S5Error
+
+    client = S5Client("https://s3.test", "/dev/null", "test")
+    with mock.patch("coinjoin_pipeline.storage.s5client.s5cmd_version", return_value=(2, 1, 0)):
+        with mock.patch("coinjoin_pipeline.storage.s5client._stage") as stage:
+            with pytest.raises(S5Error, match="needs 2.2"):
+                client.upload_archive(tmp_path, ["index"], "s3://bucket/archive.tar.zst", 1)
+    stage.assert_not_called()
 
 
 def kubectl_results(job_status: dict, pods: list[dict]):

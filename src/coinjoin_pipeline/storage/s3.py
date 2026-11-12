@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 from exporters.artifact_paths import KUBERNETES_MARKER_DIR, pbs_marker
 
 from coinjoin_pipeline.configuration import required
-from coinjoin_pipeline.storage.s5client import S5Client, S5Error, no_object_found
+from coinjoin_pipeline.storage.s5client import FRONTEND_S5CMD_VERSION, S5Client, S5Error, no_object_found, older_s5cmd
 
 if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import PipelineConfiguration
@@ -273,40 +273,16 @@ def clear_s3_stage_markers(access: S3Access, run_prefix: str, stage: str) -> Non
     delete_s3_object_if_present(access, stage_marker_uri(run_prefix, stage, "done"))
 
 
-# `sync --exclude` (used when staging the exporters) landed in s5cmd 2.1.
-MINIMUM_S5CMD_VERSION = (2, 1)
-S5CMD_VERSION_RE = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
+def require_s5cmd_version() -> None:
+    """Reject a frontend s5cmd too old for `sync --exclude`, which stages the exporters.
 
-
-def s5cmd_version() -> tuple[int, ...] | None:
-    """Best-effort frontend s5cmd version; None when it cannot be determined."""
-    try:
-        result = subprocess.run(
-            ["s5cmd", "version"],
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
-    except OSError:
-        return None
-    match = S5CMD_VERSION_RE.search(result.stdout or "")
-    return tuple(int(part) for part in match.groups()) if match else None
-
-
-def require_s5cmd_version(minimum: tuple[int, ...] = MINIMUM_S5CMD_VERSION) -> None:
-    """Reject an s5cmd too old for the flags this client relies on.
-
-    Only the frontend binary is checked: the uploader runs a pinned image and a PBS
-    node its own s5cmd. An unparsable version passes, so a vendored build cannot block
-    a run it would have handled fine.
+    Only the frontend binary is checked here: the uploader runs a pinned image, and a PBS
+    job checks its node's s5cmd before it streams an archive through `pipe`.
     """
-    version = s5cmd_version()
-    if version is not None and version < minimum:
+    found = older_s5cmd(FRONTEND_S5CMD_VERSION)
+    if found is not None:
         raise ArtifactTransportError(
-            "s5cmd on the frontend is too old for this pipeline: "
-            f"found {'.'.join(str(part) for part in version)}, "
-            f"need {'.'.join(str(part) for part in minimum)} or newer "
+            f"s5cmd on the frontend is too old for this pipeline: found {found}, need 2.1 or newer "
             "(sync --exclude support)"
         )
 
