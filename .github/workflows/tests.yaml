@@ -279,6 +279,8 @@ jobs:
           ./tests/support/pbs/local-pbs.sh status
       - name: Stop PBS container
         if: always()
+        env:
+          PBS_CONTAINER_NAME: pbs-image-smoke-${{ github.run_id }}
         run: ./tests/support/pbs/local-pbs.sh stop || true
 
   mainnet-sync-bounded:
