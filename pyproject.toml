@@ -35,7 +35,7 @@ package-dir = {coinjoin_pipeline = "src/coinjoin_pipeline", exporters = "pipelin
 
 [tool.setuptools.package-data]
 "coinjoin_pipeline.execution" = ["*.sh"]
-"coinjoin_pipeline.execution.pbs" = ["templates/*.sh"]
+"coinjoin_pipeline.execution.pbs" = ["templates/*.sh", "templates/blocksci_notebook.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/pipeline"]
@@ -77,6 +77,7 @@ extend-select = ["ANN401", "TID251"]
 "src/coinjoin_pipeline/execution/pbs/blocksci_analysis_jobs.py" = "py38"
 "src/coinjoin_pipeline/execution/pbs/index_store.py" = "py38"
 "src/coinjoin_pipeline/execution/pbs/apptainer.py" = "py38"
+"src/coinjoin_pipeline/execution/pbs/templates/blocksci_notebook.py" = "py38"
 
 [tool.pylint.main]
 fail-under = 10
