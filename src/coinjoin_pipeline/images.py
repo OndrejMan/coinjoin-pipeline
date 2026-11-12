@@ -5,6 +5,12 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING
+
+from .paths import CONTAINER_ROOT
+
+if TYPE_CHECKING:
+    from .configuration import PipelineConfiguration
 
 # Where the project's images are published.
 DEFAULT_REGISTRY = "ghcr.io/ondrejman"
@@ -74,3 +80,20 @@ def resolve_images(
 def default_image(component: str) -> str:
     """The released image of one component, resolved when it is needed."""
     return f"{image_names()[component]}:{DEFAULT_VERSION}"
+
+
+def read_image_lock(name: str) -> str:
+    """Read a committed image reference from the checkout's container/ dir."""
+    path = CONTAINER_ROOT / name
+    try:
+        reference = path.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        raise RuntimeError(f"image lock file is unreadable: {path}") from error
+    if not reference:
+        raise RuntimeError(f"image lock file is empty: {path}")
+    return reference
+
+
+def resolve_unified_report_image(args: PipelineConfiguration) -> str:
+    """Configured report image, else the lock file."""
+    return args.images.unified_report or read_image_lock("unified-report.image")

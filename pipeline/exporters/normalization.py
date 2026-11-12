@@ -10,8 +10,57 @@ from exporters.artifact_paths import (
     block_height_from_path,
 )
 from exporters.common import (
+    JsonObject,
+    coerce_sats,
     load_json,
+    sorted_items,
+    to_json_text,
+    transaction_metrics,
 )
+from exporters.report_types import IORecord, TransactionRecord
+
+
+def normalize_io_map(values: JsonObject) -> list[IORecord]:
+    records = []
+    for index, record in sorted_items(values):
+        normalized: IORecord = {
+            "index": str(index),
+            "value": coerce_sats(record.get("value")),
+            "address": to_json_text(record.get("address")),
+        }
+        if "wallet_name" in record:
+            normalized["wallet_name"] = to_json_text(record.get("wallet_name"))
+        if "mix_event_type" in record:
+            normalized["mix_event_type"] = to_json_text(record.get("mix_event_type"))
+        if "is_standard_denom" in record:
+            normalized["is_standard_denom"] = bool(record.get("is_standard_denom"))
+        if "txid" in record:
+            normalized["prev_txid"] = to_json_text(record.get("txid"))
+        if "spending_tx" in record:
+            normalized["spending_tx"] = to_json_text(record.get("spending_tx"))
+        if "spend_by_tx" in record:
+            normalized["spend_by_tx"] = to_json_text(record.get("spend_by_tx"))
+        records.append(normalized)
+    return records
+
+
+def normalize_coinjoin_analysis_record(txid: str, tx: JsonObject) -> TransactionRecord:
+    inputs = normalize_io_map(tx.get("inputs", {}))
+    outputs = normalize_io_map(tx.get("outputs", {}))
+    return {
+        "txid": to_json_text(tx.get("txid") or txid),
+        "broadcast_time": to_json_text(tx.get("broadcast_time")),
+        "block_height": tx.get("block_height") or tx.get("block_index"),
+        "round_id": to_json_text(tx.get("round_id")),
+        "inputs": inputs,
+        "outputs": outputs,
+        **transaction_metrics(inputs, outputs),
+    }
+
+
+def normalize_coinjoin_analysis(data: JsonObject) -> dict[str, TransactionRecord]:
+    coinjoins = data.get("coinjoins", {})
+    return {txid: normalize_coinjoin_analysis_record(txid, tx) for txid, tx in sorted_items(coinjoins)}
 
 
 def exported_block_paths(run_dir: Path) -> list[Path]:

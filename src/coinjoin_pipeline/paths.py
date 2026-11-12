@@ -10,6 +10,7 @@ PROJECT_ROOT = PACKAGE_ROOT.parents[1]
 PIPELINE_ROOT = PROJECT_ROOT / "pipeline"
 EXPORTERS_ROOT = PIPELINE_ROOT / "exporters"
 SCENARIOS_ROOT = PROJECT_ROOT / "scenarios"
+CONTAINER_ROOT = PROJECT_ROOT / "container"
 
 
 def scenarios_dir() -> Path:

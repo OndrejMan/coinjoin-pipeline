@@ -18,4 +18,6 @@ DEFAULT_ENGINE = "wasabi"
 CONTAINER_SCENARIOS_DIR = "/mnt/scenarios"
 DEFAULT_CONTAINER_SCENARIO = "/mnt/scenarios/overactive-local.json"
 DEFAULT_JOINMARKET_CONTAINER_SCENARIO = "/mnt/scenarios/defaultJoinMarket.json"
+VALID_PULL_POLICIES = ("always", "missing", "never")
+RUNS_ROOT_CONTAINER = "/runs/emulation/logs"
 COINJOIN_ANALYSIS_SELECTED_ROOT_CONTAINER = "/runs/emulation/selected"
