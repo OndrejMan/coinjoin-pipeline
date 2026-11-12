@@ -37,6 +37,7 @@ PipelineAction = Literal[
 Engine = Literal["wasabi", "joinmarket"]
 CoinjoinType = Literal["wasabi2", "joinmarket"]
 ContainerRuntime = Literal["docker", "podman"]
+AnalysisAction = Literal["collect_docker", "analyze_only"]
 
 
 def option(default=None, *, name=None, minimum=None, actions=None):
@@ -78,6 +79,7 @@ class PipelineConfiguration(ConfigurationModel):
     min_input_count: int | None = option(None, name="min_input_count", minimum=1)
     dry_run: bool = option(False, name="dry_run")
     all_runs: bool = option(False, name="all_runs", actions=("coinjoin-analysis",))
+    analysis_action: AnalysisAction = option("collect_docker", name="analysis_action", actions=("coinjoin-analysis",))
     images: ImageConfiguration = field(default_factory=ImageConfiguration)
     _provided: frozenset[str] = field(default_factory=frozenset, repr=False, compare=False)
 
