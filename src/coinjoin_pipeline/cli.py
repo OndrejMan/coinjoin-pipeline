@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 import shlex
 import subprocess
@@ -14,6 +15,7 @@ from exporters.artifact_paths import RUN_MANIFEST
 from . import MANIFEST_SCHEMA_VERSION, __version__
 from .arguments import (
     CONFIGURATION_FLAG,
+    DELEGATING_UTILITIES,
     UTILITIES,
     UTILITY_SUMMARIES,
     action_word,
@@ -22,7 +24,7 @@ from .arguments import (
 )
 from .configuration import ImageConfiguration, PipelineConfiguration
 from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, fail
-from .context import RunContext
+from .context import RunContext, runs_root
 from .doctor import check as doctor_check
 from .doctor import required_capabilities, required_image_components, validate_arguments
 from .images import DEFAULT_VERSION, Images, image_names
@@ -79,14 +81,20 @@ def _utility(argv: list[str]) -> int | None:
     supplied.pop("from_configuration", None)
     if action not in UTILITIES:
         return None
-    if remaining[:1] in (["-h"], ["--help"]):
+    if action not in DELEGATING_UTILITIES and remaining[:1] in (["-h"], ["--help"]):
         print(utility_usage(action))
         return EXIT_OK
     if action == "version":
         print_version()
         return EXIT_OK
-    context = RunContext.prepare(PipelineConfiguration.from_flat(supplied), shlex.join(["cjp", *argv]))
-    root = context.config.runs_path
+    config = PipelineConfiguration.from_flat(supplied)
+    reproduction = shlex.join(["cjp", *argv])
+    # Only pull and doctor need images; the others read the runs root alone.
+    root = runs_root(config)
+    if action in {"download-report"}:
+        module = importlib.import_module(f"coinjoin_pipeline.{action.replace('-', '_')}")
+        return module.main(remaining, runs_root=root)
+    context = RunContext.prepare(config, reproduction)
     if remaining:
         return fail(f"unexpected arguments for {action}: {' '.join(remaining)}; see cjp {action} --help")
     if action == "pull":
