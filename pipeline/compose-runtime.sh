@@ -1,6 +1,7 @@
 # shellcheck shell=bash
 # Sourced by emulate.sh: the Compose file and project, the container runtime and its
-# Compose command. These defaults serve a script run by hand.
+# Compose command. The CLI resolves the runtime and command in execution/runtime.py and
+# exports them; these defaults serve a script run by hand.
 COMPOSE_FILE="${COMPOSE_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/compose.yaml}"
 PROJECT_NAME="${COINJOIN_COMPOSE_PROJECT:-blocksci-emulator}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"

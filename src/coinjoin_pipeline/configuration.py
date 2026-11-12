@@ -27,7 +27,10 @@ def required(value: T | None, name: str) -> T:
     return value
 
 
-PipelineAction = Literal["emulate",]
+PipelineAction = Literal[
+    "emulate",
+    "coinjoin-analysis",
+]
 Engine = Literal["wasabi", "joinmarket"]
 ContainerRuntime = Literal["docker", "podman"]
 
@@ -50,6 +53,7 @@ class ConfigurationModel:
 class ImageConfiguration(ConfigurationModel):
     version: str | None = option(None, name="version")
     emulator: str | None = option(None, name="emulator_image")
+    coinjoin_analysis: str | None = option(None, name="coinjoin_analysis_image")
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +63,7 @@ class PipelineConfiguration(ConfigurationModel):
     runs_root: str | None = option(None, name="runs_root")
     engine: Engine = option("wasabi", name="engine")
     scenario: str | None = option(None, name="scenario")
+    run_dir: str | None = option(None, name="run_dir", actions=("coinjoin-analysis",))
     run_id: str | None = option(None, name="run_id", actions=("emulate",))
     run_timezone: str = option("Europe/Prague", name="run_timezone")
     images: ImageConfiguration = field(default_factory=ImageConfiguration)

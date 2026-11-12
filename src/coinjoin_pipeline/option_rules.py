@@ -11,6 +11,11 @@ if TYPE_CHECKING:
     from .configuration import PipelineConfiguration
 
 
+def _supplied(config: PipelineConfiguration, path: str, value: object) -> bool:
+    """Explicit false/null is inactive; zero and empty strings remain supplied."""
+    return path in config.provided and value is not None and value is not False and value != ()
+
+
 def cross_option_errors(config: PipelineConfiguration) -> list[str]:
     """Return every violated rule in order, retaining CLI spellings in diagnostics."""
     return _action_errors(config) + _general_errors(config)
@@ -31,10 +36,13 @@ def _general_errors(config: PipelineConfiguration) -> list[str]:
 
 
 def _action_errors(config: PipelineConfiguration) -> list[str]:
-    """Rules of the emulation action."""
+    """Rules of the emulation and analysis actions."""
     return _run_selection_errors(config)
 
 
 def _run_selection_errors(config: PipelineConfiguration) -> list[str]:
     errors: list[str] = []
+    action = config.action
+    if action == "coinjoin-analysis" and not _supplied(config, "run_dir", config.run_dir):
+        errors.append(f"{action} requires --run-dir")
     return errors

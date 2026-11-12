@@ -26,7 +26,8 @@ def required_capabilities(config: PipelineConfiguration) -> set[Capability]:
 def required_image_components(config: PipelineConfiguration) -> set[str]:
     return {
         "emulate": {"emulator"},
-    }.get(config.action, {"emulator"})
+        "coinjoin-analysis": {"coinjoin_analysis"},
+    }.get(config.action, {"emulator", "coinjoin_analysis"})
 
 
 def validate_arguments(config: PipelineConfiguration, runs_root: Path) -> list[str]:
@@ -36,6 +37,14 @@ def validate_arguments(config: PipelineConfiguration, runs_root: Path) -> list[s
         errors.append(
             f"scenario not found: {config.scenario}; pass a scenario JSON path or the name of a catalogue scenario"
         )
+    if config.run_dir:
+        selected = Path(config.run_dir).expanduser()
+        if not selected.is_absolute():
+            selected = runs_root / selected
+        if selected.resolve().parent != runs_root.resolve():
+            errors.append(f"run directory must be directly inside {runs_root}: {selected}")
+        if not selected.is_dir():
+            errors.append(f"run directory not found: {selected}")
     return errors
 
 

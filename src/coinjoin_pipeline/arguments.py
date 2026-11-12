@@ -35,6 +35,7 @@ def field_type(path: str):
 CONFIGURATION_FLAG = "--from-configuration"
 ACTION_SUMMARIES = {
     "emulate": "emulate a new run only",
+    "coinjoin-analysis": "baseline coinjoin-analysis of --run-dir",
 }
 
 # Argument groups by the first segment of the model path; top-level fields are "".
@@ -52,6 +53,7 @@ HELP = {
     "runs_root": "directory holding the run directories (default: $EMULATION_LOGS_DIR, else ./coinjoin-runs)",
     "engine": "CoinJoin implementation to emulate and analyze",
     "scenario": "scenario JSON file, or the file name of a packaged scenario",
+    "run_dir": "existing run, as a name inside the runs root or a path to it",
     "run_id": "run ID; emulate generates <timestamp>_<scenario> when omitted",
     "run_timezone": "IANA timezone of generated run IDs",
     "images.version": "release tag of every component image",
@@ -104,6 +106,7 @@ def _epilog() -> str:
         "",
         "examples:",
         "  cjp emulate --engine joinmarket",
+        "  cjp coinjoin-analysis --run-dir <run-id>",
         "",
         "Every option is also a YAML key (shown as YAML: ...); options after `run CONFIG.yaml` override it.",
         "",
