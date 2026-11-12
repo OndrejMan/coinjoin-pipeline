@@ -68,6 +68,14 @@ Opravy jsou nové commity nad historií ve větvi `clean-history`; existující 
 - Zlepšení 1 — všech 44 voleb bez popisu (coinjoin-analysis, mainnet, JoinMarket, mappings,
   `--network`) má nápovědu; test hlídá, že žádná volba neukazuje jen YAML klíč
   („docs(cli): describe every configuration option in --help“).
+- Refaktoring 1 a Zlepšení 13 — cache běhu má formát zálohy perzistentního indexu
+  (`blocksci_index.tar.zst`, `.sha256`, manifest se členy; v archivu `config.json`, `files.txt`,
+  `manifest.json`, `parsed/`). Zapisuje ji `replace_backup` a obnovuje `IndexStore.restore`,
+  tedy ověřující extraktor s kontrolou členů a `files.txt`; `restore_archive` zmizel
+  („refactor(blocksci): publish a run's index in the persistent index's backup format“).
+  Lab kontroluje nový tvar na větvi `index-backup-format` v `scenario-lab`
+  („refactor(notebook): check a saved index in the shared backup format“); obě změny musí jít
+  ven spolu. Cache běhů naparsovaných dřív už znovu použít nejde, je potřeba nový parse.
 - Navíc: commit nástrojů přestavby dostal `.peel/` pod `ruff check .`, opraveno v „style(history): …“.
 
 **Nepotvrdilo se**
@@ -84,11 +92,6 @@ Opravy jsou nové commity nad historií ve větvi `clean-history`; existující 
 - Zbytečný kód 5, 8, 10 — fallbacky image chrání volání mimo `RunContext` (testy a přímé volání
   knihoven); přínos odstranění je malý.
 - Refaktoring 11 — `embedded_file` je inverze `write_files` a sdílí s ním `_delimiter`.
-- Zlepšení 13 — `restore_archive` čte archiv z vlastního bucketu a ověřuje SHA-256; tvrdší
-  kontrola členů zůstává jako zlepšení.
-- Refaktoring 1 — sjednocení dvou formátů archivu indexu čeká na rozhodnutí: změna formátu cache
-  běhu rozbije kontrolu v Labu (`scenario-lab/server/run-notebook.ts` čte `archive`, sidecar a
-  `blocksci_data.tar.zst`) a cache už existujících běhů by šla znovu použít jen po novém parsování.
 
 Ostatní položky jsou dál otevřené.
 
