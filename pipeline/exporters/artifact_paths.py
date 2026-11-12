@@ -13,6 +13,7 @@ BLOCKSCI_ANALYSIS_DIR = "blocksci-analysis_data"
 REPORT_DIR = "coinjoinPipeline_data"
 COINJOIN_ANALYSIS_DIR = "coinjoin-analysis_data"
 EMULATOR_DIR = "coinjoin_emulator_data"
+RUN_MANIFEST = "research_manifest.json"
 SCENARIO_FILE = EMULATOR_DIR + "/scenario.json"
 #: The wallet and coordinator logs coinjoin-analysis reads.
 EMULATOR_DATA_DIR = EMULATOR_DIR + "/data"
@@ -24,7 +25,8 @@ EXPORTED_BLOCKS_DIR = EMULATOR_DATA_DIR + "/btc-node"
 #: One exported block below EXPORTED_BLOCKS_DIR: block_<height>.json.
 EXPORTED_BLOCK_GLOB = "block_*.json"
 _EXPORTED_BLOCK_NAME = re.compile(r"block_(\d+)\.json")
-# A run the emulator has finished.
+# A run the emulator has finished. The host writes RUN_MANIFEST before the
+# emulator starts, so the manifest alone must not count here.
 EMULATION_MARKERS = (SCENARIO_FILE,)
 
 
