@@ -8,6 +8,8 @@ from __future__ import annotations
 import hashlib
 import os
 import shlex
+import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -29,6 +31,8 @@ from coinjoin_pipeline.execution.pipeline_logging import (
 from coinjoin_pipeline.execution.run_context import run_dir_under_root
 from coinjoin_pipeline.execution.scenarios import container_scenario_path, scenario_source_path
 from coinjoin_pipeline.execution.runtime import (
+    CONTAINER_RUNTIME_ENV,
+    DEFAULT_CONTAINER_RUNTIME,
     compose_command,
     container_runtime,
 )
@@ -37,7 +41,70 @@ from coinjoin_pipeline.paths import default_runs_root, scenarios_dir
 
 from . import settings
 
+_CLEANUP_DONE = False
+
+
 DEFAULT_CONFIGURATION = PipelineConfiguration()
+
+
+def compose_project_containers(runtime: str, project: str) -> list[str]:
+    """IDs of the running containers Compose started under ``project``.
+
+    Compose names its containers ``<project>-<service>-<n>`` (or ``-run-<id>``), so
+    they are found by the project label rather than by a fixed name.
+    """
+    listed = subprocess.run(
+        [runtime, "ps", "-q", "--filter", f"label=com.docker.compose.project={project}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return listed.stdout.split()
+
+
+def cleanup_peer_containers() -> None:
+    """Stop this checkout's Compose containers; safe to call more than once."""
+    global _CLEANUP_DONE  # pylint: disable=global-statement  # one cleanup per process, shared by both signals
+    if _CLEANUP_DONE:
+        return
+    _CLEANUP_DONE = True
+    runtime = os.environ.get(CONTAINER_RUNTIME_ENV, DEFAULT_CONTAINER_RUNTIME)
+    if shutil.which(runtime):
+        project = os.environ.get(settings.COMPOSE_PROJECT_ENV) or compose_project_name(settings.ROOT_DIR)
+        running = compose_project_containers(runtime, project)
+        if running:
+            subprocess.run(
+                [runtime, "stop", *running],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if runtime == "podman":
+                subprocess.run(
+                    [runtime, "rm", "-f", "-i", *running],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+
+
+def handle_termination(signum: int, _frame: object) -> None:
+    """Exit 130 after cleanup, matching the launcher's interrupt contract."""
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    print(
+        f"Interrupted (signal {signum}); stopping CoinJoin analysis containers...",
+        file=sys.stderr,
+    )
+    cleanup_peer_containers()
+    sys.exit(130)
+
+
+def install_termination_handlers() -> None:
+    global _CLEANUP_DONE  # pylint: disable=global-statement
+    _CLEANUP_DONE = False
+    signal.signal(signal.SIGINT, handle_termination)
+    signal.signal(signal.SIGTERM, handle_termination)
 
 
 def run_command(command: list[str], *, cwd: Path | None = None, env: Mapping[str, str] | None = None) -> None:
