@@ -191,13 +191,12 @@ class S3StageRunner:
             self._submit(stage, script)
             return
         if stage.name == "blocksci":
-            # A detect run keeps the report in its own stage; any other combined run reports in place.
-            report_here = not (self.args.stages.blocksci and task == "detect")
+            # The combined workflow admits only the detect task, whose report has its own stage.
             script = render_blocksci_s3_pbs(
                 **self._blocksci(),
-                command=blocksci_pbs_command(self.target.run_id, self.args, include_report=report_here),
-                include_report=report_here,
-                export_analysis=not report_here,
+                command=blocksci_pbs_command(self.target.run_id, self.args, include_report=False),
+                include_report=False,
+                export_analysis=True,
             )
             self._submit(stage, script)
             return
