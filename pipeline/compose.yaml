@@ -161,7 +161,7 @@ services:
       command:
         - analyze-emul
         - --action
-        - collect_docker
+        - ${COINJOIN_ANALYSIS_ACTION:-collect_docker}
         - --target-path
         - ${COINJOIN_ANALYSIS_TARGET_PATH:-/runs/emulation/logs}
 

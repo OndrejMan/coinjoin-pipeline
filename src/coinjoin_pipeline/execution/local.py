@@ -54,7 +54,7 @@ def run_configuration(args: PipelineConfiguration, logs_root: Path) -> None:
         with captured_pipeline_stage(logs_root, "Unified report export", run_dir):
             containers.run_export_only(args)
     elif action == "coinjoin-analysis":
-        containers.run_coinjoin_analysis(args.run_dir, args.all_runs)
+        containers.run_coinjoin_analysis(args.run_dir, args.all_runs, args.analysis_action)
 
 
 def run_analysis(args: PipelineConfiguration, run_dir: Path, logs_root: Path) -> None:

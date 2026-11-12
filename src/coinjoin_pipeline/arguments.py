@@ -69,6 +69,7 @@ HELP = {
     ),
     "dry_run": "validate and print the plan without starting containers, jobs or uploads",
     "all_runs": "run coinjoin-analysis over every run in the runs root",
+    "analysis_action": "collect_docker collects the emulator logs first; analyze_only needs an existing baseline",
     "images.version": "release tag of every component image",
     "images.registry": (
         "registry and owner of the project's images, e.g. ghcr.io/you (also $COINJOIN_IMAGE_REGISTRY; "
