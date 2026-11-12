@@ -1,0 +1,18 @@
+# Only what runtime.Dockerfile copies; runs, logs and caches stay out of the context.
+*
+!pyproject.toml
+!README.md
+!runIt.sh
+!src
+!pipeline
+!scenarios
+!examples
+!container
+!scripts
+**/__pycache__
+**/*.pyc
+**/.mypy_cache
+**/.pytest_cache
+pipeline/emulation_logs
+scenarios/lab
+examples/lab
