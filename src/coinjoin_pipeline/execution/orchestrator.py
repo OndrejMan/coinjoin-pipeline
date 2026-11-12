@@ -1,8 +1,8 @@
 """Dispatch a resolved configuration.
 
-The Kubernetes → S3 → PBS path (``pbs-from-s3`` and the S3 ``emulate``) is
-handled here. Every other action belongs to the experimental local paths in
-``local.py``.
+The Kubernetes → S3 → PBS path (``pbs-from-s3`` and the S3 ``emulate`` and
+``full-run``) is handled here. Every other action belongs to the experimental
+local paths in ``local.py``.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from coinjoin_pipeline.execution.pipeline_logging import exit_with_error
 from coinjoin_pipeline.execution.s3_emulation import run_s3_kubernetes_emulation
 from coinjoin_pipeline.execution.s3_staging import stage_kubernetes_s3_run
 from coinjoin_pipeline.execution.s3_submission import submit_s3_pbs_graph
+from coinjoin_pipeline.execution.s3_workflow import run_s3_full_run
 from coinjoin_pipeline.storage.s3 import ArtifactTransportError
 
 from . import local
@@ -24,7 +25,9 @@ from . import local
 
 def _print_dry_run(args: PipelineConfiguration) -> bool:
     """Print dry-run intent and return whether dispatch must continue."""
-    use_pbs_dry_run = args.action == "pbs-from-s3" or (args.action == "emulate" and args.artifacts.backend == "s3")
+    use_pbs_dry_run = args.action == "pbs-from-s3" or (
+        args.action in ("emulate", "full-run") and args.artifacts.backend == "s3"
+    )
     if not args.dry_run:
         return True
     print(f"[dry-run] action: {args.action}")
@@ -33,6 +36,8 @@ def _print_dry_run(args: PipelineConfiguration) -> bool:
     if use_pbs_dry_run:
         if args.action == "emulate":
             print("[dry-run] Kubernetes resources will be rendered but not applied with kubectl.")
+        elif args.action == "full-run":
+            print("[dry-run] Kubernetes resources and PBS job scripts will be rendered but not submitted.")
         else:
             print("[dry-run] PBS job script will be rendered but not submitted with qsub.")
         return True
@@ -66,6 +71,11 @@ def run_configuration(args: PipelineConfiguration) -> None:
                 stage_kubernetes_s3_run(args)
             run_s3_kubernetes_emulation(args)
         except (ArtifactTransportError, RuntimeError) as error:
+            exit_with_error(error)
+    elif args.action == "full-run" and args.artifacts.backend == "s3":
+        try:
+            run_s3_full_run(args)
+        except (OSError, PBSError, RuntimeError) as error:
             exit_with_error(error)
     else:
         local.run_configuration(args, logs_root, local_build)

@@ -44,3 +44,10 @@ def test_resumed_detect_still_requires_the_stored_baseline(submission) -> None:
         s3_submission._submit_s3_pbs_stages(_args(action="pbs-from-s3"), [])
     exists.assert_called_once()
     runner.assert_not_called()
+
+
+def test_full_run_blocksci_without_analysis_reads_no_baseline(submission) -> None:
+    exists, runner = submission
+    s3_submission._submit_s3_pbs_stages(_args(), [])
+    exists.assert_not_called()
+    runner.return_value.submit_all.assert_called_once()

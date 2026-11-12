@@ -41,9 +41,10 @@ EXPORTED_BLOCKS_DIR = EMULATOR_DATA_DIR + "/btc-node"
 #: One exported block below EXPORTED_BLOCKS_DIR: block_<height>.json.
 EXPORTED_BLOCK_GLOB = "block_*.json"
 _EXPORTED_BLOCK_NAME = re.compile(r"block_(\d+)\.json")
-#: Directory of a run, and of its S3 prefix, holding job IDs and terminal markers:
-#: <stage>.jobid|done|failed of the PBS stages.
+#: Directories of a run, and of its S3 prefix, holding job IDs and terminal markers:
+#: <stage>.jobid|done|failed of the PBS stages, upload.done|failed of the Kubernetes uploader.
 PBS_MARKER_DIR = ".pbs"
+KUBERNETES_MARKER_DIR = ".k8s"
 
 # A run the emulator has finished. The host writes RUN_MANIFEST before the
 # emulator starts, so the manifest alone must not count here.

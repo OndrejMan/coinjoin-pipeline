@@ -98,9 +98,9 @@ def ensure_staged_exporters(args: PipelineConfiguration) -> None:
     """Stage the checkout's exporters into a run prefix that has none.
 
     The BlockSci detect and unified-report jobs download
-    ``.pipeline/exporters/`` from their own run prefix. An S3 emulation stages it
-    before it starts, but a ``pbs-from-s3`` — a resumed detect, above all — can
-    start from a prefix that has none. Only the missing case uploads:
+    ``.pipeline/exporters/`` from their own run prefix. An S3 full-run stages it
+    before emulation, but a standalone ``pbs-from-s3`` — a resumed detect, above
+    all — can start from a prefix that has none. Only the missing case uploads:
     a prefix that already carries exporters keeps the ones its earlier stages
     actually ran with.
     """
@@ -123,9 +123,10 @@ def ensure_staged_exporters(args: PipelineConfiguration) -> None:
 def stage_kubernetes_s3_run(args: PipelineConfiguration) -> None:
     """Prepare the S3 run prefix before any Kubernetes Job is created.
 
-    Run by the ``emulate`` S3 branch. Both preflights run before the upload on
-    purpose: a failed auth check must not leave staged exporters behind under a
-    run id that then needs cleaning up.
+    Shared by ``full-run --artifact-backend s3`` and the standalone ``emulate``
+    S3 branch. Both preflights run before the upload on purpose: a failed auth
+    check must not leave staged exporters behind under a run id that then needs
+    cleaning up.
     """
     target = S3Target.from_args(args)
     access = target.access

@@ -1,4 +1,4 @@
-"""The S3 emulation Job on Kubernetes: kubectl access, preflight, resources and cleanup."""
+"""The S3 emulation Job on Kubernetes: kubectl access, preflight, resources, probe and cleanup."""
 
 from __future__ import annotations
 
@@ -8,9 +8,11 @@ import os
 import shlex
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from coinjoin_pipeline.paths import EXECUTION_ROOT
+from coinjoin_pipeline.execution.probes import PROBE_QUEUED, PROBE_RUNNING, PROBE_TERMINAL, PROBE_UNKNOWN
 from coinjoin_pipeline.paths import REQUIRED_EXPORTERS
 
 S3_CONTROLLER_RESOURCE_REQUESTS = {"cpu": "250m", "memory": "512Mi"}
@@ -161,6 +163,88 @@ def s3_emulation_job_name(run_id: str) -> str:
     return f"{slug}-{digest}"
 
 
+# A pod that cannot start its containers keeps the Job "active" forever, so the
+# Job conditions alone never end the wait. The in-pod watchdog covers the
+# controller, but it cannot cover the image it runs in itself: an unpullable
+# uploader image would otherwise block the frontend until --emulation-timeout.
+UNSTARTABLE_WAITING_REASONS = frozenset(
+    {
+        "ErrImagePull",
+        "ImagePullBackOff",
+        "InvalidImageName",
+        "CreateContainerConfigError",
+    }
+)
+
+
+def unstartable_pod_reason(pod: dict) -> str | None:
+    """Return the fatal waiting reason of any container in ``pod``, if present."""
+    status = pod.get("status") or {}
+    for key in ("initContainerStatuses", "containerStatuses"):
+        for container in status.get(key) or []:
+            reason = ((container.get("state") or {}).get("waiting") or {}).get("reason")
+            if reason in UNSTARTABLE_WAITING_REASONS:
+                return f"{container.get('name')}: {reason}"
+    return None
+
+
+def _get_json(kubeconfig: Path, namespace: str, *arguments: str) -> tuple[dict | None, str]:
+    """``kubectl get ... -o json`` parsed, or None and kubectl's error when it is inconclusive."""
+    try:
+        result = kubectl(kubeconfig, "get", *arguments, "-o", "json", namespace=namespace)
+    except FileNotFoundError:
+        return None, ""
+    if result.returncode != 0:
+        return None, result.stderr or ""
+    try:
+        return json.loads(result.stdout), ""
+    except json.JSONDecodeError:
+        return None, ""
+
+
+def _pod_state(pods: list[dict], job_name: str) -> str:
+    if not pods:
+        return PROBE_QUEUED
+    for pod in pods:
+        reason = unstartable_pod_reason(pod)
+        if reason:
+            print(f"[kubernetes] Job {job_name} cannot start its containers ({reason})", file=sys.stderr)
+            return PROBE_TERMINAL
+    for pod in pods:
+        status = pod.get("status") or {}
+        if status.get("phase") == "Running":
+            return PROBE_RUNNING
+        for key in ("initContainerStatuses", "containerStatuses"):
+            for container in status.get(key) or []:
+                if (container.get("state") or {}).get("running") is not None:
+                    return PROBE_RUNNING
+    return PROBE_QUEUED
+
+
+def kubernetes_job_probe(kubeconfig_path: Path, namespace: str, job_name: str) -> Callable[[], str]:
+    """Build a kubectl-backed liveness probe for ``wait_for_s3_marker``.
+
+    kubectl errors are inconclusive so polling continues on ``PROBE_UNKNOWN``.
+    """
+    job_seen = False
+
+    def probe() -> str:
+        nonlocal job_seen
+        job, error = _get_json(kubeconfig_path, namespace, "job", job_name)
+        if job is None:
+            # Deleted after we saw it running means it terminated without markers.
+            gone = "notfound" in error.lower().replace(" ", "")
+            return PROBE_TERMINAL if gone and job_seen else PROBE_UNKNOWN
+        job_seen = True
+        for condition in (job.get("status") or {}).get("conditions") or []:
+            if condition.get("type") in {"Complete", "Failed"} and condition.get("status") == "True":
+                return PROBE_TERMINAL
+        pods, _ = _get_json(kubeconfig_path, namespace, "pods", "--selector", f"job-name={job_name}")
+        return PROBE_UNKNOWN if pods is None else _pod_state(pods.get("items") or [], job_name)
+
+    return probe
+
+
 def _delete(kubeconfig_path: Path, namespace: str, resource_type: str, name: str) -> bool:
     """Best-effort deletion; returns False only when kubectl itself is missing."""
     try:
@@ -176,7 +260,7 @@ def _delete(kubeconfig_path: Path, namespace: str, resource_type: str, name: str
 
 
 def delete_s3_emulation_job(kubeconfig_path: Path, namespace: str, job_name: str) -> None:
-    """Best-effort deletion of the emulation Job."""
+    """Best-effort frontend cleanup after a failed or timed-out marker wait."""
     _delete(kubeconfig_path, namespace, "job", job_name)
 
 

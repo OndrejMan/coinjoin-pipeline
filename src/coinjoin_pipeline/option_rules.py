@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .configuration import cli_flag, config_value, option_specs
+from .execution.stages import runs_unified_report
 from .storage.s3 import RUN_ID_RULE, is_valid_run_id
 
 if TYPE_CHECKING:
@@ -114,8 +115,8 @@ def _driver_errors(config: PipelineConfiguration) -> list[str]:
 def _pbs_stage_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
     errors: list[str] = []
     for flag, enabled, permitted in (
-        ("--analysis-pbs", stages.analysis, ("pbs-from-s3",)),
-        ("--blocksci-pbs", stages.blocksci, ("pbs-from-s3",)),
+        ("--analysis-pbs", stages.analysis, ("full-run", "pbs-from-s3")),
+        ("--blocksci-pbs", stages.blocksci, ("full-run", "pbs-from-s3")),
     ):
         if enabled and config.action not in permitted:
             errors.append(f"{flag} is supported only by {', '.join(permitted)}")
@@ -152,25 +153,38 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
             errors.append("pbs-from-s3 requires --analysis-pbs or --blocksci-pbs")
     if (
         s3_backend
-        and action == "pbs-from-s3"
+        and action in ("full-run", "pbs-from-s3")
         and _resources_supplied(config, "unified_report", config.pbs.unified_report)
-        and not stages.blocksci
+        and not runs_unified_report(
+            action=action,
+            analysis_pbs=stages.analysis,
+            blocksci_pbs=stages.blocksci,
+        )
     ):
         errors.append(
             "unified-report PBS resource overrides require a unified-report job: "
             "BlockSci detection with a coinjoin-analysis baseline"
         )
-    if s3_backend and action == "emulate":
-        errors.extend(
-            f"Kubernetes S3-compatible mode requires {flag}" for flag in _missing_s3_options(config, with_secret=True)
-        )
+    if s3_backend and action in ("full-run", "emulate"):
+        mode = "full-run --artifact-backend s3" if action == "full-run" else "Kubernetes S3-compatible mode"
+        errors.extend(f"{mode} requires {flag}" for flag in _missing_s3_options(config, with_secret=True))
         if config.driver != "kubernetes":
-            errors.append("--artifact-backend s3 requires --driver kubernetes")
+            errors.append(
+                f"{'full-run ' if action == 'full-run' else ''}--artifact-backend s3 requires --driver kubernetes"
+            )
         if not _supplied(config, "kubernetes.reuse_namespace", config.kubernetes.reuse_namespace):
             errors.append(
                 "Kubernetes S3-compatible mode requires --reuse-namespace because "
                 "the credentials Secret must exist before the Job is created"
             )
+    if s3_backend and action == "full-run":
+        # Any analyzer subset runs, emulation alone included.
+        for flag, path, value in (
+            ("--parallel", "parallel", config.parallel),
+            ("--blocksci-script", "blocksci.script", config.blocksci.script),
+        ):
+            if _supplied(config, path, value):
+                errors.append(f"full-run --artifact-backend s3 does not support {flag}")
     return errors
 
 

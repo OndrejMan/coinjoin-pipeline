@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import urlparse
 
-from exporters.artifact_paths import pbs_marker
+from exporters.artifact_paths import KUBERNETES_MARKER_DIR, pbs_marker
 
 from coinjoin_pipeline.configuration import required
 from coinjoin_pipeline.storage.s5client import S5Client, S5Error, no_object_found
@@ -172,6 +172,11 @@ def run_prefix_uri(artifact_uri: str, run_id: str) -> str:
 def stage_marker_uri(run_prefix: str, stage: str, outcome: str) -> str:
     """``<run-prefix>/.pbs/<stage>.<outcome>``: the terminal marker a PBS stage's trap uploads."""
     return f"{run_prefix}/{pbs_marker(stage, outcome)}"
+
+
+def upload_marker_uri(run_prefix: str, outcome: str) -> str:
+    """``<run-prefix>/.k8s/upload.<outcome>``: written by the Kubernetes uploader after the emulation."""
+    return f"{run_prefix}/{KUBERNETES_MARKER_DIR}/upload.{outcome}"
 
 
 def s3_listing(access: S3Access, pattern: str) -> list[dict[str, object]]:
