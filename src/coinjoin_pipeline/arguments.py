@@ -40,14 +40,16 @@ UTILITIES = (
     "version",
     "doctor",
     "pull",
+    "watch",
     "download-report",
     "clean-s3",
 )
-DELEGATING_UTILITIES = frozenset({"download-report", "clean-s3"})
+DELEGATING_UTILITIES = frozenset({"watch", "download-report", "clean-s3"})
 UTILITY_SUMMARIES = {
     "version": "print the CLI version and the default component images",
     "doctor": "check the container runtime, the runs root and the default images",
     "pull": "pull every component image with the container runtime",
+    "watch": "stream Kubernetes and PBS logs of one run",
     "download-report": "download the finished unified report of an S3 run",
     "clean-s3": "delete S3 artifacts of one run or a whole run root",
 }
@@ -240,7 +242,7 @@ def _epilog() -> str:
     width = max(map(len, (*ACTION_SUMMARIES, *UTILITY_SUMMARIES)))
     lines = ["actions:"]
     lines += [f"  {name:<{width}}  {summary}" for name, summary in ACTION_SUMMARIES.items()]
-    lines += ["", "utilities (download-report and clean-s3 accept their own --help):"]
+    lines += ["", "utilities (watch, download-report and clean-s3 accept their own --help):"]
     lines += [f"  {name:<{width}}  {summary}" for name, summary in UTILITY_SUMMARIES.items()]
     lines += [
         "",
@@ -248,6 +250,7 @@ def _epilog() -> str:
         "  cjp run examples/metacentrum-regtest-s3.yaml --dry-run",
         "  cjp full-run --engine joinmarket --dry-run",
         "  cjp analyze --run-dir <run-id>",
+        "  cjp watch --run-id <run-id> --pbs-only",
         "",
         "Every option is also a YAML key (shown as YAML: ...); options after `run CONFIG.yaml` override it.",
         "Use --dry-run to validate and render an execution without starting work.",

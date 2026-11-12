@@ -84,7 +84,7 @@ def submit_pbs(script: Path | str, dependencies: Sequence[str] = ()) -> str:
 
 
 def pbs_job_id_path(run_dir: Path, stage: str) -> Path:
-    """``<run>/.pbs/<stage>.jobid``: read by overlap detection and scenario-lab."""
+    """``<run>/.pbs/<stage>.jobid``: read by watch, overlap detection, cancellation and scenario-lab."""
     return run_dir / pbs_marker(stage, "jobid")
 
 
