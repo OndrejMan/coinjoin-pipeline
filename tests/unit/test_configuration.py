@@ -77,6 +77,13 @@ def test_explicit_disabled_stage_rejects_attached_resources():
         resolve_configuration(config)
 
 
+@pytest.mark.parametrize("action", ["pbs-from-s3", "mainnet-sync"])
+def test_s3_only_actions_reject_an_explicit_shared_storage_backend(action):
+    config = PipelineConfiguration.from_mapping({"action": action, "artifacts": {"backend": "shared-storage"}})
+    with pytest.raises(ConfigurationError, match=f"{action} reads its artifacts from S3"):
+        resolve_configuration(config)
+
+
 def test_default_namespace_only_requires_kubernetes_when_explicit():
     resolve_configuration(PipelineConfiguration.from_mapping({"action": "emulate"}))
     config = PipelineConfiguration.from_mapping({"action": "emulate", "kubernetes": {"namespace": "coinjoin"}})

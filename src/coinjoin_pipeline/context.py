@@ -43,6 +43,10 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
             config = replace_path(config, path, True)
             provided.add(path)
     if config.action in {"pbs-from-s3", "mainnet-sync"}:
+        if "artifacts.backend" in provided and config.artifacts.backend != "s3":
+            raise ConfigurationError(
+                f"{config.action} reads its artifacts from S3; drop --artifact-backend shared-storage"
+            )
         config = replace_path(config, "artifacts.backend", "s3")
     if config.engine == "joinmarket" and "coinjoin_type" not in provided:
         config = replace(config, coinjoin_type="joinmarket")
