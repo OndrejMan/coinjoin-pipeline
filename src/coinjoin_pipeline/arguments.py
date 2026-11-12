@@ -86,6 +86,10 @@ SECTIONS = {
     "blocksci": ("BlockSci", "Reusable tasks are submitted with pbs-from-s3 --blocksci-pbs."),
     "joinmarket": ("JoinMarket detector", None),
     "mappings": ("Wasabi mappings and Sake", "Used with --mappings-pbs (Wasabi runs only)."),
+    "coinjoin_analysis": (
+        "coinjoin-analysis programs",
+        "Run one upstream program instead of the default baseline.",
+    ),
     "pbs": (
         "PBS resources and images",
         "A stage-specific --pbs-<stage>-* value overrides the shared --pbs-* fallback, "
@@ -186,6 +190,10 @@ HELP = {
     "blocksci.storage_report_uri": "with --blocksci-restore-index: S3 object receiving the kept copy's size",
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
     "pbs.bitcoin_datadir": "Bitcoin datadir the PBS BlockSci stage reads",
+    "coinjoin_analysis.actions": "program operation (repeatable)",
+    "coinjoin_analysis.target_paths": "program target path (repeatable)",
+    "coinjoin_analysis.input_uri": "S3 input of the program (pbs-from-s3)",
+    "coinjoin_analysis.input_dir": "local input directory of the program (coinjoin-analysis)",
     "external.bitcoin_datadir": "Bitcoin datadir to analyze",
     "external.baseline": "baseline to compare the detections against",
     "external.false_cjtxs": "false_cjtxs.json applied to the baseline (repeatable)",
@@ -209,6 +217,14 @@ HELP = {
     "mappings.timeout": "enumerator: seconds per transaction before its first attempt stops",
     "mappings.retry_timeout": "enumerator: seconds of the one retry a timed-out transaction gets",
     "mappings.sake_seed": "seed of Sake's random decompositions; one seed reproduces a result",
+    "coinjoin_analysis.program": (
+        "coinjoin-analysis program to run alone: locally with coinjoin-analysis, on PBS with pbs-from-s3"
+    ),
+    "coinjoin_analysis.cjtype": "--cjtype of the program; parse_cj_logs and the positional programs take none",
+    "coinjoin_analysis.load_config": "configuration file of parse_cj_logs or parse_dumplings, relative to the input",
+    "coinjoin_analysis.env_vars": "the program's --env_vars: KEY=VALUE pairs separated by ';' that set its switches",
+    "coinjoin_analysis.filename": "scan_results_plot: the Scanner file to plot, without .json",
+    "coinjoin_analysis.data_mode": "whether the input is labelled emulation data or unlabelled mainnet data",
     **{
         f"images.{component}": f"{component.replace('_', '-')} image (also ${variable})"
         for component, variable in IMAGE_ENVIRONMENT.items()

@@ -130,6 +130,15 @@ class UnifiedReportSettings(CommandSettings):
     downloads: list[str]
 
 
+class CoinjoinToolsSettings(CommandSettings):
+    """One invocation of a shipped analyzer CLI."""
+
+    program: str
+    output_directory: str
+    input_uri: str | None
+    invocation: dict[str, object]
+
+
 class DumplingsBaselineSettings(CommandSettings):
     dumplings_uri: str
     mix_id: str
