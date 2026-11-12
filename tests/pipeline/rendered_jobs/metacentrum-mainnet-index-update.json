@@ -57,6 +57,7 @@
       "coinjoin_pipeline/execution/__init__.py",
       "coinjoin_pipeline/execution/pbs/__init__.py",
       "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/apptainer.py",
       "coinjoin_pipeline/execution/pbs/stage_settings.py",
       "coinjoin_pipeline/execution/pbs/stage.py",
       "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",

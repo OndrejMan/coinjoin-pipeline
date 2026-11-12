@@ -30,6 +30,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable, Mapping
 
+from coinjoin_pipeline.execution.pbs.apptainer import alias_binds
+
 if TYPE_CHECKING:
     from coinjoin_pipeline.storage.s5client import S5Client
 
@@ -265,16 +267,8 @@ class IndexStore:
         link.symlink_to(self.path / "parsed")
 
     def binds(self, mode: str) -> list[str]:
-        """Bind the index, and its target too when it is an alias.
-
-        MetaCentrum's /scratch/multijob-* aliases point outside /scratch, which the node binds
-        into every container: the alias alone resolves to nothing there and the bind is lost.
-        """
-        real = os.path.realpath(self.path)
-        binds = [f"{real}:{real}:{mode}"]
-        if real != str(self.path):
-            binds.append(f"{real}:{self.path}:{mode}")
-        return binds
+        """Bind the index, and its target too when it is a multijob alias."""
+        return alias_binds(self.path, mode)
 
     # Backup -----------------------------------------------------------------
 

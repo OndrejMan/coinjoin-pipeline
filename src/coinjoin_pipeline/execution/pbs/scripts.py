@@ -20,10 +20,12 @@ SOURCE_ROOT = Path(__file__).parents[3]
 # Modules a job ships to the node; each stays stdlib-only Python 3.8.
 S5CLIENT = Path(__file__).parents[2] / "storage" / "s5client.py"
 INDEX_STORE = Path(__file__).with_name("index_store.py")
+APPTAINER = Path(__file__).with_name("apptainer.py")
 # The S3 stage worker: its entry point and every module it imports.
 STAGE_RUNTIME_MODULES = (
     S5CLIENT,
     INDEX_STORE,
+    APPTAINER,
     *(Path(__file__).with_name(name) for name in ("stage_settings.py", "stage.py", "analyzer_jobs.py")),
     *(Path(__file__).with_name(name) for name in ("blocksci_jobs.py", "stage_runtime.py")),
 )

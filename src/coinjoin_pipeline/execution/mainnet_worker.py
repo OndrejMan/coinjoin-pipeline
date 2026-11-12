@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, TypedDict
 if TYPE_CHECKING:  # TypeGuard needs Python 3.10; the PBS node only evaluates no annotation.
     from typing import TypeGuard
 
+from coinjoin_pipeline.execution.pbs.apptainer import MISSING_RUNTIME, alias_binds, exec_command, find_runtime
 from coinjoin_pipeline.execution.pbs.index_store import MEMBERS as INDEX_MEMBERS
 from coinjoin_pipeline.execution.pbs.index_store import inventory as index_inventory
 from coinjoin_pipeline.execution.pbs.index_store import usage_report, utc_now
@@ -196,16 +197,6 @@ def resume_signature(index: Path, blocks: Path) -> dict[str, object]:
     }
 
 
-def container_bind(path: str | Path, readonly: bool = False) -> list[str]:
-    path = Path(path)
-    source = path.resolve()
-    suffix = ":ro" if readonly else ""
-    # MetaCentrum's /scratch/multijob-* aliases point outside /scratch. Bind
-    # their targets too, so aliases resolve inside the container as on the host.
-    destinations = dict.fromkeys((source, path))
-    return [argument for destination in destinations for argument in ("--bind", f"{source}:{destination}{suffix}")]
-
-
 class Worker:
     def __init__(self, settings: Settings, work: Path) -> None:
         self.c = settings
@@ -231,7 +222,7 @@ class Worker:
         self.uploaded: dict[str, JsonObject] = {}
         self.port: int | None = None
         self.stage = ""
-        self.container = shutil.which("apptainer") or shutil.which("singularity")
+        self.container = find_runtime()
 
     def publish_json(self, uri: str, value: object) -> None:
         path = self.work / "publish.json"
@@ -307,23 +298,23 @@ class Worker:
         readonly: bool = False,
         index_writable: bool = False,
         environment: dict[str, str] | None = None,
+        binds: Sequence[str] = (),
     ) -> list[str]:
+        """The dataset, the job directory and, for BlockSci, the index are bound at their own paths."""
         if self.container is None:
-            raise RuntimeError("Apptainer or Singularity is required on the PBS node")
-        command = [
-            self.container,
-            "exec",
-            "--cleanenv",
-            *container_bind(self.root, readonly),
-            *container_bind(self.work),
-        ]
+            raise RuntimeError(MISSING_RUNTIME)
+        mounts = [*alias_binds(self.root, "ro" if readonly else "rw"), *alias_binds(self.work)]
         if self.index.exists() and image == self.c["blocksci_image"]:
-            command += container_bind(self.index, not index_writable)
-        if cwd is not None:
-            command += ["--pwd", str(cwd)]
-        for key, value in (environment or {}).items():
-            command += ["--env", f"{key}={value}"]
-        return [*command, image, *map(str, args)]
+            mounts += alias_binds(self.index, "rw" if index_writable else "ro")
+        return exec_command(
+            self.container,
+            image,
+            args,
+            binds=[*mounts, *binds],
+            environment=[f"{key}={value}" for key, value in (environment or {}).items()],
+            cleanenv=True,
+            pwd=cwd,
+        )
 
     def run_command(self, command: list[str], name: str, poll: Callable[[], None] | None = None) -> subprocess.Popen:
         self.logs.mkdir(parents=True, exist_ok=True)
@@ -468,10 +459,8 @@ class Worker:
             self.c["credentials"],
             "--rpc-timeout",
             "120",
-        )
-        # Credentials are bound only to the archiver, never copied into the dataset.
-        command[command.index(self.c["core_image"]) : command.index(self.c["core_image"])] = container_bind(
-            self.c["credentials"], readonly=True
+            # Credentials are bound only to the archiver, never copied into the dataset.
+            binds=alias_binds(self.c["credentials"], "ro"),
         )
         if prune:
             ceiling = self.work / "prune-ceiling.txt"

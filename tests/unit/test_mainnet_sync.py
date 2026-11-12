@@ -467,7 +467,7 @@ def test_container_binds_symlink_targets_without_changing_workload_paths(worker,
     binds = [command[index + 1] for index, argument in enumerate(command) if argument == "--bind"]
     for path, ro in ((worker.root, readonly), (worker.work, False), (worker.index, not index_writable)):
         source = path.resolve()
-        suffix = ":ro" if ro else ""
+        suffix = ":ro" if ro else ":rw"
         assert f"{source}:{source}{suffix}" in binds
         assert f"{source}:{path}{suffix}" in binds
     assert command[-3:] == [worker.c["blocksci_image"], "reader", datadir]

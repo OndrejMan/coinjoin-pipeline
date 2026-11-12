@@ -11,7 +11,16 @@ from coinjoin_pipeline.configuration import required
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
 from coinjoin_pipeline.storage.s3 import shell_value, validate_artifact_uri, validate_run_id
 from .pbs.defaults import MAINNET_SYNC_RESOURCES, PBSResources
-from .pbs.scripts import INDEX_STORE, S5CLIENT, directives, launcher, package_files, runtime_source, write_files
+from .pbs.scripts import (
+    APPTAINER,
+    INDEX_STORE,
+    S5CLIENT,
+    directives,
+    launcher,
+    package_files,
+    runtime_source,
+    write_files,
+)
 from .pbs.submission import PBSJobSpec, persist_pbs_job_id, submit_pbs_job
 from .pbs.validation import PBSError, require_safe_image, require_safe_pbs_resources, walltime_to_seconds
 from .pbs_settings import pbs_image, stage_pbs_resources, with_singularity_scheme
@@ -31,6 +40,7 @@ WORK_TOKEN = "@WORK@"
 MAINNET_RUNTIME_MODULES = (
     *(Path(__file__).with_name(f"mainnet_{name}.py") for name in ("runtime", "jobs", "worker")),
     INDEX_STORE,
+    APPTAINER,
     S5CLIENT,
 )
 

@@ -14,6 +14,7 @@ import threading
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from coinjoin_pipeline.execution.pbs.apptainer import MISSING_RUNTIME, exec_command, find_runtime
 from coinjoin_pipeline.execution.pbs.stage_settings import StageSettings
 from coinjoin_pipeline.storage.s5client import S5Client, pipe
 
@@ -78,12 +79,12 @@ class Stage:
         cleanenv: bool = False,
     ) -> list[str]:
         """``singularity exec`` of command in the stage image, with these binds and variables."""
-        arguments = ["singularity", "exec", *(["--cleanenv"] if cleanenv else [])]
-        for bind in binds:
-            arguments += ["--bind", bind]
-        for variable in environment:
-            arguments += ["--env", variable]
-        return [*arguments, self.settings["image"], *command]
+        runtime = find_runtime()
+        if runtime is None:
+            raise StageFailure(MISSING_RUNTIME)
+        return exec_command(
+            runtime, self.settings["image"], command, binds=binds, environment=environment, cleanenv=cleanenv
+        )
 
     def singularity(
         self,
