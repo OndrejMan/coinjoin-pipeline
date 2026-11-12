@@ -12,7 +12,15 @@ import json
 from pathlib import Path
 from typing import TypedDict, Union
 
-from exporters.artifact_paths import COINJOIN_ANALYSIS_TOOLS_DIR, DUMPLINGS_SNAPSHOT_FILE
+from exporters.artifact_paths import (
+    BLOCKSCI_ANALYSIS_DIR,
+    COINJOIN_ANALYSIS_DIR,
+    COINJOIN_ANALYSIS_TOOLS_DIR,
+    DUMPLINGS_SNAPSHOT_FILE,
+    EMULATOR_DIR,
+    MAPPINGS_DIR,
+    STAGED_EXPORTERS_DIR,
+)
 
 from coinjoin_pipeline.configuration import (
     BlockSciConfiguration,
@@ -508,10 +516,10 @@ def render_unified_report_s3_pbs(
 ) -> str:
     """Render the S3 report-only job that joins both analyzer outputs."""
     downloads = [
-        ".pipeline/exporters",
-        "coinjoin_emulator_data",
-        "coinjoin-analysis_data",
-        "blocksci-analysis_data",
-        *(("coinjoin-mappings_data",) if include_mappings else ()),
+        STAGED_EXPORTERS_DIR,
+        EMULATOR_DIR,
+        COINJOIN_ANALYSIS_DIR,
+        BLOCKSCI_ANALYSIS_DIR,
+        *((MAPPINGS_DIR,) if include_mappings else ()),
     ]
     return render_python_stage("unified-report", target, resources, image, {"command": command, "downloads": downloads})

@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
+from coinjoin_pipeline.paths import EXPORTERS_ROOT
 from coinjoin_pipeline.storage.s3 import validate_artifact_uri
 
 from .defaults import PBSResources
@@ -15,17 +16,20 @@ if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import MappingsConfiguration
 
 TEMPLATES = Path(__file__).parent / "templates"
-# src/: a job ships each module at its path below it, so the node imports it as the frontend does.
-SOURCE_ROOT = Path(__file__).parents[3]
+# src/ and pipeline/: a job ships each module at its path below the one that holds it,
+# so the node imports it as the frontend does.
+SOURCE_ROOTS = (Path(__file__).resolve().parents[3], EXPORTERS_ROOT.parent)
 # Modules a job ships to the node; each stays stdlib-only Python 3.8.
 S5CLIENT = Path(__file__).parents[2] / "storage" / "s5client.py"
 INDEX_STORE = Path(__file__).with_name("index_store.py")
 APPTAINER = Path(__file__).with_name("apptainer.py")
+ARTIFACT_PATHS = EXPORTERS_ROOT / "artifact_paths.py"
 # The S3 stage worker: its entry point and every module it imports.
 STAGE_RUNTIME_MODULES = (
     S5CLIENT,
     INDEX_STORE,
     APPTAINER,
+    ARTIFACT_PATHS,
     *(Path(__file__).with_name(name) for name in ("stage_settings.py", "stage.py", "analyzer_jobs.py")),
     *(Path(__file__).with_name(name) for name in ("blocksci_jobs.py", "stage_runtime.py")),
 )
@@ -61,14 +65,22 @@ def runtime_source(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def package_files(*modules: Path) -> dict[str, str]:
-    """Each module under its path below src/, with the package markers its imports need.
+def _source_path(module: Path) -> PurePosixPath:
+    module = module.resolve()
+    for root in SOURCE_ROOTS:
+        if module.is_relative_to(root):
+            return PurePosixPath(module.relative_to(root).as_posix())
+    raise ValueError(f"{module} is outside every shipped source root")
 
-    The markers are empty: the real ``__init__.py`` of the package imports frontend code.
+
+def package_files(*modules: Path) -> dict[str, str]:
+    """Each module under its path below src/ or pipeline/, with the package markers its imports need.
+
+    The markers are empty: the real ``__init__.py`` of a package imports frontend code.
     """
     files: dict[str, str] = {}
     for module in modules:
-        relative = PurePosixPath(module.relative_to(SOURCE_ROOT).as_posix())
+        relative = _source_path(module)
         for package in reversed(relative.parents[:-1]):
             files.setdefault(f"{package}/__init__.py", "")
         files[str(relative)] = runtime_source(module)

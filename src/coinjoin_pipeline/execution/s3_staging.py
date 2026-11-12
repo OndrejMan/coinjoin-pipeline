@@ -7,6 +7,7 @@ from pathlib import Path
 # The exporters ship to the compute node on their own, so the tree hash they
 # record in the report has to come from the same implementation the frontend
 # logs here — otherwise the two provenance values are not comparable.
+from exporters.artifact_paths import STAGED_EXPORTERS_DIR
 from exporters.common import tree_sha256
 
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
@@ -25,7 +26,7 @@ from coinjoin_pipeline.storage.s3 import (
 
 def staged_exporters_uri(run_prefix: str) -> str:
     """The run's ``.pipeline/exporters/`` prefix that every BlockSci and report job downloads."""
-    return f"{run_prefix}/.pipeline/exporters/"
+    return f"{run_prefix}/{STAGED_EXPORTERS_DIR}/"
 
 
 def ensure_local_exporters(exporters_dir: Path) -> None:

@@ -1,15 +1,14 @@
 """The run-directory layout: every relative path a run is made of, in one place.
 
-The host package, the exporters and the tests import these names. Shell job
-templates keep the paths spelled out for readability; a test checks that they
-use only the directory names defined here.
+The host package, the exporters, the S3 PBS jobs and the tests import these names.
+The jobs ship this module to the compute node, so it stays standard library only.
+Shell job templates keep the paths spelled out for readability; a test checks that
+they use only the directory names defined here.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-
-from exporters.common import file_sha256
 
 BLOCKSCI_DIR = "blocksci_data"
 BLOCKSCI_PARSE_DIR = "blocksci-parse_data"
@@ -21,14 +20,20 @@ COINJOIN_ANALYSIS_DIR = "coinjoin-analysis_data"
 COINJOIN_ANALYSIS_TOOLS_DIR = "coinjoin-analysis-tools_data"
 EMULATOR_DIR = "coinjoin_emulator_data"
 MAPPINGS_DIR = "coinjoin-mappings_data"
+#: S3 runs only: the emulator's Bitcoin datadir, which the BlockSci parse reads.
+BITCOIN_DATA_DIR = "bitcoin_data"
+#: S3 runs only: the exporters staged into the run prefix for the BlockSci and report jobs.
+STAGED_EXPORTERS_DIR = ".pipeline/exporters"
 #: PBS job logs of a run, uploaded next to its artifacts.
 LOGS_DIR = "logs"
 
 RUN_MANIFEST = "research_manifest.json"
 SCENARIO_FILE = EMULATOR_DIR + "/scenario.json"
-LABEL_MANIFEST_FILE = EMULATOR_DIR + "/data/coinjoin_label_manifest.json"
-ROUND_EVENTS_FILE = EMULATOR_DIR + "/data/joinmarket_round_events.json"
-POSTMIX_SPENDS_FILE = EMULATOR_DIR + "/data/postmix_spends.json"
+#: The wallet and coordinator logs coinjoin-analysis reads, and the emulator's labels.
+EMULATOR_DATA_DIR = EMULATOR_DIR + "/data"
+LABEL_MANIFEST_FILE = EMULATOR_DATA_DIR + "/coinjoin_label_manifest.json"
+ROUND_EVENTS_FILE = EMULATOR_DATA_DIR + "/joinmarket_round_events.json"
+POSTMIX_SPENDS_FILE = EMULATOR_DATA_DIR + "/postmix_spends.json"
 BASELINE_FILE = COINJOIN_ANALYSIS_DIR + "/coinjoin_tx_info.json"
 FALSE_CJTXS_FILE = COINJOIN_ANALYSIS_DIR + "/false_cjtxs.json"
 # Every false-positive sidecar, including the numbered copies of extra inputs.
@@ -45,7 +50,7 @@ LIQUIDITY_DATASET = "liquidity_dataset.json"
 LIQUIDITY_EVENTS_CSV = "liquidity_events.csv"
 REPORT_FILE = REPORT_DIR + "/" + REPORT_JSON
 REPORT_MARKDOWN_FILE = REPORT_DIR + "/" + REPORT_MARKDOWN
-EXPORTED_BLOCKS_DIR = EMULATOR_DIR + "/data/btc-node"
+EXPORTED_BLOCKS_DIR = EMULATOR_DATA_DIR + "/btc-node"
 
 # A run the emulator has finished. The host writes RUN_MANIFEST before the
 # emulator starts, so the manifest alone must not count here.
@@ -97,8 +102,3 @@ def report_input_files(run_dir: Path) -> list[str]:
     sidecars = coinjoin_analysis_dir(run_dir).glob(FALSE_CJTXS_GLOB)
     present.extend(sorted(COINJOIN_ANALYSIS_DIR + "/" + path.name for path in sidecars if path.is_file()))
     return present
-
-
-def report_input_hashes(run_dir: Path) -> dict[str, str]:
-    """SHA-256 of each report input present in ``run_dir``, keyed by relative path."""
-    return {name: file_sha256(run_dir / name) for name in report_input_files(run_dir)}

@@ -7,7 +7,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2] / "pipeline"
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from exporters.artifact_paths import BASELINE_FILE, report_input_hashes  # noqa: E402
+from exporters.artifact_paths import BASELINE_FILE  # noqa: E402
+from exporters.manifest import report_input_hashes  # noqa: E402
 from exporters.artifact_paths import RUN_MANIFEST as MANIFEST_NAME  # noqa: E402
 
 from coinjoin_pipeline.execution.run_catalog import (  # noqa: E402

@@ -13,6 +13,7 @@ from coinjoin_pipeline.storage.s3 import shell_value, validate_artifact_uri, val
 from .pbs.defaults import MAINNET_SYNC_RESOURCES, PBSResources
 from .pbs.scripts import (
     APPTAINER,
+    ARTIFACT_PATHS,
     INDEX_STORE,
     S5CLIENT,
     directives,
@@ -41,6 +42,7 @@ MAINNET_RUNTIME_MODULES = (
     *(Path(__file__).with_name(f"mainnet_{name}.py") for name in ("runtime", "jobs", "worker")),
     INDEX_STORE,
     APPTAINER,
+    ARTIFACT_PATHS,
     S5CLIENT,
 )
 

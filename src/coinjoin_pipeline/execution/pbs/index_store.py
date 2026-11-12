@@ -30,6 +30,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable, Mapping
 
+from exporters.artifact_paths import BLOCKSCI_DIR
+
 from coinjoin_pipeline.execution.pbs.apptainer import alias_binds
 
 if TYPE_CHECKING:
@@ -259,9 +261,9 @@ class IndexStore:
 
     def link_into_run(self, run_work: Path) -> None:
         """The run-local config names the shared parsed/ through a symlink the job binds at the same path."""
-        (run_work / "blocksci_data").mkdir(parents=True, exist_ok=True)
+        (run_work / BLOCKSCI_DIR).mkdir(parents=True, exist_ok=True)
         (self.path / "parsed").mkdir(parents=True, exist_ok=True)
-        link = run_work / "blocksci_data/parsed"
+        link = run_work / BLOCKSCI_DIR / "parsed"
         if link.is_symlink() or link.exists():
             link.unlink()
         link.symlink_to(self.path / "parsed")

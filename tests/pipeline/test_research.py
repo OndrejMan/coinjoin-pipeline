@@ -9,7 +9,7 @@ from unittest import mock
 PROJECT_ROOT = Path(__file__).resolve().parents[2] / "pipeline"
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from exporters.artifact_paths import report_input_hashes  # noqa: E402
+from exporters.manifest import report_input_hashes  # noqa: E402
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.pbs.commands import detector_arguments
 from coinjoin_pipeline.execution.research import (  # noqa: E402

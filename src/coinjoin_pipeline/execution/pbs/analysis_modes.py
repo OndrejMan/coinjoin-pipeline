@@ -5,11 +5,17 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath
 
 from exporters.artifact_paths import (
+    ANALYSIS_ARTIFACT_FILE,
+    BASELINE_FILE,
     BLOCKSCI_ANALYSIS_DIR,
     BLOCKSCI_CUSTOM_ANALYSIS_DIR,
     BLOCKSCI_NOTEBOOKS_DIR,
     DUMPLINGS_SNAPSHOT_FILE,
+    EMULATOR_DIR,
+    FALSE_CJTXS_FILE,
     REPORT_DIR,
+    REPORT_FILE,
+    STAGED_EXPORTERS_DIR,
 )
 
 from coinjoin_pipeline.configuration import BlockSciConfiguration, required
@@ -33,21 +39,17 @@ def analysis_mode_settings(mode: str, blocksci: BlockSciConfiguration) -> Analys
     inputs: list[InputSettings] = []
     settings: AnalysisModeSettings = {"output": output, "inputs": inputs, "output_check": None}
     if mode == "blocksci-analyze":
-        artifact = f"{BLOCKSCI_ANALYSIS_DIR}/blocksci_analysis.json"
-        inputs += [{"run": ".pipeline/exporters"}, {"run": "coinjoin_emulator_data"}]
-        settings["output_check"] = [artifact, f"Reusable BlockSci analysis did not produce {artifact}"]
+        inputs += [{"run": STAGED_EXPORTERS_DIR}, {"run": EMULATOR_DIR}]
+        settings["output_check"] = [
+            ANALYSIS_ARTIFACT_FILE,
+            f"Reusable BlockSci analysis did not produce {ANALYSIS_ARTIFACT_FILE}",
+        ]
     elif mode == "blocksci-external":
         baseline_uri = validated_s3_uri(
             required(blocksci.external_baseline_uri, "--external-baseline-uri"), "Dumplings baseline URI"
         )
-        settings["output_check"] = [
-            f"{REPORT_DIR}/unified_report.json",
-            "External BlockSci report did not produce unified_report.json",
-        ]
-        inputs += [
-            {"run": ".pipeline/exporters"},
-            {"uri": baseline_uri, "to": "coinjoin-analysis_data/coinjoin_tx_info.json"},
-        ]
+        settings["output_check"] = [REPORT_FILE, "External BlockSci report did not produce unified_report.json"]
+        inputs += [{"run": STAGED_EXPORTERS_DIR}, {"uri": baseline_uri, "to": BASELINE_FILE}]
         if baseline_uri.endswith("/coinjoin_tx_info.json"):
             # A Dumplings baseline keeps the snapshot it came from next to it; optional.
             name = PurePosixPath(DUMPLINGS_SNAPSHOT_FILE).name
@@ -59,7 +61,7 @@ def analysis_mode_settings(mode: str, blocksci: BlockSciConfiguration) -> Analys
             inputs.append(
                 {
                     "uri": validated_s3_uri(blocksci.external_false_cjtxs_uri, "false-positive list URI"),
-                    "to": "coinjoin-analysis_data/false_cjtxs.json",
+                    "to": FALSE_CJTXS_FILE,
                 }
             )
     elif mode == "blocksci-script":

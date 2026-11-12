@@ -14,6 +14,8 @@ import threading
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from exporters.artifact_paths import LOGS_DIR
+
 from coinjoin_pipeline.execution.pbs.apptainer import MISSING_RUNTIME, exec_command, find_runtime
 from coinjoin_pipeline.execution.pbs.stage_settings import StageSettings
 from coinjoin_pipeline.storage.s5client import S5Client, pipe
@@ -155,7 +157,7 @@ def with_job_log(stage: Stage, name: str) -> None:
     The output still reaches the PBS output file too, so a job submitted from a host
     PBS cannot copy that file back to loses nothing that S3 does not keep.
     """
-    log = stage.work / "logs" / name
+    log = stage.work / LOGS_DIR / name
     log.parent.mkdir(parents=True, exist_ok=True)
     sys.stdout.flush()
     sys.stderr.flush()

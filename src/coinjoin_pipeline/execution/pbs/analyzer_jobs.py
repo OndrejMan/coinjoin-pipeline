@@ -13,6 +13,19 @@ import sys
 import time
 from typing import cast
 
+from exporters.artifact_paths import (
+    ANALYSIS_ARTIFACT_FILE,
+    BASELINE_FILE,
+    COINJOIN_ANALYSIS_DIR,
+    EMULATOR_DATA_DIR,
+    EMULATOR_DIR,
+    FALSE_CJTXS_FILE,
+    MAPPINGS_DIR,
+    REPORT_DIR,
+    REPORT_FILE,
+    STAGED_EXPORTERS_DIR,
+)
+
 from coinjoin_pipeline.execution.pbs.stage import CONTAINER_RUNS_ROOT, CONTAINER_SELECTED_ROOT, Stage, StageFailure
 from coinjoin_pipeline.execution.pbs.stage_settings import (
     CoinjoinToolsSettings,
@@ -29,26 +42,19 @@ def unified_report(stage: Stage) -> None:
     stage.log("downloading lightweight report inputs")
     for name in settings["downloads"]:
         stage.download(name)
-    for relative in (
-        "blocksci-analysis_data/blocksci_analysis.json",
-        "coinjoin-analysis_data/coinjoin_tx_info.json",
-        ".pipeline/exporters/unified_report.py",
-    ):
+    for relative in (ANALYSIS_ARTIFACT_FILE, BASELINE_FILE, f"{STAGED_EXPORTERS_DIR}/unified_report.py"):
         stage.require_file(relative, f"Unified S3 report requires {relative}")
     stage.log("assembling JSON and Markdown from precomputed analyzer outputs")
     stage.container(
         CONTAINER_RUNS_ROOT,
         (
             f"{stage.runs_root}:{CONTAINER_RUNS_ROOT}:rw",
-            f"{stage.work / '.pipeline/exporters'}:/mnt/exporters:ro",
+            f"{stage.work / STAGED_EXPORTERS_DIR}:/mnt/exporters:ro",
         ),
         settings["command"],
     )
-    stage.require_file(
-        "coinjoinPipeline_data/unified_report.json",
-        "Unified S3 report did not produce coinjoinPipeline_data/unified_report.json",
-    )
-    stage.upload(stage.work / "coinjoinPipeline_data", "coinjoinPipeline_data")
+    stage.require_file(REPORT_FILE, f"Unified S3 report did not produce {REPORT_FILE}")
+    stage.upload(stage.work / REPORT_DIR, REPORT_DIR)
     stage.log("report upload complete")
 
 
@@ -59,11 +65,11 @@ def coinjoin_analysis(stage: Stage) -> None:
     holds this run alone: the output directory, with the emulator data read-only in it.
     """
     settings = cast(CommandSettings, stage.settings)
-    stage.download("coinjoin_emulator_data")
-    data = stage.work / "coinjoin_emulator_data/data"
+    stage.download(EMULATOR_DIR)
+    data = stage.work / EMULATOR_DATA_DIR
     if not data.is_dir():
-        raise StageFailure("Coinjoin analysis requires coinjoin_emulator_data/data")
-    output = stage.work / "coinjoin-analysis_data"
+        raise StageFailure(f"Coinjoin analysis requires {EMULATOR_DATA_DIR}")
+    output = stage.work / COINJOIN_ANALYSIS_DIR
     output.mkdir(parents=True, exist_ok=True)
     selected = stage.scratch / "coinjoin-analysis-selected"
     (selected / stage.run_id).mkdir(parents=True, exist_ok=True)
@@ -77,11 +83,8 @@ def coinjoin_analysis(stage: Stage) -> None:
         ),
         settings["command"],
     )
-    stage.require_file(
-        "coinjoin-analysis_data/coinjoin_tx_info.json",
-        "Coinjoin analysis did not produce coinjoin-analysis_data/coinjoin_tx_info.json",
-    )
-    stage.upload(output, "coinjoin-analysis_data")
+    stage.require_file(BASELINE_FILE, f"Coinjoin analysis did not produce {BASELINE_FILE}")
+    stage.upload(output, COINJOIN_ANALYSIS_DIR)
 
 
 def coinjoin_tools(stage: Stage) -> None:
@@ -102,8 +105,8 @@ def coinjoin_tools(stage: Stage) -> None:
     elif settings["run_input"]:
         experiment = output / "input" / stage.run_id
         experiment.mkdir(parents=True)
-        stage.download_optional("coinjoin-analysis_data", experiment)
-        stage.download_optional("coinjoin_emulator_data/data", experiment / "data")
+        stage.download_optional(COINJOIN_ANALYSIS_DIR, experiment)
+        stage.download_optional(EMULATOR_DATA_DIR, experiment / "data")
         if not any(path.is_file() for path in experiment.rglob("*")):
             raise StageFailure("The run has no baseline or emulator data; provide analysis_input_uri")
     (output / "invocation.json").write_text(json.dumps(settings["invocation"], indent=2) + "\n")
@@ -126,7 +129,7 @@ def dumplings_baseline(stage: Stage) -> None:
     """
     settings = cast(DumplingsBaselineSettings, stage.settings)
     uri, mix_id = settings["dumplings_uri"], settings["mix_id"]
-    output = stage.work / "coinjoin-analysis_data"
+    output = stage.work / COINJOIN_ANALYSIS_DIR
     output.mkdir(parents=True, exist_ok=True)
     stage.log(f"reading the Dumplings copy from {uri}")
     manifest_path = stage.work / "dumplings-manifest.json"
@@ -159,9 +162,9 @@ def dumplings_baseline(stage: Stage) -> None:
     baseline = scanner / mix_id / "coinjoin_tx_info.json"
     if not baseline.is_file():
         raise StageFailure(f"coinjoin-analysis did not produce Scanner/{mix_id}/coinjoin_tx_info.json")
-    shutil.copyfile(baseline, output / "coinjoin_tx_info.json")
+    shutil.copyfile(baseline, stage.work / BASELINE_FILE)
     # The curated false positives shipped with this coinjoin-analysis image, for the comparison.
-    false_cjtxs = output / "false_cjtxs.json"
+    false_cjtxs = stage.work / FALSE_CJTXS_FILE
     curated = f"/opt/coinjoin-analysis/data/{settings['false_cjtxs']}/false_cjtxs.json"
     with false_cjtxs.open("wb") as handle:
         copied = subprocess.run(stage.image_command("cat", curated, cleanenv=True), stdout=handle)
@@ -169,9 +172,9 @@ def dumplings_baseline(stage: Stage) -> None:
         print(f"[{stage.name}] the image has no curated false_cjtxs.json", file=sys.stderr)
         false_cjtxs.unlink()
     shutil.copyfile(manifest_path, stage.work / settings["snapshot_file"])
-    coinjoins = len(json.loads((output / "coinjoin_tx_info.json").read_text())["coinjoins"])
+    coinjoins = len(json.loads((stage.work / BASELINE_FILE).read_text())["coinjoins"])
     stage.log(f"baseline of {coinjoins} coinjoins through height {height}")
-    stage.upload(output, "coinjoin-analysis_data")
+    stage.upload(output, COINJOIN_ANALYSIS_DIR)
 
 
 def coinjoin_mappings(stage: Stage) -> None:
@@ -181,18 +184,17 @@ def coinjoin_mappings(stage: Stage) -> None:
     shared-storage job runs too; their output is published even when they fail.
     """
     settings = cast(MappingsSettings, stage.settings)
-    output = stage.work / "coinjoin-mappings_data"
+    output = stage.work / MAPPINGS_DIR
     output.mkdir(parents=True, exist_ok=True)
-    stage.finalizers.append(lambda: stage.upload(output, "coinjoin-mappings_data"))
+    stage.finalizers.append(lambda: stage.upload(output, MAPPINGS_DIR))
     stage.log("downloading coinjoin-analysis input")
-    stage.download("coinjoin-analysis_data")
-    baseline = "coinjoin-analysis_data/coinjoin_tx_info.json"
-    stage.require_file(baseline, f"CoinJoin mappings require {baseline}")
+    stage.download(COINJOIN_ANALYSIS_DIR)
+    stage.require_file(BASELINE_FILE, f"CoinJoin mappings require {BASELINE_FILE}")
     environment = {
         **os.environ,
         "WORK": str(stage.work),
         "OUT": str(output),
-        "INPUT": str(stage.work / baseline),
+        "INPUT": str(stage.work / BASELINE_FILE),
         "ENUMERATOR_IMAGE": settings["enumerator_image"],
         "SAKE_IMAGE": settings["sake_image"],
     }
