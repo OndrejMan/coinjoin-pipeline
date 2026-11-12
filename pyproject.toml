@@ -1,0 +1,115 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coinjoin-pipeline"
+version = "0.1.0"
+description = "Reproducible CoinJoin emulation and analysis pipeline"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = ["PyYAML>=6,<7"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9"]
+
+[dependency-groups]
+dev = ["mypy>=1.18", "pylint>=3.3", "ruff>=0.6", "types-PyYAML"]
+
+[project.scripts]
+coinjoin-pipeline = "coinjoin_pipeline.cli:main"
+cjp = "coinjoin_pipeline.cli:main"
+
+[tool.setuptools]
+packages = [
+  "coinjoin_pipeline",
+  "coinjoin_pipeline.execution",
+  "coinjoin_pipeline.storage",
+  "exporters",
+]
+package-dir = {coinjoin_pipeline = "src/coinjoin_pipeline", exporters = "pipeline/exporters"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit", "tests/pipeline"]
+
+[tool.mypy]
+files = ["src/coinjoin_pipeline", "pipeline/exporters"]
+mypy_path = ["src", "pipeline"]
+explicit_package_bases = true
+exclude = ["^emulation_logs/", "(^|/)build/"]
+ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+exclude = ["emulation_logs"]
+
+[tool.ruff.lint]
+extend-select = ["ANN401", "TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"typing.Any".msg = "Do not use typing.Any; model report data with explicit aliases or narrower types."
+
+[tool.ruff.lint.per-file-ignores]
+"tests/pipeline/*.py" = ["E402"]
+
+[tool.ruff.per-file-target-version]
+"pipeline/exporters/**/*.py" = "py38"
+
+[tool.pylint.main]
+fail-under = 10
+ignore = [
+    ".venv",
+    ".uv-cache",
+    "btc-data",
+    "emulation_logs",
+]
+jobs = 1
+persistent = false
+py-version = "3.10"
+source-roots = ["src", "pipeline"]
+
+[tool.pylint.format]
+ignore-long-lines = "^\\s*(# )?<?https?://\\S+>?$"
+max-line-length = 120
+max-module-lines = 3000
+
+[tool.pylint."messages control"]
+confidence = ["HIGH", "CONTROL_FLOW", "INFERENCE", "INFERENCE_FAILURE", "UNDEFINED"]
+disable = [
+    "broad-exception-caught",
+    "duplicate-code",
+    "fixme",
+    "invalid-name",
+    "line-too-long",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "missing-module-docstring",
+    "subprocess-run-check",
+    "too-few-public-methods",
+    "too-many-arguments",
+    "too-many-branches",
+    "too-many-instance-attributes",
+    "too-many-lines",
+    "too-many-locals",
+    "too-many-positional-arguments",
+    "too-many-public-methods",
+    "too-many-return-statements",
+    "too-many-statements",
+    "import-outside-toplevel",
+    "wrong-import-position",
+]
+
+[tool.pylint.refactoring]
+max-nested-blocks = 7
+
+[tool.pylint.reports]
+score = true
+
+[tool.pylint.similarities]
+ignore-comments = true
+ignore-docstrings = true
+ignore-imports = true
+ignore-signatures = true
+min-similarity-lines = 4
