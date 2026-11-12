@@ -11,6 +11,8 @@ from exporters.report_types import BlockSciAnalysisArtifact, DetectorParameters
 
 SCHEMA_VERSION = "1.3"
 ARTIFACT_NAME = ANALYSIS_ARTIFACT_NAME
+# The detector parameters a Wasabi 2 analysis depends on; JoinMarket's depend on all of them.
+WASABI_PARAMETER_KEYS = ("coinjoin_type", "min_input_count")
 
 
 def load_analysis(
@@ -26,7 +28,11 @@ def load_analysis(
         raise ValueError(f"Unsupported BlockSci analysis schema in {path}: {artifact.get('schema_version')!r}")
     if artifact.get("run_id") != run_id:
         raise ValueError(f"BlockSci analysis run mismatch: expected {run_id!r}, got {artifact.get('run_id')!r}")
-    if artifact.get("parameters") != expected_parameters:
+    recorded = artifact.get("parameters")
+    # Only the options the selected type's detector reads must agree: changing a
+    # JoinMarket-only option leaves a Wasabi analysis valid.
+    keys = expected_parameters if expected_parameters["coinjoin_type"] == "joinmarket" else WASABI_PARAMETER_KEYS
+    if not isinstance(recorded, dict) or any(recorded.get(key) != expected_parameters.get(key) for key in keys):
         raise ValueError("BlockSci analysis detector parameters do not match the requested report parameters")
     for field, kind in (("records", dict), ("first_wasabi2_block", int)):
         if not isinstance(artifact.get(field), kind):

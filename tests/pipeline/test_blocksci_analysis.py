@@ -90,6 +90,34 @@ def test_load_analysis_rejects_parameter_mismatch(tmp_path: Path) -> None:
             expected_parameters=mismatched,
         )
 
+    # The Wasabi detector never reads the JoinMarket options.
+    joinmarket_only = {**parameters(), "joinmarket_max_depth": 100}
+    assert load_analysis(artifact, run_id="run-1", expected_parameters=joinmarket_only)["records"] == {}
+
+
+def test_load_analysis_compares_every_joinmarket_parameter(tmp_path: Path) -> None:
+    recorded = {**parameters(), "coinjoin_type": "joinmarket"}
+    artifact = tmp_path / "blocksci_analysis.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "mode": "emulator",
+                "run_id": "run-1",
+                "parameters": recorded,
+                "first_wasabi2_block": 0,
+                "records": {},
+                "subset_matching": None,
+                "integration_diagnostics": {"status": "ok"},
+                "predicted_address_clusters": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="parameters do not match"):
+        load_analysis(artifact, run_id="run-1", expected_parameters={**recorded, "joinmarket_max_depth": 100})
+
 
 def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-1"
