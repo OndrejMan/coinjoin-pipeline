@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, BLOCKSCI_DIR
@@ -57,7 +58,9 @@ def check_manifest(manifest: dict, label: str, image_name: str, run_id: str | No
         raise StageFailure(f"{label} was produced by a different BlockSci image")
 
 
-def restore_index(stage: Stage, cache_dir: Path, prefix: str, run_id: str, label: str) -> dict:
+def restore_index(
+    stage: Stage, cache_dir: Path, prefix: str, run_id: str, label: str, check: Callable[[dict], None] | None = None
+) -> dict:
     """Verify a published index's metadata, then stream it into the run's working index.
 
     Only small metadata lands in cache_dir. The .writing marker stays on any failure, so
@@ -71,6 +74,8 @@ def restore_index(stage: Stage, cache_dir: Path, prefix: str, run_id: str, label
     check_manifest(manifest, label, stage.settings["image_name"], run_id)
     if manifest.get("archive") != INDEX_ARCHIVE:
         raise StageFailure(f"{label} has an unsupported archive")
+    if check is not None:
+        check(manifest)
     checksum = sidecar.read_text().split(" ", 1)[0].strip()
     if manifest.get("archive_sha256") != checksum:
         raise StageFailure(f"{label} manifest SHA-256 does not match its sidecar")

@@ -30,6 +30,7 @@ class StageKind(Enum):
     BASELINE = "baseline"
     MAPPINGS = "mappings"
     BLOCKSCI_PARSE = "blocksci-parse"
+    BLOCKSCI_UPDATE = "blocksci-update"
     BLOCKSCI_WORK = "blocksci-work"
     REPORT = "report"
 
@@ -40,6 +41,7 @@ RESOURCE_GROUPS: dict[StageKind, str] = {
     StageKind.BASELINE: "analysis",
     StageKind.MAPPINGS: "mappings",
     StageKind.BLOCKSCI_PARSE: "blocksci",
+    StageKind.BLOCKSCI_UPDATE: "blocksci",
     StageKind.BLOCKSCI_WORK: "blocksci",
     StageKind.REPORT: "unified_report",
 }
@@ -192,6 +194,13 @@ def _blocksci_stages(
     """
     if not blocksci_pbs:
         return None, None
+    if blocksci_task == "update":
+        return None, StagePlan(
+            name="blocksci-update",
+            kind=StageKind.BLOCKSCI_UPDATE,
+            runner="pbs",
+            dependencies=(emulation.name,),
+        )
     if blocksci_workflow == "combined":
         # The combined worker downloads the emulation bundle from the same S3
         # prefix as the baseline worker, so it cannot start before the

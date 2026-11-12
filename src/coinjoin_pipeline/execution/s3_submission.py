@@ -15,6 +15,7 @@ from coinjoin_pipeline.execution.pbs.commands import (
     blocksci_parse_pbs_command,
     blocksci_pbs_command,
     blocksci_script_pbs_command,
+    blocksci_update_pbs_command,
     coinjoin_analysis_pbs_command,
 )
 from coinjoin_pipeline.execution.pbs.submission import PBSJobSpec, persist_pbs_job_id, submit_pbs_job
@@ -22,6 +23,7 @@ from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_blocksci_analyze_s3_pbs,
     render_blocksci_parse_s3_pbs,
     render_blocksci_s3_pbs,
+    render_blocksci_update_s3_pbs,
     render_coinjoin_analysis_s3_pbs,
     render_mappings_s3_pbs,
     render_unified_report_s3_pbs,
@@ -87,6 +89,7 @@ class S3StageRunner:
         handlers = {
             StageKind.BASELINE: self._analysis,
             StageKind.MAPPINGS: self._mappings,
+            StageKind.BLOCKSCI_UPDATE: self._update,
             StageKind.BLOCKSCI_PARSE: self._parse,
             StageKind.BLOCKSCI_WORK: self._blocksci_work,
             StageKind.REPORT: self._report,
@@ -136,6 +139,12 @@ class S3StageRunner:
             "image": pbs_image(self.args, "blocksci"),
             "resources": stage_pbs_resources(self.args, "blocksci"),
         }
+
+    def _update(self, stage: StagePlan) -> None:
+        script = render_blocksci_update_s3_pbs(
+            **self._blocksci(), **self._index(), command=blocksci_update_pbs_command(self.target.run_id)
+        )
+        self._submit(stage, script)
 
     def _parse(self, stage: StagePlan) -> None:
         blocksci = self.args.blocksci

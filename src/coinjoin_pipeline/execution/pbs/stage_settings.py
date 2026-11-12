@@ -15,7 +15,7 @@ class _SourceKind(TypedDict):
 
 
 class SourceSettings(_SourceKind, total=False):
-    """The single block source of a parse; ``kind`` becomes the manifest's source_kind."""
+    """The single block source of a parse or update; ``kind`` becomes the manifest's source_kind."""
 
     # What a parse logs it is preparing.
     description: str
@@ -117,6 +117,12 @@ class BlocksciSettings(CommandSettings):
 
 class BlocksciParseSettings(CommandSettings):
     source: SourceSettings
+
+
+class BlocksciUpdateSettings(BlocksciParseSettings):
+    # The run whose S3 cache is extended.
+    source_run_id: str | None
+    artifact_uri: str
 
 
 class BlocksciAnalysisSettings(CommandSettings, AnalysisModeSettings):

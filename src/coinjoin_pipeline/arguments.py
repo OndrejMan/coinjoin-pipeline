@@ -137,7 +137,7 @@ HELP = {
     "blocksci.cache_source_run_id": "run whose BlockSci index cache this task reads",
     "blocksci.notebook_port": "preferred Jupyter port of --blocksci-task notebook (1024-65535)",
     "blocksci.notebooks_dir": "notebook directory of --blocksci-task notebook",
-    "blocksci.external_bitcoin_datadir": "Bitcoin datadir to parse (reusable parse)",
+    "blocksci.external_bitcoin_datadir": "Bitcoin datadir to parse (reusable parse or cached update)",
     "blocksci.external_blocksci_dir": "existing BlockSci index directory for a reusable parse",
     "blocksci.network": "chain of an external Bitcoin source",
     "blocksci.max_block": "last height to parse from an external Bitcoin source",

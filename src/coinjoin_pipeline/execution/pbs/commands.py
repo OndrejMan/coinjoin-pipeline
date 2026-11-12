@@ -38,6 +38,13 @@ def blocksci_parse_pbs_command(
     )
 
 
+def blocksci_update_pbs_command(run_id: str) -> str:
+    return (
+        f"{BLOCKSCI_IMAGE_PYTHON_COMMAND} /mnt/exporters/worker.py update "
+        f"--run-dir {shlex.quote('/runs/emulation/logs/' + run_id)}"
+    )
+
+
 def blocksci_analysis_pbs_command(
     run_id: str,
     config: PipelineConfiguration,

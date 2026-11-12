@@ -1,4 +1,4 @@
-"""The S3 PBS jobs that write a BlockSci index: the combined run and parse.
+"""The S3 PBS jobs that write a BlockSci index: the combined run, parse and update.
 
 The job that reads an index is ``blocksci_analysis_jobs``; ``blocksci_index`` holds
 what both share.
@@ -37,14 +37,20 @@ from coinjoin_pipeline.execution.pbs.blocksci_index import (
     INDEX_FILES,
     canonicalize_index,
     require_tools,
+    restore_index,
 )
 from coinjoin_pipeline.execution.pbs.index_store import index_manifest
 from coinjoin_pipeline.execution.pbs.stage import CONTAINER_RUNS_ROOT, Stage, StageFailure
 from coinjoin_pipeline.execution.pbs.stage_settings import (
     BlocksciParseSettings,
     BlocksciSettings,
+    BlocksciUpdateSettings,
     SourceSettings,
 )
+
+
+# An update's copy of the manifest of the index it extends; job scratch, never published.
+SOURCE_CACHE_DIR = "source-blocksci-parse_data"
 
 
 def emulator_max_block(stage: Stage) -> int:
@@ -142,6 +148,25 @@ def blocksci(stage: Stage) -> None:
     stage.storage.run("sync", f"{stage.work / LOGS_DIR}/", f"{stage.settings['log_prefix']}/", check=True, timeout=None)
 
 
+def set_max_block(stage: Stage, max_block: int) -> None:
+    """Let the parser read through max_block: BlockSci's maxBlockNum is exclusive."""
+    config = stage.work / BLOCKSCI_CONFIG_FILE
+    text, replaced = re.subn(
+        r'("maxBlockNum"\s*:\s*)-?\d+', lambda match: f"{match.group(1)}{max_block + 1}", config.read_text()
+    )
+    if not replaced:
+        raise StageFailure("Could not update parser.maxBlockNum")
+    config.write_text(text)
+
+
+def check_source(manifest: dict, source_kind: str, network: str) -> None:
+    """An update resumes only an index parsed from the same kind of source and network."""
+    if manifest.get("source_kind") != source_kind:
+        raise StageFailure(f"Incremental update requires a {source_kind} cache")
+    if manifest.get("network") != network:
+        raise StageFailure(f"Source cache network does not match {network}")
+
+
 def run_parser(stage: Stage, command: str, datadir: Path, max_block: int, message: str) -> None:
     """Run the job's parse command over datadir inside the BlockSci image."""
     stage.log(message)
@@ -202,3 +227,55 @@ def blocksci_parse(stage: Stage) -> None:
         stage.require_file(relative, f"BlockSci parser did not produce {relative}")
     publish_index(stage, source["kind"], source["network"], max_block, {})
     stage.log("reusable cache upload complete")
+
+
+def blocksci_update(stage: Stage) -> None:
+    """Extend an index through a higher block from the same block source.
+
+    BlockSci remembers each block by its file number and offset, which only the source
+    that was parsed can resolve, so the update reads the same datadir.
+    """
+    settings = cast(BlocksciUpdateSettings, stage.settings)
+    source = settings["source"]
+    kind, network, max_block = source["kind"], source["network"], int(source["max_block"])
+    require_tools("zstd")
+    stage.download(STAGED_EXPORTERS_DIR)
+    source_cache = stage.work / SOURCE_CACHE_DIR
+    source_cache.mkdir(parents=True, exist_ok=True)
+    source_run_id = str(settings["source_run_id"])
+    stage.log(f"restoring verified cache from run {source_run_id}")
+    manifest = restore_index(
+        stage,
+        source_cache,
+        f"{settings['artifact_uri']}/{source_run_id}/{BLOCKSCI_PARSE_DIR}",
+        source_run_id,
+        "Source cache",
+        lambda value: check_source(value, kind, network),
+    )
+    source_max_block = manifest.get("exported_max_block")
+    if not isinstance(source_max_block, int) or isinstance(source_max_block, bool):
+        raise StageFailure("Source cache manifest has no exported_max_block")
+    if max_block <= source_max_block:
+        raise StageFailure(
+            f"Target maximum block {max_block} must be greater than source maximum block {source_max_block}"
+        )
+    extra: dict[str, object] = {}
+    datadir = Path(str(source["datadir"]))
+    if not (datadir / "blocks").is_dir():
+        raise StageFailure(f"External Bitcoin coin directory must contain blocks/: {datadir}")
+    canonicalize_index(stage)
+    set_max_block(stage, max_block)
+    run_parser(
+        stage,
+        settings["command"],
+        datadir,
+        max_block,
+        f"parsing blocks {source_max_block + 1} through {max_block}",
+    )
+    extra.update(
+        cache_operation="incremental-update",
+        source_run_id=source_run_id,
+        source_exported_max_block=source_max_block,
+    )
+    publish_index(stage, kind, network, max_block, extra)
+    stage.log(f"updated cache upload complete: {source_run_id} -> {stage.run_id}")

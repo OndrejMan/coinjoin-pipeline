@@ -50,6 +50,7 @@ from .stage_settings import (
     BlocksciAnalysisSettings,
     BlocksciParseSettings,
     BlocksciSettings,
+    BlocksciUpdateSettings,
     CommandSettings,
     MappingsSettings,
     SourceSettings,
@@ -74,6 +75,7 @@ JobSettings = Union[
     MappingsSettings,
     BlocksciSettings,
     BlocksciParseSettings,
+    BlocksciUpdateSettings,
     BlocksciAnalysisSettings,
 ]
 
@@ -134,9 +136,10 @@ def _bitcoin_datadir(path: Path) -> str:
 
 
 def _block_source(blocksci: BlockSciConfiguration) -> SourceSettings:
-    """The single block source of a parse; kind becomes the cache manifest's source_kind.
+    """The single block source of a parse or update; kind becomes the cache manifest's source_kind.
 
-    The configuration rules allow one source and require its network and last height.
+    The configuration rules allow one source and require its network and last height;
+    an update takes only a Bitcoin datadir.
     """
     if blocksci.external_bitcoin_datadir:
         return {
@@ -183,6 +186,33 @@ def render_blocksci_parse_s3_pbs(
         {
             "command": command,
             "source": _block_source(blocksci),
+        },
+    )
+
+
+def render_blocksci_update_s3_pbs(
+    target: S3Target,
+    image: str,
+    command: str,
+    resources: PBSResources = BLOCKSCI,
+    *,
+    blocksci: BlockSciConfiguration,
+) -> str:
+    """Render a job that incrementally updates one S3 cache into a fresh run.
+
+    The cache must come from the same source: BlockSci remembers each block by
+    its file number and offset, which only that Bitcoin datadir can resolve.
+    """
+    return render_python_stage(
+        "blocksci-update",
+        target,
+        resources,
+        image,
+        {
+            "command": command,
+            "source": _block_source(blocksci),
+            "source_run_id": blocksci.cache_source_run_id,
+            "artifact_uri": validate_artifact_uri(target.artifact_uri),
         },
     )
 
