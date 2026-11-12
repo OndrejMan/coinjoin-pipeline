@@ -73,6 +73,7 @@ class Settings(TypedDict, total=False):
     poll_seconds: float
     pbs_resources: PbsResources
     sync_stages: list[str]
+    measure_download: bool
     walltime_seconds: int
     clear_after_sync: bool
     notebook_root: str | None
