@@ -34,6 +34,7 @@ def field_type(path: str):
 
 CONFIGURATION_FLAG = "--from-configuration"
 ACTION_SUMMARIES = {
+    "full-run": "emulate a new run, then analyze it and export its report",
     "emulate": "emulate a new run only",
     "analyze": "BlockSci analysis of --run-dir",
     "export": "unified report of --run-dir",
@@ -57,7 +58,7 @@ HELP = {
     "coinjoin_type": "protocol the analyzers look for (default: joinmarket for --engine joinmarket)",
     "scenario": "scenario JSON file, or the file name of a packaged scenario",
     "run_dir": "existing run, as a name inside the runs root or a path to it",
-    "run_id": "run ID; emulate generates <timestamp>_<scenario> when omitted",
+    "run_id": "run ID; emulate and full-run generate <timestamp>_<scenario> when omitted",
     "run_timezone": "IANA timezone of generated run IDs",
     "min_input_count": (
         "Wasabi minimum input count for BlockSci detection "
@@ -113,7 +114,7 @@ def _epilog() -> str:
     lines += [
         "",
         "examples:",
-        "  cjp emulate --engine joinmarket",
+        "  cjp full-run --engine joinmarket",
         "  cjp analyze --run-dir <run-id>",
         "",
         "Every option is also a YAML key (shown as YAML: ...); options after `run CONFIG.yaml` override it.",

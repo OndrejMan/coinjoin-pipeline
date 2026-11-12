@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# EXPERIMENTAL: local Docker path. Not part of the Kubernetes → S3 → PBS path that the thesis results come from.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=pipeline/compose-runtime.sh
+source "${SCRIPT_DIR}/compose-runtime.sh"
+
+# Profiled services are otherwise omitted by some Compose versions, leaving a
+# stopped DinD container whose writable layer can retain stale runtime PID
+# files. Activate both profiles while removing the complete project stack.
+"${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" \
+  --profile emulate --profile analysis down --remove-orphans
+"${CONTAINER_RUNTIME}" volume rm "${PROJECT_NAME}_btc_data" >/dev/null 2>&1 || true
+
+# Reap Compose projects abandoned by earlier runs.
+#
+# The end-to-end tests name their project cjp-<scenario>-<pid> (the CLI's own is
+# blocksci-emulator-<checkout hash>), so the teardown above can only ever address
+# the project this run is about to create, and no later run names an earlier
+# test project again. Each leftover holds a Docker subnet until the default
+# address pools run out ("all predefined address pools have been fully
+# subnetted").
+#
+# Only projects whose owning pid is gone are touched. Tests run back to back and
+# --parallel starts several runs at once, so a live pid must never be reaped;
+# /proc is consulted first because `kill -0` also fails for a live process owned
+# by another user, which would read as "gone".
+process_alive() {
+  [[ -e "/proc/${1}" ]] || kill -0 "${1}" 2>/dev/null
+}
+
+reap_abandoned_projects() {
+  local project pid
+  # Volumes are listed too: once a project's network and containers are gone
+  # (an earlier sweep, or this one before it removed volumes), the volumes are
+  # the only trace left, and they are the part that holds the disk.
+  for project in $(
+    {
+      "${CONTAINER_RUNTIME}" network ls --format '{{.Name}}' 2>/dev/null | sed -n 's/_default$//p'
+      "${CONTAINER_RUNTIME}" ps -a --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null
+      "${CONTAINER_RUNTIME}" volume ls --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null
+    } | sort -u
+  ); do
+    [[ "${project}" =~ ^cjp-.+-([0-9]+)$ ]] || continue
+    [[ "${project}" == "${PROJECT_NAME}" ]] && continue
+    pid="${BASH_REMATCH[1]}"
+    if process_alive "${pid}"; then
+      continue
+    fi
+    echo "Reaping abandoned Compose project ${project} (pid ${pid} gone)"
+    # Volumes go too. The teardown above keeps dind_cache so a project can reuse
+    # its image cache, but a pid-scoped project never recurs, so its cache (about
+    # 11 GB) is never read again. The other volumes are ones the teardown above
+    # already removes for its own project.
+    "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${project}" \
+      --profile emulate --profile analysis down --remove-orphans --volumes >/dev/null 2>&1 || true
+  done
+}
+
+# Never let housekeeping fail the stage that asked for a clean slate.
+reap_abandoned_projects || true
