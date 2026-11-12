@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
 from collections.abc import Mapping, Sequence
 
 
@@ -24,7 +25,9 @@ def run(
     try:
         # Not a `with` block: the handlers below must signal the child while it runs.
         process = subprocess.Popen(argv, env=env)  # pylint: disable=consider-using-with
-    except OSError:
+    except OSError as error:
+        # 127 as a shell reports it, but with the reason: missing, not executable, ...
+        print(f"ERROR: cannot run {argv[0]}: {error.strerror or error}", file=sys.stderr)
         return 127
     interrupted = False
     previous_term = signal.getsignal(signal.SIGTERM)
