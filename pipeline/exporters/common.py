@@ -74,12 +74,60 @@ def git_commit_for_path(path: Path) -> str | None:
     return commit or None
 
 
+def git_tree_is_dirty(path: Path) -> bool | None:
+    """Report uncommitted changes, or None where the checkout is unavailable.
+
+    The report container mounts the exporter tree without its ``.git``, so this
+    is None there and the tree hash carries the provenance instead.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "status", "--porcelain"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return bool(result.stdout.strip())
+
+
+# Bytecode and caches depend on what ran before, so hashing them would make two
+# runs of the same code disagree over noise.
+TREE_HASH_SKIPPED_DIRECTORIES = {"__pycache__", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache"}
+TREE_HASH_SKIPPED_SUFFIXES = {".pyc", ".pyo"}
+
+
 def file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(partial(stream.read, 1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def tree_sha256(root: Path) -> str | None:
+    """Hash a source tree as sorted ``<file sha256> <relative path>`` lines.
+
+    Informational provenance: it names the exact exporter code a report was
+    produced by, which ``git rev-parse`` cannot do for a mounted tree (no
+    ``.git``) or for an uncommitted checkout. It never gates execution.
+    """
+    root = Path(root)
+    if not root.is_dir():
+        return None
+    lines = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root)
+        if set(relative.parts[:-1]) & TREE_HASH_SKIPPED_DIRECTORIES:
+            continue
+        if path.suffix in TREE_HASH_SKIPPED_SUFFIXES:
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        lines.append(f"{digest} {relative.as_posix()}")
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
 def digest_from_reference(image: str | None) -> str | None:

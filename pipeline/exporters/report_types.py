@@ -138,6 +138,11 @@ class SourceCommits(TypedDict):
     exporters: str | None
 
 
+class SourceTrees(TypedDict):
+    exporters_sha256: str | None
+    exporters_git_dirty: bool | None
+
+
 class RunManifest(TypedDict):
     """Provenance of one report."""
 
@@ -148,6 +153,7 @@ class RunManifest(TypedDict):
     images: ImageFields
     image_digests: ImageFields
     source_commits: SourceCommits
+    source_trees: SourceTrees
 
 
 class DetectorParameters(TypedDict):

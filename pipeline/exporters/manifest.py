@@ -12,7 +12,9 @@ from exporters.common import (
     docker_image_digest,
     first_present,
     git_commit_for_path,
+    git_tree_is_dirty,
     to_json_text,
+    tree_sha256,
 )
 from exporters.parameters import Detector, ReportImages
 from exporters.report_types import ImageFields, RunManifest
@@ -87,5 +89,14 @@ def build_run_manifest(
                 os.environ.get("COINJOIN_EMULATOR_GIT_COMMIT"),
             ),
             "exporters": git_commit_for_path(exporters_root),
+        },
+        # The report can run from a tree that has no checkout behind it: the
+        # report container mounts only the exporters, where `git rev-parse`
+        # yields null. The tree hash names the exact code that produced the
+        # report in every case; `git_dirty` says whether the commit above is the
+        # whole story. Informational only — nothing branches on them.
+        "source_trees": {
+            "exporters_sha256": tree_sha256(exporters_root),
+            "exporters_git_dirty": git_tree_is_dirty(exporters_root),
         },
     }

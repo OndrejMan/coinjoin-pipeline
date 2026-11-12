@@ -383,6 +383,7 @@ def render_run_manifest(report: JsonObject) -> list[str]:
     images = manifest.get("images") or {}
     image_digests = manifest.get("image_digests") or {}
     commits = manifest.get("source_commits") or {}
+    trees = manifest.get("source_trees") or {}
 
     image_rows = [
         row
@@ -400,6 +401,7 @@ def render_run_manifest(report: JsonObject) -> list[str]:
                 *image_rows,
                 ["coinjoin-emulator commit", commits.get("coinjoin_emulator")],
                 ["exporters commit", commits.get("exporters")],
+                ["exporters tree sha256", trees.get("exporters_sha256")],
             ],
             key="field",
         ),
