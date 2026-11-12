@@ -524,7 +524,9 @@ def apply_s3_emulation_resources(manifest: str, kubeconfig_path: Path) -> None:
 
     # The manifest orders the support resources before the Job, so a partial
     # apply can leave them behind with no Job to own them.
-    applied = subprocess.run(kubectl_command(kubeconfig_path, "apply", "-f", "-"), input=manifest, text=True, check=False)
+    applied = subprocess.run(
+        kubectl_command(kubeconfig_path, "apply", "-f", "-"), input=manifest, text=True, check=False
+    )
     if applied.returncode:
         raise roll_back(f"kubectl apply failed with exit {applied.returncode}")
     uid_result = kubectl(kubeconfig_path, "get", "job", job_name, "-o", "jsonpath={.metadata.uid}", namespace=namespace)
