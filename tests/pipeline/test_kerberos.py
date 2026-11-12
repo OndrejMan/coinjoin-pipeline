@@ -105,7 +105,7 @@ class RenewPeriodicallyTest(unittest.TestCase):
 
 
 class SubmitOnlyActionsTest(unittest.TestCase):
-    """pbs-from-s3 returns after qsub; only the S3 full-run waits on PBS."""
+    """pbs-from-s3 and mainnet-sync return after qsub; only the S3 full-run waits on PBS."""
 
     def _run(self, action: str, target: str) -> mock.Mock:
         from coinjoin_pipeline.configuration import PipelineConfiguration
@@ -124,6 +124,9 @@ class SubmitOnlyActionsTest(unittest.TestCase):
 
     def test_pbs_from_s3_needs_no_renewable_ticket(self):
         self._run("pbs-from-s3", "coinjoin_pipeline.execution.orchestrator.submit_s3_pbs_graph").assert_not_called()
+
+    def test_mainnet_sync_needs_no_renewable_ticket(self):
+        self._run("mainnet-sync", "coinjoin_pipeline.execution.mainnet_sync.submit_sync").assert_not_called()
 
 
 if __name__ == "__main__":

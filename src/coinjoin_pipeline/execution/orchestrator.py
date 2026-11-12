@@ -32,6 +32,7 @@ def _print_dry_run(args: PipelineConfiguration) -> bool:
         or (args.action == "coinjoin-analysis" and args.stages.analysis)
         or (args.action == "mappings" and args.stages.mappings)
         or (args.action == "pbs-from-s3")
+        or (args.action == "mainnet-sync")
         or (args.action in ("emulate", "full-run") and args.artifacts.backend == "s3")
     )
     if not args.dry_run:
@@ -59,8 +60,8 @@ def truthy_env(name: str) -> bool:
 def _pbs_credentials(args: PipelineConfiguration) -> AbstractContextManager[None]:
     """Keep the Kerberos ticket that qstat/qdel need alive while an S3 full-run waits on PBS.
 
-    pbs-from-s3 only submits and returns, so the ticket it starts with is enough for
-    qsub and a rollback qdel; it needs no renewable ticket.
+    pbs-from-s3 and mainnet-sync only submit and return, so the ticket they start with
+    is enough for qsub and a rollback qdel; they need no renewable ticket.
     """
     return nullcontext() if args.dry_run else kerberos_ticket_renewal()
 
@@ -80,7 +81,14 @@ def run_configuration(args: PipelineConfiguration) -> None:
     if local_build:
         os.environ["COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD"] = "1"
 
-    if args.action == "pbs-from-s3":
+    if args.action == "mainnet-sync":
+        from coinjoin_pipeline.execution.mainnet_sync import submit_sync
+
+        try:
+            submit_sync(args)
+        except (ArtifactTransportError, OSError, PBSError, RuntimeError) as error:
+            exit_with_error(error)
+    elif args.action == "pbs-from-s3":
         try:
             submit_s3_pbs_graph(args)
         except (ArtifactTransportError, OSError, PBSError, RuntimeError) as error:
