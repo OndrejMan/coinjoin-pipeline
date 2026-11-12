@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -38,6 +39,7 @@ from coinjoin_pipeline.execution.pbs.blocksci_index import (
     INDEX_ARCHIVE,
     INDEX_FILES,
     canonicalize_index,
+    container_run,
     require_tools,
     restore_index,
 )
@@ -183,6 +185,38 @@ def run_parser(stage: Stage, command: str, datadir: Path, max_block: int, messag
     )
 
 
+def verify_chain(stage: Stage, settings: BlocksciParseSettings, max_block: int, *, update: bool) -> tuple[int, str]:
+    """Check the parsed chain against the block archive before anything publishes it."""
+    source = settings["source"]
+    stage.log("[block-archive] verifying the parsed chain before cache publication")
+    run_directory = container_run(stage)
+    arguments = [
+        f"{run_directory}/{BLOCKSCI_CONFIG_FILE}",
+        "--max-block",
+        str(max_block),
+        "--network",
+        str(source["network"]),
+        *(["--expected-block-hash", str(source["expected_hash"])] if source.get("expected_hash") else []),
+        *(["--source-manifest", f"{run_directory}/{SOURCE_CACHE_DIR}/manifest.json"] if update else []),
+        "--output",
+        f"{run_directory}/{BLOCKSCI_DIR}/chain-verification.json",
+    ]
+    python = shlex.split(settings["python_command"])
+    command = stage.image_command(
+        "env",
+        *python,
+        "/mnt/exporters/verify_chain.py",
+        *arguments,
+        binds=(
+            f"{stage.runs_root}:{CONTAINER_RUNS_ROOT}:rw",
+            f"{stage.work / STAGED_EXPORTERS_DIR}:/mnt/exporters:ro",
+        ),
+    )
+    subprocess.run(command, check=True)
+    verified = json.loads((stage.work / BLOCKSCI_DIR / "chain-verification.json").read_text())
+    return int(verified["exported_max_block"]), str(verified["exported_block_hash"])
+
+
 def download_block_archive(
     stage: Stage, uri: str, max_block: int, source_manifest: Path | None = None
 ) -> tuple[Path, dict]:
@@ -283,6 +317,9 @@ def blocksci_parse(stage: Stage) -> None:
         )
     for relative in INDEX_FILES:
         stage.require_file(relative, f"BlockSci parser did not produce {relative}")
+    if source["kind"] == "bitcoin-blocks-s3":
+        max_block, block_hash = verify_chain(stage, settings, max_block, update=False)
+        extra["exported_block_hash"] = block_hash
     publish_index(stage, source["kind"], source["network"], max_block, extra)
     stage.log("reusable cache upload complete")
 
@@ -334,6 +371,9 @@ def blocksci_update(stage: Stage) -> None:
         max_block,
         f"parsing blocks {source_max_block + 1} through {max_block}",
     )
+    if kind == "bitcoin-blocks-s3":
+        max_block, block_hash = verify_chain(stage, settings, max_block, update=True)
+        extra["exported_block_hash"] = block_hash
     extra.update(
         cache_operation="incremental-update",
         source_run_id=source_run_id,

@@ -23,7 +23,7 @@ def index_manifest(
 
     An update resumes only an index of the same image, source kind and network, from
     exported_max_block. ``extra`` holds what one kind of index adds: the archive of an
-    S3 cache.
+    S3 cache, the block hash of a verified chain.
     """
     return {
         "schema_version": MANIFEST_SCHEMA,

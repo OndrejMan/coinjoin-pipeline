@@ -142,6 +142,7 @@ HELP = {
     "blocksci.external_blocksci_dir": "existing BlockSci index directory for a reusable parse",
     "blocksci.network": "chain of an external Bitcoin source",
     "blocksci.max_block": "last height to parse from an external Bitcoin source",
+    "blocksci.expected_block_hash": "expected block hash at --blocksci-max-block (required for mainnet archives)",
     "blocksci.pin_height": "script task: the last height the analysis may see",
     "blocksci.scan_start_height": "script task: first scanned height (inclusive)",
     "blocksci.scan_end_height": "script task: end of the scanned range (exclusive)",

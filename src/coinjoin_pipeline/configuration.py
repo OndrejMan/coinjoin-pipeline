@@ -127,6 +127,7 @@ class BlockSciConfiguration(ConfigurationModel):
     external_blocksci_dir: str | None = option(None, name="blocksci_external_blocksci_dir")
     network: BlockSciNetwork | None = option(None, name="blocksci_network")
     max_block: int | None = option(None, name="blocksci_max_block", minimum=0)
+    expected_block_hash: str | None = option(None, name="blocksci_expected_block_hash")
     # Script task only: the last height the analysis may see (Blockchain(config, pin_height + 1))
     # and the half-open range [scan_start_height, scan_end_height) it scans.
     pin_height: int | None = option(None, name="blocksci_pin_height", minimum=0)

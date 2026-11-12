@@ -6,6 +6,8 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from exporters.verify_chain import is_block_hash
+
 from .configuration import cli_flag, config_value, option_specs
 from .execution.stages import runs_unified_report
 from .storage.s3 import RUN_ID_RULE, is_valid_run_id
@@ -263,6 +265,14 @@ def _blocksci_source_errors(config: PipelineConfiguration) -> list[str]:
             errors.append("an external Bitcoin source requires --blocksci-network and --blocksci-max-block")
     elif network_supplied or max_block_supplied:
         errors.append("--blocksci-network and --blocksci-max-block require an external Bitcoin source")
+    expected_hash = blocksci.expected_block_hash
+    if expected_hash is not None:
+        if not blocks_uri:
+            errors.append("--blocksci-expected-block-hash requires --blocksci-bitcoin-blocks-uri")
+        if not is_block_hash(expected_hash):
+            errors.append("--blocksci-expected-block-hash must be 64 lowercase hexadecimal characters")
+    if blocks_uri and blocksci.network == "bitcoin" and expected_hash is None:
+        errors.append("Mainnet block archives require --blocksci-expected-block-hash at --blocksci-max-block")
     return errors
 
 

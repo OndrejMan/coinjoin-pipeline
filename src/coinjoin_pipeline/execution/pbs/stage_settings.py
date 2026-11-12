@@ -23,8 +23,9 @@ class SourceSettings(_SourceKind, total=False):
     max_block: int
     # external-bitcoin: the shared Bitcoin Core coin directory.
     datadir: str
-    # bitcoin-blocks-s3: the block archive.
+    # bitcoin-blocks-s3: the block archive and the hash the parsed chain must end with.
     blocks_uri: str
+    expected_hash: str | None
     # external-blocksci: an existing index to import.
     blocksci_dir: str
 
@@ -119,6 +120,8 @@ class BlocksciSettings(CommandSettings):
 
 class BlocksciParseSettings(CommandSettings):
     source: SourceSettings
+    # How the BlockSci image runs verify_chain.py.
+    python_command: str
 
 
 class BlocksciUpdateSettings(BlocksciParseSettings):
