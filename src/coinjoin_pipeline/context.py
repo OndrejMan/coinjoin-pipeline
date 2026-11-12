@@ -109,6 +109,8 @@ class RunContext:
 
     @contextmanager
     def activate(self):
+        from .execution.locks import close_locks
+
         previous = dict(os.environ)
         previous_bytecode = sys.dont_write_bytecode
         sys.dont_write_bytecode = True
@@ -117,6 +119,7 @@ class RunContext:
         try:
             yield
         finally:
+            close_locks()
             sys.dont_write_bytecode = previous_bytecode
             for sig, handler in handlers.items():
                 signal.signal(sig, handler)

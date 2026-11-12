@@ -19,6 +19,9 @@ from exporters.analysis_artifact import ARTIFACT_NAME
 from exporters.artifact_paths import BASELINE_FILE, COINJOIN_ANALYSIS_DIR, EMULATOR_DIR, blocksci_analysis_dir
 
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
+from coinjoin_pipeline.execution.locks import (
+    close_locks as close_pipeline_locks,
+)
 from coinjoin_pipeline.execution.pbs_settings import resolve_unified_report_image
 from coinjoin_pipeline.execution.pipeline_logging import (
     captured_pipeline_stage,
@@ -42,7 +45,7 @@ DEFAULT_CONFIGURATION = PipelineConfiguration()
 
 
 def cleanup_peer_containers() -> None:
-    """Stop peer containers; safe to call more than once."""
+    """Stop peer containers and release locks; safe to call more than once."""
     global _CLEANUP_DONE  # pylint: disable=global-statement  # one cleanup per process, shared by both signals
     if _CLEANUP_DONE:
         return
@@ -62,10 +65,14 @@ def cleanup_peer_containers() -> None:
                 stderr=subprocess.DEVNULL,
                 check=False,
             )
+    close_pipeline_locks()
 
 
 def handle_termination(signum: int, _frame: object) -> None:
-    """Exit 130 after cleanup, matching the launcher's interrupt contract."""
+    """Exit 130 after cleanup, matching the launcher's interrupt contract.
+
+    SIGTERM never unwinds through ``atexit``, so both signals route here to release the locks.
+    """
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
     print(
