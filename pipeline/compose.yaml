@@ -121,6 +121,32 @@ services:
           sh -c "python manager.py clean && 
                 python manager.py --engine ${COINJOIN_ENGINE:-wasabi} --run-timezone \"$${RUN_TIMEZONE}\" run $${PIPELINE_RUN_ID:+--run-id \"$${PIPELINE_RUN_ID}\"} ${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:+--coinjoin-infrastructure-local-build} --control-ip dind --scenario ${SCENARIO_PATH:-/app/scenarios/overactive-local.json} --image-prefix ${COINJOIN_EMULATOR_IMAGE_PREFIX:-ghcr.io/ondrejman/} --btcFolder /home/bitcoin/data --btc-node-arg=-blocksxor=0 --download-btc-data /home/bitcoin/data"
 
+  blocksci:
+      profiles: ["analysis"]
+      image: ${BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-complete:latest}
+      pull_policy: ${BLOCKSCI_PULL_POLICY:-always}
+      volumes:
+        - btc_data:/mnt/data:ro # Mount the BTC data as Read-Only for analysis
+        - ${EMULATION_LOGS_DIR:-./emulation_logs}:/runs/emulation/logs:rw
+        - ${EXPORTERS_DIR:-./exporters}:/mnt/exporters:ro
+      environment:
+        - ACTIVE_RUN_ID=${ACTIVE_RUN_ID:-}
+        - BLOCKSCI_COINJOIN_TYPE=${BLOCKSCI_COINJOIN_TYPE:-wasabi2}
+        - BLOCKSCI_MIN_INPUT_COUNT=${BLOCKSCI_MIN_INPUT_COUNT:-default}
+      depends_on:
+        manager:
+          condition: service_completed_successfully # Wait for simulation to finish
+          required: false
+        coinjoin_analysis:
+          condition: service_completed_successfully
+          required: true
+      entrypoint: ["/bin/bash"]
+      command:
+        - "-c"
+        - |
+          set -eu
+          python3 /mnt/exporters/worker.py run --share-output
+
   coinjoin_analysis:
       profiles: ["analysis"]
       image: ${COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}

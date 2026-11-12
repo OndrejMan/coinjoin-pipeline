@@ -27,6 +27,7 @@ packages = [
   "coinjoin_pipeline.execution",
   "coinjoin_pipeline.storage",
   "exporters",
+  "exporters.blocksci_export",
 ]
 package-dir = {coinjoin_pipeline = "src/coinjoin_pipeline", exporters = "pipeline/exporters"}
 

@@ -64,15 +64,22 @@ def compose_env(
     runs_root = Path(env.get("EMULATION_LOGS_DIR", settings.ROOT_DIR.parent / "coinjoin-runs"))
     scenarios_dir = settings.ROOT_DIR.parent / "scenarios"
     emulation_logs_dir = runs_root
+    exporters_dir = settings.ROOT_DIR / "exporters"
     env.setdefault(settings.COMPOSE_PROJECT_ENV, compose_project_name(host_root_dir))
     env.setdefault("SCENARIOS_DIR", str(scenarios_dir))
     env.setdefault("EMULATION_LOGS_DIR", str(emulation_logs_dir))
+    env.setdefault("EXPORTERS_DIR", str(exporters_dir))
     scenarios_dir = Path(env["SCENARIOS_DIR"]).expanduser().resolve()
     emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
+    exporters_dir = Path(env["EXPORTERS_DIR"]).expanduser().resolve()
     env["SCENARIOS_DIR"] = str(scenarios_dir)
     env["EMULATION_LOGS_DIR"] = str(emulation_logs_dir)
+    env["EXPORTERS_DIR"] = str(exporters_dir)
     env["COINJOIN_ENGINE"] = config.engine
+    env["BLOCKSCI_COINJOIN_TYPE"] = config.coinjoin_type
+    env["BLOCKSCI_MIN_INPUT_COUNT"] = "default" if config.min_input_count is None else str(config.min_input_count)
     env["RUN_TIMEZONE"] = config.run_timezone
+    env.setdefault("BLOCKSCI_IMAGE", settings.DEFAULT_BLOCKSCI_IMAGE)
     env.setdefault("COINJOIN_ANALYSIS_IMAGE", settings.DEFAULT_COINJOIN_ANALYSIS_IMAGE)
     env.setdefault("COINJOIN_EMULATOR_IMAGE", settings.DEFAULT_EMULATOR_IMAGE)
     scenario = config.scenario if include_scenario else None
@@ -146,7 +153,7 @@ def run_coinjoin_analysis(run_dir_arg: str | None = None) -> None:
 
 
 def run_coinjoin_analysis_docker_stage(active_run_id: str) -> None:
-    """Run coinjoin-analysis through Compose."""
+    """Run only coinjoin-analysis through Compose, without starting BlockSci."""
     run_env = compose_env(active_run_id=active_run_id)
     compose_cmd = compose_base_command(run_env)
     run_command(

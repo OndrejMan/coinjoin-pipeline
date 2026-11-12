@@ -27,7 +27,8 @@ def required_image_components(config: PipelineConfiguration) -> set[str]:
     return {
         "emulate": {"emulator"},
         "coinjoin-analysis": {"coinjoin_analysis"},
-    }.get(config.action, {"emulator", "coinjoin_analysis"})
+        "analyze": {"blocksci", "coinjoin_analysis"},
+    }.get(config.action, {"emulator", "coinjoin_analysis", "blocksci"})
 
 
 def validate_arguments(config: PipelineConfiguration, runs_root: Path) -> list[str]:

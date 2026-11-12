@@ -1,0 +1,251 @@
+"""BlockSci detector adapters."""
+
+from __future__ import annotations
+
+import builtins
+import importlib
+import os
+import sys
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Protocol, cast
+
+from exporters.common import (
+    coerce_sats,
+    safe_attr,
+    to_json_text,
+    transaction_metrics,
+)
+from exporters.parameters import Detector
+from exporters.report_types import IORecord, TransactionRecord
+
+BLOCKSCI_REQUIRED_ATTRIBUTES = ("Blockchain", "heuristics")
+
+
+class BlocksciChain(Protocol):
+    """``blocksci.Blockchain`` methods the detector calls.
+
+    The scan binding exists only in the fork's builds; ``_require_binding``
+    checks for it before use, so an older image fails with a rebuild hint.
+    """
+
+    def __len__(self) -> int: ...
+
+    def filter_coinjoin_txes_raw(self, start: int, stop: int, *args: object) -> Iterable[object]: ...
+
+    def __getitem__(self, height: int) -> BlocksciBlock: ...
+
+
+class BlocksciBlock(Protocol):
+    """A block or a transaction: both expose the hash and, for transactions, the height."""
+
+    hash: object
+    block_height: int
+
+
+class BlocksciBindings(Protocol):
+    """The compiled ``blocksci`` module surface this package uses."""
+
+    def Blockchain(self, config_path: str, max_block: int = ...) -> BlocksciChain: ...
+
+
+def prepare_blocksci_import() -> None:
+    """Keep legacy pycrypto imports working in Python 3 BlockSci images."""
+    if not hasattr(builtins, "xrange"):
+        setattr(builtins, "xrange", range)
+
+
+def import_blocksci_bindings() -> BlocksciBindings:
+    """Import the editable BlockSci binding without source-root shadowing.
+
+    The complete image keeps the BlockSci checkout at ``/mnt/blocksci`` and
+    installs ``blockscipy`` editable.  If ``/mnt`` is on ``sys.path``, Python's
+    normal path finder treats that checkout as a namespace package named
+    ``blocksci`` before the editable-install finder gets a chance to resolve
+    the compiled binding.  Temporarily omit only paths with that repository
+    layout; restoring the original path after import keeps the rest of the
+    exporter runtime unchanged.
+    """
+    prepare_blocksci_import()
+    original_path = sys.path[:]
+
+    def is_blocksci_source_parent(entry: str) -> bool:
+        parent = Path(entry or os.getcwd())
+        candidate = parent / "blocksci"
+        return (
+            candidate.is_dir()
+            and not (candidate / "__init__.py").is_file()
+            and (candidate / "blockscipy" / "blocksci" / "__init__.py").is_file()
+        )
+
+    sys.path[:] = [entry for entry in original_path if not is_blocksci_source_parent(entry)]
+    try:
+        return cast(BlocksciBindings, importlib.import_module("blocksci"))
+    finally:
+        sys.path[:] = original_path
+
+
+def assert_real_blocksci(module: object) -> None:
+    """Fail loudly when ``import blocksci`` resolved to a shadowing directory.
+
+    BlockSci is installed editable in the image, and its import hook sits behind
+    the regular ``sys.path`` lookup. Any directory named ``blocksci`` earlier on
+    the path therefore wins silently: the exporters package itself when a script
+    is run from ``/mnt/exporters``, or ``/mnt/blocksci`` when the CWD is ``/mnt``.
+    Without this check the wrong module binds fine and only explodes much later
+    on the first attribute access.
+    """
+    if module is None:
+        return
+    missing = [name for name in BLOCKSCI_REQUIRED_ATTRIBUTES if not hasattr(module, name)]
+    if not missing:
+        return
+    location = getattr(module, "__file__", None) or list(getattr(module, "__path__", []) or [])
+    raise ImportError(
+        f"'import blocksci' resolved to {location or '<unknown location>'}, which is missing "
+        f"{', '.join(missing)}. A directory named 'blocksci' earlier on sys.path is shadowing "
+        f"the installed BlockSci bindings (sys.path[0]={sys.path[0]!r}). Run the exporter from "
+        "a location whose sys.path entries contain no 'blocksci' directory."
+    )
+
+
+BLOCKSCI_IMPORT_ERROR: ImportError | None = None
+blocksci: BlocksciBindings | None
+
+try:
+    blocksci = import_blocksci_bindings()
+except ImportError as error:  # pragma: no cover - exercised without BlockSci.
+    blocksci = None
+    BLOCKSCI_IMPORT_ERROR = error
+else:
+    assert_real_blocksci(blocksci)
+
+
+def _iter_attr(obj: object, name: str) -> Iterable[object]:
+    """Return the named attribute if it is iterable, else an empty iterable."""
+    value = safe_attr(obj, name, [])
+    return value if isinstance(value, Iterable) else []
+
+
+def _address_text(address: object) -> str | None:
+    """Plain address string of a BlockSci address object.
+
+    ``str()`` is only the bare address for the pubkey family; script-hash and
+    witness-unknown (Taproot) scripts render as ``WitnessUnknownAddress(bcrt1p…)``,
+    which would make every P2TR input and output mismatch the baseline. ``address_string`` is the bare form wherever BlockSci defines one.
+    """
+    if address is None:
+        return None
+    plain = safe_attr(address, "address_string")
+    if isinstance(plain, str) and plain:
+        return plain
+    return to_json_text(address)
+
+
+def _base_io_record(item: object, fallback_index: int) -> IORecord:
+    """Build the fields shared by every input and output record."""
+    return {
+        "index": str(safe_attr(item, "index", fallback_index)),
+        "value": coerce_sats(safe_attr(item, "value")),
+        "address": _address_text(safe_attr(item, "address")),
+    }
+
+
+def _referenced_txid(item: object, tx_attr: str) -> str | None:
+    """Resolve the hash of a tx referenced by ``item`` via ``tx_attr``."""
+    referenced_tx = safe_attr(item, tx_attr)
+    if referenced_tx is None:
+        return None
+    return to_json_text(safe_attr(referenced_tx, "hash"))
+
+
+def _normalize_input(input_value: object, fallback_index: int) -> IORecord:
+    record = _base_io_record(input_value, fallback_index)
+    spent_txid = _referenced_txid(input_value, "spent_tx")
+    spent_index = safe_attr(input_value, "spent_tx_index")
+    if spent_txid is not None and spent_index is not None:
+        record["spending_tx"] = f"vout_{spent_txid}_{spent_index}"
+    return record
+
+
+def _normalize_output(output_value: object, fallback_index: int) -> IORecord:
+    record = _base_io_record(output_value, fallback_index)
+    spending_txid = _referenced_txid(output_value, "spending_tx")
+    spending_index = safe_attr(output_value, "spending_tx_index")
+    if spending_txid is not None and spending_index is not None:
+        record["spend_by_tx"] = f"vin_{spending_txid}_{spending_index}"
+    return record
+
+
+def _sorted_by_index(records: list[IORecord]) -> list[IORecord]:
+    return sorted(records, key=lambda item: int(str(item["index"])))
+
+
+def normalize_blocksci_tx(tx: object) -> TransactionRecord:
+    inputs = _sorted_by_index(
+        [_normalize_input(input_value, index) for index, input_value in enumerate(_iter_attr(tx, "inputs"))]
+    )
+    outputs = _sorted_by_index(
+        [_normalize_output(output_value, index) for index, output_value in enumerate(_iter_attr(tx, "outputs"))]
+    )
+    return {
+        "txid": to_json_text(safe_attr(tx, "hash")),
+        "block_time": to_json_text(safe_attr(tx, "block_time")),
+        "block_height": cast("int | None", safe_attr(tx, "block_height")),
+        "inputs": inputs,
+        "outputs": outputs,
+        **transaction_metrics(inputs, outputs),
+    }
+
+
+def _require_binding(chain: object, method: str, hint: str) -> None:
+    """Fail loudly when the BlockSci build lacks the required report binding."""
+    if not hasattr(chain, method):
+        raise RuntimeError(
+            f"This BlockSci build does not expose Blockchain.{method}; rebuild BlockSci with the {hint}."
+        )
+
+
+def _filter_raw_coinjoin_txes(chain: BlocksciChain, detector: Detector, window: tuple[int, int]) -> Iterable[object]:
+    _require_binding(chain, "filter_coinjoin_txes_raw", "raw CoinJoin report binding")
+    if detector.min_input_count is None:
+        return chain.filter_coinjoin_txes_raw(*window, detector.coinjoin_type)
+    return chain.filter_coinjoin_txes_raw(*window, detector.coinjoin_type, detector.min_input_count)
+
+
+def open_chain(config_path: Path, max_block: int | None = None) -> BlocksciChain:
+    """Open the index, pinned to blocks [0, max_block) when given."""
+    if blocksci is None:
+        raise RuntimeError("BlockSci Python module is required to open an index.")
+    if max_block is None:
+        return blocksci.Blockchain(str(config_path))
+    return blocksci.Blockchain(str(config_path), max_block)
+
+
+def scan_window(chain: BlocksciChain, start_height: int | None, end_height: int | None) -> tuple[int, int]:
+    """Half-open [start, end) inside the opened chain; the whole chain by default."""
+    start = 0 if start_height is None else start_height
+    end = len(chain) if end_height is None else end_height
+    if not 0 <= start < end <= len(chain):
+        raise ValueError(f"scan window [{start}, {end}) is outside the opened chain of {len(chain)} blocks")
+    return start, end
+
+
+def _records_by_txid(txes: Iterable[object]) -> dict[str, TransactionRecord]:
+    records = [normalize_blocksci_tx(tx) for tx in txes]
+    return {txid: record for record in sorted(records, key=lambda item: item["txid"] or "") if (txid := record["txid"])}
+
+
+def export_blocksci_records(
+    config_path: Path,
+    detector: Detector,
+    *,
+    max_block: int | None = None,
+    start_height: int | None = None,
+    end_height: int | None = None,
+) -> dict[str, TransactionRecord]:
+    """The selected type's protocol heuristic over the scan window, by txid."""
+    if blocksci is None:
+        raise RuntimeError("BlockSci Python module is required to export BlockSci records.")
+    chain = open_chain(config_path, max_block)
+    return _records_by_txid(_filter_raw_coinjoin_txes(chain, detector, scan_window(chain, start_height, end_height)))

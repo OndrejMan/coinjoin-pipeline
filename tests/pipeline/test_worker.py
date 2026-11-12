@@ -1,0 +1,24 @@
+"""Container payload tests use a fake process boundary; no parser or image runs."""
+
+from unittest import mock
+
+from exporters import worker
+
+
+def test_parse_uses_exclusive_height_of_exported_run_tip(tmp_path):
+    run = tmp_path / "run-a"
+    blocks = run / "coinjoin_emulator_data/data/btc-node"
+    blocks.mkdir(parents=True)
+    for height in (0, 4, 9):
+        (blocks / f"block_{height}.json").write_text("{}")
+    args = worker.parse_args(["parse", "--run-dir", str(run)])
+    with mock.patch.object(worker.subprocess, "run") as process:
+        worker.execute(args)
+    assert process.call_args_list[0].args[0][-2:] == ["--max-block", "10"]
+    assert process.call_args_list[1].args[0][-1] == "update"
+
+
+def test_shared_detector_defaults_honor_the_container_environment(monkeypatch):
+    monkeypatch.setenv("BLOCKSCI_MIN_INPUT_COUNT", "15")
+    args = worker.parse_args(["analyze", "--run-dir", "/runs/run-a"])
+    assert args.min_input_count == 15

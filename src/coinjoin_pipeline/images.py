@@ -11,6 +11,7 @@ DEFAULT_REGISTRY = "ghcr.io/ondrejman"
 REPOSITORIES = {
     "emulator": "emulator-manager",
     "coinjoin_analysis": "coinjoin-analysis",
+    "blocksci": "blocksci-complete",
 }
 
 
@@ -22,6 +23,7 @@ def image_names() -> dict[str, str]:
 IMAGE_ENVIRONMENT = {
     "emulator": "COINJOIN_EMULATOR_IMAGE",
     "coinjoin_analysis": "COINJOIN_ANALYSIS_IMAGE",
+    "blocksci": "BLOCKSCI_IMAGE",
 }
 DEFAULT_VERSION = "latest"
 
@@ -35,6 +37,8 @@ IMAGE_RE = re.compile(
 class Images:
     emulator: str
     coinjoin_analysis: str
+    blocksci: str
+
     def as_dict(self) -> dict[str, str]:
         return asdict(self)
 

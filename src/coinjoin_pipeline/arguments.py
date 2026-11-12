@@ -37,6 +37,7 @@ def field_type(path: str):
 CONFIGURATION_FLAGS = ("--from-configuration",)
 ACTION_SUMMARIES = {
     "emulate": "emulate a new run only",
+    "analyze": "BlockSci analysis of --run-dir",
     "coinjoin-analysis": "baseline coinjoin-analysis of --run-dir",
 }
 
@@ -54,10 +55,15 @@ HELP = {
     "runtime": "container runtime for local stages",
     "runs_root": "directory holding the run directories (default: $EMULATION_LOGS_DIR, else ./coinjoin-runs)",
     "engine": "CoinJoin implementation to emulate and analyze",
+    "coinjoin_type": "protocol the analyzers look for (default: joinmarket for --engine joinmarket)",
     "scenario": "scenario JSON file, or the file name of a packaged scenario",
     "run_dir": "existing run, as a name inside the runs root or a path to it",
     "run_id": "run ID; emulate generates <timestamp>_<scenario> when omitted",
     "run_timezone": "IANA timezone of generated run IDs",
+    "min_input_count": (
+        "Wasabi minimum input count for BlockSci detection "
+        "(default: BlockSci's height-aware threshold; small regtest rounds need an explicit value)"
+    ),
     "images.version": "release tag of every component image",
     **{
         f"images.{component}": f"{component.replace('_', '-')} image (also ${variable})"
@@ -108,7 +114,7 @@ def _epilog() -> str:
         "",
         "examples:",
         "  cjp emulate --engine joinmarket",
-        "  cjp coinjoin-analysis --run-dir <run-id>",
+        "  cjp analyze --run-dir <run-id>",
         "",
         "Every option is also a YAML key (shown as YAML: ...); options after `run CONFIG.yaml` override it.",
         "",
