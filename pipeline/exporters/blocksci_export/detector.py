@@ -16,20 +16,19 @@ from exporters.common import (
     to_json_text,
     transaction_metrics,
 )
+from exporters.integration_diagnostics import Blockchain
 from exporters.parameters import Detector
 from exporters.report_types import IORecord, TransactionRecord
 
 BLOCKSCI_REQUIRED_ATTRIBUTES = ("Blockchain", "heuristics")
 
 
-class BlocksciChain(Protocol):
+class BlocksciChain(Blockchain, Protocol):
     """``blocksci.Blockchain`` methods the detector calls.
 
     The scan binding exists only in the fork's builds; ``_require_binding``
     checks for it before use, so an older image fails with a rebuild hint.
     """
-
-    def __len__(self) -> int: ...
 
     def filter_coinjoin_txes_raw(self, start: int, stop: int, *args: object) -> Iterable[object]: ...
 

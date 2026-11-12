@@ -30,6 +30,7 @@ def stored_run(tmp_path: Path) -> Path:
             "parameters": Detector.from_args(args).artifact_parameters(),
             "first_wasabi2_block": 0,
             "records": {},
+            "integration_diagnostics": {},
         },
     )
     return run

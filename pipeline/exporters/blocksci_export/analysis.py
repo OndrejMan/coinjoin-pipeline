@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persist BlockSci detector output for report assembly."""
+"""Persist BlockSci detector and diagnostics output for report assembly."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from exporters.analysis_artifact import SCHEMA_VERSION
 from exporters.artifact_paths import ANALYSIS_ARTIFACT_NAME, BLOCKSCI_ANALYSIS_DIR
 from exporters.blocksci_export.detector import BLOCKSCI_IMPORT_ERROR, blocksci, export_blocksci_records
 from exporters.common import save_json
+from exporters.integration_diagnostics import build_integration_diagnostics
 from exporters.normalization import load_first_wasabi2_block
 from exporters.parameters import (
     INSPECTED_IMAGE_COMPONENTS,
@@ -41,6 +42,10 @@ def write_analysis(args: argparse.Namespace) -> Path:
     detector = Detector.from_args(args, load_first_wasabi2_block(config_path))
     records = export_blocksci_records(config_path, detector)
     images = ReportImages.from_args(args)
+    image_ids: dict[str, str | None] = {
+        name: getattr(args, name + "_image_id", None) for name in INSPECTED_IMAGE_COMPONENTS
+    }
+    diagnostics = build_integration_diagnostics(run_dir, config_path, blocksci, records, images, image_ids=image_ids)
     artifact: BlockSciAnalysisArtifact = {
         "schema_version": SCHEMA_VERSION,
         "run_id": run_dir.name,
@@ -51,10 +56,12 @@ def write_analysis(args: argparse.Namespace) -> Path:
                 "reference": images.references[name],
                 "image_id": getattr(args, name + "_image_id", None),
                 "repo_digest": images.digests[name],
+                **(diagnostics.get("images", {}).get(name) or {}),
             }
             for name in INSPECTED_IMAGE_COMPONENTS
         },
         "records": records,
+        "integration_diagnostics": diagnostics,
     }
     output_dir = run_dir / BLOCKSCI_ANALYSIS_DIR
     output_dir.mkdir(parents=True, exist_ok=True)

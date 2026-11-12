@@ -43,6 +43,7 @@ def test_load_analysis_rejects_parameter_mismatch(tmp_path: Path) -> None:
                 "parameters": parameters(),
                 "first_wasabi2_block": 0,
                 "records": {},
+                "integration_diagnostics": {"status": "ok"},
             }
         ),
         encoding="utf-8",
@@ -83,6 +84,10 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
             return_value={"tx": {"txid": "tx"}},
         ),
         mock.patch(
+            "exporters.blocksci_export.analysis.build_integration_diagnostics",
+            return_value={"status": "ok"},
+        ),
+        mock.patch(
             "exporters.blocksci_export.analysis.load_first_wasabi2_block",
             return_value=850237,
         ),
@@ -91,6 +96,7 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
 
     artifact = json.loads(output.read_text(encoding="utf-8"))
     assert artifact["records"] == {"tx": {"txid": "tx"}}
+    assert artifact["integration_diagnostics"] == {"status": "ok"}
 
 
 def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:
@@ -111,6 +117,7 @@ def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:
                 "parameters": parameters(),
                 "first_wasabi2_block": 0,
                 "records": {},
+                "integration_diagnostics": {"status": "ok"},
             }
         ),
         encoding="utf-8",
