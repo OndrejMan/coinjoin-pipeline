@@ -96,29 +96,9 @@ def pbs_marker(stage: str, suffix: str) -> str:
     return f"{PBS_MARKER_DIR}/{stage}.{suffix}"
 
 
-def _tool_dir(run_dir: Path, name: str) -> Path:
-    return run_dir / name
-
-
-def emulator_dir(run_dir: Path) -> Path:
-    return _tool_dir(run_dir, EMULATOR_DIR)
-
-
-def coinjoin_analysis_dir(run_dir: Path) -> Path:
-    return _tool_dir(run_dir, COINJOIN_ANALYSIS_DIR)
-
-
-def blocksci_analysis_dir(run_dir: Path) -> Path:
-    return _tool_dir(run_dir, BLOCKSCI_ANALYSIS_DIR)
-
-
-def report_dir(run_dir: Path) -> Path:
-    return run_dir / REPORT_DIR
-
-
 def report_input_files(run_dir: Path) -> list[str]:
     """Relative paths of the report inputs present in ``run_dir``."""
     present = [name for name in REPORT_INPUT_FILES if (run_dir / name).is_file()]
-    sidecars = coinjoin_analysis_dir(run_dir).glob(FALSE_CJTXS_GLOB)
+    sidecars = (run_dir / COINJOIN_ANALYSIS_DIR).glob(FALSE_CJTXS_GLOB)
     present.extend(sorted(COINJOIN_ANALYSIS_DIR + "/" + path.name for path in sidecars if path.is_file()))
     return present

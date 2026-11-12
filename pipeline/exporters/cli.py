@@ -10,12 +10,12 @@ from exporters.analysis_artifact import load_analysis as load_blocksci_analysis
 from exporters.artifact_paths import (
     ANALYSIS_ARTIFACT_NAME,
     BASELINE_FILE,
+    BLOCKSCI_ANALYSIS_DIR,
+    COINJOIN_ANALYSIS_DIR,
     DUMPLINGS_SNAPSHOT_FILE,
     MAPPINGS_FILE,
+    REPORT_DIR,
     REPORT_JSON,
-    blocksci_analysis_dir,
-    coinjoin_analysis_dir,
-    report_dir,
 )
 from exporters.common import (
     JsonObject,
@@ -99,7 +99,7 @@ def load_previous_run_manifest(output_path: Path) -> JsonObject | None:
 
 
 def load_run_analysis(args: argparse.Namespace, run_dir: Path) -> BlockSciAnalysisArtifact:
-    analysis_path = args.blocksci_analysis or (blocksci_analysis_dir(run_dir) / ANALYSIS_ARTIFACT_NAME)
+    analysis_path = args.blocksci_analysis or ((run_dir / BLOCKSCI_ANALYSIS_DIR) / ANALYSIS_ARTIFACT_NAME)
     if not analysis_path.is_absolute():
         analysis_path = run_dir / analysis_path
     return load_blocksci_analysis(
@@ -121,12 +121,12 @@ def add_dumplings_snapshot(coverage: JsonObject | None, run_dir: Path) -> None:
 
 def assemble_report(args: argparse.Namespace) -> int:
     run_dir = resolve_run_dir(args.runs_root, args.run_dir)
-    output_dir = report_dir(run_dir)
+    output_dir = run_dir / REPORT_DIR
     baseline_path = run_dir / BASELINE_FILE
     if not baseline_path.exists():
         raise FileNotFoundError(f"Baseline coinjoin-analysis file not found: {baseline_path}")
 
-    false_positive_txids, false_positive_sources = load_false_positive_txids(coinjoin_analysis_dir(run_dir))
+    false_positive_txids, false_positive_sources = load_false_positive_txids((run_dir / COINJOIN_ANALYSIS_DIR))
     coinjoin_analysis_data, filtered_txids = filter_coinjoin_analysis_false_positives(
         load_json(baseline_path),
         false_positive_txids,

@@ -8,7 +8,7 @@ from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 
-from exporters.artifact_paths import ROUND_EVENTS_FILE, coinjoin_analysis_dir, emulator_dir
+from exporters.artifact_paths import COINJOIN_ANALYSIS_DIR, EMULATOR_DIR, ROUND_EVENTS_FILE
 from exporters.common import (
     EMULATOR_DATA_SCHEMA_VERSION,
     JsonObject,
@@ -408,8 +408,8 @@ def build_emulator_data(
     coinjoin_analysis_data: JsonObject,
     coinjoin_type: str,
 ) -> JsonObject:
-    raw_emulator_dir = emulator_dir(run_dir)
-    wallet_mapping = load_wallet_address_mapping(coinjoin_analysis_dir(run_dir), coinjoin_analysis_data)
+    raw_emulator_dir = run_dir / EMULATOR_DIR
+    wallet_mapping = load_wallet_address_mapping((run_dir / COINJOIN_ANALYSIS_DIR), coinjoin_analysis_data)
     label_source_paths, label_provenance = verified_producer_label_sources(raw_emulator_dir, coinjoin_type)
     labels_by_txid = load_producer_labels(raw_emulator_dir, coinjoin_type, label_source_paths, label_provenance)
     producer_positive_count = label_provenance.get("producer_positive_count")

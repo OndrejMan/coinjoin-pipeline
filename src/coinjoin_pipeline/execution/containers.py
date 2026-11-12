@@ -18,9 +18,9 @@ from typing import Mapping
 from exporters.artifact_paths import (
     ANALYSIS_ARTIFACT_NAME,
     BASELINE_FILE,
+    BLOCKSCI_ANALYSIS_DIR,
     COINJOIN_ANALYSIS_DIR,
     EMULATOR_DIR,
-    blocksci_analysis_dir,
 )
 from exporters.common import tree_sha256
 from exporters.image_provenance import inspect_image
@@ -469,7 +469,7 @@ def export_preflight_error(coinjoin_ready: bool, blocksci_ready: bool, run_dir: 
     if not coinjoin_ready:
         missing.append(str(run_dir / BASELINE_FILE))
     if not blocksci_ready:
-        missing.append(str(blocksci_analysis_dir(run_dir) / ANALYSIS_ARTIFACT_NAME))
+        missing.append(str((run_dir / BLOCKSCI_ANALYSIS_DIR) / ANALYSIS_ARTIFACT_NAME))
     command = "coinjoin-analysis" if not coinjoin_ready and blocksci_ready else "analyze"
     return (
         f"cannot export unified report for run '{run_dir.name}'; missing analytical input: "
@@ -524,7 +524,7 @@ def run_export_only(args: PipelineConfiguration) -> None:
     emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
     run_dir = emulation_logs_dir / active_run_id
     coinjoin_ready = exists_or_unreadable(run_dir / BASELINE_FILE)
-    blocksci_ready = exists_or_unreadable(blocksci_analysis_dir(run_dir) / ANALYSIS_ARTIFACT_NAME)
+    blocksci_ready = exists_or_unreadable((run_dir / BLOCKSCI_ANALYSIS_DIR) / ANALYSIS_ARTIFACT_NAME)
     error = export_preflight_error(coinjoin_ready, blocksci_ready, run_dir)
     if error:
         raise ValueError(error)

@@ -15,8 +15,7 @@ if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from exporters.analysis_artifact import SCHEMA_VERSION
-from exporters.artifact_paths import ANALYSIS_ARTIFACT_NAME
-from exporters.artifact_paths import BASELINE_FILE, blocksci_analysis_dir
+from exporters.artifact_paths import ANALYSIS_ARTIFACT_NAME, BASELINE_FILE, BLOCKSCI_ANALYSIS_DIR
 from exporters.blocksci_export.detector import (
     BLOCKSCI_IMPORT_ERROR,
     baseline_block_heights,
@@ -153,7 +152,7 @@ def write_analysis(args: argparse.Namespace) -> Path:
         "scan_window": window_record,
         "baseline_heights": baseline_heights,
     }
-    output_dir = blocksci_analysis_dir(run_dir)
+    output_dir = run_dir / BLOCKSCI_ANALYSIS_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / ANALYSIS_ARTIFACT_NAME
     save_json(output_path, artifact)
