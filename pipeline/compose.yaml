@@ -1,0 +1,127 @@
+# EXPERIMENTAL: local Docker path. Not part of the Kubernetes → S3 → PBS path that the thesis results come from.
+services:
+  # The Python Manager that controls the emulator
+  dind:
+      profiles: ["emulate"]
+      image: docker:29-dind
+      pull_policy: always
+      privileged: true # REQUIRED for a container to run its own Docker daemon
+      command: ["--tls=false"]
+      sysctls:
+        # The emulator publishes fixed Wasabi ports (37127-37260) inside this
+        # daemon's network namespace, and those sit in the kernel's ephemeral
+        # port range: an outbound connection can grab one first and then the
+        # container start fails with "failed to bind host port ...: address
+        # already in use". Reserving the block keeps the ports available.
+        - net.ipv4.ip_local_reserved_ports=37127-37260
+      environment:
+        - DOCKER_TLS_CERTDIR= # Disables TLS for easier local networking
+      volumes:
+        # Mount the data into the DinD container so it knows the paths
+        # - ./daemon.json:/etc/docker/daemon.json:ro # <--- Mount the config file
+        - btc_data:/home/bitcoin/data:rw # Named container volume
+        - dind_cache:/var/lib/docker
+      healthcheck:
+        test: ["CMD", "docker", "-H", "tcp://127.0.0.1:2375", "info"]
+        start_period: 20s
+        interval: 2s
+        timeout: 5s
+        retries: 10
+
+  data_wiper:
+      profiles: ["emulate"]
+      image: alpine
+      pull_policy: always
+      volumes:
+        - btc_data:/home/bitcoin/data:rw
+      # Deletes everything inside the directory without deleting the directory itself
+      command: >
+              sh -c "rm -rf /home/bitcoin/data/* && 
+                    chmod 777 /home/bitcoin/data && 
+                    echo 'BTC data wiped and permissions set to 777!'"
+      depends_on:
+        dind:
+          condition: service_healthy
+
+  dind_image_prefetch:
+      profiles: ["emulate"]
+      image: docker:29-cli
+      pull_policy: always
+      environment:
+        - DOCKER_HOST=tcp://dind:2375
+        - DOCKER_DEFAULT_PLATFORM=${COINJOIN_EMULATOR_DOCKER_PLATFORM:-}
+      depends_on:
+        dind:
+          condition: service_healthy
+      command: >
+            sh -exc "
+                    sleep 3 &&
+                    PREFIX=${COINJOIN_EMULATOR_IMAGE_PREFIX:-ghcr.io/ondrejman/} &&
+                    pull_image() {
+                      if [ -n \"$${DOCKER_DEFAULT_PLATFORM:-}\" ]; then
+                        docker pull --platform \"$${DOCKER_DEFAULT_PLATFORM}\" \"$$1\";
+                      else
+                        docker pull \"$$1\";
+                      fi;
+                    } &&
+                    if [ -z \"${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-}\" ]; then
+                      pull_image \"$${PREFIX}btc-node\";
+                    else
+                      echo 'Skipping btc-node pull; local build requested';
+                    fi &&
+                    if [ \"${COINJOIN_ENGINE:-wasabi}\" = \"joinmarket\" ]; then
+                      if [ -z \"${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-}\" ]; then
+                        pull_image \"$${PREFIX}joinmarket-client-server\";
+                      else
+                        echo 'Skipping JoinMarket base pull; the manager builds it from the vendored source';
+                      fi &&
+                      if [ -z \"${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-}\" ]; then
+                        pull_image \"$${PREFIX}irc-server:latest\";
+                      else
+                        echo 'Skipping irc-server pull; local build requested';
+                      fi;
+                    else
+                      if [ -z \"${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-}\" ]; then
+                        pull_image ghcr.io/ondrejman/wasabi-client:2.6.0 &&
+                        pull_image ghcr.io/ondrejman/wasabi-backend:2.6.0 &&
+                        pull_image ghcr.io/ondrejman/wasabi-coordinator:2.6.0;
+                      else
+                        echo 'Skipping Wasabi image pulls; the manager builds them from source';
+                      fi;
+                    fi &&
+                    echo 'Image prefetching complete!'
+                    "
+
+  manager:
+    profiles: ["emulate"]
+    image: ${COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/emulator-manager:latest}
+    pull_policy: ${COINJOIN_EMULATOR_PULL_POLICY:-always}
+    volumes:
+     - btc_data:/home/bitcoin/data:rw # Named container volume
+     - ${EMULATION_LOGS_DIR:-./emulation_logs}:/app/logs:rw
+     - ${SCENARIOS_DIR:-./scenarios}:/app/scenarios:ro
+    environment:
+      - DOCKER_HOST=tcp://dind:2375
+      - PYTHONUNBUFFERED=1
+      - RUN_TIMEZONE=${RUN_TIMEZONE:-Europe/Prague}
+      - PIPELINE_RUN_ID=${PIPELINE_RUN_ID:-}
+      # Empty means "use the emulator's own default". The Docker path starts
+      # from the chain baked into the btc-node image, so the distributor has
+      # ~1000 block filters to download before its wallet answers; raise this
+      # when a loaded host pushes that past the default.
+      - COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT=${COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT:-}
+    depends_on:
+      dind:
+        condition: service_healthy
+      data_wiper:
+          condition: service_completed_successfully
+      dind_image_prefetch:
+          condition: service_completed_successfully
+    command: >
+          sh -c "python manager.py clean && 
+                python manager.py --engine ${COINJOIN_ENGINE:-wasabi} --run-timezone \"$${RUN_TIMEZONE}\" run $${PIPELINE_RUN_ID:+--run-id \"$${PIPELINE_RUN_ID}\"} ${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:+--coinjoin-infrastructure-local-build} --control-ip dind --scenario ${SCENARIO_PATH:-/app/scenarios/overactive-local.json} --image-prefix ${COINJOIN_EMULATOR_IMAGE_PREFIX:-ghcr.io/ondrejman/} --btcFolder /home/bitcoin/data --btc-node-arg=-blocksxor=0 --download-btc-data /home/bitcoin/data"
+
+# Define the named volumes at the top level
+volumes:
+  btc_data:
+  dind_cache:

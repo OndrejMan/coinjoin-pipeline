@@ -1,0 +1,9 @@
+emulation_logs
+coinjoin-runs/
+
+__pycache__/
+build/
+*.egg-info/
+
+.vscode/
+.idea/

@@ -1,0 +1,65 @@
+"""Central image-name and version resolution."""
+
+from __future__ import annotations
+
+import os
+import re
+from dataclasses import dataclass
+
+# Where the project's images are published.
+DEFAULT_REGISTRY = "ghcr.io/ondrejman"
+REPOSITORIES = {
+    "emulator": "emulator-manager",
+}
+
+
+def image_names() -> dict[str, str]:
+    """Each component's image name, without a tag."""
+    return {component: f"{DEFAULT_REGISTRY}/{repository}" for component, repository in REPOSITORIES.items()}
+
+
+IMAGE_ENVIRONMENT = {
+    "emulator": "COINJOIN_EMULATOR_IMAGE",
+}
+DEFAULT_VERSION = "latest"
+
+TAG_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
+IMAGE_RE = re.compile(
+    r"^(?:[a-zA-Z0-9.-]+(?::[0-9]+)?/)?[a-z0-9._-]+(?:/[a-z0-9._-]+)*(?::[A-Za-z0-9_.-]+|@sha256:[0-9a-fA-F]{64})?$"
+)
+
+
+@dataclass(frozen=True)
+class Images:
+    emulator: str
+
+
+def validate_version(version: str) -> None:
+    if not TAG_RE.fullmatch(version):
+        raise ValueError(f"invalid image version tag: {version!r}")
+
+
+def validate_image(image: str) -> None:
+    if not IMAGE_RE.fullmatch(image):
+        raise ValueError(f"invalid container image reference: {image!r}")
+
+
+def resolve_images(
+    version: str | None,
+    overrides: dict[str, str | None],
+) -> Images:
+    """Each component's configured image, else its environment variable, else the release tag."""
+    effective_version = version or DEFAULT_VERSION
+    validate_version(effective_version)
+    resolved: dict[str, str] = {}
+    for component, name in image_names().items():
+        override = overrides.get(component) or os.environ.get(IMAGE_ENVIRONMENT[component])
+        if override:
+            validate_image(override)
+            resolved[component] = override
+        else:
+            resolved[component] = f"{name}:{effective_version}"
+    return Images(**resolved)
+
+
+IMAGE_NAMES = image_names()

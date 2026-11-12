@@ -1,0 +1,57 @@
+{
+  "name": "default-joinmarket",
+  "rounds": 3,
+  "blocks": 0,
+  "default_version": "joinmarket",
+  "wallets": [
+    {
+      "funds": [200000, 100000],
+      "joinmarket": { "role": "taker" }
+    },
+    {
+      "funds": [3000000],
+      "delay_blocks": 2,
+      "joinmarket": { "role": "taker" }
+    },
+    {
+      "funds": [1000000, 500000],
+      "delay_blocks": 1,
+      "joinmarket": { "role": "maker" }
+    },
+    {
+      "funds": [3000000, 500000],
+      "delay_blocks": 1,
+      "joinmarket": { "role": "maker" }
+    },
+    {
+      "funds": [1000000, 500000],
+      "delay_blocks": 1,
+      "joinmarket": { "role": "maker" }
+    },
+    {
+      "funds": [3000000, 600000],
+      "delay_blocks": 1,
+      "joinmarket": { "role": "maker" }
+    },
+    {
+      "funds": [200000, 50000],
+      "delay_blocks": 1,
+      "joinmarket": { "role": "maker" }
+    },
+    {
+      "funds": [3000000],
+      "delay_blocks": 1,
+      "joinmarket": { "role": "maker" }
+    },
+    {
+      "funds": [1000000, 500000],
+      "delay_blocks": 1,
+      "joinmarket": { "role": "maker" }
+    },
+    {
+      "funds": [3000000, 15000],
+      "delay_blocks": 1,
+      "joinmarket": { "role": "maker" }
+    }
+  ]
+}
