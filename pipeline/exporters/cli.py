@@ -21,10 +21,11 @@ from exporters.common import (
     JsonObject,
     load_json,
     save_json,
+    save_text,
 )
 from exporters.emulator_data import build_emulator_data
 from exporters.liquidity import build_liquidity, save_liquidity_dataset
-from exporters.markdown_report import render_report, save_text
+from exporters.markdown_report import render_report
 from exporters.normalization import (
     baseline_filter_summary,
     fill_missing_block_heights,

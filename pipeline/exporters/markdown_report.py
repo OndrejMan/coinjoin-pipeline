@@ -11,12 +11,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from exporters.common import JsonObject, JsonValue, io_items, load_json, wallet_names
-
-
-def save_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+from exporters.common import JsonObject, JsonValue, io_items, load_json, save_text, wallet_names
 
 
 def md_escape(value: JsonValue) -> str:
