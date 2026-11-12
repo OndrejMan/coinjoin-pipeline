@@ -18,7 +18,7 @@ COINJOIN_ANALYSIS_DIR = "coinjoin-analysis_data"
 EMULATOR_DIR = "coinjoin_emulator_data"
 #: S3 runs only: the emulator's Bitcoin datadir, which the BlockSci parse reads.
 BITCOIN_DATA_DIR = "bitcoin_data"
-#: S3 runs only: the exporters staged into the run prefix for the BlockSci job.
+#: S3 runs only: the exporters staged into the run prefix for the BlockSci and report jobs.
 STAGED_EXPORTERS_DIR = ".pipeline/exporters"
 #: PBS job logs of a run, uploaded next to its artifacts.
 LOGS_DIR = "logs"

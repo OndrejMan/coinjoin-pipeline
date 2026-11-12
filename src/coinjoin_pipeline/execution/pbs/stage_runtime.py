@@ -30,6 +30,7 @@ from coinjoin_pipeline.execution.pbs.stage_settings import StageSettings
 
 JOBS: dict[str, Callable[[Stage], None]] = {
     "blocksci": blocksci_jobs.blocksci,
+    "unified-report": analyzer_jobs.unified_report,
     "coinjoin-analysis": analyzer_jobs.coinjoin_analysis,
 }
 
