@@ -1,0 +1,253 @@
+{
+  "blocksci-analyze": {
+    "directives": [
+      "#PBS -N blocksci_analyze_s3",
+      "#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=2tb",
+      "#PBS -l walltime=48:00:00",
+      "#PBS -j oe"
+    ],
+    "settings": {
+      "artifact_uri": "s3://coinjoin-thesis/runs",
+      "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py analyze --run-dir /runs/emulation/logs/example-run --coinjoin-type wasabi2 --min-input-count default --joinmarket-detector definite --joinmarket-min-base-fee 5000 --joinmarket-percentage-fee 4e-05 --joinmarket-max-depth 200000 --blocksci-image docker://ghcr.io/ondrejman/blocksci-complete:latest --coinjoin-analysis-image docker://ghcr.io/ondrejman/coinjoin-analysis:latest --coinjoin-emulator-image ghcr.io/ondrejman/emulator-manager:latest --uploader-image ghcr.io/example/uploader:fixed",
+      "credentials": "/storage/brno2/home/<login>/.aws/credentials",
+      "endpoint": "https://s3.cl4.du.cesnet.cz",
+      "image": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "image_name": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "inputs": [
+        {
+          "run": ".pipeline/exporters"
+        },
+        {
+          "run": "coinjoin_emulator_data"
+        }
+      ],
+      "job": "blocksci-analysis",
+      "job_log": "blocksci-analyze.pbs.log",
+      "log_prefix": "s3://coinjoin-thesis/runs/example-run/logs",
+      "ncpus": 8,
+      "output": {
+        "relative": "blocksci-analysis_data"
+      },
+      "output_check": [
+        "blocksci-analysis_data/blocksci_analysis.json",
+        "Reusable BlockSci analysis did not produce blocksci-analysis_data/blocksci_analysis.json"
+      ],
+      "persistent": null,
+      "profile": "coinjoin",
+      "run_id": "example-run",
+      "run_prefix": "s3://coinjoin-thesis/runs/example-run",
+      "source_run_id": null,
+      "stage": "blocksci-analyze"
+    },
+    "shipped_files": [
+      "settings.json",
+      "run.py",
+      "coinjoin_pipeline/__init__.py",
+      "coinjoin_pipeline/storage/__init__.py",
+      "coinjoin_pipeline/storage/s5client.py",
+      "coinjoin_pipeline/execution/__init__.py",
+      "coinjoin_pipeline/execution/pbs/__init__.py",
+      "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/apptainer.py",
+      "exporters/__init__.py",
+      "exporters/artifact_paths.py",
+      "coinjoin_pipeline/execution/pbs/stage_settings.py",
+      "coinjoin_pipeline/execution/pbs/stage.py",
+      "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_index.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_analysis_jobs.py",
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py"
+    ]
+  },
+  "blocksci-parse": {
+    "directives": [
+      "#PBS -N blocksci_parse_s3",
+      "#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=2tb",
+      "#PBS -l walltime=48:00:00",
+      "#PBS -j oe"
+    ],
+    "settings": {
+      "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py parse --run-dir /runs/emulation/logs/example-run --network bitcoin_regtest --disk /mnt/data/regtest --max-block $((PBS_EXPORTED_MAX_BLOCK + 1))",
+      "credentials": "/storage/brno2/home/<login>/.aws/credentials",
+      "endpoint": "https://s3.cl4.du.cesnet.cz",
+      "image": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "image_name": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "job": "blocksci-parse",
+      "job_log": "blocksci-parse.pbs.log",
+      "log_prefix": "s3://coinjoin-thesis/runs/example-run/logs",
+      "ncpus": 8,
+      "pbs_resources": {
+        "mem": "64gb",
+        "ncpus": 8
+      },
+      "persistent": null,
+      "profile": "coinjoin",
+      "python_command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3",
+      "run_id": "example-run",
+      "run_prefix": "s3://coinjoin-thesis/runs/example-run",
+      "source": {
+        "description": "emulator Bitcoin and exported-block inputs",
+        "kind": "emulator",
+        "network": "bitcoin_regtest"
+      },
+      "stage": "blocksci-parse"
+    },
+    "shipped_files": [
+      "settings.json",
+      "run.py",
+      "coinjoin_pipeline/__init__.py",
+      "coinjoin_pipeline/storage/__init__.py",
+      "coinjoin_pipeline/storage/s5client.py",
+      "coinjoin_pipeline/execution/__init__.py",
+      "coinjoin_pipeline/execution/pbs/__init__.py",
+      "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/apptainer.py",
+      "exporters/__init__.py",
+      "exporters/artifact_paths.py",
+      "coinjoin_pipeline/execution/pbs/stage_settings.py",
+      "coinjoin_pipeline/execution/pbs/stage.py",
+      "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_index.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_analysis_jobs.py",
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py"
+    ]
+  },
+  "coinjoin-analysis": {
+    "directives": [
+      "#PBS -N coinjoin_analysis_s3",
+      "#PBS -l select=1:ncpus=4:mem=16gb:scratch_ssd=100gb",
+      "#PBS -l walltime=08:00:00",
+      "#PBS -j oe"
+    ],
+    "settings": {
+      "command": "python -m cj_process.parse_cj_logs --action collect_docker --target-path /runs/emulation/selected",
+      "credentials": "/storage/brno2/home/<login>/.aws/credentials",
+      "endpoint": "https://s3.cl4.du.cesnet.cz",
+      "image": "docker://ghcr.io/ondrejman/coinjoin-analysis:latest",
+      "image_name": "docker://ghcr.io/ondrejman/coinjoin-analysis:latest",
+      "job": "coinjoin-analysis",
+      "job_log": "coinjoin-analysis.pbs.log",
+      "log_prefix": "s3://coinjoin-thesis/runs/example-run/logs",
+      "ncpus": 4,
+      "profile": "coinjoin",
+      "run_id": "example-run",
+      "run_prefix": "s3://coinjoin-thesis/runs/example-run",
+      "stage": "coinjoin-analysis"
+    },
+    "shipped_files": [
+      "settings.json",
+      "run.py",
+      "coinjoin_pipeline/__init__.py",
+      "coinjoin_pipeline/storage/__init__.py",
+      "coinjoin_pipeline/storage/s5client.py",
+      "coinjoin_pipeline/execution/__init__.py",
+      "coinjoin_pipeline/execution/pbs/__init__.py",
+      "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/apptainer.py",
+      "exporters/__init__.py",
+      "exporters/artifact_paths.py",
+      "coinjoin_pipeline/execution/pbs/stage_settings.py",
+      "coinjoin_pipeline/execution/pbs/stage.py",
+      "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_index.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_analysis_jobs.py",
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py"
+    ]
+  },
+  "coinjoin-mappings": {
+    "directives": [
+      "#PBS -N coinjoin_mappings_s3",
+      "#PBS -l select=1:ncpus=4:mem=16gb:scratch_ssd=100gb",
+      "#PBS -l walltime=08:00:00",
+      "#PBS -j oe"
+    ],
+    "settings": {
+      "credentials": "/storage/brno2/home/<login>/.aws/credentials",
+      "endpoint": "https://s3.cl4.du.cesnet.cz",
+      "enumerator_image": "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:latest",
+      "job": "coinjoin-mappings",
+      "job_log": "coinjoin-mappings.pbs.log",
+      "log_prefix": "s3://coinjoin-thesis/runs/example-run/logs",
+      "ncpus": 4,
+      "profile": "coinjoin",
+      "run_id": "example-run",
+      "run_prefix": "s3://coinjoin-thesis/runs/example-run",
+      "sake_image": "docker://ghcr.io/ondrejman/coinjoin-mappings-sake:latest",
+      "script": "# Run the enumerator and Sake over $INPUT into $OUT; both read and write under $WORK.\nENUMERATOR_SIF=\"$SCRATCHDIR/coinjoin-mappings-enumerator.sif\"\nSAKE_SIF=\"$SCRATCHDIR/coinjoin-mappings-sake.sif\"\nfetch_sif() {\n  case \"$1\" in\n    docker://*|oras://*|library://*|http://*|https://*) singularity pull --force \"$2\" \"$1\" ;;\n    *) test -f \"$1\"; cp \"$1\" \"$2\" ;;\n  esac\n}\nfetch_sif \"$ENUMERATOR_IMAGE\" \"$ENUMERATOR_SIF\"\nfetch_sif \"$SAKE_IMAGE\" \"$SAKE_SIF\"\nENUMERATOR_DIGEST=\"sha256:$(sha256sum \"$ENUMERATOR_SIF\" | awk '{print $1}')\"\nSAKE_DIGEST=\"sha256:$(sha256sum \"$SAKE_SIF\" | awk '{print $1}')\"\nin_enumerator() {\n  singularity exec --bind \"$WORK:$WORK:rw\" \"$ENUMERATOR_SIF\" \"$@\"\n}\n# Exit status 1 is a partial result only when the tool's summary counts errors.\naccept_partial() {\n  if [ \"$1\" -ne 0 ]; then\n    test \"$1\" -eq 1\n    in_enumerator python3 -c \\\n      'import json,sys; d=json.load(open(sys.argv[1])); assert d.get(\"summary\",{}).get(\"errors\",0)>0' \"$2\"\n  fi\n}\n\nset +e\nin_enumerator python3 /app/run.py \\\n  \"$INPUT\" --output \"$OUT/enumerator.json\" \\\n  --mining-fee-rate 1 --coordination-fee-rate 0.003 \\\n  --max-decomposition-fee 6000 --mode numeric \\\n  --timeout 60 --retry-timeout 600\nENUMERATOR_STATUS=$?\nset -e\naccept_partial \"$ENUMERATOR_STATUS\" \"$OUT/enumerator.json\"\n\nset +e\nsingularity exec --bind \"$WORK:$WORK:rw\" \"$SAKE_SIF\" dotnet /app/Sake.dll \\\n  --input \"$INPUT\" --output \"$OUT/sake.json\" --seed 20260704\nSAKE_STATUS=$?\nset -e\naccept_partial \"$SAKE_STATUS\" \"$OUT/sake.json\"\n\nin_enumerator python3 -c \\\n  'import json,sys; p,ei,si,ed,sd=sys.argv[1:]; e=json.load(open(p+\"/enumerator.json\")); s=json.load(open(p+\"/sake.json\")); es=e.get(\"summary\",{}); ss=s.get(\"summary\",{}); status=\"partial\" if any((es.get(\"timed_out\",0),es.get(\"errors\",0),ss.get(\"errors\",0))) else \"complete\"; json.dump({\"schema_version\":\"1.0\",\"status\":status,\"provenance\":{\"enumerator_image\":ei,\"sake_image\":si,\"enumerator_image_digest\":ed,\"sake_image_digest\":sd},\"enumerator\":e,\"sake\":s},open(p+\"/coinjoin_mappings.json\",\"w\"),indent=2,sort_keys=True)' \\\n  \"$OUT\" \"$ENUMERATOR_IMAGE\" \"$SAKE_IMAGE\" \"$ENUMERATOR_DIGEST\" \"$SAKE_DIGEST\"\ntest -f \"$OUT/coinjoin_mappings.json\" || { echo \"CoinJoin mappings did not produce coinjoin_mappings.json\" >&2; exit 1; }\n",
+      "stage": "coinjoin-mappings"
+    },
+    "shipped_files": [
+      "settings.json",
+      "run.py",
+      "coinjoin_pipeline/__init__.py",
+      "coinjoin_pipeline/storage/__init__.py",
+      "coinjoin_pipeline/storage/s5client.py",
+      "coinjoin_pipeline/execution/__init__.py",
+      "coinjoin_pipeline/execution/pbs/__init__.py",
+      "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/apptainer.py",
+      "exporters/__init__.py",
+      "exporters/artifact_paths.py",
+      "coinjoin_pipeline/execution/pbs/stage_settings.py",
+      "coinjoin_pipeline/execution/pbs/stage.py",
+      "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_index.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_analysis_jobs.py",
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py"
+    ]
+  },
+  "unified-report": {
+    "directives": [
+      "#PBS -N unified_report_s3",
+      "#PBS -l select=1:ncpus=2:mem=8gb:scratch_ssd=10gb",
+      "#PBS -l walltime=01:00:00",
+      "#PBS -j oe"
+    ],
+    "settings": {
+      "command": "python3 /mnt/exporters/worker.py report --run-dir /runs/emulation/logs/example-run --coinjoin-type wasabi2 --min-input-count default --joinmarket-detector definite --joinmarket-min-base-fee 5000 --joinmarket-percentage-fee 4e-05 --joinmarket-max-depth 200000 --uploader-image ghcr.io/example/uploader:fixed --unified-report-image ghcr.io/example/unified-report:fixed",
+      "credentials": "/storage/brno2/home/<login>/.aws/credentials",
+      "downloads": [
+        ".pipeline/exporters",
+        "coinjoin_emulator_data",
+        "coinjoin-analysis_data",
+        "blocksci-analysis_data",
+        "coinjoin-mappings_data"
+      ],
+      "endpoint": "https://s3.cl4.du.cesnet.cz",
+      "image": "docker://ghcr.io/example/unified-report:fixed",
+      "image_name": "docker://ghcr.io/example/unified-report:fixed",
+      "job": "unified-report",
+      "job_log": "unified-report.pbs.log",
+      "log_prefix": "s3://coinjoin-thesis/runs/example-run/logs",
+      "ncpus": 2,
+      "profile": "coinjoin",
+      "run_id": "example-run",
+      "run_prefix": "s3://coinjoin-thesis/runs/example-run",
+      "stage": "unified-report"
+    },
+    "shipped_files": [
+      "settings.json",
+      "run.py",
+      "coinjoin_pipeline/__init__.py",
+      "coinjoin_pipeline/storage/__init__.py",
+      "coinjoin_pipeline/storage/s5client.py",
+      "coinjoin_pipeline/execution/__init__.py",
+      "coinjoin_pipeline/execution/pbs/__init__.py",
+      "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/apptainer.py",
+      "exporters/__init__.py",
+      "exporters/artifact_paths.py",
+      "coinjoin_pipeline/execution/pbs/stage_settings.py",
+      "coinjoin_pipeline/execution/pbs/stage.py",
+      "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_index.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_analysis_jobs.py",
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py"
+    ]
+  }
+}

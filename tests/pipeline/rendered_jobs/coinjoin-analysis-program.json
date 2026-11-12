@@ -1,0 +1,65 @@
+{
+  "coinjoin-analysis": {
+    "directives": [
+      "#PBS -N coinjoin_analysis_s3",
+      "#PBS -l select=1:ncpus=4:mem=16gb:scratch_ssd=50gb",
+      "#PBS -l walltime=04:00:00",
+      "#PBS -j oe"
+    ],
+    "settings": {
+      "command": "cd /work && python -m cj_process.parse_cj_logs --action analyze_only --target-path /work/input --env_vars DEBUG=False",
+      "credentials": "/storage/home/user/.aws/credentials",
+      "endpoint": "https://s3.example",
+      "files": [],
+      "image": "docker://ghcr.io/ondrejman/coinjoin-analysis:latest",
+      "image_name": "docker://ghcr.io/ondrejman/coinjoin-analysis:latest",
+      "input_uri": null,
+      "invocation": {
+        "argv": [
+          "python",
+          "-m",
+          "cj_process.parse_cj_logs",
+          "--action",
+          "analyze_only",
+          "--target-path",
+          "/work/input",
+          "--env_vars",
+          "DEBUG=False"
+        ],
+        "image": "docker://ghcr.io/ondrejman/coinjoin-analysis:latest",
+        "input_uri": null
+      },
+      "job": "coinjoin-tools",
+      "job_log": "coinjoin-analysis.pbs.log",
+      "log_prefix": "s3://bucket/runs/tools/logs",
+      "ncpus": 4,
+      "output_directory": "coinjoin-analysis-tools_data",
+      "profile": "test",
+      "program": "parse_cj_logs",
+      "run_id": "tools",
+      "run_input": true,
+      "run_prefix": "s3://bucket/runs/tools",
+      "stage": "coinjoin-analysis"
+    },
+    "shipped_files": [
+      "settings.json",
+      "run.py",
+      "coinjoin_pipeline/__init__.py",
+      "coinjoin_pipeline/storage/__init__.py",
+      "coinjoin_pipeline/storage/s5client.py",
+      "coinjoin_pipeline/execution/__init__.py",
+      "coinjoin_pipeline/execution/pbs/__init__.py",
+      "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/apptainer.py",
+      "exporters/__init__.py",
+      "exporters/artifact_paths.py",
+      "coinjoin_pipeline/execution/pbs/stage_settings.py",
+      "coinjoin_pipeline/execution/pbs/stage.py",
+      "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_index.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_analysis_jobs.py",
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py"
+    ]
+  }
+}

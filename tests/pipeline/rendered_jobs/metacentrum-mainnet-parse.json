@@ -1,0 +1,58 @@
+{
+  "blocksci-parse": {
+    "directives": [
+      "#PBS -N blocksci_parse_s3",
+      "#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=2tb",
+      "#PBS -l walltime=48:00:00",
+      "#PBS -j oe"
+    ],
+    "settings": {
+      "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py parse --run-dir /runs/emulation/logs/mainnet-850000 --network bitcoin --disk /mnt/data --max-block 850001",
+      "credentials": "/storage/brno2/home/<login>/.aws/credentials",
+      "endpoint": "https://s3.cl4.du.cesnet.cz",
+      "image": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "image_name": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
+      "job": "blocksci-parse",
+      "job_log": "blocksci-parse.pbs.log",
+      "log_prefix": "s3://coinjoin-thesis/runs/mainnet-850000/logs",
+      "ncpus": 8,
+      "pbs_resources": {
+        "mem": "64gb",
+        "ncpus": 8
+      },
+      "persistent": null,
+      "profile": "coinjoin",
+      "python_command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3",
+      "run_id": "mainnet-850000",
+      "run_prefix": "s3://coinjoin-thesis/runs/mainnet-850000",
+      "source": {
+        "datadir": "/storage/brno2/home/<login>/bitcoin-mainnet",
+        "description": "external Bitcoin Core block directory",
+        "kind": "external-bitcoin",
+        "max_block": 850000,
+        "network": "bitcoin"
+      },
+      "stage": "blocksci-parse"
+    },
+    "shipped_files": [
+      "settings.json",
+      "run.py",
+      "coinjoin_pipeline/__init__.py",
+      "coinjoin_pipeline/storage/__init__.py",
+      "coinjoin_pipeline/storage/s5client.py",
+      "coinjoin_pipeline/execution/__init__.py",
+      "coinjoin_pipeline/execution/pbs/__init__.py",
+      "coinjoin_pipeline/execution/pbs/index_store.py",
+      "coinjoin_pipeline/execution/pbs/apptainer.py",
+      "exporters/__init__.py",
+      "exporters/artifact_paths.py",
+      "coinjoin_pipeline/execution/pbs/stage_settings.py",
+      "coinjoin_pipeline/execution/pbs/stage.py",
+      "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_index.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_analysis_jobs.py",
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py"
+    ]
+  }
+}
