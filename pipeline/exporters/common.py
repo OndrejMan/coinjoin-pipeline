@@ -33,6 +33,11 @@ def load_json(path: Path) -> JsonObject:
     return data
 
 
+def save_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
 def save_json(path: Path, data: JsonValue) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as file:
