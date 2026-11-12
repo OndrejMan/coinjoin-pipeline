@@ -40,6 +40,17 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
         raise ConfigurationError(f"invalid run timezone: {config.run_timezone}") from error
     config = replace(config, runs_root=str(runs_root(config)))
     provided = set(config.provided)
+    for stage in ("blocksci",):
+        path = f"stages.{stage}"
+        if getattr(config.pbs, stage).configured and path not in provided:
+            config = replace_path(config, path, True)
+            provided.add(path)
+    if config.action in {"pbs-from-s3"}:
+        if "artifacts.backend" in provided and config.artifacts.backend != "s3":
+            raise ConfigurationError(
+                f"{config.action} reads its artifacts from S3; drop --artifact-backend shared-storage"
+            )
+        config = replace_path(config, "artifacts.backend", "s3")
     if config.engine == "joinmarket" and "coinjoin_type" not in provided:
         config = replace(config, coinjoin_type="joinmarket")
     if config.action in {"full-run", "emulate"} and not config.run_dir:

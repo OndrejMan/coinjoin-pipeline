@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import urlparse
 
+from exporters.artifact_paths import pbs_marker
+
 from coinjoin_pipeline.configuration import required
 from coinjoin_pipeline.storage.s5client import FRONTEND_S5CMD_VERSION, S5Client, S5Error, no_object_found, older_s5cmd
 
@@ -143,6 +145,11 @@ def run_prefix_uri(artifact_uri: str, run_id: str) -> str:
     return f"{artifact_uri}/{run_id}"
 
 
+def stage_marker_uri(run_prefix: str, stage: str, outcome: str) -> str:
+    """``<run-prefix>/.pbs/<stage>.<outcome>``: the terminal marker a PBS stage's trap uploads."""
+    return f"{run_prefix}/{pbs_marker(stage, outcome)}"
+
+
 def s3_listing(access: S3Access, pattern: str) -> list[dict[str, object]]:
     """The objects ``ls`` lists for pattern, empty when none; any other failure raises."""
     return _s5(access, lambda client: client.listing(pattern, timeout=None))
@@ -156,6 +163,23 @@ def s3_object_exists(access: S3Access, object_uri: str) -> bool:
 def s3_prefix_has_objects(access: S3Access, prefix: str) -> bool:
     """Whether any object lies below ``prefix/``."""
     return bool(s3_listing(access, f"{prefix}/*"))
+
+
+def clear_s3_stage_markers(access: S3Access, run_prefix: str, stage: str) -> None:
+    """Clear stale completion markers before submitting the stage that owns them.
+
+    One rm of both markers, an absent one included, and one listing that checks none is left.
+    """
+    markers = [stage_marker_uri(run_prefix, stage, outcome) for outcome in ("failed", "done")]
+    result = run_s5cmd(access, "rm", *markers)
+    if result.returncode != 0 and not no_object_found(result):
+        raise ArtifactTransportError(
+            f"s5cmd rm of the {stage} markers failed (exit {result.returncode}): {(result.stderr or '').strip()}"
+        )
+    listed = {str(entry.get("key")) for entry in s3_listing(access, stage_marker_uri(run_prefix, stage, "*"))}
+    left = sorted(listed & set(markers))
+    if left:
+        raise ArtifactTransportError(f"S3 markers still exist after deletion: {', '.join(left)}")
 
 
 def require_s5cmd_version() -> None:
