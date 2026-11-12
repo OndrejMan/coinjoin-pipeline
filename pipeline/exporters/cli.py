@@ -11,6 +11,7 @@ from exporters.analysis_artifact import load_analysis as load_blocksci_analysis
 from exporters.artifact_paths import (
     BASELINE_FILE,
     DUMPLINGS_SNAPSHOT_FILE,
+    MAPPINGS_FILE,
     REPORT_JSON,
     blocksci_analysis_dir,
     coinjoin_analysis_dir,
@@ -130,6 +131,8 @@ def assemble_report(args: argparse.Namespace) -> int:
     )
     coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_data)
     fill_missing_block_heights(coinjoin_analysis, load_exported_block_tx_index(run_dir))
+    mapping_path = run_dir / MAPPINGS_FILE
+    mapping_data = load_json(mapping_path) if args.coinjoin_type == "wasabi2" and mapping_path.is_file() else None
     emulator_data = None
     if args.mode == "emulator":
         emulator_data = build_emulator_data(run_dir, coinjoin_analysis_data, args.coinjoin_type)
@@ -168,6 +171,7 @@ def assemble_report(args: argparse.Namespace) -> int:
         integration_diagnostics=analysis["integration_diagnostics"],
         mode=args.mode,
         network=args.network,
+        coinjoin_mappings=mapping_data,
         image_provenance=analysis.get("image_provenance"),
         coverage=coverage,
         baseline_filter=baseline_filter_summary(false_positive_sources, false_positive_txids, filtered_txids),

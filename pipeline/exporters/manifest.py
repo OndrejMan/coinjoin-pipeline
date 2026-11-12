@@ -31,11 +31,17 @@ MANIFEST_COMPARE_FIELDS = (
     ("images.coinjoin_emulator", ("images", "coinjoin_emulator")),
     ("images.uploader", ("images", "uploader")),
     ("images.unified_report", ("images", "unified_report")),
+    ("images.mappings_enumerator", ("images", "mappings_enumerator")),
+    ("images.sake", ("images", "sake")),
     ("image_digests.blocksci", ("image_digests", "blocksci")),
     ("image_digests.coinjoin_analysis", ("image_digests", "coinjoin_analysis")),
     ("image_digests.coinjoin_emulator", ("image_digests", "coinjoin_emulator")),
     ("image_digests.uploader", ("image_digests", "uploader")),
     ("image_digests.unified_report", ("image_digests", "unified_report")),
+    ("image_digests.mappings_enumerator", ("image_digests", "mappings_enumerator")),
+    ("image_digests.sake", ("image_digests", "sake")),
+    ("mapping_parameters", ("mapping_parameters",)),
+    ("sake_seed", ("sake_seed",)),
     ("source_commits.coinjoin_emulator", ("source_commits", "coinjoin_emulator")),
 )
 
@@ -123,6 +129,19 @@ def build_run_manifest(
             "exporters_git_dirty": git_tree_is_dirty(exporters_root),
         },
     }
+
+
+def apply_mapping_provenance(run_manifest: RunManifest, coinjoin_mappings: JsonObject | None) -> None:
+    """Record the mapping-stage images and parameters; only Wasabi runs with mappings have them."""
+    if not coinjoin_mappings:
+        return
+    provenance = coinjoin_mappings.get("provenance") or {}
+    run_manifest["images"]["mappings_enumerator"] = provenance.get("enumerator_image")
+    run_manifest["images"]["sake"] = provenance.get("sake_image")
+    run_manifest["image_digests"]["mappings_enumerator"] = provenance.get("enumerator_image_digest")
+    run_manifest["image_digests"]["sake"] = provenance.get("sake_image_digest")
+    run_manifest["mapping_parameters"] = (coinjoin_mappings.get("enumerator") or {}).get("parameters")
+    run_manifest["sake_seed"] = (coinjoin_mappings.get("sake") or {}).get("seed")
 
 
 def compare_run_manifests(

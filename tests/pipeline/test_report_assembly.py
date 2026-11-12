@@ -6,6 +6,7 @@ from pathlib import Path
 from exporters import cli as report_cli
 from exporters.artifact_paths import DUMPLINGS_SNAPSHOT_FILE, EXPORTED_BLOCKS_DIR
 from exporters.common import f1_score, io_items, wallet_names
+from exporters.markdown_report import render_run_manifest
 from exporters.analysis_artifact import SCHEMA_VERSION
 from exporters.parameters import Detector
 from exporters.normalization import iter_exported_blocks
@@ -91,3 +92,16 @@ def test_shared_record_helpers():
     assert f1_score(0.5, 1.0) == 0.666667
     assert f1_score(0.0, 0.0) is None
     assert f1_score(None, 1.0) is None
+
+
+def test_run_manifest_lists_mapping_images_only_when_recorded():
+    manifest = {"images": {"blocksci": "blocksci:1"}, "image_digests": {}, "source_trees": {"exporters_sha256": "f0"}}
+    plain = "\n".join(render_run_manifest({"run_manifest": manifest}))
+    assert "Sake image" not in plain
+    assert "| exporters tree sha256 | f0 |" in plain
+
+    manifest["images"]["sake"] = "sake:1"
+    manifest["images"]["mappings_enumerator"] = "enumerator:1"
+    with_mappings = "\n".join(render_run_manifest({"run_manifest": manifest}))
+    assert "| Sake image | sake:1 |" in with_mappings
+    assert "| mappings-enumerator image | enumerator:1 |" in with_mappings

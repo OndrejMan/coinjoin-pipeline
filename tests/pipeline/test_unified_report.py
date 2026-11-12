@@ -2661,6 +2661,61 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(baseline_matrix["false_negatives"], 1)
         self.assertEqual(baseline_matrix["false_negative_txids"], ["txA"])
 
+    def test_mapping_results_are_summarized_and_timeout_marks_partial(self):
+        mappings = {
+            "status": "complete",
+            "provenance": {
+                "enumerator_image": "docker://enumerator",
+                "sake_image": "docker://sake",
+                "enumerator_image_digest": "sha256:enum",
+                "sake_image_digest": "sha256:sake",
+            },
+            "enumerator": {
+                "parameters": {"mode": "numeric"},
+                "summary": {
+                    "transactions": 1,
+                    "completed": 0,
+                    "timed_out": 1,
+                    "errors": 0,
+                },
+                "transactions": {"txA": {"status": "timeout", "mapping_count": None, "retried": True}},
+            },
+            "sake": {
+                "seed": 42,
+                "summary": {
+                    "output_match_rate": 0.5,
+                    "wallet_match_rate": 0.25,
+                    "length_match_rate": 0.75,
+                    "full_coinjoin_match_rate": 0.0,
+                },
+                "transactions": {},
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report = build_report(Path(tmpdir) / "run", {}, {}, Detector("wasabi2"), coinjoin_mappings=mappings)
+
+        self.assertEqual(report["coinjoin_mappings"]["status"], "partial")
+        self.assertEqual(report["summary"]["mapping_timed_out"], 1)
+        self.assertEqual(report["run_manifest"]["image_digests"]["sake"], "sha256:sake")
+        self.assertIn("Sake length match rate", render_report(report))
+
+    def test_sake_errors_make_mapping_artifact_partial(self):
+        mappings = {
+            "status": "complete",
+            "enumerator": {"summary": {"timed_out": 0, "errors": 0}},
+            "sake": {"summary": {"errors": 1}},
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report = build_report(Path(tmpdir) / "run", {}, {}, Detector("wasabi2"), coinjoin_mappings=mappings)
+
+        self.assertEqual(report["coinjoin_mappings"]["status"], "partial")
+
+    def test_report_without_mapping_artifact_keeps_mapping_section_absent(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report = build_report(Path(tmpdir) / "run", {}, {}, Detector("wasabi2"))
+        self.assertIsNone(report["coinjoin_mappings"])
+        self.assertNotIn("mapping_transactions", report["summary"])
+
 
 class ScenarioFundsCheckTest(unittest.TestCase):
     """The funds bound is per CoinJoin; remixing makes the sum exceed the funding."""

@@ -541,7 +541,10 @@ IMAGE_LABELS = (
     ("coinjoin_emulator", "coinjoin-emulator"),
     ("uploader", "uploader"),
     ("unified_report", "unified-report"),
+    ("mappings_enumerator", "mappings-enumerator"),
+    ("sake", "Sake"),
 )
+OPTIONAL_IMAGES = {"mappings_enumerator", "sake"}
 
 
 def render_run_manifest(report: JsonObject) -> list[str]:
@@ -561,6 +564,8 @@ def render_run_manifest(report: JsonObject) -> list[str]:
     image_rows = [
         row
         for key, label in IMAGE_LABELS
+        # The mapping-stage images exist only in reports with a mapping stage.
+        if key in images or key not in OPTIONAL_IMAGES
         for row in ([f"{label} image", images.get(key)], [f"{label} image digest", image_digests.get(key)])
     ]
     lines = section(
@@ -668,6 +673,58 @@ def render_integration_diagnostics(report: JsonObject) -> list[str]:
     if problems:
         lines.extend(["", "Blocking problems:"])
         lines.extend(f"- {problem}" for problem in problems)
+    return lines
+
+
+def render_coinjoin_mappings(report: JsonObject) -> list[str]:
+    mappings = report.get("coinjoin_mappings") or {}
+    if not mappings:
+        return []
+    enumerator = mappings.get("enumerator") or {}
+    enum_summary = enumerator.get("summary") or {}
+    sake = mappings.get("sake") or {}
+    sake_summary = sake.get("summary") or {}
+    lines = section(
+        "CoinJoin Mapping Analysis",
+        *key_values(
+            [
+                ["stage status", mappings.get("status")],
+                ["enumerated transactions", enum_summary.get("transactions")],
+                ["completed", enum_summary.get("completed")],
+                ["timed out", enum_summary.get("timed_out")],
+                ["errors", enum_summary.get("errors")],
+                ["Sake seed", sake.get("seed")],
+                ["Sake output match rate", metric_value(sake_summary.get("output_match_rate"))],
+                ["Sake wallet match rate", metric_value(sake_summary.get("wallet_match_rate"))],
+                ["Sake length match rate", metric_value(sake_summary.get("length_match_rate"))],
+                ["Sake full CoinJoin match rate", metric_value(sake_summary.get("full_coinjoin_match_rate"))],
+            ]
+        ),
+    )
+    lines.extend(section("Per-transaction mapping results", level=3))
+    rows = []
+    sake_transactions = sake.get("transactions") or {}
+    for txid, item in sorted((enumerator.get("transactions") or {}).items()):
+        sake_item = sake_transactions.get(txid) or {}
+        rows.append(
+            [
+                txid,
+                item.get("status"),
+                item.get("mapping_count"),
+                item.get("retried"),
+                sake_item.get("matched_outputs"),
+                sake_item.get("total_outputs"),
+                sake_item.get("full_coinjoin_match"),
+            ]
+        )
+    lines.extend(
+        table(
+            ["txid", "status", "mappings", "retried", "Sake matched outputs", "Sake total outputs", "Sake full match"],
+            rows,
+        )
+        if rows
+        else ["No transactions."]
+    )
     return lines
 
 
@@ -882,6 +939,7 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
         *render_coverage(report),
         *render_baseline_filter(report),
         *render_run_manifest(report),
+        *render_coinjoin_mappings(report),
         *render_emulator_detection(report, explorer_base_url),
         *render_subset_matching(report, explorer_base_url),
         *render_clustering_evaluation(report),

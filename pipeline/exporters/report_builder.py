@@ -19,7 +19,7 @@ from exporters.comparison import (
     evaluate_cluster_assignments,
 )
 from exporters.heuristics import add_blocksci_heuristic_explanations
-from exporters.manifest import build_run_manifest, compare_run_manifests
+from exporters.manifest import apply_mapping_provenance, build_run_manifest, compare_run_manifests
 from exporters.normalization import baseline_filter_summary
 from exporters.parameters import Detector, ReportImages
 from exporters.report_types import SubsetMatchingAnalysis, TransactionRecord
@@ -29,6 +29,25 @@ from exporters.script_metadata import enrich_records_with_script_metadata, load_
 MATCHED = "matched_by_both"
 MISSED = "missed_by_blocksci"
 BLOCKSCI_ONLY = "blocksci_only"
+
+
+def mapping_summaries(coinjoin_mappings: JsonObject | None) -> tuple[JsonObject, JsonObject]:
+    """The enumerator and Sake summaries of the mapping stage, empty when absent."""
+    mappings = coinjoin_mappings or {}
+    return (
+        (mappings.get("enumerator") or {}).get("summary") or {},
+        (mappings.get("sake") or {}).get("summary") or {},
+    )
+
+
+def with_effective_mapping_status(coinjoin_mappings: JsonObject | None) -> JsonObject | None:
+    """A "complete" mapping stage whose transactions timed out or failed is only partial."""
+    if not coinjoin_mappings or coinjoin_mappings.get("status") != "complete":
+        return coinjoin_mappings
+    enumerator_summary, sake_summary = mapping_summaries(coinjoin_mappings)
+    if any((enumerator_summary.get("timed_out"), enumerator_summary.get("errors"), sake_summary.get("errors"))):
+        return {**coinjoin_mappings, "status": "partial"}
+    return coinjoin_mappings
 
 
 def compare_transactions(
@@ -103,6 +122,7 @@ def build_summary(
     coinjoin_type: str,
     scenario: JsonObject | None,
     emulator_data: JsonObject | None,
+    coinjoin_mappings: JsonObject | None,
 ) -> JsonObject:
     statuses = Counter(transaction["comparison"]["status"] for transaction in transactions.values())
     detected_count = len(blocksci_records)
@@ -126,6 +146,19 @@ def build_summary(
         summary["emulator_data_transactions"] = emulator_summary.get("transactions")
         summary["emulator_data_coinjoins"] = emulator_summary.get("coinjoin_transactions")
         summary["emulator_data_unknown_transactions"] = emulator_summary.get("unknown_transactions")
+    if coinjoin_mappings:
+        enumerator_summary, sake_summary = mapping_summaries(coinjoin_mappings)
+        summary.update(
+            {
+                "mapping_transactions": enumerator_summary.get("transactions"),
+                "mapping_completed": enumerator_summary.get("completed"),
+                "mapping_timed_out": enumerator_summary.get("timed_out"),
+                "mapping_errors": enumerator_summary.get("errors"),
+                "sake_output_match_rate": sake_summary.get("output_match_rate"),
+                "sake_wallet_match_rate": sake_summary.get("wallet_match_rate"),
+                "sake_full_coinjoin_match_rate": sake_summary.get("full_coinjoin_match_rate"),
+            }
+        )
     return summary
 
 
@@ -191,12 +224,14 @@ def build_report(
     integration_diagnostics: JsonObject | None = None,
     mode: str = "emulator",
     network: str | None = None,
+    coinjoin_mappings: JsonObject | None = None,
     image_provenance: JsonObject | None = None,
     coverage: JsonObject | None = None,
     baseline_filter: JsonObject | None = None,
 ) -> JsonObject:
     """The unified report. Every top-level key is always present, null when it does not apply."""
     coinjoin_type, min_input_count = detector.coinjoin_type, detector.min_input_count
+    coinjoin_mappings = with_effective_mapping_status(coinjoin_mappings)
     # One read of the exported blocks serves both analyzers' records.
     script_index = load_exported_block_script_metadata(run_dir)
     enrich_records_with_script_metadata(coinjoin_analysis, run_dir, script_index)
@@ -226,6 +261,7 @@ def build_report(
         coinjoin_type,
         scenario,
         emulator_data,
+        coinjoin_mappings,
     )
     divergences = build_divergences(transactions)
     summary["divergence_counts"] = {name: len(items) for name, items in divergences.items()}
@@ -240,6 +276,7 @@ def build_report(
     )
     run_manifest["mode"] = mode
     run_manifest["network"] = network
+    apply_mapping_provenance(run_manifest, coinjoin_mappings)
     return {
         "schema_version": SCHEMA_VERSION,
         "run": {
@@ -274,6 +311,7 @@ def build_report(
         "blocksci_subset_matching": build_subset_matching_comparison(
             subset_matching, coinjoin_analysis, blocksci_records, detector
         ),
+        "coinjoin_mappings": coinjoin_mappings,
         # External mode only: the BlockSci scan window and where the baseline sits in it.
         "coverage": coverage,
         "baseline_filter": baseline_filter if baseline_filter is not None else baseline_filter_summary([], set(), []),

@@ -134,14 +134,19 @@ class ExecutionManifest(TypedDict):
     reproduction_command: str | None
 
 
-class ImageFields(TypedDict):
-    """Image references or digests."""
-
+class _ImageFields(TypedDict):
     blocksci: str | None
     coinjoin_analysis: str | None
     coinjoin_emulator: str | None
     uploader: str | None
     unified_report: str | None
+
+
+class ImageFields(_ImageFields, total=False):
+    """Image references or digests; the mapping images exist only with mappings."""
+
+    mappings_enumerator: str | None
+    sake: str | None
 
 
 class SourceCommits(TypedDict):
@@ -170,6 +175,8 @@ class RunManifest(_RunManifestFields, total=False):
 
     mode: str
     network: str | None
+    mapping_parameters: JsonObject | None
+    sake_seed: int | None
 
 
 class DetectorParameters(TypedDict):
