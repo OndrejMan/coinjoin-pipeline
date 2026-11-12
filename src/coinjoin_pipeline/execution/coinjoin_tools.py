@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 from typing import TYPE_CHECKING
+import time
 from uuid import uuid4
 
 from exporters.artifact_paths import COINJOIN_ANALYSIS_DIR, COINJOIN_ANALYSIS_TOOLS_DIR, EMULATOR_DIR
@@ -280,7 +281,9 @@ def command(options: CoinjoinAnalysisConfiguration, run_id: str) -> str:
 def run_local(config: PipelineConfiguration, run_dir: Path) -> Path:
     """Run the shipped image command on a writable copy, retaining the canonical baseline."""
     options = config.coinjoin_analysis
-    output = run_dir / COINJOIN_ANALYSIS_TOOLS_DIR / str(options.program) / uuid4().hex
+    # Named like a PBS result (UTC time, then the job), so both sort by when they ran.
+    result_id = f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-local-{uuid4().hex[:8]}"
+    output = run_dir / COINJOIN_ANALYSIS_TOOLS_DIR / str(options.program) / result_id
     image = (
         config.images.coinjoin_analysis
         or f"{image_names(config.images.registry)['coinjoin_analysis']}:{config.images.version or 'latest'}"
