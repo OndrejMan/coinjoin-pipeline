@@ -34,7 +34,6 @@ def report_inputs(run_dir: Path) -> None:
                 "parameters": Detector.from_args(args).artifact_parameters(),
                 "first_wasabi2_block": 0,
                 "records": {},
-                "skipped_txids": [],
                 "integration_diagnostics": {"status": "ok"},
                 "predicted_address_clusters": {},
                 "cluster_export_error": None,

@@ -33,7 +33,6 @@ def external_run(tmp_path: Path) -> Path:
             "parameters": Detector.from_args(args).artifact_parameters(),
             "first_wasabi2_block": 0,
             "records": {},
-            "skipped_txids": [],
             "integration_diagnostics": None,
             "scan_window": {"start_height": 850000, "end_height": 850050, "end_exclusive": True},
             "baseline_heights": {TXID: 850010, "b" * 64: None},
