@@ -20,6 +20,7 @@ class Capability(Enum):
     CONTAINER_RUNTIME = auto()
     KUBECTL = auto()
     QSUB = auto()
+    QSTAT = auto()
     QDEL = auto()
     S5CMD_FRONTEND = auto()
 
@@ -34,7 +35,7 @@ def required_capabilities(config: PipelineConfiguration) -> set[Capability]:
         if config.driver == "kubernetes":
             capabilities.add(Capability.KUBECTL)
         if uses_pbs:
-            capabilities.update((Capability.QSUB, Capability.QDEL))
+            capabilities.update((Capability.QSUB, Capability.QSTAT, Capability.QDEL))
         if uses_s3:
             capabilities.add(Capability.S5CMD_FRONTEND)
     delegated = uses_s3 or (uses_pbs and config.action not in {"full-run", "emulate"})
@@ -140,6 +141,7 @@ def check(
     for capability, command, purpose in (
         (Capability.KUBECTL, "kubectl", "the Kubernetes driver"),
         (Capability.QSUB, "qsub", "PBS execution"),
+        (Capability.QSTAT, "qstat", "PBS job state polling"),
         (Capability.QDEL, "qdel", "PBS graph rollback"),
         (Capability.S5CMD_FRONTEND, "s5cmd", "S3 artifact transport"),
     ):

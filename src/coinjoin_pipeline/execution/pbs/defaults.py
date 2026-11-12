@@ -31,3 +31,9 @@ DEFAULT_PBS_IMAGES = {
 BLOCKSCI_IMAGE_PYTHON_COMMAND = (
     "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3"
 )
+
+# qstat job_state values; status.job_phase classifies every state by them. "X" marks
+# finished subjobs (and, in some PBS Pro builds, expired jobs), so it is terminal.
+PBS_TERMINAL_STATES = {"C", "F", "X"}
+PBS_QUEUED_STATES = {"H", "Q", "W"}
+PBS_ACTIVE_STATES = {"B", "E", "M", "R", "S", "T", "U"} | PBS_QUEUED_STATES

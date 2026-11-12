@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from coinjoin_pipeline.configuration import PipelineConfiguration
+from coinjoin_pipeline.configuration import PipelineConfiguration, required
+from coinjoin_pipeline.execution.locks import acquire_lock, ensure_no_active_s3_pbs_submission, pbs_submit_lock_path
 from coinjoin_pipeline.execution.pbs.commands import blocksci_pbs_command
-from coinjoin_pipeline.execution.pbs.submission import PBSJobSpec, submit_pbs_job
+from coinjoin_pipeline.execution.pbs.submission import PBSJobSpec, persist_pbs_job_id, submit_pbs_job
 from coinjoin_pipeline.execution.pbs.templates_s3 import render_blocksci_s3_pbs
 from coinjoin_pipeline.execution.pbs_settings import (
     pbs_image,
@@ -60,6 +61,7 @@ class S3StageRunner:
         if job_id:
             self.submitted_jobs.append((stage.name, job_id))
             self.jobs[stage.name] = job_id
+            persist_pbs_job_id(self.args.runs_path / self.target.run_id, stage.name, job_id)
 
     def _blocksci(self) -> dict:
         """Renderer arguments every BlockSci job shares."""
@@ -82,7 +84,12 @@ class S3StageRunner:
 
 
 def submit_s3_pbs_graph(args: PipelineConfiguration) -> dict[str, str]:
-    """Submit one S3 PBS graph and roll it back on submit failure; return job IDs by stage."""
+    """Serialise one S3 PBS submission and roll it back on submit failure; return job IDs by stage."""
+    if not args.dry_run:
+        run_id = required(args.run_id, "--run-id")
+        acquire_lock(pbs_submit_lock_path(args.runs_path, run_id))
+        ensure_no_active_s3_pbs_submission(args.runs_path / run_id)
+
     submitted_jobs: list[tuple[str, str]] = []
     try:
         return _submit_s3_pbs_stages(args, submitted_jobs)

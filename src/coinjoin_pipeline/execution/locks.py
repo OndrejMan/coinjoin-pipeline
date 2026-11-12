@@ -1,4 +1,4 @@
-"""Advisory command locks."""
+"""Advisory command locks and S3 PBS overlap detection."""
 
 from __future__ import annotations
 
@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import TextIO
 
 from coinjoin_pipeline.configuration import PipelineConfiguration
+from coinjoin_pipeline.execution.pbs.submission import pbs_job_probe, recorded_pbs_job_ids
 from coinjoin_pipeline.execution.run_context import run_dir_under_root
+from coinjoin_pipeline.execution.probes import PROBE_QUEUED, PROBE_RUNNING, PROBE_UNKNOWN
+
+PBS_SUBMIT_LOCK_NAME = ".pbs-submit.lock"
 
 _HELD_LOCKS: dict[Path, TextIO] = {}
 
@@ -54,8 +58,26 @@ def close_locks() -> None:
     _HELD_LOCKS.clear()
 
 
+def pbs_submit_lock_path(logs_root: Path, run_id: str) -> Path:
+    """The per-run lock that serialises the pbs-from-s3 submissions of a run."""
+    return logs_root / run_id / PBS_SUBMIT_LOCK_NAME
+
+
 def command_lock_path(args: PipelineConfiguration, logs_root: Path) -> Path:
     """Return the local/shared advisory lock that protects this command."""
     if args.run_dir and args.action in {"analyze", "export", "coinjoin-analysis"}:
         return run_dir_under_root(args.run_dir, logs_root) / ".research.lock"
     return logs_root / ".pipeline.lock"
+
+
+def ensure_no_active_s3_pbs_submission(run_dir: Path) -> None:
+    """Refuse a second S3 PBS graph while a recorded job is still active."""
+    active: list[str] = []
+    for stage, job_id in recorded_pbs_job_ids(run_dir).items():
+        state = pbs_job_probe(job_id)()
+        if state in (PROBE_QUEUED, PROBE_RUNNING, PROBE_UNKNOWN):
+            active.append(f"{stage}={job_id} ({state})")
+    if active:
+        raise RuntimeError(
+            f"An earlier pbs-from-s3 graph for this run is still active or cannot be verified: {', '.join(active)}"
+        )
