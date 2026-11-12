@@ -157,6 +157,6 @@ def print_full_run_completed(run_prefix: str) -> None:
     print(
         f"[full-run] Completed; results under {run_prefix}/ "
         "(coinjoin-analysis_data/, blocksci-analysis_data/, "
-        "coinjoin-mappings_data/ when requested, "
+        "coinjoin-mappings_data/ when requested, blocksci-parse_data/ when reusable, "
         "coinjoinPipeline_data/, logs/)"
     )

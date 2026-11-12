@@ -20,15 +20,20 @@ TEMPLATES = Path(__file__).parent / "templates"
 SOURCE_ROOTS = (Path(__file__).resolve().parents[3], EXPORTERS_ROOT.parent)
 # Modules a job ships to the node; each stays stdlib-only Python 3.8.
 S5CLIENT = Path(__file__).parents[2] / "storage" / "s5client.py"
+INDEX_STORE = Path(__file__).with_name("index_store.py")
 APPTAINER = Path(__file__).with_name("apptainer.py")
 ARTIFACT_PATHS = EXPORTERS_ROOT / "artifact_paths.py"
 # The S3 stage worker: its entry point and every module it imports.
 STAGE_RUNTIME_MODULES = (
     S5CLIENT,
+    INDEX_STORE,
     APPTAINER,
     ARTIFACT_PATHS,
     *(Path(__file__).with_name(name) for name in ("stage_settings.py", "stage.py", "analyzer_jobs.py")),
-    *(Path(__file__).with_name(name) for name in ("blocksci_jobs.py", "stage_runtime.py")),
+    *(
+        Path(__file__).with_name(name)
+        for name in ("blocksci_index.py", "blocksci_jobs.py", "blocksci_analysis_jobs.py", "stage_runtime.py")
+    ),
 )
 
 

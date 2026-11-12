@@ -74,6 +74,7 @@ def _action_errors(config: PipelineConfiguration) -> list[str]:
         *_run_selection_errors(config),
         *_driver_errors(config),
         *_pbs_stage_errors(config, stages),
+        *_blocksci_workflow_errors(config, stages),
         *_s3_errors(config, stages),
         *_remaining_errors(config, stages),
     ]
@@ -130,6 +131,14 @@ def _pbs_stage_errors(config: PipelineConfiguration, stages: _PbsStages) -> list
     ):
         if _resources_supplied(config, stage, resources) and not enabled:
             errors.append(f"{stage}-specific PBS resources require {flag}")
+    return errors
+
+
+def _blocksci_workflow_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
+    """Which PBS stages a BlockSci workflow runs with."""
+    errors: list[str] = []
+    if config.blocksci.workflow != "combined" and not stages.blocksci:
+        errors.append("reusable BlockSci workflows require --blocksci-pbs")
     return errors
 
 
@@ -215,6 +224,12 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
 def _remaining_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
     errors: list[str] = []
     blocksci = config.blocksci
+    if (
+        config.action == "full-run"
+        and config.artifacts.backend != "s3"
+        and blocksci.workflow != "combined"
+    ):
+        errors.append("reusable BlockSci workflows are currently supported only with the S3 artifact backend")
     if blocksci.script and not Path(blocksci.script).expanduser().is_file():
         errors.append(f"BlockSci script not found: {blocksci.script}")
     if stages.mappings and config.engine != "wasabi":

@@ -9,12 +9,16 @@ from exporters.artifact_paths import BASELINE_FILE
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution.locks import acquire_lock, ensure_no_active_s3_pbs_submission, pbs_submit_lock_path
 from coinjoin_pipeline.execution.pbs.commands import (
+    blocksci_analysis_pbs_command,
     blocksci_export_pbs_command,
+    blocksci_parse_pbs_command,
     blocksci_pbs_command,
     coinjoin_analysis_pbs_command,
 )
 from coinjoin_pipeline.execution.pbs.submission import PBSJobSpec, persist_pbs_job_id, submit_pbs_job
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
+    render_blocksci_analyze_s3_pbs,
+    render_blocksci_parse_s3_pbs,
     render_blocksci_s3_pbs,
     render_coinjoin_analysis_s3_pbs,
     render_mappings_s3_pbs,
@@ -48,6 +52,7 @@ def s3_full_run_plan_from_args(args: PipelineConfiguration) -> StageGraph:
         analysis_pbs=args.stages.analysis,
         blocksci_pbs=args.stages.blocksci,
         mappings_pbs=args.stages.mappings,
+        blocksci_workflow=args.blocksci.workflow,
         unified_report=runs_unified_report(
             action=args.action,
             analysis_pbs=args.stages.analysis,
@@ -77,6 +82,7 @@ class S3StageRunner:
         handlers = {
             StageKind.BASELINE: self._analysis,
             StageKind.MAPPINGS: self._mappings,
+            StageKind.BLOCKSCI_PARSE: self._parse,
             StageKind.BLOCKSCI_WORK: self._blocksci_work,
             StageKind.REPORT: self._report,
         }
@@ -94,6 +100,10 @@ class S3StageRunner:
             self.submitted_jobs.append((stage.name, job_id))
             self.jobs[stage.name] = job_id
             persist_pbs_job_id(self.args.runs_path / self.target.run_id, stage.name, job_id)
+
+    def _index(self) -> dict:
+        """Renderer arguments of a job over a BlockSci index: its settings."""
+        return {"blocksci": self.args.blocksci}
 
     def _analysis(self, stage: StagePlan) -> None:
         common: dict = {
@@ -122,16 +132,31 @@ class S3StageRunner:
             "resources": stage_pbs_resources(self.args, "blocksci"),
         }
 
-    def _blocksci_work(self, stage: StagePlan) -> None:
-        # A BlockSci PBS stage keeps the report in its own stage; only a run without one reports in place.
-        report_here = not self.args.stages.blocksci
-        script = render_blocksci_s3_pbs(
-            **self._blocksci(),
-            command=blocksci_pbs_command(self.target.run_id, self.args, include_report=report_here),
-            include_report=report_here,
-            export_analysis=not report_here,
+    def _parse(self, stage: StagePlan) -> None:
+        script = render_blocksci_parse_s3_pbs(
+            **self._blocksci(), command=blocksci_parse_pbs_command(self.target.run_id)
         )
         self._submit(stage, script)
+
+    def _blocksci_work(self, stage: StagePlan) -> None:
+        if stage.name == "blocksci":
+            # A BlockSci PBS stage keeps the report in its own stage; only a run without one reports in place.
+            report_here = not self.args.stages.blocksci
+            script = render_blocksci_s3_pbs(
+                **self._blocksci(),
+                command=blocksci_pbs_command(self.target.run_id, self.args, include_report=report_here),
+                include_report=report_here,
+                export_analysis=not report_here,
+            )
+            self._submit(stage, script)
+            return
+        script = render_blocksci_analyze_s3_pbs(
+            **self._blocksci(),
+            **self._index(),
+            command=blocksci_analysis_pbs_command(self.target.run_id, self.args),
+            mode=stage.name,
+        )
+        self._submit(stage, script, depends=True)
 
     def _report(self, stage: StagePlan) -> None:
         if not self.args.dry_run and len(self.plan.dependency_ids(stage.name, self.jobs)) != len(stage.dependencies):

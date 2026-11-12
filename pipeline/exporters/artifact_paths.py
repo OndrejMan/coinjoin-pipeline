@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 
 BLOCKSCI_DIR = "blocksci_data"
+BLOCKSCI_PARSE_DIR = "blocksci-parse_data"
 BLOCKSCI_ANALYSIS_DIR = "blocksci-analysis_data"
 REPORT_DIR = "coinjoinPipeline_data"
 COINJOIN_ANALYSIS_DIR = "coinjoin-analysis_data"

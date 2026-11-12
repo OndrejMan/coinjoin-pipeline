@@ -24,11 +24,13 @@ from pathlib import Path
 
 from exporters.artifact_paths import LOGS_DIR, PBS_MARKER_DIR
 
-from coinjoin_pipeline.execution.pbs import analyzer_jobs, blocksci_jobs
+from coinjoin_pipeline.execution.pbs import analyzer_jobs, blocksci_analysis_jobs, blocksci_jobs
 from coinjoin_pipeline.execution.pbs.stage import Stage, StageFailure, with_job_log
 from coinjoin_pipeline.execution.pbs.stage_settings import StageSettings
 
 JOBS: dict[str, Callable[[Stage], None]] = {
+    "blocksci-parse": blocksci_jobs.blocksci_parse,
+    "blocksci-analysis": blocksci_analysis_jobs.blocksci_analysis,
     "blocksci": blocksci_jobs.blocksci,
     "coinjoin-mappings": analyzer_jobs.coinjoin_mappings,
     "unified-report": analyzer_jobs.unified_report,

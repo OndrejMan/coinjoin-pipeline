@@ -1,0 +1,85 @@
+"""What the BlockSci jobs share: the run's working index.
+
+A run-local index lives in <run>/blocksci_data; the container sees the run under
+CONTAINER_RUNS_ROOT. A reusable index is published to <run prefix>/blocksci-parse_data
+as an archive, its checksum and, last, its manifest.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import shutil
+from pathlib import Path
+
+from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, BLOCKSCI_DIR
+
+from coinjoin_pipeline.execution.pbs.index_store import MANIFEST_SCHEMA
+from coinjoin_pipeline.execution.pbs.stage import CONTAINER_RUNS_ROOT, Stage, StageFailure
+
+
+# The archive of a reusable index in <run prefix>/blocksci-parse_data.
+INDEX_ARCHIVE = "blocksci_data.tar.zst"
+
+# Files without which a parsed index is unusable.
+INDEX_FILES = (BLOCKSCI_CONFIG_FILE, BLOCKSCI_DIR + "/parsed/chain/block.dat")
+
+
+def container_run(stage: Stage) -> str:
+    return f"{CONTAINER_RUNS_ROOT}/{stage.run_id}"
+
+
+def require_tools(*tools: str) -> None:
+    for tool in tools:
+        if shutil.which(tool) is None:
+            raise StageFailure(f"{tool} is required to pack or unpack the BlockSci cache")
+
+
+def canonicalize_index(stage: Stage) -> None:
+    """Point config.json at parsed/ as this job's container sees it; a copied index still names its old one."""
+    config = stage.work / BLOCKSCI_CONFIG_FILE
+    parsed = f"{container_run(stage)}/{BLOCKSCI_DIR}/parsed"
+    text, replaced = re.subn(
+        r'("dataDirectory"\s*:\s*)"[^"]*"', lambda match: f'{match.group(1)}"{parsed}"', config.read_text()
+    )
+    if not replaced:
+        raise StageFailure("Could not canonicalize BlockSci dataDirectory")
+    config.write_text(text)
+
+
+def check_manifest(manifest: dict, label: str, image_name: str, run_id: str | None = None) -> None:
+    """Reject a cache or index manifest of another schema, run or BlockSci image."""
+    if manifest.get("schema_version") != MANIFEST_SCHEMA:
+        raise StageFailure(f"{label} manifest has an unsupported schema")
+    if run_id is not None and manifest.get("run_id") != run_id:
+        raise StageFailure(f"{label} run ID does not match {run_id}")
+    if manifest.get("blocksci_image") != image_name:
+        raise StageFailure(f"{label} was produced by a different BlockSci image")
+
+
+def restore_index(stage: Stage, cache_dir: Path, prefix: str, run_id: str, label: str) -> dict:
+    """Verify a published index's metadata, then stream it into the run's working index.
+
+    Only small metadata lands in cache_dir. The .writing marker stays on any failure, so
+    nothing reads an index whose whole stream was not extracted and verified.
+    """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path, sidecar = cache_dir / "manifest.json", cache_dir / f"{INDEX_ARCHIVE}.sha256"
+    stage.storage.copy(f"{prefix}/manifest.json", str(manifest_path))
+    stage.storage.copy(f"{prefix}/{INDEX_ARCHIVE}.sha256", str(sidecar))
+    manifest = json.loads(manifest_path.read_text())
+    check_manifest(manifest, label, stage.settings["image_name"], run_id)
+    if manifest.get("archive") != INDEX_ARCHIVE:
+        raise StageFailure(f"{label} has an unsupported archive")
+    checksum = sidecar.read_text().split(" ", 1)[0].strip()
+    if manifest.get("archive_sha256") != checksum:
+        raise StageFailure(f"{label} manifest SHA-256 does not match its sidecar")
+    (stage.work / BLOCKSCI_DIR).mkdir(parents=True, exist_ok=True)
+    writing = stage.work / BLOCKSCI_DIR / ".writing"
+    writing.touch()
+    stage.storage.restore_archive(f"{prefix}/{INDEX_ARCHIVE}", stage.work, checksum)
+    for relative in INDEX_FILES:
+        stage.require_file(relative, f"{label} did not contain {relative}")
+    canonicalize_index(stage)
+    writing.unlink()
+    return manifest

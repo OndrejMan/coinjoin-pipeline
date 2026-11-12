@@ -10,7 +10,7 @@ from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.pbs.commands import analysis_image_arguments
 from coinjoin_pipeline.execution.pbs.defaults import DEFAULT_RESOURCES
 from coinjoin_pipeline.execution.pbs.scripts import embedded_file
-from coinjoin_pipeline.execution.pbs.templates_s3 import render_blocksci_s3_pbs
+from coinjoin_pipeline.execution.pbs.templates_s3 import render_blocksci_parse_s3_pbs
 from coinjoin_pipeline.execution.s3_emulation import pin_emulation_images
 from coinjoin_pipeline.storage.s3 import S3Target
 
@@ -96,8 +96,8 @@ def test_unresolvable_reference_runs_unpinned_with_a_warning(capsys) -> None:
     assert "running ghcr.io/x/y:latest unpinned" in capsys.readouterr().err
 
 
-def test_pbs_job_runs_the_digest(registry_digests) -> None:
-    script = render_blocksci_s3_pbs(
+def test_pbs_job_runs_the_digest_but_keeps_the_index_identity(registry_digests) -> None:
+    script = render_blocksci_parse_s3_pbs(
         target=S3Target(
             artifact_uri="s3://bucket/runs",
             run_id="run-1",
@@ -111,7 +111,9 @@ def test_pbs_job_runs_the_digest(registry_digests) -> None:
     )
 
     settings = json.loads(embedded_file(script, "settings.json"))
+    # The job runs the pinned digest; the index manifest records the configured name.
     assert settings["image"] == f"docker://ghcr.io/x/blocksci@{DIGEST}"
+    assert settings["image_name"] == "docker://ghcr.io/x/blocksci:latest"
 
 
 def test_analysis_records_the_pinned_images(registry_digests) -> None:

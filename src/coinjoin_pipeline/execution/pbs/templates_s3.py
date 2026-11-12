@@ -3,7 +3,8 @@
 Every job is ``directives`` and a few lines of shell that write the stage worker's
 modules (``scripts.STAGE_RUNTIME_MODULES``) and a ``settings.json`` to the node's
 scratch and run them. The renderers here validate the options and assemble those
-settings; the work itself is ``analyzer_jobs``' and ``blocksci_jobs``'.
+settings; the work itself is ``analyzer_jobs``', ``blocksci_jobs``' and
+``blocksci_analysis_jobs``'.
 """
 
 from __future__ import annotations
@@ -19,7 +20,10 @@ from exporters.artifact_paths import (
     STAGED_EXPORTERS_DIR,
 )
 
-from coinjoin_pipeline.configuration import MappingsConfiguration
+from coinjoin_pipeline.configuration import (
+    BlockSciConfiguration,
+    MappingsConfiguration,
+)
 from coinjoin_pipeline.registry import pinned_reference
 from coinjoin_pipeline.storage.s3 import (
     S3Target,
@@ -30,6 +34,7 @@ from coinjoin_pipeline.storage.s3 import (
     validate_s3_profile,
 )
 
+from .analysis_modes import MODE_OUTPUTS, analysis_mode_settings
 from .defaults import DEFAULT_RESOURCES, PBSResources
 from .scripts import (
     STAGE_RUNTIME_MODULES,
@@ -40,6 +45,7 @@ from .scripts import (
     write_files,
 )
 from .stage_settings import (
+    BlocksciAnalysisSettings,
     BlocksciSettings,
     CommandSettings,
     MappingsSettings,
@@ -47,6 +53,7 @@ from .stage_settings import (
     UnifiedReportSettings,
 )
 from .validation import (
+    PBSError,
     require_safe_image,
     require_safe_pbs_token,
 )
@@ -58,6 +65,7 @@ JobSettings = Union[
     UnifiedReportSettings,
     MappingsSettings,
     BlocksciSettings,
+    BlocksciAnalysisSettings,
 ]
 
 
@@ -106,12 +114,49 @@ def render_blocksci_s3_pbs(
     )
 
 
+def render_blocksci_parse_s3_pbs(
+    target: S3Target,
+    image: str,
+    command: str,
+    resources: PBSResources = BLOCKSCI,
+) -> str:
+    """Render a parser-only job that publishes a checksummed reusable index."""
+    return render_python_stage("blocksci-parse", target, resources, image, {"command": command})
+
+
+def render_blocksci_analyze_s3_pbs(
+    target: S3Target,
+    image: str,
+    command: str,
+    resources: PBSResources = BLOCKSCI,
+    *,
+    mode: str = "blocksci-analyze",
+    blocksci: BlockSciConfiguration = BlockSciConfiguration(),
+) -> str:
+    """Render analysis work over a cached index."""
+    if mode not in MODE_OUTPUTS:
+        raise PBSError(f"Unsupported reusable BlockSci mode: {mode}")
+    return render_python_stage(
+        mode,
+        target,
+        resources,
+        image,
+        {
+            **analysis_mode_settings(mode, blocksci),
+            "command": command,
+        },
+        job="blocksci-analysis",
+    )
+
+
 def render_python_stage(
     stage: str,
     target: S3Target,
     resources: PBSResources,
     image: str | None,
     settings: JobSettings,
+    *,
+    job: str | None = None,
 ) -> str:
     """The job script: write the worker's modules and settings.json to scratch and run ``stage_runtime``.
 
@@ -121,7 +166,7 @@ def render_python_stage(
     require_safe_pbs_token(stage, "PBS stage")
     common: StageSettings = {
         "stage": stage,
-        "job": stage,
+        "job": job or stage,
         "run_id": validate_run_id(target.run_id),
         "run_prefix": validate_artifact_uri(target.run_prefix),
         "endpoint": validate_s3_endpoint_url(target.endpoint_url),
@@ -135,8 +180,9 @@ def render_python_stage(
     image_settings: dict[str, str] = {}
     if image is not None:
         require_safe_image(image)
-        # The job runs the digest the tag names now.
-        image_settings = {"image": pinned_reference(image)}
+        # The job runs the digest the tag names now; index manifests keep the configured
+        # name, so a rebuilt image under the same tag still reuses an existing index.
+        image_settings = {"image": pinned_reference(image), "image_name": image}
     files = {
         # One flat object: the worker reads it as StageSettings and as the job's own type.
         "settings.json": json.dumps({**common, **settings, **image_settings}, indent=2),

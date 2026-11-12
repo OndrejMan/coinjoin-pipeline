@@ -9,9 +9,35 @@ from __future__ import annotations
 from typing import TypedDict
 
 
+class _OutputDirectory(TypedDict):
+    # Run-relative directory uploaded after the job.
+    relative: str
+
+
+class OutputSettings(_OutputDirectory, total=False):
+    """Where an analysis over an index writes."""
+
+
+class InputSettings(TypedDict):
+    """One download before an analysis: a run directory."""
+
+    run: str
+
+
+class _AnalysisIO(TypedDict):
+    output: OutputSettings
+    inputs: list[InputSettings]
+    # A run-relative file the work must leave, and the failure message when it did not.
+    output_check: list[str] | None
+
+
+class AnalysisModeSettings(_AnalysisIO, total=False):
+    """What detection needs (analysis_modes)."""
+
+
 class _CommonSettings(TypedDict):
     stage: str
-    # The worker function in JOBS that runs the stage.
+    # The worker function in JOBS; several jobs share a stage name and its markers.
     job: str
     run_id: str
     run_prefix: str
@@ -33,6 +59,8 @@ class StageSettings(_CommonSettings, total=False):
 
     # Every job but coinjoin-mappings runs one image.
     image: str
+    # The configured image name; index manifests record it so a rebuilt tag still matches.
+    image_name: str
 
 
 class CommandSettings(TypedDict):
@@ -60,3 +88,7 @@ class BlocksciSettings(CommandSettings):
 
     include_report: bool
     export_analysis: bool
+
+
+class BlocksciAnalysisSettings(CommandSettings, AnalysisModeSettings):
+    """Detection over this run's index."""

@@ -20,6 +20,22 @@ def blocksci_pbs_command(run_id: str, config: PipelineConfiguration, include_rep
     return command
 
 
+def blocksci_parse_pbs_command(run_id: str) -> str:
+    return (
+        f"{BLOCKSCI_IMAGE_PYTHON_COMMAND} /mnt/exporters/worker.py parse "
+        f"--run-dir {shlex.quote('/runs/emulation/logs/' + run_id)} "
+        "--network bitcoin_regtest --disk /mnt/data/regtest "
+        "--max-block $((PBS_EXPORTED_MAX_BLOCK + 1))"
+    )
+
+
+def blocksci_analysis_pbs_command(
+    run_id: str,
+    config: PipelineConfiguration,
+) -> str:
+    return worker_command("analyze", run_id, config)
+
+
 def blocksci_export_pbs_command(
     run_id: str,
     config: PipelineConfiguration,
@@ -78,7 +94,7 @@ def analysis_image_arguments(config: PipelineConfiguration) -> list[str]:
 
 
 def worker_command(
-    phase: Literal["run", "report"],
+    phase: Literal["run", "analyze", "report"],
     run_id: str,
     config: PipelineConfiguration,
 ) -> str:

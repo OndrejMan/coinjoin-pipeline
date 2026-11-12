@@ -1,6 +1,6 @@
 """The S3 PBS jobs that run coinjoin-analysis, the mappings and the unified report.
 
-None of them touches a BlockSci index; that is ``blocksci_jobs``'.
+None of them touches a BlockSci index; ``blocksci_jobs`` writes one, ``blocksci_analysis_jobs`` reads one.
 """
 
 from __future__ import annotations
