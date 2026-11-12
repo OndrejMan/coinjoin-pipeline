@@ -52,6 +52,26 @@ def blocksci_analysis_pbs_command(
     return worker_command("analyze", run_id, config)
 
 
+def blocksci_external_report_pbs_command(
+    run_id: str,
+    config: PipelineConfiguration,
+) -> str:
+    window = "".join(
+        f" {flag} {value}"
+        for flag, value in (
+            ("--pin-height", config.blocksci.pin_height),
+            ("--scan-start-height", config.blocksci.scan_start_height),
+            ("--scan-end-height", config.blocksci.scan_end_height),
+        )
+        if value is not None
+    )
+    return (
+        worker_command("analyze", run_id, config)
+        + " --mode external --network bitcoin --skip-clustering --report"
+        + window
+    )
+
+
 def blocksci_script_pbs_command(
     run_id: str,
     config: PipelineConfiguration,

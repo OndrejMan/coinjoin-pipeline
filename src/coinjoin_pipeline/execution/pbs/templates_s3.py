@@ -118,7 +118,7 @@ def render_coinjoin_analysis_dumplings_s3_pbs(
     ``<dumplings_uri>/Scanner/`` is the copy mainnet-sync keeps incrementally and
     ``manifest.json`` (written last) its height and file sizes. The run gets
     ``coinjoin_tx_info.json``, the image's curated ``false_cjtxs.json`` and the manifest as
-    ``dumplings-snapshot.json`` for the report.
+    ``dumplings-snapshot.json`` for the external comparison.
     """
     uri = validated_s3_uri(dumplings_uri, "Dumplings snapshot URI")
     if coinjoin_type not in DUMPLINGS_PROTOCOLS:

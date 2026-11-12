@@ -67,10 +67,13 @@ class OutputSettings(_OutputDirectory, total=False):
     notebooks_dir: str
 
 
-class InputSettings(TypedDict):
-    """One download before an analysis: a run directory."""
+class InputSettings(TypedDict, total=False):
+    """One download before an analysis: a run directory, or an object placed at a run-relative path."""
 
     run: str
+    uri: str
+    to: str
+    optional: bool
 
 
 class _AnalysisIO(TypedDict):
@@ -81,7 +84,7 @@ class _AnalysisIO(TypedDict):
 
 
 class AnalysisModeSettings(_AnalysisIO, total=False):
-    """What detection, a user script or a notebook needs (analysis_modes)."""
+    """What detection, an external comparison, a user script or a notebook needs (analysis_modes)."""
 
     user_script: str
     connection_help: list[str]
@@ -131,7 +134,7 @@ class DumplingsBaselineSettings(CommandSettings):
     dumplings_uri: str
     mix_id: str
     false_cjtxs: str
-    # Run-relative path of the manifest copy the report reads.
+    # Run-relative path of the manifest copy the external comparison reads.
     snapshot_file: str
 
 

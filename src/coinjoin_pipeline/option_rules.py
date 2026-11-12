@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from .configuration import PipelineConfiguration, PBSResourceConfiguration
 
 # Tasks that may read the index of another run (--blocksci-cache-source-run-id) without writing to it.
-READ_ONLY_CACHE_TASKS = frozenset({"script", "notebook"})
+READ_ONLY_CACHE_TASKS = frozenset({"script", "external", "notebook"})
 PERSISTENT_INDEX_TASKS = frozenset({"parse", "update", "backup"}) | READ_ONLY_CACHE_TASKS
 # The jobs that only maintain the index; their state can live at one fixed S3 prefix.
 INDEX_STATE_TASKS = ("parse", "update", "backup")
@@ -72,7 +72,7 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
         return errors
     if blocksci.task not in PERSISTENT_INDEX_TASKS:
         errors.append(
-            "--blocksci-index-dir requires --blocksci-task parse, update, backup, script, or notebook"
+            "--blocksci-index-dir requires --blocksci-task parse, update, backup, script, external, or notebook"
         )
     if blocksci.cache_source_run_id:
         errors.append("choose one index source: --blocksci-index-dir or --blocksci-cache-source-run-id")
@@ -93,10 +93,10 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
         errors.append("--blocksci-index-dir must not contain '..'")
     if blocksci.task == "backup" and not backup_uri:
         errors.append("--blocksci-task backup requires --blocksci-index-backup-uri")
-    if blocksci.index_in_scratch and (not backup_uri or blocksci.task not in {"script", "notebook"}):
+    if blocksci.index_in_scratch and (not backup_uri or blocksci.task not in {"script", "external", "notebook"}):
         errors.append(
             "--blocksci-index-in-scratch requires --blocksci-index-backup-uri and --blocksci-task "
-            "script or notebook"
+            "script, external or notebook"
         )
     if blocksci.restore_index and (not backup_uri or blocksci.task != "notebook" or blocksci.index_in_scratch):
         errors.append(
@@ -183,6 +183,7 @@ def _action_errors(config: PipelineConfiguration) -> list[str]:
         *_dumplings_errors(config, stages),
         *_height_errors(config),
         *_blocksci_source_errors(config),
+        *_external_baseline_errors(config, stages),
         *_s3_errors(config, stages),
         *_remaining_errors(config, stages),
     ]
@@ -260,7 +261,7 @@ def _blocksci_task_errors(config: PipelineConfiguration, stages: _PbsStages) -> 
             errors.append(f"--blocksci-task {task} requires pbs-from-s3 --blocksci-workflow {required_workflow}")
         if not stages.blocksci_alone:
             errors.append(f"--blocksci-task {task} requires --blocksci-pbs without --analysis-pbs")
-    elif task != "detect":
+    elif task not in {"detect", "external"}:
         if action != "pbs-from-s3":
             errors.append("BlockSci reusable tasks are submitted with pbs-from-s3")
         if workflow == "combined":
@@ -304,7 +305,7 @@ def _cache_source_errors(config: PipelineConfiguration) -> list[str]:
         if config.run_id == source_run_id:
             errors.append("--blocksci-cache-source-run-id must differ from target --run-id")
     elif source_run_id:
-        errors.append("--blocksci-cache-source-run-id requires --blocksci-task update, script, or notebook")
+        errors.append("--blocksci-cache-source-run-id requires --blocksci-task update, script, external, or notebook")
     return errors
 
 
@@ -323,14 +324,14 @@ def _height_errors(config: PipelineConfiguration) -> list[str]:
     errors: list[str] = []
     blocksci = config.blocksci
     pin_height, scan_start, scan_end = blocksci.pin_height, blocksci.scan_start_height, blocksci.scan_end_height
-    if blocksci.task != "script":
+    if blocksci.task not in {"script", "external"}:
         for flag, path, height in (
             ("--blocksci-pin-height", "blocksci.pin_height", pin_height),
             ("--blocksci-scan-start-height", "blocksci.scan_start_height", scan_start),
             ("--blocksci-scan-end-height", "blocksci.scan_end_height", scan_end),
         ):
             if _supplied(config, path, height):
-                errors.append(f"{flag} requires --blocksci-task script")
+                errors.append(f"{flag} requires --blocksci-task script or external")
     if scan_start is not None and scan_end is not None and scan_start >= scan_end:
         errors.append("--blocksci-scan-start-height must be below --blocksci-scan-end-height")
     if pin_height is not None and scan_end is not None and scan_end > pin_height + 1:
@@ -378,6 +379,23 @@ def _blocksci_source_errors(config: PipelineConfiguration) -> list[str]:
             errors.append("--blocksci-expected-block-hash must be 64 lowercase hexadecimal characters")
     if blocks_uri and blocksci.network == "bitcoin" and expected_hash is None:
         errors.append("Mainnet block archives require --blocksci-expected-block-hash at --blocksci-max-block")
+    return errors
+
+
+def _external_baseline_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
+    errors: list[str] = []
+    blocksci = config.blocksci
+    if blocksci.task == "external":
+        if config.action != "pbs-from-s3" or blocksci.workflow == "combined":
+            errors.append("--blocksci-task external requires pbs-from-s3 with reusable or cached workflow")
+        if not stages.blocksci_alone:
+            errors.append("--blocksci-task external requires --blocksci-pbs without --analysis-pbs")
+        if not blocksci.external_baseline_uri:
+            errors.append("--blocksci-task external requires --external-baseline-uri")
+    elif blocksci.external_baseline_uri:
+        errors.append("--external-baseline-uri requires --blocksci-task external")
+    if blocksci.external_false_cjtxs_uri and blocksci.task != "external":
+        errors.append("--external-false-cjtxs-uri requires --blocksci-task external")
     return errors
 
 

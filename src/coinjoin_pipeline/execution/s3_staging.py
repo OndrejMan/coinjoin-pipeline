@@ -96,6 +96,7 @@ def pbs_stages_need_exporters(args: PipelineConfiguration) -> bool:
     task = args.blocksci.task
     return args.blocksci.workflow == "combined" or task in {
         "detect",
+        "external",
         "parse",
         "update",
     }

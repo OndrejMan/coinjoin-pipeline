@@ -1,4 +1,4 @@
-"""The S3 PBS job that reads a BlockSci index: detection, a user script or a notebook.
+"""The S3 PBS job that reads a BlockSci index: detection, an external comparison, a user script or a notebook.
 
 The index comes from this run's cache, read-only from another run's, or in place from a
 persistent directory (``blocksci_index``).
@@ -207,7 +207,7 @@ def notebook_connection(stage: Stage, control: Path) -> Iterator[None]:
 
 
 def blocksci_analysis(stage: Stage) -> None:
-    """Detection, a user script or a notebook over an existing index.
+    """Detection, an external comparison, a user script or a notebook over an existing index.
 
     Outputs are published even when the work fails. The index comes from this run's cache,
     read-only from another run's, or in place from a persistent directory.
@@ -219,7 +219,17 @@ def blocksci_analysis(stage: Stage) -> None:
     require_tools("zstd")
     stage.log(f"[{mode}] downloading required reusable BlockSci inputs")
     for download in settings["inputs"]:
-        stage.download(download["run"])
+        if "run" in download:
+            stage.download(download["run"])
+            continue
+        target = stage.work / download["to"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            stage.storage.copy(download["uri"], str(target))
+        except subprocess.CalledProcessError:
+            if not download.get("optional"):
+                raise
+            stage.log(f"[{mode}] the baseline has no {target.name}")
     (stage.work / STAGED_EXPORTERS_DIR).mkdir(parents=True, exist_ok=True)
     binds = [f"{stage.runs_root}:{CONTAINER_RUNS_ROOT}:rw", f"{stage.work / STAGED_EXPORTERS_DIR}:/mnt/exporters:ro"]
     environment = [

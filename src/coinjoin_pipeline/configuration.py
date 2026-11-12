@@ -43,7 +43,7 @@ CoinjoinType = Literal["wasabi2", "joinmarket"]
 ArtifactBackend = Literal["shared-storage", "s3"]
 ContainerRuntime = Literal["docker", "podman"]
 BlockSciWorkflow = Literal["combined", "reusable", "cached"]
-BlockSciTask = Literal["detect", "parse", "update", "script", "notebook", "backup"]
+BlockSciTask = Literal["detect", "parse", "update", "script", "notebook", "external", "backup"]
 BlockSciNetwork = Literal["bitcoin", "bitcoin_testnet", "bitcoin_regtest"]
 JoinMarketDetector = Literal["possible", "definite"]
 MappingMode = Literal["numeric", "all"]
@@ -126,6 +126,9 @@ class BlockSciConfiguration(ConfigurationModel):
     external_bitcoin_datadir: str | None = option(None, name="blocksci_external_bitcoin_datadir")
     bitcoin_blocks_uri: str | None = option(None, name="blocksci_bitcoin_blocks_uri")
     external_blocksci_dir: str | None = option(None, name="blocksci_external_blocksci_dir")
+    external_baseline_uri: str | None = option(None, name="external_baseline_uri")
+    # Curated Dumplings false positives (coinjoin-analysis data/<protocol>/false_cjtxs.json).
+    external_false_cjtxs_uri: str | None = option(None, name="external_false_cjtxs_uri")
     network: BlockSciNetwork | None = option(None, name="blocksci_network")
     max_block: int | None = option(None, name="blocksci_max_block", minimum=0)
     expected_block_hash: str | None = option(None, name="blocksci_expected_block_hash")

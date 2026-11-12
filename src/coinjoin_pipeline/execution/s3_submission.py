@@ -11,6 +11,7 @@ from coinjoin_pipeline.execution.locks import acquire_lock, ensure_no_active_s3_
 from coinjoin_pipeline.execution.pbs.commands import (
     blocksci_analysis_pbs_command,
     blocksci_export_pbs_command,
+    blocksci_external_report_pbs_command,
     blocksci_notebook_pbs_command,
     blocksci_parse_pbs_command,
     blocksci_pbs_command,
@@ -192,6 +193,7 @@ class S3StageRunner:
             return
         commands = {
             "detect": lambda: blocksci_analysis_pbs_command(self.target.run_id, self.args),
+            "external": lambda: blocksci_external_report_pbs_command(self.target.run_id, self.args),
             "script": lambda: blocksci_script_pbs_command(self.target.run_id, self.args),
             "notebook": lambda: blocksci_notebook_pbs_command(blocksci.notebook_port),
         }

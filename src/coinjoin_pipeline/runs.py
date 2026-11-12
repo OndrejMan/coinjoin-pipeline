@@ -69,6 +69,7 @@ def store_host_manifest(target: Path, manifest: dict[str, object]) -> None:
     """
     existing = read_host_manifest(target)
     existing.setdefault("schema_version", 1)
+    existing.setdefault("mode", "emulator")
     existing.setdefault("run_id", target.parent.name)
     launch_id = manifest.get("launch_id")
     recorded = existing.get("earlier_host_launchers")

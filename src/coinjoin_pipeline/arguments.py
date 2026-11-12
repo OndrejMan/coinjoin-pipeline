@@ -141,12 +141,14 @@ HELP = {
     "blocksci.external_bitcoin_datadir": "Bitcoin datadir to parse (reusable parse or cached update)",
     "blocksci.bitcoin_blocks_uri": "S3 prefix of a bitcoin-block-archive to parse (reusable parse or cached update)",
     "blocksci.external_blocksci_dir": "existing BlockSci index directory for a reusable parse",
+    "blocksci.external_baseline_uri": "S3 URI of the baseline compared by --blocksci-task external",
+    "blocksci.external_false_cjtxs_uri": "S3 URI of curated Dumplings false positives (false_cjtxs.json)",
     "blocksci.network": "chain of an external Bitcoin source",
     "blocksci.max_block": "last height to parse from an external Bitcoin source",
     "blocksci.expected_block_hash": "expected block hash at --blocksci-max-block (required for mainnet archives)",
-    "blocksci.pin_height": "script task: the last height the analysis may see",
-    "blocksci.scan_start_height": "script task: first scanned height (inclusive)",
-    "blocksci.scan_end_height": "script task: end of the scanned range (exclusive)",
+    "blocksci.pin_height": "script or external task: the last height the analysis may see",
+    "blocksci.scan_start_height": "script or external task: first scanned height (inclusive)",
+    "blocksci.scan_end_height": "script or external task: end of the scanned range (exclusive)",
     "blocksci.index_dir": (
         "persistent BlockSci index under /storage/ or /scratch/multijob-<location>/ instead of the S3 cache"
     ),
@@ -155,7 +157,7 @@ HELP = {
         "Fixed S3 prefix of the persistent index's parse, update and backup jobs in place of the run prefix; "
         "each job replaces its markers and manifest there and keeps its logs under logs/<run-id>/"
     ),
-    "blocksci.index_in_scratch": "script or notebook task: restore the index backup into the job's scratch",
+    "blocksci.index_in_scratch": "script, external or notebook task: restore the index backup into the job's scratch",
     "blocksci.restore_index": "notebook task: fill an incomplete index directory from the backup and keep it there",
     "blocksci.dumplings_uri": (
         "with --blocksci-index-in-scratch or --blocksci-restore-index: S3 prefix of the Dumplings copy placed "
