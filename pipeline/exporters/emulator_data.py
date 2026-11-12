@@ -6,9 +6,9 @@ import json
 import re
 from collections import Counter
 from collections.abc import Iterator
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
-from exporters.artifact_paths import coinjoin_analysis_dir, emulator_dir
+from exporters.artifact_paths import ROUND_EVENTS_FILE, coinjoin_analysis_dir, emulator_dir
 from exporters.common import (
     EMULATOR_DATA_SCHEMA_VERSION,
     JsonObject,
@@ -32,7 +32,7 @@ PRODUCER_LABEL_MANIFEST_SCHEMA_VERSION = "1.0"
 WASABI_PARSEABILITY_MIN_INPUTS = 5
 # The only producer source each engine may declare: the JoinMarket round-event
 # file by its exact path, Wasabi coordinator logs by file name.
-JOINMARKET_LABEL_SOURCE = "joinmarket_round_events.json"
+JOINMARKET_LABEL_SOURCE = PurePosixPath(ROUND_EVENTS_FILE).name
 WASABI_LABEL_SOURCE_NAME = "Logs.txt"
 SHA256_HEX_RE = re.compile(r"[0-9a-f]{64}")
 

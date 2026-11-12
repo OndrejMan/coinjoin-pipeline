@@ -6,9 +6,9 @@ import argparse
 import os
 from pathlib import Path
 
-from exporters.analysis_artifact import ARTIFACT_NAME
 from exporters.analysis_artifact import load_analysis as load_blocksci_analysis
 from exporters.artifact_paths import (
+    ANALYSIS_ARTIFACT_NAME,
     BASELINE_FILE,
     DUMPLINGS_SNAPSHOT_FILE,
     MAPPINGS_FILE,
@@ -98,7 +98,7 @@ def load_previous_run_manifest(output_path: Path) -> JsonObject | None:
 
 
 def load_run_analysis(args: argparse.Namespace, run_dir: Path) -> BlockSciAnalysisArtifact:
-    analysis_path = args.blocksci_analysis or (blocksci_analysis_dir(run_dir) / ARTIFACT_NAME)
+    analysis_path = args.blocksci_analysis or (blocksci_analysis_dir(run_dir) / ANALYSIS_ARTIFACT_NAME)
     if not analysis_path.is_absolute():
         analysis_path = run_dir / analysis_path
     return load_blocksci_analysis(

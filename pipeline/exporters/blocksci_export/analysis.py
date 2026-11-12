@@ -14,7 +14,8 @@ if not hasattr(builtins, "xrange"):
 if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from exporters.analysis_artifact import ARTIFACT_NAME, SCHEMA_VERSION
+from exporters.analysis_artifact import SCHEMA_VERSION
+from exporters.artifact_paths import ANALYSIS_ARTIFACT_NAME
 from exporters.artifact_paths import BASELINE_FILE, blocksci_analysis_dir
 from exporters.blocksci_export.detector import (
     BLOCKSCI_IMPORT_ERROR,
@@ -34,7 +35,8 @@ from exporters.common import (
 from exporters.integration_diagnostics import build_integration_diagnostics
 from exporters.normalization import iter_exported_blocks, load_first_wasabi2_block, output_address
 from exporters.parameters import (
-    IMAGE_COMPONENTS,
+    INSPECTED_IMAGE_COMPONENTS,
+    PRODUCER_IMAGE_COMPONENTS,
     Detector,
     ReportImages,
     add_detector_arguments,
@@ -42,10 +44,6 @@ from exporters.parameters import (
     add_window_arguments,
 )
 from exporters.report_types import BlockSciAnalysisArtifact, SubsetMatchingAnalysis
-
-INSPECTED_IMAGE_NAMES = IMAGE_COMPONENTS[:3]
-# The report stage resolves its own image (manifest.resolve_manifest_images).
-PROVENANCE_IMAGE_NAMES = IMAGE_COMPONENTS[:4]
 
 
 def exported_addresses(run_dir: Path) -> set[str]:
@@ -108,7 +106,7 @@ def write_analysis(args: argparse.Namespace) -> Path:
         if baseline_path.is_file():
             baseline_heights = baseline_block_heights(chain, load_json(baseline_path).get("coinjoins", {}))
     images = ReportImages.from_args(args)
-    image_ids = {name: getattr(args, name + "_image_id", None) for name in INSPECTED_IMAGE_NAMES}
+    image_ids = {name: getattr(args, name + "_image_id", None) for name in INSPECTED_IMAGE_COMPONENTS}
     diagnostics = (
         build_integration_diagnostics(run_dir, config_path, blocksci, records, images, image_ids=image_ids)
         if getattr(args, "mode", "emulator") == "emulator"
@@ -143,7 +141,7 @@ def write_analysis(args: argparse.Namespace) -> Path:
                 "repo_digest": images.digests[name],
                 **((diagnostics or {}).get("images", {}).get(name) or {}),
             }
-            for name in PROVENANCE_IMAGE_NAMES
+            for name in PRODUCER_IMAGE_COMPONENTS
         },
         "records": records,
         "subset_matching": subset_matching,
@@ -157,7 +155,7 @@ def write_analysis(args: argparse.Namespace) -> Path:
     }
     output_dir = blocksci_analysis_dir(run_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / ARTIFACT_NAME
+    output_path = output_dir / ANALYSIS_ARTIFACT_NAME
     save_json(output_path, artifact)
     print(f"BlockSci analysis saved to {output_path}")
     return output_path

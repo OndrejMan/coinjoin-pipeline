@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal
 
 from exporters.artifact_paths import report_input_files
 from exporters.common import (
@@ -18,7 +17,7 @@ from exporters.common import (
     to_json_text,
     tree_sha256,
 )
-from exporters.parameters import Detector, ReportImages
+from exporters.parameters import IMAGE_COMPONENTS, Detector, ReportImages
 from exporters.report_types import ImageFields, RunManifest
 
 MANIFEST_COMPARE_FIELDS = (
@@ -59,16 +58,7 @@ def resolve_manifest_images(
     """Keep each recorded producer identity together, including unknown digests."""
     references = images.copy()
     digests = supplied_digests.copy()
-    components: tuple[
-        Literal["blocksci", "coinjoin_analysis", "coinjoin_emulator", "uploader", "unified_report"], ...
-    ] = (
-        "blocksci",
-        "coinjoin_analysis",
-        "coinjoin_emulator",
-        "uploader",
-        "unified_report",
-    )
-    for component in components:
+    for component in IMAGE_COMPONENTS:
         reference = images[component]
         recorded = (provenance or {}).get(component)
         if isinstance(recorded, dict) and (recorded.get("reference") or recorded.get("repo_digest")):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 from dataclasses import dataclass, field
+from typing import Literal, Tuple
 
 from exporters.common import (
     DEFAULT_FIRST_WASABI2_BLOCK,
@@ -16,8 +17,20 @@ from exporters.common import (
 )
 from exporters.report_types import DetectorManifest, DetectorParameters, ImageFields
 
+ImageComponent = Literal["blocksci", "coinjoin_analysis", "coinjoin_emulator", "uploader", "unified_report"]
 # Images whose reference and digest a report records.
-IMAGE_COMPONENTS = ("blocksci", "coinjoin_analysis", "coinjoin_emulator", "uploader", "unified_report")
+IMAGE_COMPONENTS: Tuple[ImageComponent, ...] = (
+    "blocksci",
+    "coinjoin_analysis",
+    "coinjoin_emulator",
+    "uploader",
+    "unified_report",
+)
+# The images a local container runtime can inspect. Kubernetes and Singularity pull the
+# uploader and the PBS report image, so `docker image inspect` would always fail on them.
+INSPECTED_IMAGE_COMPONENTS: Tuple[ImageComponent, ...] = ("blocksci", "coinjoin_analysis", "coinjoin_emulator")
+# The producers an analysis records; the report stage resolves its own image.
+PRODUCER_IMAGE_COMPONENTS: Tuple[ImageComponent, ...] = (*INSPECTED_IMAGE_COMPONENTS, "uploader")
 
 
 @dataclass(frozen=True)

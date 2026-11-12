@@ -15,14 +15,7 @@ from exporters.common import (
 )
 from exporters.image_provenance import inspect_image
 from exporters.normalization import is_coinbase_tx, iter_exported_blocks
-from exporters.parameters import ReportImages
-
-# Only the images the report can actually inspect. The uploader and the PBS
-# unified-report image are pulled by Kubernetes and Singularity, never by the
-# daemon this code can reach, so `docker image inspect` would always fail and
-# every run would report two spurious provenance problems. Their references and
-# digests still reach the manifest through build_run_manifest.
-IMAGE_COMPONENTS = ("blocksci", "coinjoin_analysis", "coinjoin_emulator")
+from exporters.parameters import INSPECTED_IMAGE_COMPONENTS, ReportImages
 
 
 class Blockchain(Protocol):
@@ -62,7 +55,8 @@ def build_image_diagnostics(
     diagnostics: dict[str, JsonObject] = {}
     problems: list[str] = []
 
-    for component in IMAGE_COMPONENTS:
+    # Only these can be inspected; the others reach the manifest through build_run_manifest.
+    for component in INSPECTED_IMAGE_COMPONENTS:
         reference = images.get(component)
         inspected = docker_image_provenance(reference)
         image_id = image_ids.get(component) or to_json_text(inspected.get("image_id"))

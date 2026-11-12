@@ -5,12 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-from exporters.artifact_paths import ANALYSIS_ARTIFACT_NAME
 from exporters.common import load_json
 from exporters.report_types import BlockSciAnalysisArtifact, DetectorParameters
 
 SCHEMA_VERSION = "1.3"
-ARTIFACT_NAME = ANALYSIS_ARTIFACT_NAME
 # The detector parameters a Wasabi 2 analysis depends on; JoinMarket's depend on all of them.
 WASABI_PARAMETER_KEYS = ("coinjoin_type", "min_input_count")
 
