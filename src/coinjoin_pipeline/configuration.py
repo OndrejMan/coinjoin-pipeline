@@ -123,6 +123,7 @@ class BlockSciConfiguration(ConfigurationModel):
     notebook_port: int = option(8888, name="blocksci_notebook_port", minimum=1)
     notebooks_dir: str | None = option(None, name="blocksci_notebooks_dir")
     external_bitcoin_datadir: str | None = option(None, name="blocksci_external_bitcoin_datadir")
+    external_blocksci_dir: str | None = option(None, name="blocksci_external_blocksci_dir")
     network: BlockSciNetwork | None = option(None, name="blocksci_network")
     max_block: int | None = option(None, name="blocksci_max_block", minimum=0)
     # Script task only: the last height the analysis may see (Blockchain(config, pin_height + 1))

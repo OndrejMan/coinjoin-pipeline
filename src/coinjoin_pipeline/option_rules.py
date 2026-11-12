@@ -220,13 +220,18 @@ def _height_errors(config: PipelineConfiguration) -> list[str]:
 
 
 def _blocksci_source_errors(config: PipelineConfiguration) -> list[str]:
-    """Rules for parsing an index from an external Bitcoin datadir."""
+    """Rules for parsing an index from an external Bitcoin or BlockSci source."""
     errors: list[str] = []
     blocksci = config.blocksci
     external_bitcoin = bool(blocksci.external_bitcoin_datadir)
-    if external_bitcoin:
+    external_index = bool(blocksci.external_blocksci_dir)
+    if external_bitcoin and external_index:
+        errors.append(
+            "choose only one BlockSci source: --blocksci-external-bitcoin-datadir or --blocksci-external-blocksci-dir"
+        )
+    if external_bitcoin or external_index:
         if not (config.action == "pbs-from-s3" and blocksci.workflow == "reusable" and blocksci.task == "parse"):
-            errors.append("an external Bitcoin source requires a reusable parse")
+            errors.append("external BlockSci sources require a reusable parse")
     network_supplied = _supplied(config, "blocksci.network", blocksci.network)
     max_block_supplied = _supplied(config, "blocksci.max_block", blocksci.max_block)
     if external_bitcoin:

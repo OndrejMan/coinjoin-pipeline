@@ -146,6 +146,19 @@ def _block_source(blocksci: BlockSciConfiguration) -> SourceSettings:
             "datadir": _bitcoin_datadir(Path(blocksci.external_bitcoin_datadir)),
             "max_block": required(blocksci.max_block, "--blocksci-max-block"),
         }
+    if blocksci.external_blocksci_dir:
+        blocksci_path = Path(blocksci.external_blocksci_dir).expanduser().resolve()
+        require_storage_path(blocksci_path)
+        require_existing_path(blocksci_path, "external BlockSci directory")
+        for relative in ("config.json", "parsed/chain/block.dat"):
+            if not (blocksci_path / relative).is_file():
+                raise PBSError(f"External BlockSci directory must contain {relative}: {blocksci_path}")
+        return {
+            "kind": "external-blocksci",
+            "network": "from-config",
+            "description": "existing external BlockSci index",
+            "blocksci_dir": str(blocksci_path),
+        }
     return {
         "kind": "emulator",
         "network": "bitcoin_regtest",

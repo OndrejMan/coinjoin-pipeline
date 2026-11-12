@@ -7,6 +7,7 @@ what both share.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import cast
@@ -16,6 +17,7 @@ from exporters.artifact_paths import (
     BASELINE_FILE,
     BITCOIN_DATA_DIR,
     BLOCKSCI_ANALYSIS_DIR,
+    BLOCKSCI_CONFIG_FILE,
     BLOCKSCI_DIR,
     BLOCKSCI_PARSE_DIR,
     COINJOIN_ANALYSIS_DIR,
@@ -33,6 +35,7 @@ from exporters.artifact_paths import (
 from coinjoin_pipeline.execution.pbs.blocksci_index import (
     INDEX_ARCHIVE,
     INDEX_FILES,
+    canonicalize_index,
     require_tools,
 )
 from coinjoin_pipeline.execution.pbs.index_store import index_manifest
@@ -153,8 +156,8 @@ def run_parser(stage: Stage, command: str, datadir: Path, max_block: int, messag
     )
 
 
-def parse_source(stage: Stage, source: SourceSettings) -> tuple[Path, int]:
-    """Prepare the parse's single source: its datadir and height."""
+def parse_source(stage: Stage, source: SourceSettings) -> tuple[Path | None, int]:
+    """Prepare the parse's single source: its datadir (None for a copied index) and height."""
     kind = source["kind"]
     stage.log(f"preparing {source['description']}")
     if kind == "external-bitcoin":
@@ -162,6 +165,19 @@ def parse_source(stage: Stage, source: SourceSettings) -> tuple[Path, int]:
         if not (datadir / "blocks").is_dir():
             raise StageFailure(f"External Bitcoin coin directory must contain blocks/: {datadir}")
         return datadir, int(source["max_block"])
+    if kind == "external-blocksci":
+        index = Path(str(source["blocksci_dir"]))
+        for relative in ("config.json", "parsed/chain/block.dat"):
+            if not (index / relative).is_file():
+                raise StageFailure(f"External BlockSci directory must contain {relative}: {index}")
+        shutil.copytree(index, stage.work / BLOCKSCI_DIR, symlinks=True)
+        canonicalize_index(stage)
+        found = re.search(r'"maxBlockNum"\s*:\s*(\d+)', (stage.work / BLOCKSCI_CONFIG_FILE).read_text())
+        if found is None or int(found.group(1)) <= 0:
+            raise StageFailure("External BlockSci config has no positive parser.maxBlockNum")
+        max_block = int(found.group(1)) - 1
+        stage.log(f"imported external index through block {max_block}")
+        return None, max_block
     stage.download(BITCOIN_DATA_DIR)
     stage.download(EXPORTED_BLOCKS_DIR)
     return emulator_bitcoin_datadir(stage), emulator_max_block(stage)
@@ -174,13 +190,14 @@ def blocksci_parse(stage: Stage) -> None:
     stage.download(STAGED_EXPORTERS_DIR)
     source = settings["source"]
     datadir, max_block = parse_source(stage, source)
-    run_parser(
-        stage,
-        settings["command"],
-        datadir,
-        max_block,
-        f"parsing {source['description']} through block {max_block}",
-    )
+    if datadir is not None:
+        run_parser(
+            stage,
+            settings["command"],
+            datadir,
+            max_block,
+            f"parsing {source['description']} through block {max_block}",
+        )
     for relative in INDEX_FILES:
         stage.require_file(relative, f"BlockSci parser did not produce {relative}")
     publish_index(stage, source["kind"], source["network"], max_block, {})

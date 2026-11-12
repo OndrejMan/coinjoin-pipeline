@@ -19,10 +19,12 @@ class SourceSettings(_SourceKind, total=False):
 
     # What a parse logs it is preparing.
     description: str
-    # The last height to parse.
+    # The last height to parse; an imported BlockSci index names its own.
     max_block: int
     # external-bitcoin: the shared Bitcoin Core coin directory.
     datadir: str
+    # external-blocksci: an existing index to import.
+    blocksci_dir: str
 
 
 class _OutputDirectory(TypedDict):
