@@ -61,18 +61,20 @@ def qsub_command(dependencies: Sequence[str] = ()) -> list[str]:
     return ["qsub", "-W", f"depend=afterok:{':'.join(dependencies)}"] if dependencies else ["qsub"]
 
 
-def submit_pbs(script: str, dependencies: Sequence[str] = ()) -> str:
-    """Submit script text through stdin and return the job ID.
+def submit_pbs(script: Path | str, dependencies: Sequence[str] = ()) -> str:
+    """Submit a script file, or script text through stdin, and return the job ID.
 
     Stdin submission avoids needing a script path visible to the PBS server,
     which the S3-compatible stages lack (no shared run directory).
     """
     command = qsub_command(dependencies)
+    if isinstance(script, Path):
+        command.append(str(script))
     result = subprocess.run(
         command,
         check=False,
         text=True,
-        input=script,
+        input=None if isinstance(script, Path) else script,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )

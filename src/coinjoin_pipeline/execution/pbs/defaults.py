@@ -43,6 +43,11 @@ BLOCKSCI_IMAGE_PYTHON_COMMAND = (
     "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3"
 )
 
+POLL_INTERVAL_SECONDS = 30
+# How much of a failed stage's job log to echo, and how long to wait for PBS
+# to copy that log back after the marker appears.
+STAGE_LOG_TAIL_LINES = 80
+STAGE_LOG_SETTLE_SECONDS = 15
 # qstat job_state values; status.job_phase classifies every state by them. "X" marks
 # finished subjobs (and, in some PBS Pro builds, expired jobs), so it is terminal.
 PBS_TERMINAL_STATES = {"C", "F", "X"}

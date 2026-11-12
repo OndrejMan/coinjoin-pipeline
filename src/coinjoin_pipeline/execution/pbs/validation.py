@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 from pathlib import Path
@@ -115,3 +116,21 @@ def require_existing_path(path: Path, description: str) -> None:
     """Ensure a path used by the PBS job exists before submitting."""
     if not path.exists():
         raise PBSError(f"{description} does not exist: {path}")
+
+
+def require_bitcoin_datadir(path: Path) -> None:
+    """Ensure the supplied Bitcoin Core datadir has the shape BlockSci expects."""
+    require_existing_path(path, "PBS Bitcoin datadir")
+    regtest_dir = path / "regtest"
+    if regtest_dir.is_dir() and not os.access(regtest_dir, os.R_OK | os.X_OK):
+        # bitcoind creates regtest/ as 0700, so a node that ran under a
+        # different uid leaves the datadir present but unreadable here - and
+        # unreadable for the BlockSci job too.
+        raise PBSError(
+            f"PBS Bitcoin datadir is not readable by the current user (uid {os.getuid()}): "
+            f"{regtest_dir} is owned by uid {regtest_dir.stat().st_uid} with mode "
+            f"{regtest_dir.stat().st_mode & 0o777:o}. The btc-node must run as the storage "
+            "identity (KUBERNETES_STORAGE_UID/KUBERNETES_STORAGE_GID)."
+        )
+    if not (regtest_dir / "blocks").is_dir():
+        raise PBSError(f"PBS Bitcoin datadir must contain regtest/blocks so BlockSci can read it: {path}")
