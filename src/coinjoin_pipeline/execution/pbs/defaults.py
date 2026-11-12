@@ -28,3 +28,6 @@ DEFAULT_RESOURCES = {
 DEFAULT_PBS_IMAGES = {
     component: f"docker://{IMAGE_NAMES[name]}:{DEFAULT_VERSION}" for component, name in (("blocksci", "blocksci"),)
 }
+BLOCKSCI_IMAGE_PYTHON_COMMAND = (
+    "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3"
+)

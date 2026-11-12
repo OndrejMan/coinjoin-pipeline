@@ -404,7 +404,7 @@ def exists_or_unreadable(path: Path) -> bool:
 
 
 def stage_blocksci_script(script: str | None, run_dir: Path) -> str | None:
-    """Copy a user analysis script into the run, where the BlockSci container sees it."""
+    """Copy a user analysis script into the run so local and PBS jobs see identical input."""
     if not script:
         return None
     source = Path(script).expanduser().resolve()

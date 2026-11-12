@@ -1,10 +1,15 @@
-"""s5cmd access of the frontend."""
+"""s5cmd access shared by the frontend and the self-contained PBS workers.
+
+Standard library only and Python 3.8 syntax: a PBS job copies this file next to its
+worker script and runs it with the node's ``python3``.
+"""
 
 from __future__ import annotations
 
 import json
 import os
 import subprocess
+from typing import IO
 
 
 class S5Error(RuntimeError):
@@ -14,6 +19,13 @@ class S5Error(RuntimeError):
 def no_object_found(result: subprocess.CompletedProcess) -> bool:
     """s5cmd's answer to a listing that matched nothing; its exit status is nonzero."""
     return "no object found" in ((result.stderr or "") + (result.stdout or "")).lower()
+
+
+def pipe(stream: IO[bytes] | None) -> IO[bytes]:
+    """The pipe a process was started with; every caller asked for one."""
+    if stream is None:
+        raise RuntimeError("The process has no pipe to stream through")
+    return stream
 
 
 class S5Client:

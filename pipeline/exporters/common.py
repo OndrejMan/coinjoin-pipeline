@@ -90,8 +90,8 @@ def git_commit_for_path(path: Path) -> str | None:
 def git_tree_is_dirty(path: Path) -> bool | None:
     """Report uncommitted changes, or None where the checkout is unavailable.
 
-    The report container mounts the exporter tree without its ``.git``, so this
-    is None there and the tree hash carries the provenance instead.
+    The PBS/S3 node runs a downloaded exporter tree with no ``.git``, so this is
+    None there and the tree hash carries the provenance instead.
     """
     try:
         result = subprocess.run(
@@ -105,8 +105,8 @@ def git_tree_is_dirty(path: Path) -> bool | None:
     return bool(result.stdout.strip())
 
 
-# Bytecode and caches depend on what ran before, so hashing them would make two
-# runs of the same code disagree over noise.
+# Bytecode and caches are excluded from the staged upload, so hashing them would
+# make the frontend and node hashes disagree over noise.
 TREE_HASH_SKIPPED_DIRECTORIES = {"__pycache__", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache"}
 TREE_HASH_SKIPPED_SUFFIXES = {".pyc", ".pyo"}
 
@@ -123,7 +123,7 @@ def tree_sha256(root: Path) -> str | None:
     """Hash a source tree as sorted ``<file sha256> <relative path>`` lines.
 
     Informational provenance: it names the exact exporter code a report was
-    produced by, which ``git rev-parse`` cannot do for a mounted tree (no
+    produced by, which ``git rev-parse`` cannot do for a staged tree (no
     ``.git``) or for an uncommitted checkout. It never gates execution.
     """
     root = Path(root)

@@ -1293,7 +1293,7 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertIn("blocksci image provenance is incomplete", diagnostics["problems"][0])
 
     def test_integration_diagnostics_accepts_repo_digest_without_local_image_id(self):
-        # A digest-pinned image needs no local image id.
+        # Singularity on PBS has no daemon that could report an image id.
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)
             (run_dir / "coinjoin_emulator_data" / "data" / "btc-node").mkdir(parents=True)

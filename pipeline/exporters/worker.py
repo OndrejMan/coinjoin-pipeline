@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The analysis payload the BlockSci container runs."""
+"""The same analysis payload runs under Docker and Apptainer."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from exporters.parameters import add_detector_arguments, add_image_arguments, ad
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=("run", "parse", "analyze", "report"))
-    run_id = os.environ.get("ACTIVE_RUN_ID")
+    run_id = os.environ.get("PBS_RUN_ID") or os.environ.get("ACTIVE_RUN_ID")
     default_run = Path("/runs/emulation/logs") / run_id if run_id else None
     parser.add_argument("--run-dir", type=Path, default=default_run)
     parser.add_argument("--config", type=Path)
@@ -42,7 +42,7 @@ def parse_args(argv=None):
     add_image_arguments(parser)
     args = parser.parse_args(argv)
     if args.run_dir is None:
-        parser.error("--run-dir or ACTIVE_RUN_ID is required")
+        parser.error("--run-dir or ACTIVE_RUN_ID/PBS_RUN_ID is required")
     args.run_dir = args.run_dir.expanduser().resolve()
     args.config = args.config or args.run_dir / BLOCKSCI_CONFIG_FILE
     args.runs_root = args.run_dir.parent

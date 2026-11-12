@@ -1,4 +1,7 @@
-"""S3 run targets, their validation, and the frontend's s5cmd access to them."""
+"""S3 run targets, their validation, and the frontend's s5cmd access to them.
+
+Exporter staging lives in ``execution/s3_staging.py``.
+"""
 
 from __future__ import annotations
 
@@ -62,6 +65,11 @@ class S3Target:
     def run_prefix(self) -> str:
         """Where this run's markers, staged exporters and outputs live."""
         return run_prefix_uri(self.artifact_uri, self.run_id)
+
+    @property
+    def log_prefix(self) -> str:
+        """Where this run's logs live."""
+        return f"{self.run_prefix}/logs"
 
     @property
     def access(self) -> S3Access:
@@ -173,10 +181,49 @@ def s3_prefix_has_objects(access: S3Access, prefix: str) -> bool:
     return bool(s3_listing(access, f"{prefix}/*"))
 
 
+# `sync --exclude` (used when staging the exporters) landed in s5cmd 2.1.
+MINIMUM_S5CMD_VERSION = (2, 1)
+S5CMD_VERSION_RE = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
+
+
+def s5cmd_version() -> tuple[int, ...] | None:
+    """Best-effort frontend s5cmd version; None when it cannot be determined."""
+    try:
+        result = subprocess.run(
+            ["s5cmd", "version"],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+    except OSError:
+        return None
+    match = S5CMD_VERSION_RE.search(result.stdout or "")
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def require_s5cmd_version(minimum: tuple[int, ...] = MINIMUM_S5CMD_VERSION) -> None:
+    """Reject an s5cmd too old for the flags this client relies on.
+
+    Only the frontend binary is checked: the uploader runs a pinned image and a PBS
+    node its own s5cmd. An unparsable version passes, so a vendored build cannot block
+    a run it would have handled fine.
+    """
+    version = s5cmd_version()
+    if version is not None and version < minimum:
+        raise ArtifactTransportError(
+            "s5cmd on the frontend is too old for this pipeline: "
+            f"found {'.'.join(str(part) for part in version)}, "
+            f"need {'.'.join(str(part) for part in minimum)} or newer "
+            "(sync --exclude support)"
+        )
+
+
 def s3_access_preflight(access: S3Access, artifact_uri: str) -> None:
     """Fail fast when s5cmd, the credentials file, or the endpoint is unusable."""
     if shutil.which("s5cmd") is None:
         raise ArtifactTransportError("s5cmd is required on the frontend PATH for S3-compatible full-run")
+    require_s5cmd_version()
     if not Path(access.credentials_file).is_file():
         raise ArtifactTransportError(f"S3 credentials file not found: {access.credentials_file}")
     result = run_s5cmd(access, "ls", f"{artifact_uri}/*")

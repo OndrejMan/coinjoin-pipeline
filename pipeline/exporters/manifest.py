@@ -113,8 +113,8 @@ def build_run_manifest(
             ),
             "exporters": git_commit_for_path(exporters_root),
         },
-        # The report can run from a tree that has no checkout behind it: the
-        # report container mounts only the exporters, where `git rev-parse`
+        # The report can run from a tree that has no checkout behind it: the PBS
+        # node executes exporters downloaded from S3, where `git rev-parse`
         # yields null. The tree hash names the exact code that produced the
         # report in every case; `git_dirty` says whether the commit above is the
         # whole story. Informational only — nothing branches on them.

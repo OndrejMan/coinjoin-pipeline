@@ -17,11 +17,11 @@ from exporters.image_provenance import inspect_image
 from exporters.normalization import is_coinbase_tx, iter_exported_blocks
 from exporters.parameters import ReportImages
 
-# Only the images the report can actually inspect. The uploader image is pulled
-# by Kubernetes, never by the daemon this code can reach, so `docker image inspect`
-# would always fail and every run would report a spurious provenance problem. Its
-# reference and digest, like the report image's, still reach the manifest through
-# build_run_manifest.
+# Only the images the report can actually inspect. The uploader and the PBS
+# unified-report image are pulled by Kubernetes and Singularity, never by the
+# daemon this code can reach, so `docker image inspect` would always fail and
+# every run would report two spurious provenance problems. Their references and
+# digests still reach the manifest through build_run_manifest.
 IMAGE_COMPONENTS = ("blocksci", "coinjoin_analysis", "coinjoin_emulator")
 TARGET_DETAIL_LIMIT = 100
 
@@ -71,7 +71,9 @@ def build_image_diagnostics(
         component_problems = []
         if not reference:
             component_problems.append("missing image reference")
-        # A repo digest identifies the image by itself, without a local image id.
+        # A repo digest identifies the image by itself. Singularity on PBS has
+        # no daemon to report a local image id, so requiring one there would
+        # make a digest-pinned run incomplete forever.
         if not image_id and not repo_digest:
             component_problems.append("missing image id")
         if not repo_digest:

@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from coinjoin_pipeline.paths import EXECUTION_ROOT
+from coinjoin_pipeline.paths import REQUIRED_EXPORTERS
 
 S3_CONTROLLER_RESOURCE_REQUESTS = {"cpu": "250m", "memory": "512Mi"}
 S3_CONTROLLER_RESOURCE_LIMITS = {"cpu": "1", "memory": "1Gi"}
@@ -262,7 +263,9 @@ def render_s3_emulation_resources(
         "--controller-done-marker /app/logs/.controller.done "
         "--controller-failed-marker /app/logs/.controller.failed"
     )
-    prefix_preflight = _execution_script("k8s_s3_access.sh", "k8s_s3_prefix_preflight.sh")
+    prefix_preflight = _execution_script("k8s_s3_access.sh", "k8s_s3_prefix_preflight.sh").replace(
+        "@REQUIRED_EXPORTERS@", " ".join(REQUIRED_EXPORTERS)
+    )
     uploader = _execution_script("k8s_s3_access.sh", "k8s_s3_uploader.sh").rstrip("\n")
 
     # The emulator makes this pod the owner of every pod and service it
