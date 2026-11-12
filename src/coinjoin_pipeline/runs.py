@@ -11,8 +11,7 @@ from zoneinfo import ZoneInfo
 
 from .configuration import PipelineConfiguration
 from .manifest import atomic_write
-
-MAX_RUN_ID_LENGTH = 63
+from .run_ids import RUN_ID_MAX_LENGTH
 
 
 def slugify_run_component(value: str, *, max_length: int) -> str:
@@ -48,7 +47,7 @@ def run_id_for(config: PipelineConfiguration) -> str:
     timestamp = datetime.now(ZoneInfo(config.run_timezone)).strftime("%Y-%m-%d_%H-%M-%S")
     slug = slugify_run_component(
         scenario_name,
-        max_length=MAX_RUN_ID_LENGTH - len(timestamp) - 1,
+        max_length=RUN_ID_MAX_LENGTH - len(timestamp) - 1,
     )
     return f"{timestamp}_{slug}"
 

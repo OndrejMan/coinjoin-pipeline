@@ -38,11 +38,11 @@ from coinjoin_pipeline.execution.coinjoin_tools import (
 )
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
 from coinjoin_pipeline.registry import pinned_reference
+from coinjoin_pipeline.run_ids import validate_run_id
 from coinjoin_pipeline.storage.s3 import (
     S3Target,
     validate_artifact_uri,
     validate_credentials_file,
-    validate_run_id,
     validate_s3_endpoint_url,
     validate_s3_profile,
 )

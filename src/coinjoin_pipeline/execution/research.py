@@ -38,7 +38,7 @@ from coinjoin_pipeline.execution.scenarios import (
 )
 from coinjoin_pipeline.images import default_image
 from coinjoin_pipeline.paths import PIPELINE_ROOT, default_runs_root
-from coinjoin_pipeline.storage.s3 import validate_run_id
+from coinjoin_pipeline.run_ids import validate_run_id
 
 ROOT = PIPELINE_ROOT
 

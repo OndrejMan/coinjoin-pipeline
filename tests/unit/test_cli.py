@@ -18,7 +18,7 @@ from coinjoin_pipeline.doctor import (
 from coinjoin_pipeline.images import resolve_images
 from coinjoin_pipeline.manifest import redact
 from coinjoin_pipeline.runs import run_id_for, store_host_manifest
-from coinjoin_pipeline.storage.s3 import validate_run_id
+from coinjoin_pipeline.run_ids import validate_run_id
 
 
 def test_executes_typed_configuration_in_process_and_restores_environment(tmp_path):

@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING, Callable
 
 from coinjoin_pipeline.configuration import required
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
-from coinjoin_pipeline.storage.s3 import validate_artifact_uri, validate_run_id
+from coinjoin_pipeline.run_ids import validate_run_id
+from coinjoin_pipeline.storage.s3 import validate_artifact_uri
 from .pbs.defaults import MAINNET_SYNC_RESOURCES, PBSResources
 from .pbs.scripts import (
     APPTAINER,

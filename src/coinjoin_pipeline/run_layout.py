@@ -14,7 +14,7 @@ import sys
 from exporters import artifact_paths as paths
 
 from .execution.stages import BASELINE_STAGE, BLOCKSCI_STAGE, EMULATION_STAGE, REPORT_STAGE
-from .storage.s3 import RUN_ID_MAX_LENGTH, RUN_ID_RE
+from .run_ids import RUN_ID_MAX_LENGTH, RUN_ID_RE
 
 # The mainnet job that writes the synchronization's logs; tests/unit/test_run_layout_json.py checks it is a job.
 MAINNET_PRODUCER_STAGE = "mainnet-producer"

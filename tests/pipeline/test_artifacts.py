@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pipeline"))
 from coinjoin_pipeline.paths import EXECUTION_ROOT
 from coinjoin_pipeline.execution.probes import PROBE_QUEUED, PROBE_RUNNING, PROBE_TERMINAL, PROBE_UNKNOWN
 from coinjoin_pipeline.execution.s3_markers import wait_for_s3_marker
+from coinjoin_pipeline.run_ids import validate_run_id
 from coinjoin_pipeline.storage.s3 import (
     AWS_SCRUB_VARIABLES,
     ArtifactTransportError,
@@ -24,7 +25,6 @@ from coinjoin_pipeline.storage.s3 import (
     s5_client,
     validate_artifact_uri,
     validate_credentials_file,
-    validate_run_id,
     validate_s3_endpoint_url,
 )
 

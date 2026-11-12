@@ -12,6 +12,7 @@ from exporters.artifact_paths import REPORT_DIR, REPORT_JSON
 
 from .console import EXIT_FAILURE, EXIT_OK, fail
 from .paths import default_runs_root
+from .run_ids import validate_run_id
 from .storage.s3 import (
     ArtifactTransportError,
     S3Access,
@@ -21,7 +22,6 @@ from .storage.s3 import (
     s3_arguments_access,
     s3_object_exists,
     stage_marker_uri,
-    validate_run_id,
 )
 
 

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from exporters.artifact_paths import EMULATION_MARKERS
 
-from coinjoin_pipeline.storage.s3 import validate_run_id
+from coinjoin_pipeline.run_ids import validate_run_id
 
 
 def is_run_dir(path: Path, marker_files: tuple[str, ...] = EMULATION_MARKERS) -> bool:

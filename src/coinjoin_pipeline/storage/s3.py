@@ -26,8 +26,6 @@ from coinjoin_pipeline.storage.s5client import FRONTEND_S5CMD_VERSION, S5Client,
 if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import PipelineConfiguration
 
-RUN_ID_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
-RUN_ID_MAX_LENGTH = 63
 PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 # The variables the in-pod s5 wrapper (k8s_s3_access.sh) unsets, as a test checks;
@@ -110,22 +108,6 @@ def validate_artifact_uri(uri: str | None) -> str:
     if any(char.isspace() for char in uri):
         raise ValueError("artifact URI must not contain whitespace")
     return uri.rstrip("/")
-
-
-RUN_ID_RULE = (
-    "must be at most 63 characters, begin and end with an alphanumeric character, "
-    "contain only [A-Za-z0-9._-], and not contain '..'"
-)
-
-
-def is_valid_run_id(run_id: str) -> bool:
-    return len(run_id) <= RUN_ID_MAX_LENGTH and ".." not in run_id and RUN_ID_RE.fullmatch(run_id) is not None
-
-
-def validate_run_id(run_id: str) -> str:
-    if not is_valid_run_id(run_id):
-        raise ValueError(f"run ID {RUN_ID_RULE}")
-    return run_id
 
 
 def validate_s3_endpoint_url(endpoint_url: str) -> str:

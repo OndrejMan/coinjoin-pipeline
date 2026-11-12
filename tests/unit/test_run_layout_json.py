@@ -5,7 +5,8 @@ import json
 from coinjoin_pipeline import run_layout
 from coinjoin_pipeline.execution.mainnet_sync import SYNC_STAGES
 from coinjoin_pipeline.execution.stages import s3_full_run_plan
-from coinjoin_pipeline.storage.s3 import is_valid_run_id, stage_marker_uri, upload_marker_uri
+from coinjoin_pipeline.run_ids import is_valid_run_id
+from coinjoin_pipeline.storage.s3 import stage_marker_uri, upload_marker_uri
 
 
 def test_every_stage_of_the_layout_is_a_real_stage() -> None:

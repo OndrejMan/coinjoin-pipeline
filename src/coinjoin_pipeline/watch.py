@@ -23,7 +23,7 @@ from .execution.pbs.status import job_details, job_phase
 from .execution.pbs.submission import recorded_pbs_job_ids
 from .execution.probes import PROBE_TERMINAL
 from .paths import default_runs_root
-from .storage.s3 import RUN_ID_RULE, is_valid_run_id
+from .run_ids import is_valid_run_id, RUN_ID_RULE
 
 # The pipeline's own default, so a run started without --namespace is found without it.
 DEFAULT_NAMESPACE = KubernetesConfiguration().namespace

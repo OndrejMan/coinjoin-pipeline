@@ -12,7 +12,7 @@ from .configuration import cli_flag, config_value, option_specs
 from .execution.pbs.defaults import MAINNET_SYNC_RESOURCES
 from .execution.pbs.validation import SHARED_STORAGE_ROOTS, kept_between_jobs, multijob_location
 from .execution.stages import runs_unified_report
-from .storage.s3 import RUN_ID_RULE, is_valid_run_id
+from .run_ids import is_valid_run_id, RUN_ID_RULE
 
 if TYPE_CHECKING:
     from .configuration import PipelineConfiguration, PBSResourceConfiguration
@@ -111,10 +111,7 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
     if blocksci.dumplings_uri and not (blocksci.index_in_scratch or blocksci.restore_index):
         errors.append("--blocksci-dumplings-uri requires --blocksci-index-in-scratch or --blocksci-restore-index")
     if blocksci.dumplings_dir and (
-        blocksci.task != "notebook"
-        or not blocksci.index_dir
-        or blocksci.index_in_scratch
-        or blocksci.restore_index
+        blocksci.task != "notebook" or not blocksci.index_dir or blocksci.index_in_scratch or blocksci.restore_index
     ):
         errors.append(
             "--blocksci-dumplings-dir requires --blocksci-task notebook and --blocksci-index-dir, "

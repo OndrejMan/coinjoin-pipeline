@@ -9,7 +9,8 @@ from pathlib import Path
 from .console import EXIT_OK, fail
 from .execution.kubernetes import resolve_kubeconfig
 from .run_records import emulation_states, job_state, recorded_jobs, run_markers, scheduler_states
-from .storage.s3 import ArtifactTransportError, add_s3_arguments, s3_arguments_access, validate_run_id
+from .run_ids import validate_run_id
+from .storage.s3 import ArtifactTransportError, add_s3_arguments, s3_arguments_access
 from .watch import DEFAULT_NAMESPACE
 
 

@@ -6,6 +6,7 @@ import argparse
 import sys
 
 from .console import EXIT_ABORTED, EXIT_FAILURE, EXIT_OK, fail
+from .run_ids import validate_run_id
 from .storage.s3 import (
     ArtifactTransportError,
     S3Access,
@@ -13,7 +14,6 @@ from .storage.s3 import (
     run_s5cmd,
     s3_arguments_access,
     s3_listing,
-    validate_run_id,
 )
 
 

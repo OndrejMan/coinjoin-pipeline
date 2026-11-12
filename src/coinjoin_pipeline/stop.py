@@ -17,7 +17,7 @@ from .console import EXIT_FAILURE, EXIT_OK, fail
 from .execution.kubernetes import RUN_ID_LABEL, kubectl, kubectl_command, resolve_kubeconfig
 from .execution.pbs.submission import qdel_error
 from .run_records import RUN_RESOURCE_TYPES, recorded_jobs
-from .storage.s3 import validate_run_id
+from .run_ids import validate_run_id
 from .watch import DEFAULT_NAMESPACE
 
 
