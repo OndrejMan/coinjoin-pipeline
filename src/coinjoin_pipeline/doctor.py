@@ -136,7 +136,6 @@ def check(
     runs_root: Path,
     images: Images,
     *,
-    check_images: bool = True,
     image_components: set[str] | None = None,
     capabilities: set[Capability] | None = None,
 ) -> list[str]:
@@ -167,7 +166,7 @@ def check(
     probe = runs_root if runs_root.exists() else runs_root.parent
     if not probe.exists() or not os.access(probe, os.W_OK):
         errors.append(f"output directory is not writable: {runs_root}")
-    if executable and check_images and wants_runtime:
+    if executable and wants_runtime:
         selected = set(images.as_dict()) if image_components is None else image_components
         errors.extend(_image_errors(executable, images, selected))
     return errors
