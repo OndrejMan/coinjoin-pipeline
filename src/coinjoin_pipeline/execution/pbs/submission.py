@@ -131,7 +131,8 @@ def persist_pbs_job_id(run_dir: Path, stage: str, job_id: str) -> None:
 def qdel_error(job_id: str) -> str | None:
     """Cancel a PBS job; None when the cancellation is confirmed, else why it is not.
 
-    A job that already left the queue counts as cancelled.
+    A job that already left the queue counts as cancelled: ``.jobid`` records
+    are never pruned, so finished stages are cancelled again on every stop.
     """
     if shutil.which("qdel") is None:
         return f"qdel unavailable; cannot cancel PBS job {job_id}"

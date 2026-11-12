@@ -89,7 +89,7 @@ def _utility(argv: list[str]) -> int | None:
         return EXIT_OK
     context = RunContext.prepare(PipelineConfiguration.from_flat(supplied), shlex.join(["cjp", *argv]))
     root = context.config.runs_path
-    if action in {"watch", "status", "download-report", "clean-s3"}:
+    if action in {"watch", "status", "stop", "download-report", "clean-s3"}:
         module = importlib.import_module(f"coinjoin_pipeline.{action.replace('-', '_')}")
         return module.main(remaining, runs_root=root)
     if remaining:

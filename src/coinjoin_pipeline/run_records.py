@@ -22,6 +22,10 @@ from .execution.probes import PROBE_RUNNING, PROBE_TERMINAL
 from .execution.pbs.validation import PBSError, require_safe_pbs_token
 from .storage.s3 import S3Access, run_prefix_uri, s3_object_exists, stage_marker_uri, upload_marker_uri
 
+#: Resources an S3 emulation creates under the run label. The Role and RoleBinding
+#: carry no run label; owner references on the Job remove them.
+RUN_RESOURCE_TYPES = "jobs,pods,services,configmaps,serviceaccounts"
+
 QUEUED = "queued"
 RUNNING = "running"
 FINISHED = "finished"
