@@ -25,6 +25,7 @@ from coinjoin_pipeline.execution.pbs_settings import pbs_image, stage_pbs_resour
 from coinjoin_pipeline.execution.s3_markers import rollback_s3_pbs_submissions
 from coinjoin_pipeline.execution.s3_staging import ensure_staged_exporters, pbs_stages_need_exporters
 from coinjoin_pipeline.execution.stages import StageGraph, StageKind, StagePlan, s3_full_run_plan
+from coinjoin_pipeline.registry import pinned_reference
 from coinjoin_pipeline.storage.s3 import (
     ArtifactTransportError,
     S3Target,
@@ -120,7 +121,7 @@ class S3StageRunner:
                 self.target.run_id,
                 self.args,
                 uploader_image=resolve_uploader_image(self.args),
-                unified_report_image=report_image,
+                unified_report_image=pinned_reference(report_image),
             ),
             resources=stage_pbs_resources(self.args, "unified_report"),
         )
