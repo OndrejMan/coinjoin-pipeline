@@ -1,5 +1,6 @@
 emulation_logs
 coinjoin-runs/
+.btc-rpc-explorer.env
 
 __pycache__/
 build/
