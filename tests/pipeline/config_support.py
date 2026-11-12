@@ -8,10 +8,6 @@ from coinjoin_pipeline.configuration import PipelineConfiguration
 
 
 def configuration(**values):
-    submission = values.pop("pbs_submission_dir", None)
-    if submission is not None:
-        values["runs_root"] = str(Path(submission).parent)
-        values["run_id"] = Path(submission).name
     values = {key: str(value) if isinstance(value, Path) else value for key, value in values.items()}
     return PipelineConfiguration.from_flat(values)
 
