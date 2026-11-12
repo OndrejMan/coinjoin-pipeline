@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 
 from .defaults import PBS_SCRATCH_TYPES, PBSResources
 
@@ -31,6 +32,12 @@ def walltime_to_seconds(walltime: str) -> int:
     if total <= 0:
         raise PBSError("PBS walltime must be greater than zero")
     return total
+
+
+def require_qsub() -> None:
+    """Ensure ``qsub`` is available; this must run on a MetaCentrum frontend."""
+    if shutil.which("qsub") is None:
+        raise PBSError("PBS stages must be run on a MetaCentrum frontend with qsub available")
 
 
 SAFE_PBS_SIZE_RE = re.compile(r"^[1-9][0-9]*(?:b|kb|mb|gb|tb)$", re.IGNORECASE)

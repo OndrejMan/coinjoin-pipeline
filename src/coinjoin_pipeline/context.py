@@ -37,6 +37,13 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
     root = Path(config.runs_root).expanduser().resolve() if config.runs_root else default_runs_root()
     config = replace(config, runs_root=str(root))
     provided = set(config.provided)
+    for stage in ("blocksci",):
+        path = f"stages.{stage}"
+        if getattr(config.pbs, stage).configured and path not in provided:
+            config = replace_path(config, path, True)
+            provided.add(path)
+    if config.action in {"pbs-from-s3"}:
+        config = replace_path(config, "artifacts.backend", "s3")
     if config.engine == "joinmarket" and "coinjoin_type" not in provided:
         config = replace(config, coinjoin_type="joinmarket")
     if config.action in {"full-run", "emulate"} and not config.run_dir:

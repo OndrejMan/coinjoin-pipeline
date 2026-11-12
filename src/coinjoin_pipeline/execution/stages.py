@@ -1,7 +1,8 @@
 """Declarative stage plans for the CoinJoin analysis pipeline.
 
 No Docker, Kubernetes, PBS or subprocess code lives here: this is the dependency
-graph, defined once, which the local executor runs in order.
+graph, defined once. Submission derives an invocation's PBS jobs from it and
+``--dry-run`` prints them.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
-RunnerName = Literal["local"]
+RunnerName = Literal["local", "kubernetes", "pbs"]
 
 
 class StageKind(Enum):
@@ -22,6 +23,7 @@ class StageKind(Enum):
     silently break a dispatch table.
     """
 
+    EMULATION = "emulation"
     BASELINE = "baseline"
     BLOCKSCI_WORK = "blocksci-work"
     REPORT = "report"
@@ -89,6 +91,10 @@ class StageGraph:
                 return stage
         return None
 
+    def scheduled(self) -> tuple[StagePlan, ...]:
+        """Return the stages submitted to the batch scheduler, in wait order."""
+        return tuple(stage for stage in self.ordered() if stage.runner == "pbs")
+
 
 def _report_stage(runner: RunnerName, *analyzers: StagePlan | None) -> StagePlan:
     """The unified report waits for every analyzer present in the graph."""
@@ -101,10 +107,37 @@ def _report_stage(runner: RunnerName, *analyzers: StagePlan | None) -> StagePlan
 
 
 def analysis_plan() -> StageGraph:
-    """Declare the experimental local graph: both analyzers, then the report that
-    joins them. Its node order is the serial execution order."""
+    """Declare the experimental local graph: the same analyzer/report dependencies
+    as ``s3_full_run_plan``, without an emulation node. Its node order is the
+    serial execution order."""
     baseline = StagePlan("coinjoin-analysis", StageKind.BASELINE, "local")
     blocksci = StagePlan("blocksci", StageKind.BLOCKSCI_WORK, "local")
     stages = [baseline, blocksci]
     stages.append(_report_stage("local", baseline, blocksci))
+    return StageGraph(tuple(stages))
+
+
+def s3_full_run_plan(
+    *,
+    blocksci_pbs: bool = True,
+) -> StageGraph:
+    """Build the canonical Kubernetes → S3 → PBS graph for one invocation."""
+    emulation = StagePlan(
+        name="kubernetes-emulation",
+        kind=StageKind.EMULATION,
+        runner="kubernetes",
+    )
+    # The BlockSci worker downloads the emulation bundle from the run's S3 prefix,
+    # so it cannot start before the Kubernetes uploader has published it.
+    work = (
+        StagePlan(
+            name="blocksci",
+            kind=StageKind.BLOCKSCI_WORK,
+            runner="pbs",
+            dependencies=(emulation.name,),
+        )
+        if blocksci_pbs
+        else None
+    )
+    stages = [stage for stage in (emulation, work) if stage is not None]
     return StageGraph(tuple(stages))

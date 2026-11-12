@@ -1,4 +1,4 @@
-"""PBS defaults shared by rendering and command builders."""
+"""PBS defaults shared by rendering, submission, and command builders."""
 
 from dataclasses import dataclass
 

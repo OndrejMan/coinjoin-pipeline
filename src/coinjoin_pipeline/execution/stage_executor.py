@@ -1,6 +1,6 @@
 """Execute a stage graph with bounded concurrency for the experimental local and shared-storage paths.
 
-The adapter owns submission, waiting and cancellation.
+The adapter owns submission, waiting and cancellation; the S3 path submits through ``s3_submission``.
 """
 
 from __future__ import annotations

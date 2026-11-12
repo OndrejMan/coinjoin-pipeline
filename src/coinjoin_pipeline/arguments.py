@@ -52,6 +52,7 @@ ACTION_SUMMARIES = {
     "analyze": "BlockSci analysis of --run-dir",
     "export": "unified report of --run-dir",
     "coinjoin-analysis": "baseline coinjoin-analysis of --run-dir or --all-runs",
+    "pbs-from-s3": "submit PBS analysis jobs for a run already in S3",
     "initialize": "pull the emulation and analysis images through Compose",
     "clean": "remove the local pipeline containers and volumes (needs --yes)",
 }
@@ -60,7 +61,7 @@ ACTION_SUMMARIES = {
 SECTIONS = {
     "": ("run options", None),
     "kubernetes": ("Kubernetes driver", "Used with --driver kubernetes."),
-    "artifacts": ("artifact backend", "S3 options are required by --artifact-backend s3."),
+    "artifacts": ("artifact backend", "S3 options are required by --artifact-backend s3 and pbs-from-s3."),
     "images": (
         "component images",
         "Each image is the explicit option, else its environment variable, else the --local-build tag, "
@@ -118,6 +119,7 @@ HELP = {
     "images.local_build": "use locally built images (*:local)",
     "images.uploader": "S3 uploader image (default: container/uploader.image)",
     "images.unified_report": ("unified-report job image (default: container/unified-report.image)"),
+    "stages.blocksci": "run BlockSci as a PBS job",
     "blocksci.script": "Python script run over the parsed BlockSci index",
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
     **{

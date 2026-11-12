@@ -19,18 +19,25 @@ class Capability(Enum):
 
     CONTAINER_RUNTIME = auto()
     KUBECTL = auto()
+    QSUB = auto()
     S5CMD_FRONTEND = auto()
 
 
 def required_capabilities(config: PipelineConfiguration) -> set[Capability]:
     capabilities: set[Capability] = set()
     uses_s3 = config.artifacts.backend == "s3"
+    uses_pbs = config.stages.blocksci or config.action in {
+        "pbs-from-s3",
+    }
     if not config.dry_run:
         if config.driver == "kubernetes":
             capabilities.add(Capability.KUBECTL)
+        if uses_pbs:
+            capabilities.add(Capability.QSUB)
         if uses_s3:
             capabilities.add(Capability.S5CMD_FRONTEND)
-    if not uses_s3 and not config.dry_run:
+    delegated = uses_s3 or (uses_pbs and config.action not in {"full-run", "emulate"})
+    if not delegated and not config.dry_run:
         capabilities.add(Capability.CONTAINER_RUNTIME)
     return capabilities
 
@@ -38,12 +45,19 @@ def required_capabilities(config: PipelineConfiguration) -> set[Capability]:
 def required_image_components(config: PipelineConfiguration) -> set[str]:
     if config.dry_run or config.artifacts.backend == "s3" or config.action == "clean":
         return set()
-    return {
+    delegated = set()
+    for enabled, names in ((config.stages.blocksci, {"blocksci"}),):
+        if enabled:
+            delegated.update(names)
+    if delegated and config.action not in {"full-run", "emulate"}:
+        return set()
+    selected = {
         "emulate": {"emulator"},
         "coinjoin-analysis": {"coinjoin_analysis"},
         "analyze": {"blocksci", "coinjoin_analysis"},
         "export": set(),
     }.get(config.action, {"emulator", "coinjoin_analysis", "blocksci"})
+    return selected - delegated
 
 
 def validate_arguments(config: PipelineConfiguration, runs_root: Path) -> list[str]:
@@ -124,6 +138,7 @@ def check(
                 errors.append(f"{runtime} daemon/API is not reachable")
     for capability, command, purpose in (
         (Capability.KUBECTL, "kubectl", "the Kubernetes driver"),
+        (Capability.QSUB, "qsub", "PBS execution"),
         (Capability.S5CMD_FRONTEND, "s5cmd", "S3 artifact transport"),
     ):
         if capabilities and capability in capabilities and shutil.which(command) is None:

@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import urlparse
 
+from exporters.artifact_paths import pbs_marker
+
 from coinjoin_pipeline.configuration import required
 from coinjoin_pipeline.storage.s5client import S5Client, S5Error, no_object_found
 
@@ -166,6 +168,11 @@ def run_prefix_uri(artifact_uri: str, run_id: str) -> str:
     return f"{artifact_uri}/{run_id}"
 
 
+def stage_marker_uri(run_prefix: str, stage: str, outcome: str) -> str:
+    """``<run-prefix>/.pbs/<stage>.<outcome>``: the terminal marker a PBS stage's trap uploads."""
+    return f"{run_prefix}/{pbs_marker(stage, outcome)}"
+
+
 def s3_listing(access: S3Access, pattern: str) -> list[dict[str, object]]:
     """The objects ``ls`` lists for pattern, empty when none; any other failure raises."""
     return _s5(access, lambda client: client.listing(pattern, timeout=None))
@@ -179,6 +186,25 @@ def s3_object_exists(access: S3Access, object_uri: str) -> bool:
 def s3_prefix_has_objects(access: S3Access, prefix: str) -> bool:
     """Whether any object lies below ``prefix/``."""
     return bool(s3_listing(access, f"{prefix}/*"))
+
+
+def delete_s3_object_if_present(access: S3Access, object_uri: str) -> None:
+    """Strictly remove one object while treating an absent object as success."""
+    if not s3_object_exists(access, object_uri):
+        return
+    result = run_s5cmd(access, "rm", object_uri)
+    if result.returncode != 0:
+        raise ArtifactTransportError(
+            f"s5cmd rm {object_uri} failed (exit {result.returncode}): {(result.stderr or '').strip()}"
+        )
+    if s3_object_exists(access, object_uri):
+        raise ArtifactTransportError(f"S3 object still exists after deletion: {object_uri}")
+
+
+def clear_s3_stage_markers(access: S3Access, run_prefix: str, stage: str) -> None:
+    """Clear stale completion markers before submitting the stage that owns them."""
+    delete_s3_object_if_present(access, stage_marker_uri(run_prefix, stage, "failed"))
+    delete_s3_object_if_present(access, stage_marker_uri(run_prefix, stage, "done"))
 
 
 # `sync --exclude` (used when staging the exporters) landed in s5cmd 2.1.

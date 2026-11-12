@@ -33,6 +33,7 @@ PipelineAction = Literal[
     "analyze",
     "export",
     "coinjoin-analysis",
+    "pbs-from-s3",
     "initialize",
     "clean",
 ]
@@ -51,6 +52,14 @@ def option(default=None, *, name=None, minimum=None, actions=None):
     # Called only inside the dataclass bodies below; pylint cannot see through the helper.
     return field(  # pylint: disable=invalid-field-call
         default=default, metadata={"option": name, "minimum": minimum, "actions": actions}
+    )
+
+
+def any_option_set(model) -> bool:
+    """Whether any field holds a value other than null, false or an empty list."""
+    return any(
+        (value := getattr(model, item.name)) is not None and value is not False and value != ()
+        for item in fields(model)
     )
 
 
@@ -107,12 +116,21 @@ class JoinMarketConfiguration(ConfigurationModel):
 
 
 @dataclass(frozen=True, slots=True)
+class StageConfiguration(ConfigurationModel):
+    blocksci: bool = option(False, name="blocksci_pbs")
+
+
+@dataclass(frozen=True, slots=True)
 class PBSResourceConfiguration(ConfigurationModel):
     ncpus: int | None = option(None, name="ncpus", minimum=1)
     mem: str | None = option(None, name="mem")
     scratch: str | None = option(None, name="scratch")
     scratch_type: PBSScratchType | None = option(None, name="scratch_type")
     walltime: str | None = option(None, name="walltime")
+
+    @property
+    def configured(self) -> bool:
+        return any_option_set(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,7 +155,7 @@ class PipelineConfiguration(ConfigurationModel):
     driver: Driver = option("docker", name="driver")
     scenario: str | None = option(None, name="scenario")
     run_dir: str | None = option(None, name="run_dir", actions=("analyze", "export", "coinjoin-analysis"))
-    run_id: str | None = option(None, name="run_id", actions=("emulate", "full-run"))
+    run_id: str | None = option(None, name="run_id", actions=("emulate", "full-run", "pbs-from-s3"))
     run_timezone: str = option("Europe/Prague", name="run_timezone")
     min_input_count: int | None = option(None, name="min_input_count", minimum=1)
     dry_run: bool = option(False, name="dry_run")
@@ -151,6 +169,7 @@ class PipelineConfiguration(ConfigurationModel):
     images: ImageConfiguration = field(default_factory=ImageConfiguration)
     blocksci: BlockSciConfiguration = field(default_factory=BlockSciConfiguration)
     joinmarket: JoinMarketConfiguration = field(default_factory=JoinMarketConfiguration)
+    stages: StageConfiguration = field(default_factory=StageConfiguration)
     pbs: PBSConfiguration = field(default_factory=PBSConfiguration)
     _provided: frozenset[str] = field(default_factory=frozenset, repr=False, compare=False)
 
