@@ -12,6 +12,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from exporters.image_provenance import inspect_image
 
 if TYPE_CHECKING:
     from exporters.report_types import IORecord, TransactionMetrics
@@ -79,6 +80,20 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(partial(stream.read, 1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def digest_from_reference(image: str | None) -> str | None:
+    """Read the digest straight out of a pinned reference, without Docker."""
+    if image and "@sha256:" in image:
+        return f"sha256:{image.rsplit('@sha256:', 1)[1]}"
+    return None
+
+
+def docker_image_digest(image: str | None) -> str | None:
+    if not image:
+        return None
+    provenance = inspect_image(image)
+    return provenance.repo_digest or provenance.image_id
 
 
 def parse_run_started_at(run_id: str) -> str | None:

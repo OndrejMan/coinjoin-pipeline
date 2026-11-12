@@ -31,7 +31,7 @@ from exporters.common import SCHEMA_VERSION, save_json, sha256_json
 from exporters.emulator_data import build_emulator_data, load_wasabi_round_labels
 from exporters.manifest import build_run_manifest
 from exporters.markdown_report import render_report
-from exporters.parameters import Detector  # noqa: E402
+from exporters.parameters import Detector, ReportImages  # noqa: E402
 from exporters.normalization import (
     fill_missing_block_heights,
     load_exported_block_tx_index,
@@ -250,11 +250,23 @@ class UnifiedReportTest(unittest.TestCase):
             [
                 "--run-dir",
                 "run",
+                "--blocksci-image",
+                "blocksci:test",
+                "--coinjoin-analysis-image",
+                "coinjoin-analysis:test",
+                "--coinjoin-emulator-image",
+                "coinjoin-emulator:test",
+                "--unified-report-image",
+                "python:3.12-slim-bookworm",
                 "--emulator-git-commit",
                 "abc123",
             ]
         )
 
+        self.assertEqual(args.blocksci_image, "blocksci:test")
+        self.assertEqual(args.coinjoin_analysis_image, "coinjoin-analysis:test")
+        self.assertEqual(args.coinjoin_emulator_image, "coinjoin-emulator:test")
+        self.assertEqual(args.unified_report_image, "python:3.12-slim-bookworm")
         self.assertEqual(args.emulator_git_commit, "abc123")
 
     def test_build_report_exact_match(self):
@@ -364,6 +376,35 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(
             report["detector_evaluations"]["coinjoin_analysis"],
             report["detector_evaluations"]["blocksci"],
+        )
+
+    def test_build_report_includes_image_digests(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            run_dir.mkdir()
+
+            report = build_report(
+                run_dir,
+                normalize_coinjoin_analysis(coinjoin_analysis_fixture()),
+                {},
+                Detector("joinmarket"),
+                images=ReportImages(
+                    digests={
+                        "blocksci": "sha256:blocksci",
+                        "coinjoin_analysis": "sha256:analysis",
+                        "coinjoin_emulator": "sha256:emulator",
+                    }
+                ),
+            )
+
+        self.assertEqual(report["run_manifest"]["image_digests"]["blocksci"], "sha256:blocksci")
+        self.assertEqual(
+            report["run_manifest"]["image_digests"]["coinjoin_analysis"],
+            "sha256:analysis",
+        )
+        self.assertEqual(
+            report["run_manifest"]["image_digests"]["coinjoin_emulator"],
+            "sha256:emulator",
         )
 
     def test_build_emulator_data_labels_chain_transactions(self):

@@ -19,8 +19,17 @@ from exporters.artifact_paths import blocksci_analysis_dir
 from exporters.blocksci_export.detector import BLOCKSCI_IMPORT_ERROR, blocksci, export_blocksci_records
 from exporters.common import save_json
 from exporters.normalization import load_first_wasabi2_block
-from exporters.parameters import Detector, add_detector_arguments
+from exporters.parameters import (
+    IMAGE_COMPONENTS,
+    Detector,
+    ReportImages,
+    add_detector_arguments,
+    add_image_arguments,
+)
 from exporters.report_types import BlockSciAnalysisArtifact
+
+# The report stage resolves its own image (manifest.resolve_manifest_images).
+PROVENANCE_IMAGE_NAMES = IMAGE_COMPONENTS[:3]
 
 
 def write_analysis(args: argparse.Namespace) -> Path:
@@ -34,11 +43,20 @@ def write_analysis(args: argparse.Namespace) -> Path:
 
     detector = Detector.from_args(args, load_first_wasabi2_block(config_path))
     records = export_blocksci_records(config_path, detector)
+    images = ReportImages.from_args(args)
     artifact: BlockSciAnalysisArtifact = {
         "schema_version": SCHEMA_VERSION,
         "run_id": run_dir.name,
         "parameters": detector.artifact_parameters(),
         "first_wasabi2_block": detector.first_wasabi2_block,
+        "image_provenance": {
+            name: {
+                "reference": images.references[name],
+                "image_id": getattr(args, name + "_image_id", None),
+                "repo_digest": images.digests[name],
+            }
+            for name in PROVENANCE_IMAGE_NAMES
+        },
         "records": records,
     }
     output_dir = blocksci_analysis_dir(run_dir)
@@ -54,6 +72,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--run-dir", type=Path, required=True)
     add_detector_arguments(parser)
+    add_image_arguments(parser)
     return parser.parse_args(argv)
 
 

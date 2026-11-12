@@ -1,13 +1,16 @@
-"""Detector options shared by analysis and report input boundaries."""
+"""Detector and image options shared by analysis and report input boundaries."""
 
 from __future__ import annotations
 
 import argparse
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from exporters.common import DEFAULT_FIRST_WASABI2_BLOCK
-from exporters.report_types import DetectorManifest, DetectorParameters
+from exporters.common import DEFAULT_FIRST_WASABI2_BLOCK, digest_from_reference
+from exporters.report_types import DetectorManifest, DetectorParameters, ImageFields
+
+# Images whose reference and digest a report records.
+IMAGE_COMPONENTS = ("blocksci", "coinjoin_analysis", "coinjoin_emulator", "unified_report")
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,41 @@ class Detector:
         return detector
 
 
+@dataclass(frozen=True)
+class ReportImages:
+    """Image references by component, and the digest each one was pinned or inspected at."""
+
+    references: dict[str, str | None] = field(default_factory=dict)
+    digests: dict[str, str | None] = field(default_factory=dict)
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> ReportImages:
+        # The report image has no digest option; a pinned reference carries its own.
+        references = {name: getattr(args, name + "_image", None) for name in IMAGE_COMPONENTS}
+        return cls(
+            references,
+            {
+                name: getattr(args, name + "_image_digest", None) or digest_from_reference(references[name])
+                for name in IMAGE_COMPONENTS
+            },
+        )
+
+    def reference_fields(self) -> ImageFields:
+        return _image_fields(self.references)
+
+    def digest_fields(self) -> ImageFields:
+        return _image_fields(self.digests)
+
+
+def _image_fields(values: dict[str, str | None]) -> ImageFields:
+    return {
+        "blocksci": values.get("blocksci"),
+        "coinjoin_analysis": values.get("coinjoin_analysis"),
+        "coinjoin_emulator": values.get("coinjoin_emulator"),
+        "unified_report": values.get("unified_report"),
+    }
+
+
 def parse_min_input_count(value: str | None) -> int | None:
     if value is None:
         return None
@@ -68,4 +106,29 @@ def add_detector_arguments(parser: argparse.ArgumentParser) -> None:
         type=parse_min_input_count,
         default=os.environ.get("BLOCKSCI_MIN_INPUT_COUNT"),
         help="Override BlockSci detector min input count; use 'default' for BlockSci's default.",
+    )
+
+
+def add_image_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--blocksci-image", default=os.environ.get("BLOCKSCI_IMAGE"))
+    parser.add_argument("--coinjoin-analysis-image", default=os.environ.get("COINJOIN_ANALYSIS_IMAGE"))
+    parser.add_argument(
+        "--coinjoin-emulator-image",
+        default=os.environ.get("COINJOIN_EMULATOR_IMAGE") or os.environ.get("EMULATOR_IMAGE"),
+    )
+    parser.add_argument("--unified-report-image", default=os.environ.get("COINJOIN_UNIFIED_REPORT_IMAGE"))
+    parser.add_argument("--blocksci-image-digest", default=os.environ.get("BLOCKSCI_IMAGE_DIGEST"))
+    parser.add_argument("--blocksci-image-id", default=os.environ.get("BLOCKSCI_IMAGE_ID"))
+    parser.add_argument(
+        "--coinjoin-analysis-image-digest",
+        default=os.environ.get("COINJOIN_ANALYSIS_IMAGE_DIGEST"),
+    )
+    parser.add_argument("--coinjoin-analysis-image-id", default=os.environ.get("COINJOIN_ANALYSIS_IMAGE_ID"))
+    parser.add_argument(
+        "--coinjoin-emulator-image-digest",
+        default=os.environ.get("COINJOIN_EMULATOR_IMAGE_DIGEST") or os.environ.get("EMULATOR_IMAGE_DIGEST"),
+    )
+    parser.add_argument(
+        "--coinjoin-emulator-image-id",
+        default=os.environ.get("COINJOIN_EMULATOR_IMAGE_ID") or os.environ.get("EMULATOR_IMAGE_ID"),
     )

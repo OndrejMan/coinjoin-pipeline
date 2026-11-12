@@ -14,7 +14,7 @@ if __package__ in (None, ""):
 
 from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, REPORT_JSON
 from exporters.normalization import block_height_from_path, exported_block_paths
-from exporters.parameters import add_detector_arguments
+from exporters.parameters import add_detector_arguments, add_image_arguments
 
 
 def parse_args(argv=None):
@@ -35,6 +35,7 @@ def parse_args(argv=None):
     parser.add_argument("--output-name", default=REPORT_JSON)
     parser.add_argument("--emulator-git-commit", default=os.environ.get("COINJOIN_EMULATOR_GIT_COMMIT"))
     add_detector_arguments(parser)
+    add_image_arguments(parser)
     args = parser.parse_args(argv)
     if args.run_dir is None:
         parser.error("--run-dir or ACTIVE_RUN_ID is required")

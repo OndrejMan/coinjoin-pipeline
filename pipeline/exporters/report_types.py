@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import TypedDict
 
+from exporters.common import JsonObject
+
 
 class _IORecordFields(TypedDict):
     index: str
@@ -122,6 +124,15 @@ class ExecutionManifest(TypedDict):
     reproduction_command: str | None
 
 
+class ImageFields(TypedDict):
+    """Image references or digests."""
+
+    blocksci: str | None
+    coinjoin_analysis: str | None
+    coinjoin_emulator: str | None
+    unified_report: str | None
+
+
 class SourceCommits(TypedDict):
     coinjoin_emulator: str | None
     exporters: str | None
@@ -134,6 +145,8 @@ class RunManifest(TypedDict):
     scenario: ScenarioIdentity
     execution: ExecutionManifest
     detector: DetectorManifest
+    images: ImageFields
+    image_digests: ImageFields
     source_commits: SourceCommits
 
 
@@ -152,3 +165,4 @@ class BlockSciAnalysisArtifact(TypedDict):
     parameters: DetectorParameters
     first_wasabi2_block: int
     records: dict[str, TransactionRecord]
+    image_provenance: JsonObject

@@ -17,6 +17,7 @@ from typing import Mapping
 
 from exporters.analysis_artifact import ARTIFACT_NAME
 from exporters.artifact_paths import BASELINE_FILE, COINJOIN_ANALYSIS_DIR, EMULATOR_DIR, blocksci_analysis_dir
+from exporters.image_provenance import inspect_image
 
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution.locks import (
@@ -184,6 +185,7 @@ def compose_env(
             env["SCENARIOS_DIR"] = str(scenarios_dir)
         scenario = str(source)
     env["SCENARIO_CONTAINER_PATH"] = container_scenario_path(scenario, scenarios_dir, config.engine)
+    add_image_provenance_env(env)
     if active_run_id:
         env["ACTIVE_RUN_ID"] = active_run_id
         run_dir = emulation_logs_dir / active_run_id
@@ -219,6 +221,24 @@ def compose_base_command(env: Mapping[str, str]) -> list[str]:
         "-p",
         env.get(settings.COMPOSE_PROJECT_ENV, settings.COMPOSE_PROJECT),
     ]
+
+
+def inspect_image_provenance(image: str, runtime: str) -> tuple[str | None, str | None]:
+    provenance = inspect_image(image, runtime, timeout=5)
+    return provenance.image_id, provenance.repo_digest
+
+
+def add_image_provenance_env(env: dict[str, str]) -> None:
+    runtime = container_runtime(env)
+    for image_env, (id_env, digest_env) in settings.IMAGE_PROVENANCE_ENV.items():
+        image = env.get(image_env)
+        if not image:
+            continue
+        image_id, repo_digest = inspect_image_provenance(image, runtime)
+        if image_id:
+            env.setdefault(id_env, image_id)
+        if repo_digest:
+            env.setdefault(digest_env, repo_digest)
 
 
 def run_script(
@@ -418,6 +438,21 @@ def export_command(active_run_id: str, env: dict[str, str]) -> str:
         ("min-input-count", "BLOCKSCI_MIN_INPUT_COUNT"),
     ):
         command.extend(["--" + name, env[key]])
+    optional_args = [
+        ("--blocksci-image", env.get("BLOCKSCI_IMAGE")),
+        ("--blocksci-image-id", env.get("BLOCKSCI_IMAGE_ID")),
+        ("--blocksci-image-digest", env.get("BLOCKSCI_IMAGE_DIGEST")),
+        ("--coinjoin-analysis-image", env.get("COINJOIN_ANALYSIS_IMAGE")),
+        ("--coinjoin-analysis-image-id", env.get("COINJOIN_ANALYSIS_IMAGE_ID")),
+        ("--coinjoin-analysis-image-digest", env.get("COINJOIN_ANALYSIS_IMAGE_DIGEST")),
+        ("--coinjoin-emulator-image", env.get("COINJOIN_EMULATOR_IMAGE")),
+        ("--coinjoin-emulator-image-id", env.get("COINJOIN_EMULATOR_IMAGE_ID")),
+        ("--coinjoin-emulator-image-digest", env.get("COINJOIN_EMULATOR_IMAGE_DIGEST")),
+        ("--unified-report-image", env.get("COINJOIN_UNIFIED_REPORT_IMAGE")),
+    ]
+    for flag, value in optional_args:
+        if value:
+            command.extend([flag, value])
     return " ".join((shlex.quote(part) for part in command))
 
 
@@ -436,6 +471,7 @@ def run_export_only(args: PipelineConfiguration) -> None:
         sys.exit(2)
     image = resolve_unified_report_image(args).removeprefix("docker://")
     validate_image(image)
+    env["COINJOIN_UNIFIED_REPORT_IMAGE"] = image
     command = [
         container_runtime(),
         "run",

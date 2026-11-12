@@ -25,7 +25,7 @@ from exporters.normalization import (
     load_exported_block_tx_index,
     normalize_coinjoin_analysis,
 )
-from exporters.parameters import Detector, add_detector_arguments
+from exporters.parameters import Detector, ReportImages, add_detector_arguments, add_image_arguments
 from exporters.report_builder import build_report
 from exporters.report_types import BlockSciAnalysisArtifact
 from exporters.scenario import load_scenario
@@ -57,6 +57,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Also render a Markdown report next to the JSON output.",
     )
     add_detector_arguments(parser)
+    add_image_arguments(parser)
     return parser.parse_args(argv)
 
 
@@ -96,7 +97,9 @@ def assemble_report(args: argparse.Namespace) -> int:
         scenario,
         emulator_data=emulator_data,
         engine=args.engine,
+        images=ReportImages.from_args(args),
         emulator_git_commit=args.emulator_git_commit,
+        image_provenance=analysis.get("image_provenance"),
     )
     save_json(output_path, report)
     print(f"Unified report saved to {output_path}")

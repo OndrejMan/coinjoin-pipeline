@@ -364,6 +364,14 @@ def render_io_details(title: str, records: list[JsonObject], explorer_base_url: 
     return [f"#### {title}", "", *table(headers, rows), ""]
 
 
+IMAGE_LABELS = (
+    ("blocksci", "BlockSci"),
+    ("coinjoin_analysis", "coinjoin-analysis"),
+    ("coinjoin_emulator", "coinjoin-emulator"),
+    ("unified_report", "unified-report"),
+)
+
+
 def render_run_manifest(report: JsonObject) -> list[str]:
     manifest = report.get("run_manifest") or {}
     if not manifest:
@@ -372,8 +380,15 @@ def render_run_manifest(report: JsonObject) -> list[str]:
     scenario = manifest.get("scenario") or {}
     execution = manifest.get("execution") or {}
     detector = manifest.get("detector") or {}
+    images = manifest.get("images") or {}
+    image_digests = manifest.get("image_digests") or {}
     commits = manifest.get("source_commits") or {}
 
+    image_rows = [
+        row
+        for key, label in IMAGE_LABELS
+        for row in ([f"{label} image", images.get(key)], [f"{label} image digest", image_digests.get(key)])
+    ]
     lines = section(
         "Run Manifest",
         *key_values(
@@ -382,6 +397,7 @@ def render_run_manifest(report: JsonObject) -> list[str]:
                 ["engine", execution.get("engine")],
                 ["coinjoin type", execution.get("coinjoin_type")],
                 ["detector", json.dumps(detector, sort_keys=True)],
+                *image_rows,
                 ["coinjoin-emulator commit", commits.get("coinjoin_emulator")],
                 ["exporters commit", commits.get("exporters")],
             ],
