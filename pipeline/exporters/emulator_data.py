@@ -20,6 +20,7 @@ from exporters.common import (
     to_json_text,
 )
 from exporters.normalization import is_coinbase_tx, iter_exported_blocks, output_address
+from exporters.verify_chain import SHA256_HEX
 
 WASABI_BROADCAST_RE = re.compile(
     r"successfully\s+broadcast(?:ed)?\s+(?:the\s+)?coinjoin(?:\s+transaction)?:\s*"
@@ -34,7 +35,6 @@ WASABI_PARSEABILITY_MIN_INPUTS = 5
 # file by its exact path, Wasabi coordinator logs by file name.
 JOINMARKET_LABEL_SOURCE = PurePosixPath(ROUND_EVENTS_FILE).name
 WASABI_LABEL_SOURCE_NAME = "Logs.txt"
-SHA256_HEX_RE = re.compile(r"[0-9a-f]{64}")
 
 
 def _label_provenance(
@@ -85,7 +85,7 @@ def _verify_label_source(data_dir: Path, record: JsonValue, expected_engine: str
         or not isinstance(expected_size, int)
         or expected_size < 0
         or not isinstance(expected_sha256, str)
-        or not SHA256_HEX_RE.fullmatch(expected_sha256)
+        or not SHA256_HEX.fullmatch(expected_sha256)
     ):
         return None, "producer label manifest source metadata is invalid"
     if source_path.stat().st_size != expected_size:

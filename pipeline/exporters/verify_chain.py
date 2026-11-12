@@ -8,8 +8,13 @@ import re
 from pathlib import Path
 
 
+# Lowercase hex of a SHA-256, a block hash or a file checksum alike. The standalone
+# scripts block_archive.py and storage/s5client.py import nothing and keep a copy.
+SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+
+
 def is_block_hash(value: object) -> bool:
-    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+    return isinstance(value, str) and SHA256_HEX.fullmatch(value) is not None
 
 
 def verify_chain(chain, maximum, network, expected_hash=None, source_manifest=None):

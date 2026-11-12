@@ -30,6 +30,7 @@ CHUNK = 8 * 1024 * 1024
 # s5cmd cannot size the parts of a stream and S3 allows 10,000 of them: its default of
 # 50 MiB ends at 488 GiB, within reach of the archived index of the whole chain.
 PIPE_PART_SIZE_MIB = 256
+# A copy of exporters.verify_chain.SHA256_HEX: a PBS job ships this module on its own.
 SHA256 = re.compile(r"[0-9a-f]{64}")
 # What each side needs from s5cmd: the frontend stages the exporters with `sync --exclude`
 # (2.1); only the PBS jobs stream an archive, through `pipe` (2.2).

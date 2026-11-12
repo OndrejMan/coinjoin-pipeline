@@ -39,6 +39,7 @@ from typing import NamedTuple
 
 TIP_MARGIN = 6
 SIDECAR_NAME = re.compile(r"blk([0-9]{5})\.dat\.json")
+# A copy of exporters.verify_chain.SHA256_HEX: this script runs alone and imports nothing.
 SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 CHUNK_SIZE = 8 * 1024 * 1024
 
