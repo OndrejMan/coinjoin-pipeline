@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 from exporters.artifact_paths import (
@@ -69,6 +70,45 @@ def exported_block_paths(run_dir: Path) -> list[Path]:
     if not block_dir.is_dir():
         return []
     return sorted(block_dir.glob(EXPORTED_BLOCK_GLOB), key=lambda path: block_height_from_path(path) or -1)
+
+
+def iter_exported_blocks(run_dir: Path) -> Iterator[tuple[Path, int | None, JsonObject]]:
+    """Each exported block with its height: the block's own, else the file name's.
+
+    Inputs reference outputs of lower blocks, so consumers that index outputs
+    rely on this order.
+    """
+    for path in exported_block_paths(run_dir):
+        block = load_json(path)
+        height = block.get("height")
+        if height is None:
+            height = block_height_from_path(path)
+        yield path, int(height) if height is not None else None, block
+
+
+def load_exported_block_tx_index(run_dir: Path) -> dict[str, int]:
+    tx_index: dict[str, int] = {}
+    for _path, height, block in iter_exported_blocks(run_dir):
+        if height is None:
+            continue
+        for tx in block.get("tx", []):
+            txid = tx.get("txid")
+            if txid:
+                tx_index[str(txid)] = height
+    return tx_index
+
+
+def fill_missing_block_heights(
+    records: dict[str, TransactionRecord],
+    tx_block_heights: dict[str, int],
+) -> None:
+    for txid, record in records.items():
+        if record.get("block_height") is not None:
+            continue
+        if txid not in tx_block_heights:
+            continue
+        record["block_height"] = tx_block_heights[txid]
+        record["block_height_inferred"] = True
 
 
 def load_first_wasabi2_block(config_path: Path) -> int:

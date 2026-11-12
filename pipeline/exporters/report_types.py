@@ -58,12 +58,14 @@ class TransactionRecord(_TransactionFields, TransactionMetrics, total=False):
     block_time: str | None
 
     round_id: str | None
+    block_height_inferred: bool
 
 
 class RecordSummary(TypedDict):
     """The comparable part of a record quoted in the report's divergences."""
 
     block_height: int | None
+    block_height_inferred: bool | None
     input_count: int | None
     output_count: int | None
     total_input_sats: int | None
