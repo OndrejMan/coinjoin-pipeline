@@ -232,6 +232,7 @@ class PBSConfiguration(ConfigurationModel):
     mappings: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     unified_report: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     producer: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
+    checkpoint: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,10 +243,13 @@ class MainnetSyncConfiguration(ConfigurationModel):
     root: str | None = option(None, name="mainnet_root")
     # Fixed S3 prefix of the synchronization's state, markers and per-run logs.
     state_uri: str | None = option(None, name="mainnet_state_uri")
+    backup_uri: str | None = option(None, name="mainnet_backup_uri")
     blocks_uri: str | None = option(None, name="mainnet_blocks_uri")
+    dumplings_uri: str | None = option(None, name="mainnet_dumplings_uri")
     core_image: str = option("ghcr.io/ondrejman/bitcoin-block-archive:latest", name="mainnet_core_image")
     dumplings_image: str = option("ghcr.io/ondrejman/dumplings:latest", name="mainnet_dumplings_image")
     dbcache_mb: int = option(4096, name="mainnet_dbcache_mb", minimum=1)
+    reorg_reserve: int = option(2016, name="mainnet_reorg_reserve", minimum=288)
     poll_seconds: int = option(30, name="mainnet_poll_seconds", minimum=1)
     # Kept notebook data beside the dataset; only measured, so the storage report covers it.
     notebook_root: str | None = option(None, name="mainnet_notebook_root")

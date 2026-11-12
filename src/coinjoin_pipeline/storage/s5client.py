@@ -149,6 +149,14 @@ class S5Client:
                 return entry.get("size", 0)
         return None
 
+    def sizes(self, prefix: str, timeout: float | None = 600) -> dict[str, object]:
+        """Relative key -> size of every object below prefix, which ends with a slash."""
+        return {
+            str(entry["key"])[len(prefix) :]: entry.get("size", 0)
+            for entry in self.listing(prefix + "*", timeout)
+            if entry.get("type", "file") == "file" and str(entry.get("key", "")).startswith(prefix)
+        }
+
     def cat(self, uri: str, timeout: float | None = 60) -> str:
         return self.run("cat", uri, check=True, timeout=timeout).stdout
 

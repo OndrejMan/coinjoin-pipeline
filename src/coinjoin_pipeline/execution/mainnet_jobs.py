@@ -1,5 +1,8 @@
-"""The jobs of one mainnet synchronization, in their order: producer and blocksci.
-Each is a function over its PBS job's ``Worker``.
+"""The jobs of one mainnet synchronization, in their order: producer, blocksci and
+checkpoint. Each is a function over its PBS job's ``Worker``.
+
+Each backup has one place: the old archive is deleted, the new one streamed and its size
+checked, and manifest.json, written last, makes it valid again.
 """
 
 from __future__ import annotations
@@ -14,10 +17,14 @@ from coinjoin_pipeline.execution.mainnet_worker import (
     is_count,
     is_sha256,
     read_json,
+    resume_file,
     resume_signature,
     scanner_complete,
+    stopped_core,
 )
-from coinjoin_pipeline.execution.pbs.index_store import IndexStore, index_manifest
+from coinjoin_pipeline.execution.pbs.index_store import ARCHIVE as INDEX_ARCHIVE
+from coinjoin_pipeline.execution.pbs.index_store import MEMBERS as INDEX_MEMBERS
+from coinjoin_pipeline.execution.pbs.index_store import IndexStore, index_manifest, utc_now
 
 
 def require_ready(ready: JsonObject, run_id: str) -> int:
@@ -238,3 +245,78 @@ def blocksci(worker: Worker) -> None:
     worker.publish_json(worker.remote + "/blocksci-index-manifest.json", manifest)
     worker.progress("indexed", state="done", height=height)
     worker.complete(manifest)
+
+
+def checkpoint(worker: Worker) -> None:
+    """Job 3: back up the index and Dumplings, prune Core and back up its checkpoint, with little memory.
+
+    Holds the index reader lock: notebooks keep reading, index jobs cannot write.
+    """
+    worker.stage = "checkpoint"
+    worker.acquire_dataset()
+    ready = read_json(worker.run / "ready.json")
+    height = require_ready(ready, worker.run_id)
+    if read_json(worker.root / "current-ready.json") != ready:
+        raise ValueError("The working dataset no longer matches this ready generation")
+    manifest = read_json(worker.index / "manifest.json")
+    if (
+        (worker.index / ".writing").exists()
+        or manifest.get("run_id") != worker.run_id
+        or manifest.get("exported_max_block") != height
+        or not worker.index_matches_inventory()
+    ):
+        raise ValueError("The index is not the one this synchronization's BlockSci job completed")
+    number = resume_file(worker.index, worker.core_dir / "blocks")
+    signature = resume_signature(worker.index, worker.core_dir / "blocks")
+    if any(manifest.get(key) != value for key, value in signature.items()):
+        raise ValueError("BlockSci resume bytes no longer match this Core working copy")
+    worker.progress("index-backup")
+    index_backup = worker.backup(worker.index, INDEX_MEMBERS, worker.c["index_backup_uri"], manifest, INDEX_ARCHIVE)
+    # Here, not in the producer: a run that fails earlier must leave the S3 backups matching.
+    dumplings_backup = worker.publish_dumplings(ready["dumplings_height"])
+    worker.progress("pruning")
+    # Offline Core only loads its chain for pruning; a large cache would just cost memory.
+    info = worker.start_core(True, dbcache_mb=min(1024, worker.c["dbcache_mb"]))
+    if info["blocks"] != height or info["bestblockhash"] != ready["hash"]:
+        raise ValueError("Offline Core does not match the ready generation")
+    worker.archive(prune=True, height=min(height, ready["dumplings_height"]), number=number)
+    worker.stop_core()
+    if resume_signature(worker.index, worker.core_dir / "blocks") != signature:
+        raise ValueError("Core cleanup changed the BlockSci resume source; checkpoint refused")
+    worker.progress("core-checkpoint")
+    with stopped_core(worker.core_dir):
+        core_checkpoint = worker.backup(
+            worker.root,
+            [
+                str((worker.core_dir / "blocks").relative_to(worker.root)),
+                str((worker.core_dir / "chainstate").relative_to(worker.root)),
+                # Scanner/ is restored from its own incremental copy (publish_dumplings).
+                "archive-state",
+            ],
+            worker.c["backup_uri"],
+            {"height": height, "hash": ready["hash"], "index_backup": index_backup, **signature},
+            "checkpoint.tar.zst",
+        )
+    done = {
+        **ready,
+        "state": "done",
+        "core_checkpoint": core_checkpoint,
+        "index_backup": index_backup,
+        "dumplings_backup": dumplings_backup,
+        # Measured while Core is stopped and no index job can write.
+        "storage": {
+            "measured_at": utc_now(),
+            "multijob": {
+                "core": worker.uploaded.get(core_checkpoint, {}).get("member_bytes"),
+                "index": worker.uploaded.get(index_backup, {}).get("member_bytes"),
+            },
+            "s3": {
+                "core_checkpoint": worker.uploaded.get(core_checkpoint, {}).get("archive_size"),
+                "index_backup": worker.uploaded.get(index_backup, {}).get("archive_size"),
+            },
+        },
+    }
+    worker.progress("complete", state="done", height=height)
+    worker.publish_json(worker.remote + "/done.json", done)
+    worker.complete(done)
+    atomic_json(worker.run / "done.json", done)

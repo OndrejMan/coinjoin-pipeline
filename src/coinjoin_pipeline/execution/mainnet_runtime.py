@@ -16,13 +16,14 @@ from pathlib import Path
 
 from exporters.artifact_paths import pbs_marker
 
-from coinjoin_pipeline.execution.mainnet_jobs import blocksci, producer
+from coinjoin_pipeline.execution.mainnet_jobs import blocksci, checkpoint, producer
 from coinjoin_pipeline.execution.mainnet_worker import Worker
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore
 
 JOBS: dict[str, Callable[[Worker], None]] = {
     "producer": producer,
     "blocksci": blocksci,
+    "checkpoint": checkpoint,
 }
 
 

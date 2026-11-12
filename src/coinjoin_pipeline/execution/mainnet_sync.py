@@ -1,4 +1,4 @@
-"""Manual Core/Dumplings → BlockSci PBS chain over a shared working directory."""
+"""Manual Core/Dumplings → BlockSci → checkpoint PBS chain over a shared working directory."""
 
 from __future__ import annotations
 
@@ -55,6 +55,7 @@ MAINNET_SYNC_OPTIONS = frozenset(
         "images.blocksci",
         "images.version",
         "blocksci.index_dir",
+        "blocksci.index_backup_uri",
         "artifacts.backend",
         "artifacts.endpoint_url",
         "artifacts.credentials_file",
@@ -109,7 +110,10 @@ def _location_errors(config: PipelineConfiguration) -> list[str]:
     for label, value, validator in (
         ("run_id", config.run_id, validate_run_id),
         ("mainnet.state_uri", mainnet.state_uri, validate_artifact_uri),
+        ("mainnet.backup_uri", mainnet.backup_uri, validate_artifact_uri),
         ("mainnet.blocks_uri", mainnet.blocks_uri, validate_artifact_uri),
+        ("mainnet.dumplings_uri", mainnet.dumplings_uri, validate_artifact_uri),
+        ("blocksci.index_backup_uri", config.blocksci.index_backup_uri, validate_artifact_uri),
     ):
         if value is None:
             errors.append(f"mainnet-sync requires {label}")
@@ -120,11 +124,14 @@ def _location_errors(config: PipelineConfiguration) -> list[str]:
             errors.append(f"mainnet-sync requires artifacts.{name}")
     prefixes = (
         mainnet.state_uri,
+        mainnet.backup_uri,
+        config.blocksci.index_backup_uri,
+        mainnet.dumplings_uri,
         mainnet.blocks_uri,
     )
     present = [value.rstrip("/") for value in prefixes if value]
     if any(a == b or b.startswith(a + "/") for a in present for b in present if a is not b):
-        errors.append("The state and block prefixes must be distinct, without nesting")
+        errors.append("The state, Core, index, Dumplings and block prefixes must be distinct, without nesting")
     return errors
 
 
@@ -166,13 +173,15 @@ def sync_settings(config: PipelineConfiguration, stage: str, budget: PBSResource
         "credentials": required(config.artifacts.credentials_file, "artifacts.credentials_file"),
         "profile": config.artifacts.profile,
         "index_dir": config.blocksci.index_dir,
+        "index_backup_uri": config.blocksci.index_backup_uri,
         "blocksci_image": pbs_image(config, "blocksci"),
         "pbs_resources": {"ncpus": budget.ncpus, "mem": budget.mem},
         "core_image": with_singularity_scheme(config.mainnet.core_image),
         "dumplings_image": with_singularity_scheme(config.mainnet.dumplings_image),
-        # BlockSci writes the index.
+        # BlockSci writes the index; the checkpoint only reads it, so readers stay.
         "index_lock": {
             "blocksci": "exclusive",
+            "checkpoint": "shared",
         }.get(stage),
         # Past the walltime the job is gone, so its lock entry may be cleared.
         "index_lock_seconds": walltime_to_seconds(budget.walltime) + 600,
