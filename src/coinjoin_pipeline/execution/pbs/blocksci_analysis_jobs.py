@@ -6,9 +6,14 @@ The index comes from this run's cache or read-only from another run's.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import socket
+import subprocess
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import cast
 
@@ -21,6 +26,7 @@ from coinjoin_pipeline.execution.pbs.blocksci_index import (
 )
 from coinjoin_pipeline.execution.pbs.stage import CONTAINER_RUNS_ROOT, Stage, StageFailure
 from coinjoin_pipeline.execution.pbs.stage_settings import BlocksciAnalysisSettings, OutputSettings
+from coinjoin_pipeline.storage.s5client import S5Error
 
 
 def submission_home() -> Path:
@@ -40,6 +46,51 @@ def analysis_output(stage: Stage, output: OutputSettings) -> Path:
     if output.get("notebook"):
         return submission_home() / "coinjoin-notebooks" / stage.run_id
     return stage.work / str(output["relative"])
+
+
+@contextmanager
+def notebook_connection(stage: Stage, control: Path) -> Iterator[None]:
+    """Publish the current job's private connection while Jupyter is running.
+
+    The frontend container has no shared /storage mount. Its only discovery path is
+    this S3 object, checked against qstat before opening a direct node SSH tunnel.
+    """
+    uri = f"{stage.run_prefix}/.notebook/connection.json"
+    stopping = threading.Event()
+
+    def publish() -> None:
+        warned = False
+        while not stopping.wait(0.2):
+            try:
+                path = control / "connection.json"
+                if not path.is_file():
+                    continue
+                info = json.loads(path.read_text())
+                if info.get("jobId") != os.environ.get("PBS_JOBID") or info.get("runId") != stage.run_id:
+                    continue
+                stage.storage.copy(path, uri, timeout=15)
+                return
+            except (OSError, ValueError, subprocess.SubprocessError, S5Error):
+                if not warned:
+                    stage.log("Notebook connection publication failed; retrying (connection token is not logged)")
+                    warned = True
+                stopping.wait(1)
+
+    thread = threading.Thread(target=publish, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stopping.set()
+        thread.join(timeout=16)
+        # Stale objects are also rejected by run ID, PBS job ID and terminal qstat state.
+        # Wait for an in-flight upload before deleting, so it cannot republish afterwards.
+        if not thread.is_alive():
+            try:
+                if not stage.storage.remove(uri, timeout=15):
+                    stage.log("Could not remove ended notebook connection metadata")
+            except (OSError, subprocess.SubprocessError, S5Error):
+                stage.log("Could not remove ended notebook connection metadata")
 
 
 def blocksci_analysis(stage: Stage) -> None:
@@ -80,6 +131,7 @@ def blocksci_analysis(stage: Stage) -> None:
         digest = hashlib.sha256(script.read_bytes()).hexdigest()
         (output / "script.py.sha256").write_text(f"{digest}  {script}\n")
         binds.append(f"{script}:/mnt/user-analysis.py:ro")
+    control = None
     if settings["output"].get("notebook"):
         control = notebook_control(stage)
         control.mkdir(parents=True, exist_ok=True)
@@ -99,12 +151,13 @@ def blocksci_analysis(stage: Stage) -> None:
     stage.log(f"[{mode}] starting on {socket.getfqdn()}")
     for line in settings.get("connection_help", ()):
         stage.log(line)
-    stage.singularity(
-        f'cd "{CONTAINER_RUNS_ROOT}/$PBS_RUN_ID" && {settings["command"]}',
-        binds=binds,
-        environment=environment,
-        cleanenv=True,
-    )
+    with notebook_connection(stage, control) if control is not None else nullcontext():
+        stage.singularity(
+            f'cd "{CONTAINER_RUNS_ROOT}/$PBS_RUN_ID" && {settings["command"]}',
+            binds=binds,
+            environment=environment,
+            cleanenv=True,
+        )
     check = settings.get("output_check")
     if check:
         stage.require_file(check[0], check[1])
