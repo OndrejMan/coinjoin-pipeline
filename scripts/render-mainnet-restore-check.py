@@ -12,7 +12,7 @@ from coinjoin_pipeline.execution.mainnet_sync import render_restore_check
 
 
 def main() -> None:
-    path = Path(sys.argv[1])
+    path = Path(sys.argv[1] if len(sys.argv) > 1 else "examples/mainnet-sync.yaml")
     mapping = yaml.safe_load(path.read_text(encoding="utf-8"))
     mapping["run_id"] = "mainnet-restore-check-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
     print(render_restore_check(resolve_configuration(PipelineConfiguration.from_mapping(mapping))))
