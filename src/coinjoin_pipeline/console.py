@@ -15,7 +15,7 @@ EXIT_INTERRUPTED = 130
 EXIT_CODES = (
     (EXIT_OK, "success"),
     (EXIT_USAGE, "invalid configuration or arguments, or a failed preflight check"),
-    (EXIT_FAILURE, "a failed run reported as [ERROR] or a runtime error"),
+    (EXIT_FAILURE, "a failed run reported as [ERROR], a runtime error, or a failed pull"),
     (EXIT_INTERRUPTED, "interrupted"),
 )
 

@@ -25,9 +25,10 @@ from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, fail
 from .context import RunContext
 from .doctor import check as doctor_check
 from .doctor import required_capabilities, required_image_components, validate_arguments
-from .images import DEFAULT_VERSION, image_names
+from .images import DEFAULT_VERSION, Images, image_names
 from .manifest import environment_snapshot, initial_manifest, mark_finished
 from .paths import PIPELINE_ROOT
+from .process import run
 from .runs import read_host_manifest, store_host_manifest
 
 
@@ -37,6 +38,13 @@ def print_version() -> None:
     print(f"default image version: {DEFAULT_VERSION}")
     for component, image in image_names().items():
         print(f"{component}: {image}")
+
+
+def pull(runtime: str, images: Images) -> int:
+    for image in images.as_dict().values():
+        if run([runtime, "pull", image]):
+            return EXIT_FAILURE
+    return EXIT_OK
 
 
 def runtime_root() -> Path:
@@ -81,6 +89,8 @@ def _utility(argv: list[str]) -> int | None:
     root = context.config.runs_path
     if remaining:
         return fail(f"unexpected arguments for {action}: {' '.join(remaining)}; see cjp {action} --help")
+    if action == "pull":
+        return pull(context.config.runtime, context.images)
     errors = doctor_check(context.config.runtime, root, context.images)
     if errors:
         return fail(*errors)
