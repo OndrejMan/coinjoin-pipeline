@@ -103,7 +103,7 @@ class S3Target:
 
 def validate_artifact_uri(uri: str | None) -> str:
     if not uri:
-        raise ValueError("--artifact-uri is required (or set ARTIFACT_URI)")
+        raise ValueError("--artifact-uri is required")
     parsed = urlparse(uri)
     if parsed.scheme != "s3" or not parsed.netloc:
         raise ValueError("artifact URI must use s3:// and include a bucket")
@@ -192,6 +192,9 @@ def add_s3_arguments(parser: argparse.ArgumentParser, uri_help: str) -> None:
 
 def s3_arguments_access(args: argparse.Namespace) -> tuple[str, S3Access]:
     """Validated artifact URI and access of ``add_s3_arguments``; ValueError when unusable."""
+    if not args.artifact_uri:
+        # Only the utilities read the environment; the main CLI takes the option or YAML alone.
+        raise ValueError("--artifact-uri is required (or set ARTIFACT_URI)")
     artifact_uri = validate_artifact_uri(args.artifact_uri)
     access = access_from_values(args.s3_endpoint_url, args.s3_credentials_file, args.s3_profile, check_file=True)
     if shutil.which("s5cmd") is None:
