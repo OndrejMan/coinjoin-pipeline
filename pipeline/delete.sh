@@ -26,7 +26,7 @@ fi
 # files. Activate both profiles while removing the complete project stack.
 "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" \
   --profile emulate --profile analysis down --remove-orphans
-"${CONTAINER_RUNTIME}" volume rm "${PROJECT_NAME}_btc_data" "${PROJECT_NAME}_blocksci_cache" "${PROJECT_NAME}_emulation_logs" >/dev/null 2>&1 || true
+"${CONTAINER_RUNTIME}" volume rm "${PROJECT_NAME}_btc_data" >/dev/null 2>&1 || true
 
 # Reap Compose projects abandoned by earlier runs.
 #
