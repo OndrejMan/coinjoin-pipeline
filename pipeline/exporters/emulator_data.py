@@ -20,6 +20,7 @@ from exporters.common import (
     to_json_text,
 )
 from exporters.normalization import is_coinbase_tx, iter_exported_blocks, output_address
+from exporters.verify_chain import SHA256_HEX
 
 WASABI_BROADCAST_RE = re.compile(
     r"successfully\s+broadcast(?:ed)?\s+(?:the\s+)?coinjoin(?:\s+transaction)?:\s*"
@@ -34,7 +35,6 @@ WASABI_PARSEABILITY_MIN_INPUTS = 5
 # file by its exact path, Wasabi coordinator logs by file name.
 JOINMARKET_LABEL_SOURCE = PurePosixPath(ROUND_EVENTS_FILE).name
 WASABI_LABEL_SOURCE_NAME = "Logs.txt"
-SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 
 
 def _label_provenance(

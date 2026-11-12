@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Union
+from typing import TypedDict, Union
 
 from exporters.artifact_paths import (
     BLOCKSCI_ANALYSIS_DIR,
@@ -37,7 +37,7 @@ from coinjoin_pipeline.storage.s3 import (
 )
 
 from .analysis_modes import MODE_OUTPUTS, analysis_mode_settings
-from .defaults import DEFAULT_RESOURCES, PBSResources
+from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND, DEFAULT_RESOURCES, PBSResources
 from .scripts import (
     STAGE_RUNTIME_MODULES,
     directives,
@@ -170,6 +170,7 @@ def _block_source(blocksci: BlockSciConfiguration) -> SourceSettings:
             "description": "verified Bitcoin block archive from S3",
             "max_block": required(blocksci.max_block, "--blocksci-max-block"),
             "blocks_uri": validated_s3_uri(blocksci.bitcoin_blocks_uri, "Bitcoin block archive URI"),
+            "expected_hash": blocksci.expected_block_hash,
         }
     if blocksci.external_blocksci_dir:
         blocksci_path = Path(blocksci.external_blocksci_dir).expanduser().resolve()
@@ -191,9 +192,19 @@ def _block_source(blocksci: BlockSciConfiguration) -> SourceSettings:
     }
 
 
+class _IndexJobSettings(TypedDict):
+    pbs_resources: PbsResourceSettings
+    python_command: str
+
+
 def _pbs_resources(resources: PBSResources) -> PbsResourceSettings:
     """The resources of a job that writes an index, recorded in the index manifest."""
     return {"ncpus": resources.ncpus, "mem": resources.mem}
+
+
+def _index_job_settings(resources: PBSResources) -> _IndexJobSettings:
+    """What parse and update jobs record in an index manifest and need to verify a chain."""
+    return {"pbs_resources": _pbs_resources(resources), "python_command": BLOCKSCI_IMAGE_PYTHON_COMMAND}
 
 
 def render_blocksci_parse_s3_pbs(
@@ -213,7 +224,7 @@ def render_blocksci_parse_s3_pbs(
         {
             "command": command,
             "source": _block_source(blocksci),
-            "pbs_resources": _pbs_resources(resources),
+            **_index_job_settings(resources),
         },
         extra_files=(BLOCK_ARCHIVE,) if blocksci.bitcoin_blocks_uri else (),
     )
@@ -241,9 +252,9 @@ def render_blocksci_update_s3_pbs(
         {
             "command": command,
             "source": _block_source(blocksci),
-            "pbs_resources": _pbs_resources(resources),
             "source_run_id": blocksci.cache_source_run_id,
             "artifact_uri": validate_artifact_uri(target.artifact_uri),
+            **_index_job_settings(resources),
         },
         extra_files=(BLOCK_ARCHIVE,) if blocksci.bitcoin_blocks_uri else (),
     )
