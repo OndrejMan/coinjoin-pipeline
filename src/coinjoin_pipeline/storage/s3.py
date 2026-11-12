@@ -1,6 +1,7 @@
 """S3 run targets, their validation, and the frontend's s5cmd access to them.
 
-Exporter staging lives in ``execution/s3_staging.py``.
+Marker waiting lives in ``execution/s3_markers.py`` and exporter staging in
+``execution/s3_staging.py``.
 """
 
 from __future__ import annotations
