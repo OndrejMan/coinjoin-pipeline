@@ -236,6 +236,7 @@ HELP = {
     "mainnet.dbcache_mb": "Core -dbcache in MB; keep it at half the producer job's memory",
     "mainnet.reorg_reserve": "blocks below the frozen tip that pruning keeps, so a reorganization can be undone",
     "mainnet.poll_seconds": "seconds between progress checks of the running jobs",
+    "mainnet.clear_after_sync": "empty the dataset after the last job; the next restore job refills it from S3",
     "mainnet.notebook_root": "notebook data kept beside the dataset, measured in the storage report",
     "coinjoin_analysis.program": (
         "coinjoin-analysis program to run alone: locally with coinjoin-analysis, on PBS with pbs-from-s3"
