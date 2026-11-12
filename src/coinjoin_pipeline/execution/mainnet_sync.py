@@ -1,4 +1,4 @@
-"""Manual restore → Core/Dumplings → BlockSci → checkpoint → pack PBS chain over a shared working directory."""
+"""Manual restore → Core/Dumplings → BlockSci → checkpoint → pack → clear PBS chain over a shared working directory."""
 
 from __future__ import annotations
 
@@ -183,6 +183,7 @@ def sync_settings(config: PipelineConfiguration, stage: str, budget: PBSResource
             "restore": "exclusive",
             "blocksci": "exclusive",
             "checkpoint": "shared",
+            "clear": "exclusive",
         }.get(stage),
         # Past the walltime the job is gone, so its lock entry may be cleared.
         "index_lock_seconds": walltime_to_seconds(budget.walltime) + 600,
@@ -251,7 +252,8 @@ def submit_sync(config: PipelineConfiguration) -> None:
     holds the dataset lock, so submission checks nothing there.
     """
     run_id = required(config.run_id, "run_id")
-    scripts = {stage: render_sync(config, stage) for stage in SYNC_STAGES}
+    stages = SYNC_STAGES if config.mainnet.clear_after_sync else SYNC_STAGES[:-1]
+    scripts = {stage: render_sync(config, stage) for stage in stages}
     submitted: list[tuple[str, str]] = []
     try:
         for stage, script in scripts.items():

@@ -17,7 +17,7 @@ from pathlib import Path
 
 from exporters.artifact_paths import pbs_marker
 
-from coinjoin_pipeline.execution.mainnet_jobs import blocksci, checkpoint, pack, producer, restore
+from coinjoin_pipeline.execution.mainnet_jobs import blocksci, checkpoint, clear, pack, producer, restore
 from coinjoin_pipeline.execution.mainnet_worker import Worker
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore
 
@@ -27,6 +27,7 @@ JOBS: dict[str, Callable[[Worker], None]] = {
     "blocksci": blocksci,
     "checkpoint": checkpoint,
     "pack": pack,
+    "clear": clear,
 }
 
 

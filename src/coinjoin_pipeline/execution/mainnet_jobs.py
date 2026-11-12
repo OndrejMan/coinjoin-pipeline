@@ -1,5 +1,5 @@
 """The jobs of one mainnet synchronization, in their order: restore, producer, blocksci,
-checkpoint and pack. Each is a function over its PBS job's ``Worker``.
+checkpoint, pack and clear. Each is a function over its PBS job's ``Worker``.
 
 Working data are downloaded only by the restore job and only into an empty working
 dataset. Each backup has one place: the old archive is deleted, the new one streamed and
@@ -615,3 +615,14 @@ def pack(worker: Worker) -> None:
         raise ValueError(f"{len(failed)} block files could not be packed; they stay raw in S3")
     worker.progress("complete", totals["packed"], len(pending), "done", **summary)
     worker.complete({"run_id": worker.run_id, **summary})
+
+
+def clear(worker: Worker) -> None:
+    """Job 5: empty the working dataset; the next restore job refills it from S3."""
+    worker.stage = "clear"
+    worker.acquire_dataset()
+    if read_json(worker.run / "done.json").get("run_id") != worker.run_id:
+        raise ValueError("This synchronization's checkpoint did not finish; clearing refused")
+    worker.discard_dataset()
+    worker.progress("complete", state="done")
+    worker.complete({"run_id": worker.run_id})

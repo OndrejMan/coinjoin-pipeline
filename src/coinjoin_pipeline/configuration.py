@@ -235,6 +235,7 @@ class PBSConfiguration(ConfigurationModel):
     restore: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     checkpoint: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     pack: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
+    clear: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,6 +254,8 @@ class MainnetSyncConfiguration(ConfigurationModel):
     dbcache_mb: int = option(4096, name="mainnet_dbcache_mb", minimum=1)
     reorg_reserve: int = option(2016, name="mainnet_reorg_reserve", minimum=288)
     poll_seconds: int = option(30, name="mainnet_poll_seconds", minimum=1)
+    # Empty the working dataset after the last job; the next restore job refills it from S3.
+    clear_after_sync: bool = option(True, name="mainnet_clear_after_sync")
     # Kept notebook data beside the dataset; only measured, so the storage report covers it.
     notebook_root: str | None = option(None, name="mainnet_notebook_root")
 

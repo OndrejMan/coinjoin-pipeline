@@ -74,6 +74,7 @@ class Settings(TypedDict, total=False):
     pbs_resources: PbsResources
     sync_stages: list[str]
     walltime_seconds: int
+    clear_after_sync: bool
     notebook_root: str | None
     # restore and blocksci write the index, the checkpoint reads it; producer leaves it alone.
     index_lock: str | None
