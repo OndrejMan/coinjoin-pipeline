@@ -495,7 +495,7 @@ class UnifiedReportTest(unittest.TestCase):
 
     def test_parse_args_rejects_removed_test_values(self):
         with self.assertRaises(SystemExit):
-            parse_args(["--test-values"])
+            parse_args(["--run-dir", "run", "--test-values"])
 
     def test_min_input_count_requires_a_positive_integer_or_default(self):
         self.assertIsNone(parse_min_input_count("default"))
@@ -507,11 +507,13 @@ class UnifiedReportTest(unittest.TestCase):
     def test_parse_args_reports_invalid_min_input_count_as_a_cli_error(self):
         for value in ("0", "-1", "not-a-number"):
             with self.subTest(value=value), self.assertRaises(SystemExit):
-                parse_args(["--min-input-count", value])
+                parse_args(["--run-dir", "run", "--min-input-count", value])
 
     def test_parse_args_accepts_joinmarket_detector_settings(self):
         args = parse_args(
             [
+                "--run-dir",
+                "run",
                 "--engine",
                 "joinmarket",
                 "--coinjoin-type",
@@ -536,6 +538,8 @@ class UnifiedReportTest(unittest.TestCase):
     def test_parse_args_accepts_manifest_provenance(self):
         args = parse_args(
             [
+                "--run-dir",
+                "run",
                 "--blocksci-image",
                 "blocksci:test",
                 "--coinjoin-analysis-image",
@@ -658,7 +662,7 @@ class UnifiedReportTest(unittest.TestCase):
             scenario_path.write_text(json.dumps(scenario_fixture()), encoding="utf-8")
 
             coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_fixture())
-            scenario = load_scenario(run_dir, None)
+            scenario = load_scenario(run_dir)
             report = build_report(
                 run_dir,
                 coinjoin_analysis,
@@ -2605,18 +2609,19 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(scenario["wallets"][0]["funds"], [1000, 500])
         self.assertEqual(scenario["total_initial_funds_sats"], 1500)
 
-    def test_load_scenario_fallback(self):
+    def test_load_scenario_reads_only_the_run_scenario(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            base = Path(tmpdir)
-            run_dir = base / "run-without-scenario"
+            run_dir = Path(tmpdir) / "run"
             run_dir.mkdir()
-            fallback_path = base / "defaultCoinJoin.json"
-            fallback_path.write_text(json.dumps(scenario_fixture()), encoding="utf-8")
+            self.assertIsNone(load_scenario(run_dir))
 
-            scenario = load_scenario(run_dir, fallback_path)
+            scenario_path = run_dir / "coinjoin_emulator_data" / "scenario.json"
+            scenario_path.parent.mkdir(parents=True)
+            scenario_path.write_text(json.dumps(scenario_fixture()), encoding="utf-8")
+            scenario = load_scenario(run_dir)
 
         assert scenario is not None
-        self.assertEqual(scenario["source"], str(fallback_path))
+        self.assertEqual(scenario["source"], str(scenario_path))
         self.assertEqual(scenario["sha256"], sha256_json(scenario_fixture()))
 
     def test_false_positive_sidecars_are_merged_and_filter_only_baseline_matches(self):

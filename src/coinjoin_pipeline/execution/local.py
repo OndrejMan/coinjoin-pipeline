@@ -9,19 +9,18 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from coinjoin_pipeline.configuration import PipelineConfiguration
+from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution.pbs.validation import PBSError
 from coinjoin_pipeline.execution.pipeline_logging import captured_pipeline_stage, exit_with_error
-from coinjoin_pipeline.execution.run_context import detect_active_run, pipeline_run_id_env, resolve_run_id, run_dirs
+from coinjoin_pipeline.execution.run_context import detect_active_run, run_dir_under_root
 from coinjoin_pipeline.execution.workflow import SharedStorageStageRunner, shared_storage_analysis_plan
 
 from . import containers, kubernetes_launch, settings, shared_storage_pbs
 from .stage_executor import execute_analysis
 
 
-def _emulate(args: PipelineConfiguration, logs_root: Path, local_build: bool, *, full_run: bool) -> Path | None:
+def _emulate(args: PipelineConfiguration, logs_root: Path, local_build: bool, *, full_run: bool) -> Path:
     """Run the emulator on Docker or Kubernetes and file its log under the run it created."""
-    before = run_dirs(logs_root)
     on_kubernetes = args.driver == "kubernetes"
     with captured_pipeline_stage(logs_root, "Kubernetes emulation" if on_kubernetes else "Docker emulation") as log:
         if on_kubernetes:
@@ -33,22 +32,17 @@ def _emulate(args: PipelineConfiguration, logs_root: Path, local_build: bool, *,
             )
         else:
             containers.run_script(settings.EMULATE_SCRIPT, config=args)
-    active_run = detect_active_run(logs_root, before)
+    active_run = detect_active_run(logs_root)
     if active_run is None:
         log.relocate(logs_root / "_failed")
-        if full_run or pipeline_run_id_env():
-            exit_with_error(RuntimeError("Emulator did not produce the expected run directory."))
-        return None
+        exit_with_error(RuntimeError("Emulator did not produce the expected run directory."))
     print(f"Active run: {active_run.name}")
     log.relocate_to_run(active_run)
     return active_run
 
 
 def _selected_run_dir(args: PipelineConfiguration, logs_root: Path) -> Path:
-    active_run_id = resolve_run_id(args.run_dir, logs_root)
-    if not active_run_id:
-        exit_with_error(RuntimeError("No grouped emulation run folder found."))
-    return (logs_root / active_run_id).resolve()
+    return run_dir_under_root(required(args.run_dir, "run_dir"), logs_root)
 
 
 def _on_pbs(logs_root: Path, stage_name: str, run_dir: Path, submit) -> None:
@@ -68,7 +62,6 @@ def run_configuration(args: PipelineConfiguration, logs_root: Path, local_build:
         _emulate(args, logs_root, local_build, full_run=False)
     elif action == "full-run":
         run_dir = _emulate(args, logs_root, local_build, full_run=True)
-        assert run_dir is not None
         try:
             run_analysis(args, run_dir, logs_root)
         except (PBSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:

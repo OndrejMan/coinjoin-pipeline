@@ -77,15 +77,12 @@ def normalize_scenario(scenario: JsonObject, source_path: Path) -> JsonObject:
     }
 
 
-def load_scenario(run_dir: Path, fallback_path: Path | None) -> JsonObject | None:
+def load_scenario(run_dir: Path) -> JsonObject | None:
+    """The scenario the emulator stored with the run; external runs have none."""
     run_scenario_path = run_dir / SCENARIO_FILE
-    if run_scenario_path.exists():
-        return normalize_scenario(load_json(run_scenario_path), run_scenario_path)
-
-    if fallback_path is not None and fallback_path.exists():
-        return normalize_scenario(load_json(fallback_path), fallback_path)
-
-    return None
+    if not run_scenario_path.exists():
+        return None
+    return normalize_scenario(load_json(run_scenario_path), run_scenario_path)
 
 
 def coinjoin_analysis_wallet_names(coinjoin_analysis: dict[str, TransactionRecord]) -> set[str]:

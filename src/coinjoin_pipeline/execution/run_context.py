@@ -21,11 +21,6 @@ def run_dirs(emulation_logs_dir: Path, marker_files: tuple[str, ...] = EMULATION
     return {child.resolve() for child in emulation_logs_dir.iterdir() if is_run_dir(child, marker_files)}
 
 
-def newest_run_dir(emulation_logs_dir: Path, marker_files: tuple[str, ...] = EMULATION_MARKERS) -> Path | None:
-    candidates = run_dirs(emulation_logs_dir, marker_files)
-    return max(candidates, key=lambda path: path.stat().st_mtime) if candidates else None
-
-
 def pipeline_run_id_env() -> str:
     """Return the host-pinned run id, ignoring an invalid environment value."""
     run_id_value = os.environ.get("PIPELINE_RUN_ID", "")
@@ -38,21 +33,13 @@ def pipeline_run_id_env() -> str:
         return ""
 
 
-def detect_active_run(
-    emulation_logs_dir: Path,
-    before: set[Path],
-    marker_files: tuple[str, ...] = EMULATION_MARKERS,
-) -> Path | None:
-    """Locate the newly created run, honouring a host-pinned id first."""
+def detect_active_run(emulation_logs_dir: Path, marker_files: tuple[str, ...] = EMULATION_MARKERS) -> Path | None:
+    """The run the host pinned through PIPELINE_RUN_ID, once the emulator has stored it."""
     expected_run_id = pipeline_run_id_env()
-    if expected_run_id:
-        run_dir = (emulation_logs_dir / expected_run_id).resolve()
-        return run_dir if is_run_dir(run_dir, marker_files) else None
-    created = sorted(
-        run_dirs(emulation_logs_dir, marker_files) - before,
-        key=lambda path: path.stat().st_mtime,
-    )
-    return created[-1] if created else newest_run_dir(emulation_logs_dir, marker_files)
+    if not expected_run_id:
+        return None
+    run_dir = (emulation_logs_dir / expected_run_id).resolve()
+    return run_dir if is_run_dir(run_dir, marker_files) else None
 
 
 def run_dir_under_root(run_dir_arg: str, runs_root: Path) -> Path:
@@ -69,20 +56,3 @@ def run_dir_under_root(run_dir_arg: str, runs_root: Path) -> Path:
         print(f"[ERROR] Run directory not found: {resolved}", file=sys.stderr)
         sys.exit(2)
     return resolved
-
-
-def resolve_run_id(
-    run_dir_arg: str | None,
-    emulation_logs_dir: Path,
-    marker_files: tuple[str, ...] = EMULATION_MARKERS,
-) -> str | None:
-    if run_dir_arg:
-        return run_dir_under_root(run_dir_arg, emulation_logs_dir).name
-    latest = newest_run_dir(emulation_logs_dir, marker_files)
-    if latest is None:
-        return None
-    print(
-        f"[WARN] No --run-dir provided; using newest run folder: {latest}",
-        file=sys.stderr,
-    )
-    return latest.name

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
 from pathlib import Path
 
 from exporters.analysis_artifact import ARTIFACT_NAME
@@ -14,7 +13,6 @@ from exporters.artifact_paths import (
     DUMPLINGS_SNAPSHOT_FILE,
     MAPPINGS_FILE,
     REPORT_JSON,
-    SCENARIO_FILE,
     blocksci_analysis_dir,
     coinjoin_analysis_dir,
     report_dir,
@@ -42,18 +40,7 @@ from exporters.report_types import BlockSciAnalysisArtifact
 from exporters.scenario import load_scenario
 
 
-def find_latest_run_dir(runs_root: Path) -> Path:
-    candidates = [child for child in runs_root.iterdir() if child.is_dir() and (child / SCENARIO_FILE).exists()]
-    if not candidates:
-        raise FileNotFoundError(f"No emulation run folders found under {runs_root}")
-    latest = max(candidates, key=lambda path: path.stat().st_mtime)
-    print(f"[WARN] No --run-dir provided; using newest run folder: {latest}", file=sys.stderr)
-    return latest
-
-
-def resolve_run_dir(runs_root: Path, run_dir_arg: str | Path | None) -> Path:
-    if run_dir_arg is None or not str(run_dir_arg).strip():
-        return find_latest_run_dir(runs_root).resolve()
+def resolve_run_dir(runs_root: Path, run_dir_arg: str | Path) -> Path:
     run_dir = Path(run_dir_arg).expanduser()
     if not run_dir.is_absolute():
         run_dir = runs_root.expanduser() / run_dir
@@ -64,8 +51,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Write a unified BlockSci-vs-emulator JSON report.")
     parser.add_argument("--config", type=Path, help="BlockSci config; defaults to the selected run config.")
     parser.add_argument("--runs-root", type=Path, default=Path("/runs/emulation/logs"))
-    parser.add_argument("--run-dir", help="Run folder path or name under --runs-root.")
-    parser.add_argument("--scenario", type=Path, help="Fallback scenario JSON path if run folder has none.")
+    parser.add_argument("--run-dir", required=True, help="Run folder path or name under --runs-root.")
     parser.add_argument("--engine", default=os.environ.get("COINJOIN_ENGINE"))
     parser.add_argument(
         "--mode",
@@ -167,7 +153,7 @@ def assemble_report(args: argparse.Namespace) -> int:
     if args.skip_clustering:
         predicted_address_clusters = None
         cluster_export_error = "Clustering was explicitly skipped during report assembly."
-    scenario = load_scenario(run_dir, args.scenario)
+    scenario = load_scenario(run_dir)
     liquidity_evaluation, liquidity_dataset = build_liquidity(
         run_dir,
         emulator_data,

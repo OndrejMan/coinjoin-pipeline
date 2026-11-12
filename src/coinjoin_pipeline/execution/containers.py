@@ -20,7 +20,7 @@ from exporters.artifact_paths import BASELINE_FILE, COINJOIN_ANALYSIS_DIR, EMULA
 from exporters.common import tree_sha256
 from exporters.image_provenance import inspect_image
 
-from coinjoin_pipeline.configuration import PipelineConfiguration
+from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution.locks import (
     close_locks as close_pipeline_locks,
 )
@@ -29,7 +29,7 @@ from coinjoin_pipeline.execution.pbs_settings import resolve_unified_report_imag
 from coinjoin_pipeline.execution.pipeline_logging import (
     captured_pipeline_stage,
 )
-from coinjoin_pipeline.execution.run_context import resolve_run_id, run_dirs
+from coinjoin_pipeline.execution.run_context import run_dir_under_root, run_dirs
 from coinjoin_pipeline.execution.scenarios import container_scenario_path, scenario_source_path
 from coinjoin_pipeline.execution.runtime import (
     CONTAINER_RUNTIME_ENV,
@@ -197,7 +197,7 @@ def compose_env(
             scenarios_dir = source.parent
             env["SCENARIOS_DIR"] = str(scenarios_dir)
         scenario = str(source)
-    env["SCENARIO_FALLBACK_PATH"] = container_scenario_path(scenario, scenarios_dir, config.engine)
+    env["SCENARIO_CONTAINER_PATH"] = container_scenario_path(scenario, scenarios_dir, config.engine)
     add_image_provenance_env(env)
     if active_run_id:
         env["ACTIVE_RUN_ID"] = active_run_id
@@ -269,7 +269,7 @@ def run_script(
     if blocksci_script:
         env["BLOCKSCI_SCRIPT"] = blocksci_script
     if script == settings.EMULATE_SCRIPT:
-        relative_scenario = env["SCENARIO_FALLBACK_PATH"].removeprefix(settings.CONTAINER_SCENARIOS_DIR + "/")
+        relative_scenario = env["SCENARIO_CONTAINER_PATH"].removeprefix(settings.CONTAINER_SCENARIOS_DIR + "/")
         args = ("--scenario", "/app/scenarios/" + relative_scenario)
     try:
         run_command(["bash", str(script), *args], cwd=settings.ROOT_DIR, env=env)
@@ -316,15 +316,12 @@ def run_coinjoin_analysis(
     emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"])
     if all_runs:
         active_run_ids = [path.name for path in sorted(run_dirs(emulation_logs_dir))]
+        if not active_run_ids:
+            print(f"[ERROR] No emulation run folder found under {emulation_logs_dir}.", file=sys.stderr)
+            sys.exit(2)
     else:
-        active_run_id = resolve_run_id(run_dir_arg, Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve())
-        active_run_ids = [active_run_id] if active_run_id else []
-    if not active_run_ids:
-        print(
-            "[ERROR] No grouped emulation run folder found. Run emulate/full-run first or pass --run-dir explicitly.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
+        selected = run_dir_under_root(required(run_dir_arg, "run_dir"), emulation_logs_dir.expanduser().resolve())
+        active_run_ids = [selected.name]
     for active_run_id in active_run_ids:
         run_dir = emulation_logs_dir / active_run_id
         baseline_path = run_dir / BASELINE_FILE
@@ -467,8 +464,6 @@ def export_command(active_run_id: str, env: dict[str, str]) -> str:
         "report",
         "--run-dir",
         f"{settings.RUNS_ROOT_CONTAINER}/{active_run_id}",
-        "--scenario",
-        env["SCENARIO_FALLBACK_PATH"],
         "--engine",
         env.get("COINJOIN_ENGINE", settings.DEFAULT_ENGINE),
     ]
@@ -502,13 +497,8 @@ def export_command(active_run_id: str, env: dict[str, str]) -> str:
 
 def run_export_only(args: PipelineConfiguration) -> None:
     env = compose_env(args)
-    active_run_id = resolve_run_id(args.run_dir, Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve())
-    if not active_run_id:
-        print(
-            "[ERROR] No emulation run folder found. Run emulate/full-run first, or pass --run-dir explicitly.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
+    logs_root = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
+    active_run_id = run_dir_under_root(required(args.run_dir, "run_dir"), logs_root).name
     env = compose_env(args, active_run_id)
     emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
     run_dir = emulation_logs_dir / active_run_id
@@ -530,8 +520,6 @@ def run_export_only(args: PipelineConfiguration) -> None:
         f"{emulation_logs_dir}:{settings.RUNS_ROOT_CONTAINER}:rw",
         "-v",
         f"{env['EXPORTERS_DIR']}:/mnt/exporters:ro",
-        "-v",
-        f"{env['SCENARIOS_DIR']}:/mnt/scenarios:ro",
         "--env",
         "REPRODUCTION_COMMAND",
         "--env",

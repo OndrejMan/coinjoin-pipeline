@@ -689,7 +689,6 @@ class WrapperExportTest(unittest.TestCase):
 
     def test_export_command_uses_explicit_minimum_input_count(self):
         env = {
-            "SCENARIO_FALLBACK_PATH": "/mnt/scenarios/defaultCoinJoin.json",
             "BLOCKSCI_COINJOIN_TYPE": "wasabi2",
             "BLOCKSCI_MIN_INPUT_COUNT": "1",
             "BLOCKSCI_JOINMARKET_DETECTOR": "definite",
@@ -708,7 +707,6 @@ class WrapperExportTest(unittest.TestCase):
 
     def test_export_command_does_not_accept_test_value_environment(self):
         env = {
-            "SCENARIO_FALLBACK_PATH": "/mnt/scenarios/defaultCoinJoin.json",
             "BLOCKSCI_COINJOIN_TYPE": "wasabi2",
             "BLOCKSCI_MIN_INPUT_COUNT": "1",
             "BLOCKSCI_TEST_VALUES": "true",
@@ -839,13 +837,13 @@ class WrapperExportTest(unittest.TestCase):
 
             with mock.patch.dict(os.environ, {"PIPELINE_RUN_ID": pinned.name}):
                 # The emulator never stored artifacts: the stale run must not win.
-                self.assertIsNone(detect_active_run(root, set()))
+                self.assertIsNone(detect_active_run(root))
 
                 (pinned / "coinjoin_emulator_data").mkdir()
                 (pinned / "coinjoin_emulator_data" / "scenario.json").write_text("{}", encoding="utf-8")
-                self.assertEqual(detect_active_run(root, set()), pinned.resolve())
+                self.assertEqual(detect_active_run(root), pinned.resolve())
 
-    def test_detect_active_run_falls_back_without_pinned_id(self):
+    def test_detect_active_run_never_guesses_without_pinned_id(self):
         from coinjoin_pipeline.execution.run_context import detect_active_run
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -856,7 +854,7 @@ class WrapperExportTest(unittest.TestCase):
 
             environment = {key: value for key, value in os.environ.items() if key != "PIPELINE_RUN_ID"}
             with mock.patch.dict(os.environ, environment, clear=True):
-                self.assertEqual(detect_active_run(root, set()), run.resolve())
+                self.assertIsNone(detect_active_run(root))
 
     def test_run_coinjoin_analysis_targets_requested_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1460,7 +1458,7 @@ class ScenarioPathTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {}, clear=True):
                 env = compose_env(config)
                 self.assertEqual(env["SCENARIOS_DIR"], str(catalogue))
-                self.assertEqual(env["SCENARIO_FALLBACK_PATH"], "/mnt/scenarios/fin-cliff.json")
+                self.assertEqual(env["SCENARIO_CONTAINER_PATH"], "/mnt/scenarios/fin-cliff.json")
                 with mock.patch("coinjoin_pipeline.execution.containers.run_command") as run:
                     run_script(settings.EMULATE_SCRIPT, "--scenario", str(scenario), config=config)
                 self.assertEqual(run.call_args.args[0][-2:], ["--scenario", "/app/scenarios/fin-cliff.json"])
