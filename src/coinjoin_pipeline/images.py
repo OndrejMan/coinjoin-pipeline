@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass
 DEFAULT_REGISTRY = "ghcr.io/ondrejman"
 REPOSITORIES = {
     "emulator": "emulator-manager",
+    "coinjoin_analysis": "coinjoin-analysis",
 }
 
 
@@ -20,6 +21,7 @@ def image_names() -> dict[str, str]:
 
 IMAGE_ENVIRONMENT = {
     "emulator": "COINJOIN_EMULATOR_IMAGE",
+    "coinjoin_analysis": "COINJOIN_ANALYSIS_IMAGE",
 }
 DEFAULT_VERSION = "latest"
 
@@ -32,6 +34,7 @@ IMAGE_RE = re.compile(
 @dataclass(frozen=True)
 class Images:
     emulator: str
+    coinjoin_analysis: str
     def as_dict(self) -> dict[str, str]:
         return asdict(self)
 

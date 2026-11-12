@@ -31,3 +31,5 @@ def run_configuration(args: PipelineConfiguration, logs_root: Path) -> None:
     action = args.action
     if action == "emulate":
         _emulate(args, logs_root)
+    elif action == "coinjoin-analysis":
+        containers.run_coinjoin_analysis(args.run_dir)

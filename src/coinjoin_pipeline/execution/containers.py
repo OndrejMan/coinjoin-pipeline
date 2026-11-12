@@ -12,8 +12,15 @@ import sys
 from pathlib import Path
 from typing import Mapping
 
-from coinjoin_pipeline.configuration import PipelineConfiguration
+from exporters.artifact_paths import COINJOIN_ANALYSIS_DIR, EMULATOR_DIR
+
+from coinjoin_pipeline.configuration import PipelineConfiguration, required
+from coinjoin_pipeline.execution.pipeline_logging import (
+    captured_pipeline_stage,
+)
+from coinjoin_pipeline.execution.run_context import run_dir_under_root
 from coinjoin_pipeline.execution.scenarios import container_scenario_path, scenario_source_path
+from coinjoin_pipeline.execution.runtime import compose_command
 
 from . import settings
 
@@ -47,6 +54,7 @@ def compose_project_name(host_root_dir: Path) -> str:
 
 def compose_env(
     config: PipelineConfiguration = DEFAULT_CONFIGURATION,
+    active_run_id: str | None = None,
     *,
     include_scenario: bool = True,
 ) -> dict[str, str]:
@@ -65,6 +73,7 @@ def compose_env(
     env["EMULATION_LOGS_DIR"] = str(emulation_logs_dir)
     env["COINJOIN_ENGINE"] = config.engine
     env["RUN_TIMEZONE"] = config.run_timezone
+    env.setdefault("COINJOIN_ANALYSIS_IMAGE", settings.DEFAULT_COINJOIN_ANALYSIS_IMAGE)
     env.setdefault("COINJOIN_EMULATOR_IMAGE", settings.DEFAULT_EMULATOR_IMAGE)
     scenario = config.scenario if include_scenario else None
     if scenario:
@@ -74,19 +83,48 @@ def compose_env(
             env["SCENARIOS_DIR"] = str(scenarios_dir)
         scenario = str(source)
     env["SCENARIO_CONTAINER_PATH"] = container_scenario_path(scenario, scenarios_dir, config.engine)
+    if active_run_id:
+        env["ACTIVE_RUN_ID"] = active_run_id
+        run_dir = emulation_logs_dir / active_run_id
+        analysis_dir = run_dir / COINJOIN_ANALYSIS_DIR
+        analysis_dir.mkdir(parents=True, exist_ok=True)
+        env[settings.COINJOIN_ANALYSIS_SOURCE_PATH_ENV] = str(analysis_dir)
+        env[settings.COINJOIN_ANALYSIS_MOUNT_PATH_ENV] = (
+            f"{settings.COINJOIN_ANALYSIS_SELECTED_ROOT_CONTAINER}/{active_run_id}"
+        )
+        env[settings.COINJOIN_ANALYSIS_TARGET_PATH_ENV] = settings.COINJOIN_ANALYSIS_SELECTED_ROOT_CONTAINER
+        env[settings.COINJOIN_ANALYSIS_INPUT_DATA_PATH_ENV] = str(run_dir / EMULATOR_DIR / "data")
+    else:
+        env.pop("ACTIVE_RUN_ID", None)
+        env.pop(settings.COINJOIN_ANALYSIS_SOURCE_PATH_ENV, None)
+        env.pop(settings.COINJOIN_ANALYSIS_MOUNT_PATH_ENV, None)
+        env.pop(settings.COINJOIN_ANALYSIS_TARGET_PATH_ENV, None)
+        env.pop(settings.COINJOIN_ANALYSIS_INPUT_DATA_PATH_ENV, None)
     return env
+
+
+def compose_base_command(env: Mapping[str, str]) -> list[str]:
+    """Return the common Compose invocation for this pipeline checkout."""
+    return [
+        *compose_command(env),
+        "-f",
+        str(settings.COMPOSE_FILE),
+        "-p",
+        env.get(settings.COMPOSE_PROJECT_ENV, settings.COMPOSE_PROJECT),
+    ]
 
 
 def run_script(
     script: Path,
     *args: str,
     config: PipelineConfiguration = DEFAULT_CONFIGURATION,
+    active_run_id: str | None = None,
     include_scenario: bool = True,
 ) -> None:
     if not script.exists():
         print(f"[ERROR] Script not found: {script}", file=sys.stderr)
         sys.exit(1)
-    env = compose_env(config, include_scenario=include_scenario)
+    env = compose_env(config, active_run_id, include_scenario=include_scenario)
     if script == settings.EMULATE_SCRIPT:
         relative_scenario = env["SCENARIO_CONTAINER_PATH"].removeprefix(settings.CONTAINER_SCENARIOS_DIR + "/")
         args = ("--scenario", "/app/scenarios/" + relative_scenario)
@@ -94,3 +132,33 @@ def run_script(
         run_command(["bash", str(script), *args], cwd=settings.ROOT_DIR, env=env)
     except subprocess.CalledProcessError as exc:
         sys.exit(exc.returncode)
+
+
+def run_coinjoin_analysis(run_dir_arg: str | None = None) -> None:
+    env = compose_env()
+    emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"])
+    selected = run_dir_under_root(required(run_dir_arg, "run_dir"), emulation_logs_dir.expanduser().resolve())
+    with captured_pipeline_stage(emulation_logs_dir, "coinjoin-analysis baseline", selected):
+        try:
+            run_coinjoin_analysis_docker_stage(selected.name)
+        except subprocess.CalledProcessError as exc:
+            sys.exit(exc.returncode)
+
+
+def run_coinjoin_analysis_docker_stage(active_run_id: str) -> None:
+    """Run coinjoin-analysis through Compose."""
+    run_env = compose_env(active_run_id=active_run_id)
+    compose_cmd = compose_base_command(run_env)
+    run_command(
+        [
+            *compose_cmd,
+            "--profile",
+            "analysis",
+            "run",
+            "--rm",
+            "--no-deps",
+            "coinjoin_analysis",
+        ],
+        cwd=settings.ROOT_DIR,
+        env=run_env,
+    )

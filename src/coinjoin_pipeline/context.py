@@ -30,7 +30,7 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
     root = Path(config.runs_root).expanduser().resolve() if config.runs_root else default_runs_root()
     config = replace(config, runs_root=str(root))
     provided = set(config.provided)
-    if config.action == "emulate":
+    if config.action == "emulate" and not config.run_dir:
         config = replace(config, run_id=run_id_for(config))
         provided.add("run_id")
     config = replace(config, _provided=frozenset(provided))
@@ -55,13 +55,17 @@ def resolve_run_images(config: PipelineConfiguration) -> tuple[PipelineConfigura
         images=replace(
             config.images,
             emulator=images.emulator,
+            coinjoin_analysis=images.coinjoin_analysis,
         ),
     )
     return config, images
 
 
 def selected_run_dir(config: PipelineConfiguration) -> Path | None:
-    """The directory of the run ID."""
+    """--run-dir relative to the runs root, else the directory of the run ID."""
+    if config.run_dir:
+        selected = Path(config.run_dir).expanduser()
+        return (selected if selected.is_absolute() else config.runs_path / selected).resolve()
     return config.runs_path / config.run_id if config.run_id else None
 
 
@@ -73,6 +77,7 @@ def host_environment(config: PipelineConfiguration, images: Images) -> dict[str,
         "SCENARIOS_DIR": str(SCENARIOS_ROOT),
         "EMULATION_LOGS_DIR": str(root),
         "COINJOIN_EMULATOR_IMAGE": images.emulator,
+        "COINJOIN_ANALYSIS_IMAGE": images.coinjoin_analysis,
         "PYTHONDONTWRITEBYTECODE": "1",
     }
     if config.run_id:
