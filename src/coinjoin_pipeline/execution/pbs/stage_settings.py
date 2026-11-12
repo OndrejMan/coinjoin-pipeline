@@ -157,7 +157,13 @@ class MappingsSettings(TypedDict):
     sake_image: str
 
 
-class BlocksciSettings(CommandSettings):
+class IndexWriterSettings(CommandSettings):
+    """A job that writes an index records its resources in the index manifest."""
+
+    pbs_resources: PbsResourceSettings
+
+
+class BlocksciSettings(IndexWriterSettings):
     """The combined parse and analysis of an emulation."""
 
     include_report: bool
@@ -170,10 +176,8 @@ class PersistentJobSettings(TypedDict):
     persistent: PersistentSettings | None
 
 
-class BlocksciParseSettings(CommandSettings, PersistentJobSettings):
+class BlocksciParseSettings(IndexWriterSettings, PersistentJobSettings):
     source: SourceSettings
-    # Recorded in the index manifest.
-    pbs_resources: PbsResourceSettings
     # How the BlockSci image runs verify_chain.py.
     python_command: str
 

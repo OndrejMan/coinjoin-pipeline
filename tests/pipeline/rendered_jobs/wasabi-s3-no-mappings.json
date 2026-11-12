@@ -18,6 +18,10 @@
       "job_log": "blocksci.pbs.log",
       "log_prefix": "s3://xman-coinjoin-new/runs/2026-07-28-wasabi-k8s-s3-06/logs",
       "ncpus": 8,
+      "pbs_resources": {
+        "mem": "64gb",
+        "ncpus": 8
+      },
       "profile": "coinjoin",
       "run_id": "2026-07-28-wasabi-k8s-s3-06",
       "run_prefix": "s3://xman-coinjoin-new/runs/2026-07-28-wasabi-k8s-s3-06",

@@ -38,6 +38,7 @@ def stage(tmp_path, run_id):
             "profile": "test",
             "image_name": "docker://blocksci",
             "ncpus": 2,
+            "pbs_resources": {"ncpus": 2, "mem": "8gb"},
         },
         tmp_path / "scratch",
     )
@@ -100,6 +101,7 @@ def test_the_streamed_archive_restores_the_same_verified_index(tmp_path):
     manifest = json.loads((files / "manifest.json").read_text())
     assert manifest["exported_max_block"] == 42
     assert manifest["members"] == ["config.json", "files.txt", "manifest.json", "parsed"]
+    assert manifest["pbs_resources"] == {"ncpus": 2, "mem": "8gb"}
     assert manifest["archive_sha256"] == hashlib.sha256((files / "blocksci_index.tar.zst").read_bytes()).hexdigest()
     assert "index_dir" not in manifest
     original = (tmp_path / "scratch/coinjoin-run/source/blocksci_data/config.json").read_bytes()

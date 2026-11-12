@@ -230,7 +230,12 @@ def render_blocksci_s3_pbs(
         target,
         resources,
         image,
-        {"command": command, "include_report": include_report, "export_analysis": export_analysis},
+        {
+            "command": command,
+            "include_report": include_report,
+            "export_analysis": export_analysis,
+            "pbs_resources": _pbs_resources(resources),
+        },
     )
 
 
@@ -322,12 +327,14 @@ class _IndexJobSettings(TypedDict):
     python_command: str
 
 
+def _pbs_resources(resources: PBSResources) -> PbsResourceSettings:
+    """The resources of a job that writes an index, recorded in the index manifest."""
+    return {"ncpus": resources.ncpus, "mem": resources.mem}
+
+
 def _index_job_settings(resources: PBSResources) -> _IndexJobSettings:
     """What parse and update jobs record in an index manifest and need to verify a chain."""
-    return {
-        "pbs_resources": {"ncpus": resources.ncpus, "mem": resources.mem},
-        "python_command": BLOCKSCI_IMAGE_PYTHON_COMMAND,
-    }
+    return {"pbs_resources": _pbs_resources(resources), "python_command": BLOCKSCI_IMAGE_PYTHON_COMMAND}
 
 
 def render_blocksci_parse_s3_pbs(

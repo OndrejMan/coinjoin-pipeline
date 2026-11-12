@@ -52,6 +52,7 @@ from coinjoin_pipeline.execution.pbs.stage_settings import (
     BlocksciParseSettings,
     BlocksciSettings,
     BlocksciUpdateSettings,
+    IndexWriterSettings,
     PersistentJobSettings,
     PersistentSettings,
     SourceSettings,
@@ -96,6 +97,8 @@ def publish_index(stage: Stage, source_kind: str, network: str, max_block: int, 
     """
     stage.log("archiving reusable index")
     index = run_index(stage, f"{stage.run_prefix}/{BLOCKSCI_PARSE_DIR}")
+    # Every job that writes an index records its resources, like a persistent index does.
+    extra = {**extra, "pbs_resources": cast(IndexWriterSettings, stage.settings)["pbs_resources"]}
     manifest = index_manifest(stage.run_id, stage.settings["image_name"], source_kind, network, max_block, extra)
     index.publish(stage.work / BLOCKSCI_CONFIG_FILE, manifest, in_place=False)
     index.backup(threads=stage.settings["ncpus"])

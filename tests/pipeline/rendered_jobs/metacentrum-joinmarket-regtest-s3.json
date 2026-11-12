@@ -18,6 +18,10 @@
       "job_log": "blocksci.pbs.log",
       "log_prefix": "s3://xman-coinjoin-new/runs/example-run/logs",
       "ncpus": 2,
+      "pbs_resources": {
+        "mem": "16gb",
+        "ncpus": 2
+      },
       "profile": "coinjoin",
       "run_id": "example-run",
       "run_prefix": "s3://xman-coinjoin-new/runs/example-run",
