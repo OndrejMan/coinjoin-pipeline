@@ -167,9 +167,10 @@ def compose_env(
     env["BLOCKSCI_COINJOIN_TYPE"] = config.coinjoin_type
     env["BLOCKSCI_MIN_INPUT_COUNT"] = "default" if config.min_input_count is None else str(config.min_input_count)
     env["RUN_TIMEZONE"] = config.run_timezone
-    env.setdefault("BLOCKSCI_IMAGE", default_image("blocksci"))
-    env.setdefault("COINJOIN_ANALYSIS_IMAGE", default_image("coinjoin_analysis"))
-    env.setdefault("COINJOIN_EMULATOR_IMAGE", default_image("emulator"))
+    registry = config.images.registry
+    env.setdefault("BLOCKSCI_IMAGE", default_image("blocksci", registry))
+    env.setdefault("COINJOIN_ANALYSIS_IMAGE", default_image("coinjoin_analysis", registry))
+    env.setdefault("COINJOIN_EMULATOR_IMAGE", default_image("emulator", registry))
     scenario = config.scenario if include_scenario else None
     if scenario:
         source = scenario_source_path(scenario, scenario_root, config.engine)
