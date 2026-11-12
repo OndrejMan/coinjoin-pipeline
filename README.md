@@ -498,3 +498,270 @@ an existing baseline without rerunning either analyzer:
 This mappings-only form expects
 `coinjoin-analysis_data/coinjoin_tx_info.json` to already exist in the run
 prefix and does not regenerate the unified report by itself.
+
+### Saved BlockSci index
+
+All S3 PBS parsing workflows publish the same
+`blocksci-parse_data/{blocksci_data.tar.zst,blocksci_data.tar.zst.sha256,manifest.json}`.
+The zstd archive contains the working `blocksci_data/` directory; the schema 1.1
+manifest records its run, image, source, exported maximum block and SHA-256.
+The default `--blocksci-workflow combined` parses and analyzes in one job.
+`reusable` splits parsing and analysis into dependent jobs; `cached` skips
+parsing and reads a saved index. The job arrangement does not change the S3 format.
+S3 never receives the loose working index.
+
+Archive transfer shares the persistent mainnet backup's implementation. Uploads
+stream through tar, zstd and SHA-256 into S3 when `s5 pipe` is supported, otherwise
+through a temporary archive on job scratch. Restores stream directly into job
+scratch and verify the checksum before analysis or Jupyter can use the index.
+The manifest is uploaded last; a failed publication is not a reusable index.
+Emulation indexes do not use persistent or multijob storage. The persistent
+mainnet index retains its existing location, direct reads, updates and backup lifecycle.
+
+Use the split graph in a complete run:
+
+```bash
+./runIt.sh full-run \
+  ... \
+  --run-id '<id>' \
+  --artifact-backend s3 \
+  --analysis-pbs --blocksci-pbs \
+  --blocksci-workflow reusable
+```
+
+Or publish only the parsed cache for an existing S3 run:
+
+```bash
+./runIt.sh pbs-from-s3 \
+  --run-id '<id>' \
+  --artifact-uri s3://coinjoin-thesis/runs \
+  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
+  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
+  --s3-profile coinjoin \
+  --engine wasabi \
+  --blocksci-pbs \
+  --blocksci-workflow reusable \
+  --blocksci-task parse
+```
+
+The cache producer can also start from data already available to MetaCentrum
+under `/storage`. To parse an external Bitcoin Core coin directory (the
+directory that directly contains `blocks/`), provide the network and an
+inclusive maximum block height:
+
+```bash
+./runIt.sh pbs-from-s3 \
+  ... \
+  --run-id '<id>' \
+  --engine wasabi \
+  --blocksci-pbs \
+  --blocksci-workflow reusable \
+  --blocksci-task parse \
+  --blocksci-external-bitcoin-datadir /storage/brno2/home/<login>/bitcoin \
+  --blocksci-network bitcoin \
+  --blocksci-max-block 850000
+```
+
+To reuse an index parsed elsewhere, point at a BlockSci directory containing
+`config.json` and `parsed/`. The import job copies it into the canonical run
+layout, rewrites the parsed-data path, verifies the expected files, and
+publishes the same checksummed cache:
+
+```bash
+./runIt.sh pbs-from-s3 \
+  ... \
+  --run-id '<id>' \
+  --engine wasabi \
+  --blocksci-pbs \
+  --blocksci-workflow reusable \
+  --blocksci-task parse \
+  --blocksci-external-blocksci-dir /storage/brno2/home/<login>/blocksci_data
+```
+
+To incrementally advance an external mainnet cache after Bitcoin Core has
+received newer blocks, use the existing cache run as the source and a fresh
+run ID as the target. Use the same block source as the source cache: a cache
+parsed from a coin directory updates from that directory, and a cache parsed
+from the block archive updates with `--blocksci-bitcoin-blocks-uri` instead of
+`--blocksci-external-bitcoin-datadir`:
+
+```bash
+./runIt.sh pbs-from-s3 \
+  --run-id 'mainnet-850100' \
+  --artifact-uri s3://coinjoin-thesis/runs \
+  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
+  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
+  --s3-profile coinjoin \
+  --engine joinmarket \
+  --blocksci-pbs \
+  --blocksci-workflow cached \
+  --blocksci-task update \
+  --blocksci-cache-source-run-id 'mainnet-850000' \
+  --blocksci-external-bitcoin-datadir /storage/brno2/home/<login>/bitcoin \
+  --blocksci-network bitcoin \
+  --blocksci-max-block 850100
+```
+
+The target maximum is inclusive and must be greater than the maximum recorded
+by the source cache. The target prefix must be completely empty. The job
+verifies and extracts the source cache, runs only the incremental
+`blocksci_parser update`, and uploads a new checksummed cache under the target
+run. It never overwrites the source cache, so a parser or upload failure leaves
+the last successful generation intact. From the block archive it downloads only
+the last file the source cache scanned, the newer files, and any older file that
+holds a height above the source maximum, after checking that the files the
+source cache indexed are unchanged. Archive updates also verify that the
+result preserves the source cache's block hash at its recorded height. Older
+archive caches without `exported_block_hash` must be parsed again; they are
+rejected before block downloads. A mainnet archive update needs a new
+`--blocksci-expected-block-hash` for its target `--blocksci-max-block`.
+Use the new target run ID for later
+`cached` script or notebook jobs.
+
+After either command finishes, use the normal `cached` `notebook` or `script`
+command for the same `<id>`. Those tasks need only the cache. The standard
+`detect` task additionally needs the run's emulator labels and exported block
+metadata, so an otherwise empty external-data run is intended for notebook or
+custom-script analysis rather than the unified emulator comparison report.
+
+An analysis can read such a cache without touching it: give the script,
+external, or notebook task a fresh `--run-id`, `--blocksci-workflow cached`
+and `--blocksci-cache-source-run-id` of the cache run. The job checks the
+source manifest, writes outputs and markers under its own run, and stores the
+source manifest next to the outputs as `blocksci-cache-manifest.json`. For the
+script task, `--blocksci-pin-height` and the half-open
+`--blocksci-scan-start-height`/`--blocksci-scan-end-height` reach the script as
+`BLOCKSCI_MAX_BLOCK` (pin + 1), `SCAN_START_HEIGHT` and `SCAN_END_HEIGHT`;
+`examples/metacentrum-mainnet-analyze.yaml` uses all of them.
+
+For the mainnet index, keep the working copy out of S3:
+`--blocksci-index-dir` points the parse, update and analysis jobs at one
+persistent directory, usually on MetaCentrum multijob scratch
+(`--pbs-blocksci-multijob brno`). A manually started `--blocksci-task backup`
+job archives it into one S3 backup (`--blocksci-index-backup-uri`), deleting the
+previous one first. Updates take a writer lock and analyses and the backup a shared
+one; an update restores a missing or incomplete working copy from the backup
+first. See `examples/metacentrum-mainnet-index-update.yaml`,
+`examples/metacentrum-mainnet-index-backup.yaml` and the persistent-index
+section of `docs/pbs-stage-contract.md`.
+
+Run the default detector later without invoking `blocksci_parser`:
+
+```bash
+./runIt.sh pbs-from-s3 \
+  ... \
+  --run-id '<id>' \
+  --engine wasabi \
+  --blocksci-pbs \
+  --blocksci-workflow cached \
+  --blocksci-task detect \
+  --min-input-count 15
+```
+
+Custom scripts must be on shared `/storage` so the PBS compute node can bind
+them read-only. They receive `ACTIVE_RUN_ID`, `BLOCKSCI_CONFIG`,
+`BLOCKSCI_RUN_DIR`, and `BLOCKSCI_OUTPUT_DIR`; outputs under the latter are
+uploaded to `blocksci-custom-analysis_data/`:
+
+```bash
+./runIt.sh pbs-from-s3 \
+  ... \
+  --run-id '<id>' \
+  --engine wasabi \
+  --blocksci-pbs \
+  --blocksci-workflow cached \
+  --blocksci-task script \
+  --blocksci-script /storage/brno2/home/<login>/analysis.py
+```
+
+Jupyter is a separate long-lived PBS task and never blocks `full-run` or the
+unified report. The current BlockSci image installs Jupyter at image-build
+time, so this task does not call `build.sh`, compile BlockSci, or parse again:
+
+```bash
+./runIt.sh pbs-from-s3 \
+  ... \
+  --run-id '<id>' \
+  --engine wasabi \
+  --blocksci-pbs \
+  --blocksci-workflow cached \
+  --blocksci-task notebook \
+  --blocksci-notebook-port 8888 \
+  --blocksci-notebooks-dir /storage/brno2/home/<login>/notebooks
+```
+
+The PBS output prints the assigned node, port, and Jupyter token. Stream that
+output with `./runIt.sh watch --run-id '<id>' --pbs-only --pbs` and create an
+SSH tunnel to the assigned compute node through the normal MetaCentrum access
+path. Stop the PBS job when finished; notebook files are uploaded to
+`blocksci-notebooks_data/` (or written directly to the supplied shared
+directory).
+
+After `.pbs/unified-report.done` appears, download the canonical report
+directly on the frontend without starting Docker or Podman:
+
+```bash
+./runIt.sh download-report \
+  --run-id '<id>' \
+  --artifact-uri s3://coinjoin-thesis/runs \
+  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
+  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
+  --s3-profile coinjoin
+```
+
+The default destination is
+`coinjoin-runs/<run-id>/coinjoinPipeline_data`; use the host
+`--runs-root PATH` option or `--output-dir PATH` to change it. The command
+refuses a failed or incomplete report stage and requires `s5cmd` on `PATH`.
+
+### Cleaning the S3 backend
+
+To remove artifacts from the bucket, `clean-s3` deletes every object under an
+S3 run root (or a single run) directly on the frontend, without Docker/Podman.
+It is irreversible, so it first lists the matching objects and, unless `--yes`
+is given, requires you to retype the target prefix at an interactive prompt
+(non-interactive stdin is refused without `--yes`). Use `--dry-run` to preview.
+
+```bash
+# Preview what a full wipe of the runs root would remove.
+./runIt.sh clean-s3 --dry-run \
+  --artifact-uri s3://<bucket>/runs \
+  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
+  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
+  --s3-profile coinjoin
+
+# Delete a single run non-interactively.
+./runIt.sh clean-s3 --yes \
+  --run-id '<id>' \
+  --artifact-uri s3://<bucket>/runs \
+  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
+  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
+  --s3-profile coinjoin
+```
+
+Omit `--run-id` to clean everything under `--artifact-uri`; point `--artifact-uri`
+at the bucket root (`s3://<bucket>`) to wipe the whole bucket. The
+`--artifact-uri`, `--s3-*` options also read the `ARTIFACT_URI`, `S3_ENDPOINT_URL`,
+`S3_CREDENTIALS_FILE`, and `S3_PROFILE` environment variables.
+
+`--blocksci-pbs` by itself remains available only to `pbs-from-s3`; it retains
+the combined BlockSci-plus-report behavior and requires the remote run to
+already contain `coinjoin-analysis_data/coinjoin_tx_info.json`. Both S3 report
+paths require and upload the canonical `coinjoinPipeline_data` output.
+
+The general `--pbs-{ncpus,mem,scratch,walltime}` values are backward-compatible
+fallbacks. Use `--pbs-blocksci-*`, `--pbs-analysis-*`, and `--pbs-mappings-*`
+to size those allocations independently. A stage-specific value takes
+precedence over the general fallback and otherwise retains that stage's
+existing default.
+
+Every PBS job asks for `scratch_ssd` by default. `--pbs-scratch-type local`
+(YAML `pbs.scratch_type: local`, or per stage such as
+`pbs.blocksci.scratch_type`) requests `scratch_local` instead, which is a
+spinning disk on most MetaCentrum nodes but available on every node.
+
+The report-only job defaults to 2 CPUs, 8 GB RAM, 10 GB scratch, and a one-hour
+walltime. Use `--pbs-unified-report-ncpus`,
+`--pbs-unified-report-mem`, `--pbs-unified-report-scratch`, and
+`--pbs-unified-report-walltime` to override only that job; the shared
+`--pbs-*` resource options remain the fallback.
