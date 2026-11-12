@@ -13,6 +13,8 @@ from pathlib import Path
 from types import NoneType, UnionType
 from typing import Literal, Mapping, TypeVar, Union, get_args, get_origin, get_type_hints
 
+from coinjoin_pipeline.execution.pbs.defaults import PBSScratchType
+
 T = TypeVar("T")
 
 
@@ -106,6 +108,28 @@ class JoinMarketConfiguration(ConfigurationModel):
 
 
 @dataclass(frozen=True, slots=True)
+class PBSResourceConfiguration(ConfigurationModel):
+    # One model serves every PBS stage, so option_specs names each flag after its path.
+    ncpus: int | None = option(None, minimum=1)
+    mem: str | None = option(None)
+    scratch: str | None = option(None)
+    scratch_type: PBSScratchType | None = option(None)
+    walltime: str | None = option(None)
+
+
+@dataclass(frozen=True, slots=True)
+class PBSConfiguration(ConfigurationModel):
+    ncpus: int | None = option(None, name="pbs_ncpus", minimum=1)
+    mem: str | None = option(None, name="pbs_mem")
+    scratch: str | None = option(None, name="pbs_scratch")
+    scratch_type: PBSScratchType | None = option(None, name="pbs_scratch_type")
+    walltime: str | None = option(None, name="pbs_walltime")
+    image: str | None = option(None, name="pbs_image")
+    blocksci_image: str | None = option(None, name="pbs_blocksci_image")
+    blocksci: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
+
+
+@dataclass(frozen=True, slots=True)
 class PipelineConfiguration(ConfigurationModel):
     action: PipelineAction = option("full-run")
     runtime: ContainerRuntime = option("docker", name="runtime")
@@ -129,6 +153,7 @@ class PipelineConfiguration(ConfigurationModel):
     images: ImageConfiguration = field(default_factory=ImageConfiguration)
     blocksci: BlockSciConfiguration = field(default_factory=BlockSciConfiguration)
     joinmarket: JoinMarketConfiguration = field(default_factory=JoinMarketConfiguration)
+    pbs: PBSConfiguration = field(default_factory=PBSConfiguration)
     _provided: frozenset[str] = field(default_factory=frozenset, repr=False, compare=False)
 
     @property
@@ -255,6 +280,8 @@ def option_specs(model_type=PipelineConfiguration, prefix=""):
             yield from option_specs(annotation, path)
         else:
             destination = item.metadata.get("option")
+            if model_type is PBSResourceConfiguration:
+                destination = path.replace(".", "_")
             yield path, destination, item
 
 
