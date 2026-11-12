@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Stand-in for `singularity exec` on a host with Docker: same binds, environment and
+# command, run in $FAKE_SINGULARITY_IMAGE as the calling user.
+set -euo pipefail
+
+[ "${1:-}" = exec ] || { echo "fake singularity supports only exec" >&2; exit 2; }
+shift
+# singularity exec ignores the image's entrypoint, so the stand-in does too.
+docker_args=(run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -w /tmp --entrypoint "")
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --cleanenv) shift ;;
+        --bind) docker_args+=(-v "$2"); shift 2 ;;
+        --env) docker_args+=(-e "$2"); shift 2 ;;
+        -*) echo "fake singularity: unsupported option $1" >&2; exit 2 ;;
+        *) break ;;
+    esac
+done
+shift # the image reference; the job names a registry image we replace locally
+exec docker "${docker_args[@]}" "${FAKE_SINGULARITY_IMAGE:?}" "$@"
