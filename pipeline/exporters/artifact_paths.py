@@ -10,13 +10,16 @@ from pathlib import Path
 
 BLOCKSCI_DIR = "blocksci_data"
 BLOCKSCI_ANALYSIS_DIR = "blocksci-analysis_data"
+REPORT_DIR = "coinjoinPipeline_data"
 COINJOIN_ANALYSIS_DIR = "coinjoin-analysis_data"
 EMULATOR_DIR = "coinjoin_emulator_data"
 SCENARIO_FILE = EMULATOR_DIR + "/scenario.json"
 #: The wallet and coordinator logs coinjoin-analysis reads.
 EMULATOR_DATA_DIR = EMULATOR_DIR + "/data"
+BASELINE_FILE = COINJOIN_ANALYSIS_DIR + "/coinjoin_tx_info.json"
 BLOCKSCI_CONFIG_FILE = BLOCKSCI_DIR + "/config.json"
 ANALYSIS_ARTIFACT_NAME = "blocksci_analysis.json"
+REPORT_JSON = "unified_report.json"
 EXPORTED_BLOCKS_DIR = EMULATOR_DATA_DIR + "/btc-node"
 #: One exported block below EXPORTED_BLOCKS_DIR: block_<height>.json.
 EXPORTED_BLOCK_GLOB = "block_*.json"
@@ -37,3 +40,7 @@ def _tool_dir(run_dir: Path, name: str) -> Path:
 
 def blocksci_analysis_dir(run_dir: Path) -> Path:
     return _tool_dir(run_dir, BLOCKSCI_ANALYSIS_DIR)
+
+
+def report_dir(run_dir: Path) -> Path:
+    return run_dir / REPORT_DIR

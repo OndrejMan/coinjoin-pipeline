@@ -41,7 +41,7 @@ def _action_errors(config: PipelineConfiguration) -> list[str]:
 def _run_selection_errors(config: PipelineConfiguration) -> list[str]:
     errors: list[str] = []
     action = config.action
-    if action in {"analyze", "coinjoin-analysis"} and not _supplied(config, "run_dir", config.run_dir):
+    if action in {"analyze", "export", "coinjoin-analysis"} and not _supplied(config, "run_dir", config.run_dir):
         errors.append(f"{action} requires --run-dir")
     if config.run_id is not None and not is_valid_run_id(config.run_id):
         errors.append(f"--run-id {RUN_ID_RULE}")

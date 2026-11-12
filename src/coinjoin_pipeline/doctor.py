@@ -28,6 +28,7 @@ def required_image_components(config: PipelineConfiguration) -> set[str]:
         "emulate": {"emulator"},
         "coinjoin-analysis": {"coinjoin_analysis"},
         "analyze": {"blocksci", "coinjoin_analysis"},
+        "export": set(),
     }.get(config.action, {"emulator", "coinjoin_analysis", "blocksci"})
 
 

@@ -38,6 +38,7 @@ CONFIGURATION_FLAGS = ("--from-configuration",)
 ACTION_SUMMARIES = {
     "emulate": "emulate a new run only",
     "analyze": "BlockSci analysis of --run-dir",
+    "export": "unified report of --run-dir",
     "coinjoin-analysis": "baseline coinjoin-analysis of --run-dir",
 }
 
@@ -65,6 +66,7 @@ HELP = {
         "(default: BlockSci's height-aware threshold; small regtest rounds need an explicit value)"
     ),
     "images.version": "release tag of every component image",
+    "images.unified_report": ("unified-report job image (default: container/unified-report.image)"),
     **{
         f"images.{component}": f"{component.replace('_', '-')} image (also ${variable})"
         for component, variable in IMAGE_ENVIRONMENT.items()

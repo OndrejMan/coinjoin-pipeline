@@ -22,4 +22,6 @@ CONTAINER_SCENARIOS_DIR = "/mnt/scenarios"
 DEFAULT_CONTAINER_SCENARIO = "/mnt/scenarios/overactive-local.json"
 DEFAULT_JOINMARKET_CONTAINER_SCENARIO = "/mnt/scenarios/defaultJoinMarket.json"
 DEFAULT_EMULATOR_IMAGE = IMAGE_NAMES["emulator"] + ":" + DEFAULT_VERSION
+VALID_PULL_POLICIES = ("always", "missing", "never")
+RUNS_ROOT_CONTAINER = "/runs/emulation/logs"
 COINJOIN_ANALYSIS_SELECTED_ROOT_CONTAINER = "/runs/emulation/selected"

@@ -7,20 +7,27 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
 from typing import Mapping
 
-from exporters.artifact_paths import COINJOIN_ANALYSIS_DIR, EMULATOR_DIR
+from exporters.analysis_artifact import ARTIFACT_NAME
+from exporters.artifact_paths import BASELINE_FILE, COINJOIN_ANALYSIS_DIR, EMULATOR_DIR, blocksci_analysis_dir
 
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
+from coinjoin_pipeline.execution.pbs_settings import resolve_unified_report_image
 from coinjoin_pipeline.execution.pipeline_logging import (
     captured_pipeline_stage,
 )
 from coinjoin_pipeline.execution.run_context import run_dir_under_root
 from coinjoin_pipeline.execution.scenarios import container_scenario_path, scenario_source_path
-from coinjoin_pipeline.execution.runtime import compose_command
+from coinjoin_pipeline.execution.runtime import (
+    compose_command,
+    container_runtime,
+)
+from coinjoin_pipeline.images import validate_image
 
 from . import settings
 
@@ -169,3 +176,102 @@ def run_coinjoin_analysis_docker_stage(active_run_id: str) -> None:
         cwd=settings.ROOT_DIR,
         env=run_env,
     )
+
+
+def container_run_pull_args(image: str, env_name: str) -> list[str]:
+    pull_policy = os.environ.get(env_name)
+    if not pull_policy:
+        pull_policy = "always" if "/" in image else "missing"
+    if pull_policy not in settings.VALID_PULL_POLICIES:
+        print(
+            f"[ERROR] Invalid {env_name}={pull_policy!r}; expected one of: {', '.join(settings.VALID_PULL_POLICIES)}.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    return [f"--pull={pull_policy}"]
+
+
+def exists_or_unreadable(path: Path) -> bool:
+    """True when ``path`` is present, or hidden behind a directory we may not read.
+
+    The analysis containers run as root, and ``blocksci_parser`` creates its
+    ``parsed/`` directory with mode 0700. This process runs as the invoking user,
+    so a lookup there fails with EACCES and a finished BlockSci run would read as
+    one that never happened. Everything that consumes these paths
+    runs as root in a container, so "cannot look" must not mean "not there".
+
+    ``os.path`` rather than ``Path``: before Python 3.14, ``Path.is_file()`` and
+    ``Path.exists()`` raise ``PermissionError`` behind such a directory instead
+    of returning ``False``.
+    """
+    if os.path.isfile(path):
+        return True
+    for parent in path.parents:
+        if not os.path.exists(parent):
+            continue
+        return not os.access(parent, os.R_OK | os.X_OK)
+    return False
+
+
+def export_preflight_error(coinjoin_ready: bool, blocksci_ready: bool, run_dir: Path) -> str | None:
+    if coinjoin_ready and blocksci_ready:
+        return None
+    missing = []
+    if not coinjoin_ready:
+        missing.append(str(run_dir / BASELINE_FILE))
+    if not blocksci_ready:
+        missing.append(str(blocksci_analysis_dir(run_dir) / ARTIFACT_NAME))
+    command = "coinjoin-analysis" if not coinjoin_ready and blocksci_ready else "analyze"
+    return (
+        f"[ERROR] Cannot export unified report for run '{run_dir.name}'; missing analytical input: "
+        + ", ".join(missing)
+        + f". Run: cjp {command} --run-dir {shlex.quote(run_dir.name)}"
+    )
+
+
+def export_command(active_run_id: str, env: dict[str, str]) -> str:
+    command = [
+        "python3",
+        "/mnt/exporters/worker.py",
+        "report",
+        "--run-dir",
+        f"{settings.RUNS_ROOT_CONTAINER}/{active_run_id}",
+    ]
+    for name, key in (
+        ("coinjoin-type", "BLOCKSCI_COINJOIN_TYPE"),
+        ("min-input-count", "BLOCKSCI_MIN_INPUT_COUNT"),
+    ):
+        command.extend(["--" + name, env[key]])
+    return " ".join((shlex.quote(part) for part in command))
+
+
+def run_export_only(args: PipelineConfiguration) -> None:
+    env = compose_env(args)
+    logs_root = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
+    active_run_id = run_dir_under_root(required(args.run_dir, "run_dir"), logs_root).name
+    env = compose_env(args, active_run_id)
+    emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
+    run_dir = emulation_logs_dir / active_run_id
+    coinjoin_ready = exists_or_unreadable(run_dir / BASELINE_FILE)
+    blocksci_ready = exists_or_unreadable(blocksci_analysis_dir(run_dir) / ARTIFACT_NAME)
+    error = export_preflight_error(coinjoin_ready, blocksci_ready, run_dir)
+    if error:
+        print(error, file=sys.stderr)
+        sys.exit(2)
+    image = resolve_unified_report_image(args).removeprefix("docker://")
+    validate_image(image)
+    command = [
+        container_runtime(),
+        "run",
+        "--rm",
+        *container_run_pull_args(image, "COINJOIN_UNIFIED_REPORT_PULL_POLICY"),
+        "-v",
+        f"{emulation_logs_dir}:{settings.RUNS_ROOT_CONTAINER}:rw",
+        "-v",
+        f"{env['EXPORTERS_DIR']}:/mnt/exporters:ro",
+        "--entrypoint",
+        "",
+        image,
+        *shlex.split(export_command(active_run_id, env)),
+    ]
+    run_command(command, cwd=settings.ROOT_DIR, env=env)

@@ -145,7 +145,7 @@ services:
         - "-c"
         - |
           set -eu
-          python3 /mnt/exporters/worker.py run --share-output
+          python3 /mnt/exporters/worker.py run --share-output --report
 
   coinjoin_analysis:
       profiles: ["analysis"]

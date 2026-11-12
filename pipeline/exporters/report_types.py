@@ -60,6 +60,18 @@ class TransactionRecord(_TransactionFields, TransactionMetrics, total=False):
     round_id: str | None
 
 
+class RecordSummary(TypedDict):
+    """The comparable part of a record quoted in the report's divergences."""
+
+    block_height: int | None
+    input_count: int | None
+    output_count: int | None
+    total_input_sats: int | None
+    total_output_sats: int | None
+    repeated_output_denominations: dict[str, int]
+    wallets: list[str]
+
+
 class DetectorParameters(TypedDict):
     """Parameters a BlockSci analysis artifact was produced with."""
 

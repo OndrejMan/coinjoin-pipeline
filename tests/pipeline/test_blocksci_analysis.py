@@ -10,12 +10,54 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "pipeline"))
 
-from exporters.blocksci_export.analysis import write_analysis  # noqa: E402
+from exporters import cli as report_cli  # noqa: E402
+from exporters.analysis_artifact import load_analysis
+from exporters.blocksci_export.analysis import (  # noqa: E402
+    SCHEMA_VERSION,
+    write_analysis,
+)
 from exporters.normalization import load_first_wasabi2_block  # noqa: E402
+from exporters.parameters import Detector  # noqa: E402
 from exporters.blocksci_export.detector import (
     assert_real_blocksci,  # noqa: E402
     import_blocksci_bindings,  # noqa: E402
 )
+
+
+def parameters() -> dict:
+    return Detector.from_args(
+        argparse.Namespace(
+            coinjoin_type="wasabi2",
+            min_input_count=None,
+        )
+    ).artifact_parameters()
+
+
+def test_load_analysis_rejects_parameter_mismatch(tmp_path: Path) -> None:
+    artifact = tmp_path / "blocksci_analysis.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "run_id": "run-1",
+                "parameters": parameters(),
+                "first_wasabi2_block": 0,
+                "records": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = load_analysis(artifact, run_id="run-1", expected_parameters=parameters())
+    assert loaded["records"] == {}
+
+    mismatched = {**parameters(), "min_input_count": 1}
+    with pytest.raises(ValueError, match="parameters do not match"):
+        load_analysis(
+            artifact,
+            run_id="run-1",
+            expected_parameters=mismatched,
+        )
 
 
 def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
@@ -45,6 +87,53 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
 
     artifact = json.loads(output.read_text(encoding="utf-8"))
     assert artifact["records"] == {"tx": {"txid": "tx"}}
+
+
+def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-1"
+    baseline_dir = run_dir / "coinjoin-analysis_data"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "coinjoin_tx_info.json").write_text('{"coinjoins": {}}', encoding="utf-8")
+    emulator_dir = run_dir / "coinjoin_emulator_data"
+    emulator_dir.mkdir()
+    (emulator_dir / "scenario.json").write_text('{"name": "fixture"}', encoding="utf-8")
+    artifact = run_dir / "blocksci-analysis_data" / "blocksci_analysis.json"
+    artifact.parent.mkdir()
+    artifact.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "run_id": "run-1",
+                "parameters": parameters(),
+                "first_wasabi2_block": 0,
+                "records": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with (
+        mock.patch(
+            "exporters.blocksci_export.detector.export_blocksci_records",
+            side_effect=AssertionError("BlockSci must not be queried"),
+        ),
+        mock.patch.object(report_cli, "build_report", return_value={"schema_version": "test"}),
+    ):
+        code = report_cli.main(
+            [
+                "--runs-root",
+                str(tmp_path),
+                "--run-dir",
+                "run-1",
+                "--blocksci-analysis",
+                str(artifact),
+                "--coinjoin-type",
+                "wasabi2",
+            ]
+        )
+
+    assert code == 0
+    assert (run_dir / "coinjoinPipeline_data" / "unified_report.json").is_file()
 
 
 def test_assert_real_blocksci_accepts_the_real_bindings() -> None:

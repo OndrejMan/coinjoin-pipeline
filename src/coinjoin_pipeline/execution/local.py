@@ -39,5 +39,9 @@ def run_configuration(args: PipelineConfiguration, logs_root: Path) -> None:
         run_dir = _selected_run_dir(args, logs_root)
         with captured_pipeline_stage(logs_root, "BlockSci analysis", run_dir):
             containers.run_script(settings.ANALYSIS_SCRIPT, config=args, active_run_id=run_dir.name)
+    elif action == "export":
+        run_dir = _selected_run_dir(args, logs_root)
+        with captured_pipeline_stage(logs_root, "Unified report export", run_dir):
+            containers.run_export_only(args)
     elif action == "coinjoin-analysis":
         containers.run_coinjoin_analysis(args.run_dir)

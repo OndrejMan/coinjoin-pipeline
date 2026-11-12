@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import Counter
+from collections.abc import Iterator, Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -36,6 +38,21 @@ def save_json(path: Path, data: JsonValue) -> None:
     with path.open("w", encoding="utf-8") as file:
         json.dump(data, file, indent=2, sort_keys=True)
         file.write("\n")
+
+
+def canonical_json(data: JsonValue) -> str:
+    return json.dumps(data, sort_keys=True, separators=(",", ":"))
+
+
+def sha256_json(data: JsonValue) -> str:
+    return hashlib.sha256(canonical_json(data).encode("utf-8")).hexdigest()
+
+
+def parse_run_started_at(run_id: str) -> str | None:
+    try:
+        return datetime.strptime(run_id[:16], "%Y-%m-%d_%H-%M").isoformat()
+    except ValueError:
+        return None
 
 
 def coerce_sats(value: JsonValue, *, unit: str = "sats") -> int | None:
@@ -78,6 +95,17 @@ def to_json_text(value: JsonValue) -> str | None:
     return str(value)
 
 
+def sorted_items(mapping: JsonObject) -> list[tuple[str, JsonObject]]:
+    def key(item: tuple[str, JsonObject]) -> tuple[int, int | str]:
+        raw_key = item[0]
+        try:
+            return (0, int(raw_key))
+        except (TypeError, ValueError):
+            return (1, raw_key)
+
+    return sorted(mapping.items(), key=key)
+
+
 def repeated_denominations(outputs: list[IORecord]) -> dict[str, int]:
     counts = Counter(output["value"] for output in outputs if output.get("value") is not None)
     return {str(value): count for value, count in sorted(counts.items()) if count > 1}
@@ -98,3 +126,27 @@ def safe_attr(obj: object, name: str, default: object = None) -> object:
         return getattr(obj, name)
     except Exception:
         return default
+
+
+def compute_rate(numerator: int, denominator: int, empty_default: float) -> float:
+    if denominator == 0:
+        return empty_default
+    return round(numerator / denominator, 6)
+
+
+IO_SIDES = ("inputs", "outputs")
+
+
+def io_items(record: Mapping[str, object] | None) -> Iterator[Mapping[str, object]]:
+    """Every input then every output of a transaction record that keeps them as lists."""
+    for side in IO_SIDES:
+        items = (record or {}).get(side)
+        if isinstance(items, list):
+            for item in items:
+                if isinstance(item, Mapping):
+                    yield item
+
+
+def wallet_names(record: Mapping[str, object] | None) -> list[str]:
+    """Sorted wallets owning any input or output of ``record``."""
+    return sorted({str(item["wallet_name"]) for item in io_items(record) if item.get("wallet_name")})
