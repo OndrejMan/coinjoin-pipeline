@@ -5,6 +5,7 @@ These paths serve local development and reproduction.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
@@ -33,8 +34,17 @@ def _selected_run_dir(args: PipelineConfiguration, logs_root: Path) -> Path:
 
 def run_configuration(args: PipelineConfiguration, logs_root: Path) -> None:
     action = args.action
+    if action == "full-run":
+        with captured_pipeline_stage(logs_root, "Clean containers and volumes", logs_root / "_maintenance"):
+            containers.run_script(settings.DELETE_SCRIPT)
     if action == "emulate":
         _emulate(args, logs_root)
+    elif action == "full-run":
+        run_dir = _emulate(args, logs_root)
+        try:
+            run_analysis(args, run_dir, logs_root)
+        except (RuntimeError, ValueError, subprocess.CalledProcessError) as error:
+            exit_with_error(error)
     elif action == "analyze":
         run_dir = _selected_run_dir(args, logs_root)
         with captured_pipeline_stage(logs_root, "BlockSci analysis", run_dir):
@@ -45,3 +55,8 @@ def run_configuration(args: PipelineConfiguration, logs_root: Path) -> None:
             containers.run_export_only(args)
     elif action == "coinjoin-analysis":
         containers.run_coinjoin_analysis(args.run_dir)
+
+
+def run_analysis(args: PipelineConfiguration, run_dir: Path, logs_root: Path) -> None:
+    with captured_pipeline_stage(logs_root, "Analysis", run_dir):
+        containers.run_script(settings.ANALYSIS_SCRIPT, config=args, active_run_id=run_dir.name)

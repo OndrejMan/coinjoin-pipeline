@@ -32,7 +32,7 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
     provided = set(config.provided)
     if config.engine == "joinmarket" and "coinjoin_type" not in provided:
         config = replace(config, coinjoin_type="joinmarket")
-    if config.action == "emulate" and not config.run_dir:
+    if config.action in {"full-run", "emulate"} and not config.run_dir:
         config = replace(config, run_id=run_id_for(config))
         provided.add("run_id")
     config = replace(config, _provided=frozenset(provided))

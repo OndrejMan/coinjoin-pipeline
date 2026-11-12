@@ -8,6 +8,7 @@ from coinjoin_pipeline.paths import PIPELINE_ROOT
 ROOT_DIR = PIPELINE_ROOT
 EMULATE_SCRIPT = ROOT_DIR / "emulate.sh"
 ANALYSIS_SCRIPT = ROOT_DIR / "analysis.sh"
+DELETE_SCRIPT = ROOT_DIR / "delete.sh"
 COMPOSE_FILE = ROOT_DIR / "compose.yaml"
 COMPOSE_PROJECT = "blocksci-emulator"
 COMPOSE_PROJECT_ENV = "COINJOIN_COMPOSE_PROJECT"

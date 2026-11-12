@@ -28,6 +28,7 @@ def required(value: T | None, name: str) -> T:
 
 
 PipelineAction = Literal[
+    "full-run",
     "emulate",
     "analyze",
     "export",
@@ -63,14 +64,14 @@ class ImageConfiguration(ConfigurationModel):
 
 @dataclass(frozen=True, slots=True)
 class PipelineConfiguration(ConfigurationModel):
-    action: PipelineAction = option("emulate")
+    action: PipelineAction = option("full-run")
     runtime: ContainerRuntime = option("docker", name="runtime")
     runs_root: str | None = option(None, name="runs_root")
     engine: Engine = option("wasabi", name="engine")
     coinjoin_type: CoinjoinType = option("wasabi2", name="coinjoin_type")
     scenario: str | None = option(None, name="scenario")
     run_dir: str | None = option(None, name="run_dir", actions=("analyze", "export", "coinjoin-analysis"))
-    run_id: str | None = option(None, name="run_id", actions=("emulate",))
+    run_id: str | None = option(None, name="run_id", actions=("emulate", "full-run"))
     run_timezone: str = option("Europe/Prague", name="run_timezone")
     min_input_count: int | None = option(None, name="min_input_count", minimum=1)
     images: ImageConfiguration = field(default_factory=ImageConfiguration)
