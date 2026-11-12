@@ -230,6 +230,36 @@ def run_script(
         sys.exit(exc.returncode)
 
 
+def initialize_images(config: PipelineConfiguration) -> None:
+    env = compose_env(config)
+    compose_cmd = compose_base_command(env)
+    try:
+        run_command(
+            [*compose_cmd, "--profile", "emulate", "--profile", "analysis", "pull"],
+            cwd=settings.ROOT_DIR,
+            env=env,
+        )
+        run_command(
+            [
+                *compose_cmd,
+                "--profile",
+                "emulate",
+                "run",
+                "--rm",
+                "dind_image_prefetch",
+            ],
+            cwd=settings.ROOT_DIR,
+            env=env,
+        )
+        run_command(
+            [*compose_cmd, "--profile", "emulate", "down"],
+            cwd=settings.ROOT_DIR,
+            env=env,
+        )
+    except subprocess.CalledProcessError as exc:
+        sys.exit(exc.returncode)
+
+
 def run_coinjoin_analysis(
     config: PipelineConfiguration,
     run_dir_arg: str | None = None,
