@@ -124,31 +124,36 @@ def test_ensure_empty_run_prefix_rejects_every_existing_artifact() -> None:
         ensure_empty_run_prefix(ACCESS, "s3://bucket/runs", "run-1")
 
 
-def test_clear_stage_markers_treats_missing_as_success_and_deletes_existing() -> None:
+def test_clear_stage_markers_removes_both_in_one_call_and_checks_once() -> None:
+    markers = ["s3://bucket/runs/run-1/.pbs/blocksci.failed", "s3://bucket/runs/run-1/.pbs/blocksci.done"]
     with (
         mock.patch(
-            "coinjoin_pipeline.storage.s3.s3_object_exists",
-            side_effect=[False, True, False],
-        ) as exists,
-        mock.patch(
-            "coinjoin_pipeline.storage.s3.run_s5cmd",
-            return_value=_completed(0),
+            "coinjoin_pipeline.storage.s3.run_s5cmd", return_value=_completed(1, "ERROR rm: no object found")
         ) as s5cmd,
+        mock.patch(
+            "coinjoin_pipeline.storage.s3.s3_listing", return_value=[{"key": "s3://bucket/runs/run-1/.pbs/blocksci.jobid"}]
+        ) as listing,
     ):
         clear_s3_stage_markers(ACCESS, "s3://bucket/runs/run-1", "blocksci")
 
-    s5cmd.assert_called_once_with(ACCESS, "rm", "s3://bucket/runs/run-1/.pbs/blocksci.done")
-    assert exists.call_count == 3
+    s5cmd.assert_called_once_with(ACCESS, "rm", *markers)
+    listing.assert_called_once_with(ACCESS, "s3://bucket/runs/run-1/.pbs/blocksci.*")
 
 
 def test_clear_stage_markers_propagates_delete_errors() -> None:
     with (
-        mock.patch("coinjoin_pipeline.storage.s3.s3_object_exists", return_value=True),
-        mock.patch(
-            "coinjoin_pipeline.storage.s3.run_s5cmd",
-            return_value=_completed(1, "AccessDenied"),
-        ),
+        mock.patch("coinjoin_pipeline.storage.s3.run_s5cmd", return_value=_completed(1, "AccessDenied")),
         pytest.raises(ArtifactTransportError, match="AccessDenied"),
+    ):
+        clear_s3_stage_markers(ACCESS, "s3://bucket/runs/run-1", "blocksci")
+
+
+def test_clear_stage_markers_refuses_a_marker_that_survived() -> None:
+    survivor = "s3://bucket/runs/run-1/.pbs/blocksci.done"
+    with (
+        mock.patch("coinjoin_pipeline.storage.s3.run_s5cmd", return_value=_completed(0)),
+        mock.patch("coinjoin_pipeline.storage.s3.s3_listing", return_value=[{"key": survivor}]),
+        pytest.raises(ArtifactTransportError, match="still exist"),
     ):
         clear_s3_stage_markers(ACCESS, "s3://bucket/runs/run-1", "blocksci")
 

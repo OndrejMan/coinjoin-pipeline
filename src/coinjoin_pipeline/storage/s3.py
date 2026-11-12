@@ -239,23 +239,21 @@ def s3_prefix_has_objects(access: S3Access, prefix: str) -> bool:
     return bool(s3_listing(access, f"{prefix}/*"))
 
 
-def delete_s3_object_if_present(access: S3Access, object_uri: str) -> None:
-    """Strictly remove one object while treating an absent object as success."""
-    if not s3_object_exists(access, object_uri):
-        return
-    result = run_s5cmd(access, "rm", object_uri)
-    if result.returncode != 0:
-        raise ArtifactTransportError(
-            f"s5cmd rm {object_uri} failed (exit {result.returncode}): {(result.stderr or '').strip()}"
-        )
-    if s3_object_exists(access, object_uri):
-        raise ArtifactTransportError(f"S3 object still exists after deletion: {object_uri}")
-
-
 def clear_s3_stage_markers(access: S3Access, run_prefix: str, stage: str) -> None:
-    """Clear stale completion markers before submitting the stage that owns them."""
-    delete_s3_object_if_present(access, stage_marker_uri(run_prefix, stage, "failed"))
-    delete_s3_object_if_present(access, stage_marker_uri(run_prefix, stage, "done"))
+    """Clear stale completion markers before submitting the stage that owns them.
+
+    One rm of both markers, an absent one included, and one listing that checks none is left.
+    """
+    markers = [stage_marker_uri(run_prefix, stage, outcome) for outcome in ("failed", "done")]
+    result = run_s5cmd(access, "rm", *markers)
+    if result.returncode != 0 and not no_object_found(result):
+        raise ArtifactTransportError(
+            f"s5cmd rm of the {stage} markers failed (exit {result.returncode}): {(result.stderr or '').strip()}"
+        )
+    listed = {str(entry.get("key")) for entry in s3_listing(access, stage_marker_uri(run_prefix, stage, "*"))}
+    left = sorted(listed & set(markers))
+    if left:
+        raise ArtifactTransportError(f"S3 markers still exist after deletion: {', '.join(left)}")
 
 
 def require_s5cmd_version() -> None:
