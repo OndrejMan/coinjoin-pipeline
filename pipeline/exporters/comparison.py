@@ -66,6 +66,7 @@ def record_summary(record: TransactionRecord | None) -> RecordSummary | None:
 
     return {
         "block_height": record.get("block_height"),
+        "block_height_inferred": record.get("block_height_inferred"),
         "input_count": record.get("input_count"),
         "output_count": record.get("output_count"),
         "total_input_sats": record.get("total_input_sats"),

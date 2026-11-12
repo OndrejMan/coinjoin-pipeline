@@ -52,7 +52,8 @@ def summary_value(record: JsonObject | None, field: str) -> JsonValue:
 def block_label(record: JsonObject | None) -> str:
     if not record or record.get("block_height") is None:
         return "-"
-    return str(record["block_height"])
+    prefix = "_" if record.get("block_height_inferred") else ""
+    return f"{prefix}{record['block_height']}"
 
 
 def block_value(record: JsonObject | None, explorer_base_url: str) -> str:
@@ -275,7 +276,13 @@ def render_io_details(title: str, records: list[JsonObject], explorer_base_url: 
 
 
 def render_header(report: JsonObject) -> list[str]:
-    return ["# BlockSci vs Emulator CoinJoin Report"]
+    lines = [
+        "# BlockSci vs Emulator CoinJoin Report",
+        "",
+        "> `_N` means the block height was inferred from exported `block_*.json` files, not present in original "
+        "`coinjoin_tx_info.json`.",
+    ]
+    return lines
 
 
 def render_run(report: JsonObject) -> list[str]:

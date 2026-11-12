@@ -28,7 +28,11 @@ from exporters.cli import parse_args
 from exporters.common import SCHEMA_VERSION, save_json, sha256_json
 from exporters.markdown_report import render_report
 from exporters.parameters import Detector  # noqa: E402
-from exporters.normalization import normalize_coinjoin_analysis
+from exporters.normalization import (
+    fill_missing_block_heights,
+    load_exported_block_tx_index,
+    normalize_coinjoin_analysis,
+)
 from exporters.parameters import parse_min_input_count
 from exporters.report_builder import build_report
 from exporters.scenario import load_scenario, normalize_scenario
@@ -240,6 +244,74 @@ class UnifiedReportTest(unittest.TestCase):
         )
         self.assertEqual(report["divergences"]["blocksci_only"][0]["txid"], "txB")
         self.assertIsNone(report["divergences"]["blocksci_only"][0]["coinjoin_analysis"])
+
+    def test_fill_missing_block_height_from_exported_blocks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
+            block_dir.mkdir(parents=True)
+            (block_dir / "block_226.json").write_text(
+                json.dumps(
+                    {
+                        "height": 226,
+                        "tx": [
+                            {"txid": "coinbase"},
+                            {"txid": "txA"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_fixture())
+            fill_missing_block_heights(coinjoin_analysis, load_exported_block_tx_index(run_dir))
+            report = build_report(run_dir, coinjoin_analysis, blocksci_fixture("txB"), Detector("wasabi2"))
+
+        tx_record = report["transactions"]["txA"]["coinjoin_analysis"]
+        self.assertEqual(tx_record["block_height"], 226)
+        self.assertTrue(tx_record["block_height_inferred"])
+        self.assertEqual(
+            report["divergences"]["missed_by_blocksci"][0]["coinjoin_analysis"]["block_height"],
+            226,
+        )
+        self.assertTrue(report["divergences"]["missed_by_blocksci"][0]["coinjoin_analysis"]["block_height_inferred"])
+        markdown = render_report(report)
+        self.assertIn(
+            "| missed_by_blocksci | [txA](http://localhost:3002/tx/txA) | "
+            "[_226](http://localhost:3002/block-height/226) |",
+            markdown,
+        )
+        self.assertIn("## Notable Divergences", markdown)
+        self.assertIn("- tx: [txA](http://localhost:3002/tx/txA)", markdown)
+        self.assertIn("#### Inputs", markdown)
+        self.assertIn("| 0 | 150,000 | input-a | wallet-000 |", markdown)
+        self.assertIn("#### Outputs", markdown)
+        self.assertIn("| 0 | 100,000 | output-a0 | wallet-000 |", markdown)
+
+    def test_existing_block_height_is_not_overwritten_by_exported_blocks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
+            block_dir.mkdir(parents=True)
+            (block_dir / "block_226.json").write_text(
+                json.dumps({"height": 226, "tx": [{"txid": "txA"}]}),
+                encoding="utf-8",
+            )
+
+            coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_fixture_with_block_height(12))
+            fill_missing_block_heights(coinjoin_analysis, load_exported_block_tx_index(run_dir))
+            report = build_report(run_dir, coinjoin_analysis, blocksci_fixture("txB"), Detector("wasabi2"))
+
+        tx_record = report["transactions"]["txA"]["coinjoin_analysis"]
+        self.assertEqual(tx_record["block_height"], 12)
+        self.assertNotIn("block_height_inferred", tx_record)
+        markdown = render_report(report)
+        self.assertIn(
+            "| missed_by_blocksci | [txA](http://localhost:3002/tx/txA) | "
+            "[12](http://localhost:3002/block-height/12) |",
+            markdown,
+        )
+        self.assertNotIn("| _12 |", markdown)
 
     def test_build_report_field_mismatch(self):
         with tempfile.TemporaryDirectory() as tmpdir:

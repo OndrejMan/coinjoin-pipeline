@@ -1,6 +1,30 @@
 """The record helpers the report sections share."""
 
+import json
+from pathlib import Path
+
+from exporters.artifact_paths import EXPORTED_BLOCKS_DIR
 from exporters.common import io_items, wallet_names
+from exporters.normalization import iter_exported_blocks
+
+
+def write(path: Path, data: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_exported_blocks_are_read_in_height_order_with_file_name_fallback(tmp_path):
+    for height in (10, 9, 2):
+        write(
+            tmp_path / EXPORTED_BLOCKS_DIR / f"block_{height}.json", {"tx": []} if height == 9 else {"height": height}
+        )
+
+    assert [(path.name, height) for path, height, _block in iter_exported_blocks(tmp_path)] == [
+        ("block_2.json", 2),
+        ("block_9.json", 9),
+        ("block_10.json", 10),
+    ]
+    assert list(iter_exported_blocks(tmp_path / "missing")) == []
 
 
 def test_shared_record_helpers():

@@ -18,7 +18,11 @@ from exporters.common import (
     save_json,
 )
 from exporters.markdown_report import render_report, save_text
-from exporters.normalization import normalize_coinjoin_analysis
+from exporters.normalization import (
+    fill_missing_block_heights,
+    load_exported_block_tx_index,
+    normalize_coinjoin_analysis,
+)
 from exporters.parameters import Detector, add_detector_arguments
 from exporters.report_builder import build_report
 from exporters.report_types import BlockSciAnalysisArtifact
@@ -72,6 +76,7 @@ def assemble_report(args: argparse.Namespace) -> int:
 
     coinjoin_analysis_data = load_json(baseline_path)
     coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_data)
+    fill_missing_block_heights(coinjoin_analysis, load_exported_block_tx_index(run_dir))
     analysis = load_run_analysis(args, run_dir)
     scenario = load_scenario(run_dir)
     output_path = output_dir / args.output_name
