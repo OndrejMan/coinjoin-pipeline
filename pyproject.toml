@@ -106,6 +106,10 @@ disable = [
     "wrong-import-position",
 ]
 
+[tool.pylint.design]
+# The report builder's Wasabi threshold rule needs six conditions.
+max-bool-expr = 6
+
 [tool.pylint.refactoring]
 max-nested-blocks = 7
 

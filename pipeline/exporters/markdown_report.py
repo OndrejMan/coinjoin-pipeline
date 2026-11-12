@@ -282,6 +282,10 @@ def render_header(report: JsonObject) -> list[str]:
         "> `_N` means the block height was inferred from exported `block_*.json` files, not present in original "
         "`coinjoin_tx_info.json`.",
     ]
+    warnings = report.get("warnings") or []
+    if warnings:
+        lines.extend(section("Warnings"))
+        lines.extend(f"> **{warning.get('code')}:** {warning.get('message')}" for warning in warnings)
     return lines
 
 

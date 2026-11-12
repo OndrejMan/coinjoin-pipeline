@@ -7,6 +7,7 @@ from pathlib import Path
 
 from exporters.common import (
     SCHEMA_VERSION,
+    WASABI2_THRESHOLD_CHANGE_BLOCK,
     JsonObject,
     compute_rate,
     parse_run_started_at,
@@ -46,6 +47,38 @@ def compare_transactions(
             "blocksci": blocksci_record,
         }
     return transactions
+
+
+def build_warnings(
+    coinjoin_type: str,
+    min_input_count: int | None,
+    blocksci_records: dict[str, TransactionRecord],
+    emulator_data: JsonObject | None,
+) -> list[JsonObject]:
+    warnings: list[JsonObject] = []
+    emulator_block_heights = [
+        int(record["block_height"])
+        for record in ((emulator_data or {}).get("transactions") or {}).values()
+        if record.get("block_height") is not None
+    ]
+    if (
+        coinjoin_type == "wasabi2"
+        and min_input_count is None
+        and not blocksci_records
+        and emulator_block_heights
+        and max(emulator_block_heights) < WASABI2_THRESHOLD_CHANGE_BLOCK
+    ):
+        warnings.append(
+            {
+                "code": "wasabi_production_threshold_zero_detections",
+                "message": (
+                    "BlockSci detected no Wasabi2 CoinJoins at regtest-height blocks while using "
+                    "the production minimum-input threshold. Use an explicit --min-input-count "
+                    "for small emulated rounds, or keep this run as a production-threshold comparison."
+                ),
+            }
+        )
+    return warnings
 
 
 def build_summary(
@@ -103,6 +136,7 @@ def build_report(
             "blocksci_min_input_count": min_input_count,
             "scenario_sha256": scenario.get("sha256") if scenario else None,
         },
+        "warnings": build_warnings(coinjoin_type, min_input_count, blocksci_records, emulator_data),
         "scenario": scenario,
         "emulator_data": {
             "schema_version": emulator_data.get("schema_version"),

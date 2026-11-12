@@ -863,6 +863,18 @@ class UnifiedReportTest(unittest.TestCase):
             emulator_data["label_provenance"]["unavailable_reason"],
         )
 
+    def test_report_warns_when_production_thresholds_detect_no_regtest_wasabi(self):
+        emulator_data = emulator_data_fixture()
+        for transaction in emulator_data["transactions"].values():
+            transaction["block_height"] = 100
+        report = build_report(Path("/tmp/run"), {}, {}, Detector("wasabi2"), emulator_data=emulator_data)
+
+        self.assertEqual(
+            report["warnings"][0]["code"],
+            "wasabi_production_threshold_zero_detections",
+        )
+        self.assertIn("production minimum-input threshold", render_report(report))
+
     def test_build_report_blocksci_only_and_missed_by_blocksci(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir) / "run"
