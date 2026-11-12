@@ -116,13 +116,13 @@ def test_zero_is_a_supplied_maximum_height():
     assert resolve_configuration(config).blocksci.max_block == 0
 
 
-def test_effective_env_defaults_are_validated(monkeypatch):
-    monkeypatch.setenv("PBS_BITCOIN_DATADIR", "/tmp/btc")
+def test_shared_bitcoin_storage_is_refused_in_s3_mode():
     config = PipelineConfiguration.from_mapping(
         {
             "action": "emulate",
             "driver": "kubernetes",
             "run_id": "test",
+            "pbs": {"bitcoin_datadir": "/tmp/btc"},
             "kubernetes": {"reuse_namespace": True},
             "artifacts": {
                 "backend": "s3",

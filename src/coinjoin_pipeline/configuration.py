@@ -512,30 +512,6 @@ def set_mapping_path(mapping, path, value):
     mapping[parts[-1]] = value
 
 
-def decode_text(path: str, text: str, source: str):
-    """Decode one option given as text, such as an environment variable, with its YAML rules."""
-    model, annotation, item = PipelineConfiguration, None, None
-    for part in path.split("."):
-        annotation = model_annotations(model)[part]
-        item = next(field_ for field_ in fields(model) if field_.name == part)
-        model = annotation
-    value: object = text
-    base = next((argument for argument in get_args(annotation) if argument is not NoneType), annotation)
-    if base is int:
-        try:
-            value = int(text)
-        except ValueError as error:
-            raise ConfigurationError(f"{source} must be an integer, not {text!r}") from error
-    try:
-        value = decode_value(annotation, value, path)
-    except ConfigurationError as error:
-        raise ConfigurationError(f"{source}: {error}") from error
-    minimum = item.metadata.get("minimum") if item is not None else None
-    if value is not None and minimum is not None and value < minimum:
-        raise ConfigurationError(f"{source} must be {'positive' if minimum == 1 else 'non-negative'}")
-    return value
-
-
 def config_value(config, path):
     for part in path.split("."):
         config = getattr(config, part)

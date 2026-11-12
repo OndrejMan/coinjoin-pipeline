@@ -1,4 +1,4 @@
-"""The S3 emulation Job options: typed configuration first, the environment as a fallback."""
+"""The S3 emulation Job options: only the typed configuration sets them, never the environment."""
 
 import json
 from dataclasses import replace
@@ -61,57 +61,29 @@ def _controller_environment(config, tmp_path):
     return {item["name"]: item.get("value") for item in controller["env"]}
 
 
-def test_the_environment_fills_unset_options_and_marks_them_provided(monkeypatch) -> None:
+def test_the_environment_no_longer_sets_the_options(monkeypatch) -> None:
     for variable, value in ENVIRONMENT.items():
         monkeypatch.setenv(variable, value)
 
     config = resolve_configuration(load_configuration(S3_EMULATE))
 
-    assert config.kubernetes.distributor_startup_timeout == 1800
-    assert config.kubernetes.btc_node_image == "btc-node:env"
-    assert config.kubernetes.btc_node_initial_block_count == 201
-    assert config.kubernetes.image_pull_policy == "IfNotPresent"
-    assert {
-        "kubernetes.distributor_startup_timeout",
-        "kubernetes.btc_node_image",
-        "kubernetes.btc_node_initial_block_count",
-        "kubernetes.image_pull_policy",
-    } <= config.provided
-
-
-def test_an_explicit_option_wins_over_the_environment(monkeypatch) -> None:
-    monkeypatch.setenv("COINJOIN_BTC_NODE_IMAGE", "btc-node:env")
-
-    config = resolve_configuration(load_configuration([*S3_EMULATE, "--btc-node-image", "btc-node:cli"]))
-
-    assert config.kubernetes.btc_node_image == "btc-node:cli"
-
-
-def test_the_environment_is_ignored_outside_the_s3_emulation(monkeypatch) -> None:
-    # The experimental Kubernetes path without S3 still reads these variables itself.
-    monkeypatch.setenv("COINJOIN_BTC_NODE_IMAGE", "btc-node:env")
-
-    config = resolve_configuration(
-        load_configuration(["full-run", "--engine", "wasabi", "--driver", "kubernetes", "--run-id", "run-1"])
-    )
-
+    assert config.kubernetes.distributor_startup_timeout is None
     assert config.kubernetes.btc_node_image is None
+    assert config.kubernetes.btc_node_initial_block_count is None
+    assert config.kubernetes.image_pull_policy is None
 
 
 @pytest.mark.parametrize(
-    ("variable", "value", "message"),
+    ("option", "value"),
     [
-        ("COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT", "abc", "must be an integer"),
-        ("COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT", "0", "must be positive"),
-        ("COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT", "-1", "must be non-negative"),
-        ("KUBERNETES_IMAGE_PULL_POLICY", "Sometimes", "must be one of: Always, IfNotPresent, Never"),
+        ("--btc-node-initial-block-count", "-1"),
+        ("--distributor-startup-timeout", "0"),
+        ("--kubernetes-image-pull-policy", "Sometimes"),
     ],
 )
-def test_an_invalid_environment_value_names_its_variable(monkeypatch, variable, value, message) -> None:
-    monkeypatch.setenv(variable, value)
-
-    with pytest.raises(ConfigurationError, match=f"{variable}.*{message}"):
-        resolve_configuration(load_configuration(S3_EMULATE))
+def test_an_invalid_option_value_is_refused(option, value) -> None:
+    with pytest.raises((ConfigurationError, SystemExit)):
+        resolve_configuration(load_configuration([*S3_EMULATE, option, value]))
 
 
 def test_the_job_renders_the_configured_options_not_the_environment(monkeypatch, tmp_path) -> None:

@@ -141,11 +141,8 @@ CASES: dict[str, dict] = {
 @pytest.fixture(autouse=True)
 def fixed_environment(monkeypatch, tmp_path):
     """Nothing of this host reaches a rendered job: its environment, checkout path or filesystem."""
-    for name in (*IMAGE_ENVIRONMENT.values(), REGISTRY_ENVIRONMENT, "PBS_BITCOIN_DATADIR", "EMULATION_LOGS_DIR"):
+    for name in (*IMAGE_ENVIRONMENT.values(), REGISTRY_ENVIRONMENT, "EMULATION_LOGS_DIR"):
         monkeypatch.delenv(name, raising=False)
-    # The committed image locks change with every published image; the jobs get fixed names.
-    monkeypatch.setenv("COINJOIN_UPLOADER_IMAGE", "ghcr.io/example/uploader:fixed")
-    monkeypatch.setenv("COINJOIN_UNIFIED_REPORT_IMAGE", "ghcr.io/example/unified-report:fixed")
     # Relative scenario and script paths of the examples resolve from the checkout.
     monkeypatch.chdir(REPO)
     # Submission probes shared storage, which only a MetaCentrum frontend has.
@@ -155,7 +152,15 @@ def fixed_environment(monkeypatch, tmp_path):
 
 def render(arguments: list[str], tmp_path: Path) -> dict:
     """Stage name -> what the job would run."""
-    config = RunContext.prepare(load_configuration([*arguments, "--runs-root", str(tmp_path), "--dry-run"]), "test").config
+    # The committed image locks change with every published image; the jobs get fixed names.
+    fixed_images = [
+        "--uploader-image",
+        "ghcr.io/example/uploader:fixed",
+        "--unified-report-image",
+        "ghcr.io/example/unified-report:fixed",
+    ]
+    arguments = [*arguments, *fixed_images, "--runs-root", str(tmp_path), "--dry-run"]
+    config = RunContext.prepare(load_configuration(arguments), "test").config
     scripts: dict[str, str] = {}
 
     def record(job, _dry_run):

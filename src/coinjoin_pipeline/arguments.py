@@ -140,13 +140,9 @@ HELP = {
         "seconds the Wasabi distributor may take to start in the S3 emulation Job "
         "(fallback: $COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT)"
     ),
-    "kubernetes.btc_node_image": "Bitcoin node image of the S3 emulation (fallback: $COINJOIN_BTC_NODE_IMAGE)",
-    "kubernetes.btc_node_initial_block_count": (
-        "blocks the S3 emulation's Bitcoin node mines before the run (fallback: $COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT)"
-    ),
-    "kubernetes.image_pull_policy": (
-        "imagePullPolicy of the S3 emulation's pods (fallback: $KUBERNETES_IMAGE_PULL_POLICY)"
-    ),
+    "kubernetes.btc_node_image": "Bitcoin node image of the S3 emulation",
+    "kubernetes.btc_node_initial_block_count": ("blocks the S3 emulation's Bitcoin node mines before the run"),
+    "kubernetes.image_pull_policy": ("imagePullPolicy of the S3 emulation's pods"),
     "artifacts.backend": "where run artifacts are kept between stages",
     "artifacts.uri": "S3 run root, for example s3://bucket/runs",
     "artifacts.endpoint_url": "S3-compatible HTTP(S) endpoint URL",
@@ -159,10 +155,8 @@ HELP = {
         "default: ghcr.io/ondrejman)"
     ),
     "images.local_build": "use the images ./run-all.sh local builds (*:local)",
-    "images.uploader": "S3 uploader image (also $COINJOIN_UPLOADER_IMAGE; default: container/uploader.image)",
-    "images.unified_report": (
-        "unified-report job image (also $COINJOIN_UNIFIED_REPORT_IMAGE; default: container/unified-report.image)"
-    ),
+    "images.uploader": "S3 uploader image (default: container/uploader.image)",
+    "images.unified_report": ("unified-report job image (default: container/unified-report.image)"),
     "stages.analysis": "run coinjoin-analysis as a PBS job",
     "stages.blocksci": "run BlockSci as a PBS job",
     "stages.mappings": "run the Wasabi mappings enumerator and Sake as PBS jobs",
@@ -200,7 +194,7 @@ HELP = {
     "blocksci.dumplings_dir": "notebook task over an index read in place: Scanner/ read in place, seen at /mnt/dumplings",
     "blocksci.storage_report_uri": "with --blocksci-restore-index: S3 object receiving the kept copy's size",
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
-    "pbs.bitcoin_datadir": "Bitcoin datadir the PBS BlockSci stage reads (also $PBS_BITCOIN_DATADIR)",
+    "pbs.bitcoin_datadir": "Bitcoin datadir the PBS BlockSci stage reads",
     "coinjoin_analysis.actions": "program operation (repeatable)",
     "coinjoin_analysis.target_paths": "program target path (repeatable)",
     "coinjoin_analysis.input_uri": "S3 input of the program (pbs-from-s3)",

@@ -66,12 +66,12 @@ def read_image_lock(name: str) -> str:
 
 
 def resolve_uploader_image(args: PipelineConfiguration) -> str:
-    """Configured uploader image (``COINJOIN_UPLOADER_IMAGE`` is folded in), else the lock file."""
+    """Configured uploader image, else the lock file."""
     return args.images.uploader or in_registry(read_image_lock("uploader.image"), args.images.registry)
 
 
 def resolve_unified_report_image(args: PipelineConfiguration) -> str:
-    """Configured report image (``COINJOIN_UNIFIED_REPORT_IMAGE`` is folded in), else the lock file."""
+    """Configured report image, else the lock file."""
     return args.images.unified_report or read_image_lock("unified-report.image")
 
 

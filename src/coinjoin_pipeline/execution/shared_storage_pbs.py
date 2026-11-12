@@ -55,7 +55,7 @@ def _submit_blocksci_job(
 ) -> None:
     """Submit one job in the BlockSci image over the shared run, Bitcoin datadir and exporters."""
     if not args.pbs.bitcoin_datadir:
-        raise PBSError("--blocksciPbs requires --pbs-bitcoin-datadir or PBS_BITCOIN_DATADIR")
+        raise PBSError("--blocksci-pbs requires --pbs-bitcoin-datadir")
     env = containers.compose_env(args, run_dir.name)
     exporters_dir = Path(env["EXPORTERS_DIR"]).expanduser().resolve()
     if not args.dry_run:

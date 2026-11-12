@@ -345,10 +345,14 @@ docker exec -u root "${PBS_CONTAINER_NAME}" chmod 0755 /usr/bin/s5cmd
 export PBS_CLIENT_WORKDIR="${WORK_ROOT}"
 export EMULATION_LOGS_DIR="${LOGS_ROOT}"
 export COINJOIN_EMULATOR_IMAGE
-export COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT
-export COINJOIN_BTC_NODE_IMAGE
-export KUBERNETES_IMAGE_PULL_POLICY
-export COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT
+EMULATION_JOB_ARGS=(
+  --distributor-startup-timeout "${COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT}"
+  --btc-node-image "${COINJOIN_BTC_NODE_IMAGE}"
+  --kubernetes-image-pull-policy "${KUBERNETES_IMAGE_PULL_POLICY}"
+)
+if [[ -n "${COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT:-}" ]]; then
+  EMULATION_JOB_ARGS+=(--btc-node-initial-block-count "${COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT}")
+fi
 
 echo "Running the S3-compatible full-run for run ${RUN_ID}..."
 set +e
@@ -372,8 +376,9 @@ set +e
     --s3-credentials-file "${CREDENTIALS_FILE}" \
     --s3-profile "${S3_PROFILE}" \
     --uploader-image "${UPLOADER_IMAGE}" \
-    --analysisPbs \
-    --blocksciPbs \
+    "${EMULATION_JOB_ARGS[@]}" \
+    --analysis-pbs \
+    --blocksci-pbs \
     --min-input-count 15 \
     "${PBS_IMAGE_ARGS[@]}" \
     --pbs-ncpus 2 \

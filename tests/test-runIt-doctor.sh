@@ -80,15 +80,6 @@ if [[ -s "${FAKE_LOG}" ]]; then
   exit 1
 fi
 
-# A globally exported PBS datadir is ignored unless the BlockSci PBS stage is requested.
-run_it env PBS_BITCOIN_DATADIR="${TMP_DIR}/missing-pbs-datadir" bash "${LAUNCHER}" \
-  --engine wasabi --scenario scenarios/overactive-local.json --dry-run >"${TMP_DIR}/pbs-env.out" 2>&1
-grep -q '\[dry-run\]' "${TMP_DIR}/pbs-env.out"
-if grep -q 'PBS Bitcoin datadir' "${TMP_DIR}/pbs-env.out"; then
-  echo "FAIL: non-PBS dry-run should not validate PBS_BITCOIN_DATADIR" >&2
-  exit 1
-fi
-
 # A runtime failure and a strict scenario failure both prevent launch. The
 # daemon gate runs only for live runs; it fails before anything is executed.
 set +e
