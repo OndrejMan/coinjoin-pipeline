@@ -150,6 +150,7 @@ HELP = {
         "persistent BlockSci index under /storage/ or /scratch/multijob-<location>/ instead of the S3 cache"
     ),
     "blocksci.index_backup_uri": "S3 prefix of the persistent index's backup (one archive and its manifest)",
+    "blocksci.index_in_scratch": "script or notebook task: restore the index backup into the job's scratch",
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
     **{
         f"images.{component}": f"{component.replace('_', '-')} image (also ${variable})"

@@ -35,9 +35,21 @@ from coinjoin_pipeline.execution.pbs.stage_settings import BlocksciAnalysisSetti
 from coinjoin_pipeline.storage.s5client import S5Error
 
 
+def scratch_index(stage: Stage, settings: PersistentSettings) -> IndexStore:
+    """A private copy of the backup in the job's scratch; nobody else reads it, so no lock."""
+    require_tools("zstd")
+    index = IndexStore(str(stage.scratch / "index"), settings["backup_uri"], storage=stage.storage)
+    index.path.mkdir(parents=True, exist_ok=True)
+    index.restore()
+    return index
+
+
 def read_index(stage: Stage, settings: PersistentSettings) -> IndexStore:
     """Read-only access for an analysis: shared lock, complete copy, run-local config."""
-    index = open_index(stage, settings, writer=False)
+    if settings.get("in_scratch"):
+        index = scratch_index(stage, settings)
+    else:
+        index = open_index(stage, settings, writer=False)
     if not index.complete():
         raise StageFailure(
             f"[index] working copy {index.path} is incomplete; a persistent update restores it from the S3 backup"

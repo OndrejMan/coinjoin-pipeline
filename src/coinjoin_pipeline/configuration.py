@@ -138,6 +138,8 @@ class BlockSciConfiguration(ConfigurationModel):
     # its single backup (written by backup, read to restore it).
     index_dir: str | None = option(None, name="blocksci_index_dir")
     index_backup_uri: str | None = option(None, name="blocksci_index_backup_uri")
+    # A reading job restores the backup into its own scratch instead of reading index_dir.
+    index_in_scratch: bool = option(False, name="blocksci_index_in_scratch")
 
 
 @dataclass(frozen=True, slots=True)
