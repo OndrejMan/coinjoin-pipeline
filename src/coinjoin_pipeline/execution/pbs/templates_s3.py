@@ -16,6 +16,7 @@ from typing import TypedDict, Union
 from exporters.artifact_paths import (
     BLOCKSCI_ANALYSIS_DIR,
     COINJOIN_ANALYSIS_DIR,
+    DUMPLINGS_SNAPSHOT_FILE,
     EMULATOR_DIR,
     MAPPINGS_DIR,
     STAGED_EXPORTERS_DIR,
@@ -53,6 +54,7 @@ from .stage_settings import (
     BlocksciSettings,
     BlocksciUpdateSettings,
     CommandSettings,
+    DumplingsBaselineSettings,
     MappingsSettings,
     PbsResourceSettings,
     PersistentJobSettings,
@@ -79,6 +81,7 @@ BLOCKSCI = DEFAULT_RESOURCES["blocksci"]
 JobSettings = Union[
     CommandSettings,
     UnifiedReportSettings,
+    DumplingsBaselineSettings,
     MappingsSettings,
     BlocksciSettings,
     BlocksciParseSettings,
@@ -93,6 +96,49 @@ def render_coinjoin_analysis_s3_pbs(
 ) -> str:
     """Render the baseline job that runs coinjoin-analysis over the emulator logs."""
     return render_python_stage("coinjoin-analysis", target, resources, image, {"command": command})
+
+
+# coinjoin-analysis names per protocol: --cjtype, the Scanner/ output folder, data/<name>/false_cjtxs.json.
+DUMPLINGS_PROTOCOLS = {
+    "wasabi2": ("ww2", "wasabi2", "wasabi2"),
+    "joinmarket": ("jm", "joinmarket_all", "joinmarket"),
+}
+
+
+def render_coinjoin_analysis_dumplings_s3_pbs(
+    target: S3Target,
+    image: str,
+    *,
+    dumplings_uri: str,
+    coinjoin_type: str,
+    resources: PBSResources = DEFAULT_RESOURCES["analysis"],
+) -> str:
+    """Render the mainnet baseline: coinjoin-analysis over the published Dumplings copy.
+
+    ``<dumplings_uri>/Scanner/`` is the copy mainnet-sync keeps incrementally and
+    ``manifest.json`` (written last) its height and file sizes. The run gets
+    ``coinjoin_tx_info.json``, the image's curated ``false_cjtxs.json`` and the manifest as
+    ``dumplings-snapshot.json`` for the report.
+    """
+    uri = validated_s3_uri(dumplings_uri, "Dumplings snapshot URI")
+    if coinjoin_type not in DUMPLINGS_PROTOCOLS:
+        raise PBSError(f"Dumplings baselines cover wasabi2 and joinmarket, not {coinjoin_type}")
+    cjtype, mix_id, false_cjtxs = DUMPLINGS_PROTOCOLS[coinjoin_type]
+    return render_python_stage(
+        "coinjoin-analysis",
+        target,
+        resources,
+        image,
+        {
+            "dumplings_uri": uri,
+            "mix_id": mix_id,
+            "false_cjtxs": false_cjtxs,
+            "snapshot_file": DUMPLINGS_SNAPSHOT_FILE,
+            "command": f"python -m cj_process.parse_dumplings --cjtype {cjtype} --action process_dumplings "
+            "--target-path /work/dumplings",
+        },
+        job="dumplings-baseline",
+    )
 
 
 def render_mappings_s3_pbs(

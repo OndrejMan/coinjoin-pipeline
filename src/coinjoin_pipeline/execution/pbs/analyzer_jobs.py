@@ -5,8 +5,11 @@ None of them touches a BlockSci index; ``blocksci_jobs`` writes one, ``blocksci_
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
 import subprocess
+import sys
 from typing import cast
 
 from exporters.artifact_paths import (
@@ -15,6 +18,7 @@ from exporters.artifact_paths import (
     COINJOIN_ANALYSIS_DIR,
     EMULATOR_DATA_DIR,
     EMULATOR_DIR,
+    FALSE_CJTXS_FILE,
     MAPPINGS_DIR,
     REPORT_DIR,
     REPORT_FILE,
@@ -24,6 +28,7 @@ from exporters.artifact_paths import (
 from coinjoin_pipeline.execution.pbs.stage import CONTAINER_RUNS_ROOT, CONTAINER_SELECTED_ROOT, Stage, StageFailure
 from coinjoin_pipeline.execution.pbs.stage_settings import (
     CommandSettings,
+    DumplingsBaselineSettings,
     MappingsSettings,
     UnifiedReportSettings,
 )
@@ -77,6 +82,62 @@ def coinjoin_analysis(stage: Stage) -> None:
         settings["command"],
     )
     stage.require_file(BASELINE_FILE, f"Coinjoin analysis did not produce {BASELINE_FILE}")
+    stage.upload(output, COINJOIN_ANALYSIS_DIR)
+
+
+def dumplings_baseline(stage: Stage) -> None:
+    """The mainnet baseline: coinjoin-analysis over the Dumplings copy mainnet-sync publishes.
+
+    ``manifest.json``, written last, names the copy's height and file sizes; a copy
+    without it is being replaced or its upload failed.
+    """
+    settings = cast(DumplingsBaselineSettings, stage.settings)
+    uri, mix_id = settings["dumplings_uri"], settings["mix_id"]
+    output = stage.work / COINJOIN_ANALYSIS_DIR
+    output.mkdir(parents=True, exist_ok=True)
+    stage.log(f"reading the Dumplings copy from {uri}")
+    manifest_path = stage.work / "dumplings-manifest.json"
+    stage.storage.copy(f"{uri}/manifest.json", str(manifest_path))
+    manifest = json.loads(manifest_path.read_text())
+    height = manifest["last_processed_height"]
+    stage.log(f"Dumplings Scanner/ at height {height}")
+    # Parent of Scanner/: parse_dumplings also writes summary.log and operation.txt one level up.
+    work = stage.scratch / "dumplings-work"
+    scanner = work / "dumplings/Scanner"
+    scanner.mkdir(parents=True)
+    stage.storage.copy(f"{uri}/Scanner/*", f"{scanner}/", timeout=None)
+    sizes = {
+        os.path.relpath(os.path.join(directory, name), scanner): os.path.getsize(os.path.join(directory, name))
+        for directory, _, names in os.walk(scanner)
+        for name in names
+    }
+    if sizes != manifest["files"]:
+        raise StageFailure("the downloaded Scanner/ does not match its manifest")
+    # coinjoin-analysis reads <file>.json instead of a Dumplings file when one exists and
+    # never checks its age, so the snapshot must arrive without them.
+    for cached in scanner.glob("*.txt.json"):
+        cached.unlink()
+    stage.singularity(
+        f"cd /work && {settings['command']}",
+        binds=(f"{work}:/work:rw",),
+        environment=("MPLCONFIGDIR=/tmp",),
+        cleanenv=True,
+    )
+    baseline = scanner / mix_id / "coinjoin_tx_info.json"
+    if not baseline.is_file():
+        raise StageFailure(f"coinjoin-analysis did not produce Scanner/{mix_id}/coinjoin_tx_info.json")
+    shutil.copyfile(baseline, stage.work / BASELINE_FILE)
+    # The curated false positives shipped with this coinjoin-analysis image, for the comparison.
+    false_cjtxs = stage.work / FALSE_CJTXS_FILE
+    curated = f"/opt/coinjoin-analysis/data/{settings['false_cjtxs']}/false_cjtxs.json"
+    with false_cjtxs.open("wb") as handle:
+        copied = subprocess.run(stage.image_command("cat", curated, cleanenv=True), stdout=handle)
+    if copied.returncode:
+        print(f"[{stage.name}] the image has no curated false_cjtxs.json", file=sys.stderr)
+        false_cjtxs.unlink()
+    shutil.copyfile(manifest_path, stage.work / settings["snapshot_file"])
+    coinjoins = len(json.loads((stage.work / BASELINE_FILE).read_text())["coinjoins"])
+    stage.log(f"baseline of {coinjoins} coinjoins through height {height}")
     stage.upload(output, COINJOIN_ANALYSIS_DIR)
 
 

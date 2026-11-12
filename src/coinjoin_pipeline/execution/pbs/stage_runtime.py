@@ -37,6 +37,7 @@ JOBS: dict[str, Callable[[Stage], None]] = {
     "coinjoin-mappings": analyzer_jobs.coinjoin_mappings,
     "unified-report": analyzer_jobs.unified_report,
     "coinjoin-analysis": analyzer_jobs.coinjoin_analysis,
+    "dumplings-baseline": analyzer_jobs.dumplings_baseline,
 }
 
 

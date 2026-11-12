@@ -32,6 +32,7 @@ SCENARIO_FILE = EMULATOR_DIR + "/scenario.json"
 #: The wallet and coordinator logs coinjoin-analysis reads, and the emulator's labels.
 EMULATOR_DATA_DIR = EMULATOR_DIR + "/data"
 BASELINE_FILE = COINJOIN_ANALYSIS_DIR + "/coinjoin_tx_info.json"
+FALSE_CJTXS_FILE = COINJOIN_ANALYSIS_DIR + "/false_cjtxs.json"
 # Every false-positive sidecar, including the numbered copies of extra inputs.
 FALSE_CJTXS_GLOB = "false_cjtxs.json*"
 # External baselines only: the Dumplings state the baseline was parsed from.

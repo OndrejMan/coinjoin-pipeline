@@ -25,6 +25,7 @@ from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_blocksci_parse_s3_pbs,
     render_blocksci_s3_pbs,
     render_blocksci_update_s3_pbs,
+    render_coinjoin_analysis_dumplings_s3_pbs,
     render_coinjoin_analysis_s3_pbs,
     render_mappings_s3_pbs,
     render_unified_report_s3_pbs,
@@ -121,7 +122,13 @@ class S3StageRunner:
             "image": pbs_image(self.args, "coinjoin_analysis"),
             "resources": stage_pbs_resources(self.args, "analysis"),
         }
-        script = render_coinjoin_analysis_s3_pbs(**common, command=coinjoin_analysis_pbs_command("collect_docker"))
+        if self.args.dumplings_uri:
+            # Mainnet: the baseline comes from the latest Dumplings snapshot, not an emulation.
+            script = render_coinjoin_analysis_dumplings_s3_pbs(
+                **common, dumplings_uri=self.args.dumplings_uri, coinjoin_type=self.args.coinjoin_type
+            )
+        else:
+            script = render_coinjoin_analysis_s3_pbs(**common, command=coinjoin_analysis_pbs_command("collect_docker"))
         self._submit(stage, script)
 
     def _mappings(self, stage: StagePlan) -> None:

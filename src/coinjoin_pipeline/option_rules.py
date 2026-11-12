@@ -180,6 +180,7 @@ def _action_errors(config: PipelineConfiguration) -> list[str]:
         *_blocksci_task_errors(config, stages),
         *_cache_source_errors(config),
         *_persistent_index_errors(config),
+        *_dumplings_errors(config, stages),
         *_height_errors(config),
         *_blocksci_source_errors(config),
         *_s3_errors(config, stages),
@@ -304,6 +305,17 @@ def _cache_source_errors(config: PipelineConfiguration) -> list[str]:
             errors.append("--blocksci-cache-source-run-id must differ from target --run-id")
     elif source_run_id:
         errors.append("--blocksci-cache-source-run-id requires --blocksci-task update, script, or notebook")
+    return errors
+
+
+def _dumplings_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
+    if not config.dumplings_uri:
+        return []
+    errors: list[str] = []
+    if config.action != "pbs-from-s3" or not stages.analysis:
+        errors.append("--dumplings-uri requires pbs-from-s3 --analysis-pbs")
+    if stages.mappings:
+        errors.append("--dumplings-uri does not support --mappings-pbs")
     return errors
 
 
