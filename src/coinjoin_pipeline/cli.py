@@ -81,6 +81,10 @@ def main(argv: list[str] | None = None) -> int:
         code = EXIT_INTERRUPTED
     except SystemExit as error:
         code = error.code if isinstance(error.code, int) else EXIT_USAGE
+    finally:
+        from .execution.locks import close_locks
+
+        close_locks()
     return code
 
 
