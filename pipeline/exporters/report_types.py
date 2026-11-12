@@ -151,12 +151,10 @@ class ImageFields(_ImageFields, total=False):
 
 class SourceCommits(TypedDict):
     coinjoin_emulator: str | None
-    exporters: str | None
 
 
 class SourceTrees(TypedDict):
     exporters_sha256: str | None
-    exporters_git_dirty: bool | None
 
 
 class _RunManifestFields(TypedDict):

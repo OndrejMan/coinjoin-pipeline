@@ -1,10 +1,9 @@
-"""Shared JSON, subprocess, and normalization helpers for unified reports."""
+"""Shared JSON and normalization helpers for unified reports."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 from collections import Counter
 from collections.abc import Iterator, Mapping
 from datetime import datetime
@@ -23,7 +22,7 @@ JsonValue = object
 # are typed in exporters.report_types instead.
 JsonObject = dict
 
-SCHEMA_VERSION = "3.0"
+SCHEMA_VERSION = "3.1"
 EMULATOR_DATA_SCHEMA_VERSION = "1.0"
 SATS_IN_BTC = 100_000_000
 DEFAULT_FIRST_WASABI2_BLOCK = 0
@@ -71,38 +70,6 @@ def first_present(*values: str | None) -> str | None:
         if value is not None and value != "":
             return value
     return None
-
-
-def git_commit_for_path(path: Path) -> str | None:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    commit = result.stdout.strip()
-    return commit or None
-
-
-def git_tree_is_dirty(path: Path) -> bool | None:
-    """Report uncommitted changes, or None where the checkout is unavailable.
-
-    The PBS/S3 node runs a downloaded exporter tree with no ``.git``, so this is
-    None there and the tree hash carries the provenance instead.
-    """
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(path), "status", "--porcelain"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    return bool(result.stdout.strip())
 
 
 # Bytecode and caches are excluded from the staged upload, so hashing them would

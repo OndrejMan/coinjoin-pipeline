@@ -699,7 +699,6 @@ def render_run_manifest(report: JsonObject) -> list[str]:
                 ["detector", json.dumps(detector, sort_keys=True)],
                 *image_rows,
                 ["coinjoin-emulator commit", commits.get("coinjoin_emulator")],
-                ["exporters commit", commits.get("exporters")],
                 ["exporters tree sha256", trees.get("exporters_sha256")],
             ],
             key="field",

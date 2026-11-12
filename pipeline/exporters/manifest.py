@@ -14,8 +14,6 @@ from exporters.common import (
     docker_image_digest,
     file_sha256,
     first_present,
-    git_commit_for_path,
-    git_tree_is_dirty,
     nested_get,
     to_json_text,
     tree_sha256,
@@ -124,16 +122,13 @@ def build_run_manifest(
                 emulator_git_commit,
                 os.environ.get("COINJOIN_EMULATOR_GIT_COMMIT"),
             ),
-            "exporters": git_commit_for_path(exporters_root),
         },
-        # The report can run from a tree that has no checkout behind it: the PBS
-        # node executes exporters downloaded from S3, where `git rev-parse`
-        # yields null. The tree hash names the exact code that produced the
-        # report in every case; `git_dirty` says whether the commit above is the
-        # whole story. Informational only — nothing branches on them.
+        # The report container sees the exporters without their checkout's .git (a
+        # mount locally, a download from S3 on PBS), so no commit can be read there.
+        # The tree hash names the exact code that produced the report in every case.
+        # Informational only — nothing branches on it.
         "source_trees": {
             "exporters_sha256": tree_sha256(exporters_root),
-            "exporters_git_dirty": git_tree_is_dirty(exporters_root),
         },
         "inputs": report_input_hashes(run_dir),
     }
