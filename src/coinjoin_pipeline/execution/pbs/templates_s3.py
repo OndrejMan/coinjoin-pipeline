@@ -112,13 +112,18 @@ def render_blocksci_s3_pbs(
     include_report: bool = True,
     export_analysis: bool = False,
 ) -> str:
-    """Parse and analyze in one job."""
+    """Parse and analyze in one job, publishing the same index archive as the split workflow."""
     return render_python_stage(
         "blocksci",
         target,
         resources,
         image,
-        {"command": command, "include_report": include_report, "export_analysis": export_analysis},
+        {
+            "command": command,
+            "include_report": include_report,
+            "export_analysis": export_analysis,
+            "pbs_resources": _pbs_resources(resources),
+        },
     )
 
 

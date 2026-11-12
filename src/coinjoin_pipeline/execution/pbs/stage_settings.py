@@ -96,7 +96,7 @@ class IndexWriterSettings(CommandSettings):
     pbs_resources: PbsResourceSettings
 
 
-class BlocksciSettings(CommandSettings):
+class BlocksciSettings(IndexWriterSettings):
     """The combined parse and analysis of an emulation."""
 
     include_report: bool

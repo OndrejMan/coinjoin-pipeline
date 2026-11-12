@@ -67,7 +67,7 @@ def emulator_bitcoin_datadir(stage: Stage) -> Path:
 
 
 class WrittenIndex:
-    """The index a parse job writes.
+    """The index a parse or combined job writes.
 
     It is written in the job's scratch and published as its single backup in
     <run prefix>/blocksci-parse_data, with its manifest and file list.
@@ -95,8 +95,12 @@ class WrittenIndex:
 
 
 def blocksci(stage: Stage) -> None:
-    """Parse the emulated chain, detect CoinJoins and, with the baseline at hand, write the report."""
+    """Parse the emulated chain, detect CoinJoins and, with the baseline at hand, write the report.
+
+    The parsed index is published like the reusable workflow's, so cached jobs can reuse it.
+    """
     settings = cast(BlocksciSettings, stage.settings)
+    index = WrittenIndex(stage)
     for name in (BITCOIN_DATA_DIR, EMULATOR_DIR, STAGED_EXPORTERS_DIR):
         stage.download(name)
     datadir = emulator_bitcoin_datadir(stage)
@@ -125,6 +129,7 @@ def blocksci(stage: Stage) -> None:
     for _, relative, wanted, producer in outputs:
         if wanted:
             stage.require_file(relative, f"{producer} did not produce {relative}")
+    index.publish("emulator", "bitcoin_regtest", max_block, {})
     for directory, _, wanted, _ in reversed(outputs):
         if wanted:
             stage.upload(stage.work / directory, directory)
