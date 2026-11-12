@@ -30,6 +30,13 @@ def load_analysis(
     for field, kind in (("records", dict), ("first_wasabi2_block", int)):
         if not isinstance(artifact.get(field), kind):
             raise ValueError(f"BlockSci analysis artifact has invalid {field}")
+    subset_matching = artifact.get("subset_matching")
+    if subset_matching is not None and not (
+        isinstance(subset_matching, dict)
+        and isinstance(subset_matching.get("records"), dict)
+        and isinstance(subset_matching.get("skipped_txids"), list)
+    ):
+        raise ValueError("BlockSci analysis artifact has invalid subset_matching")
     if not isinstance(artifact.get("integration_diagnostics"), dict):
         raise ValueError("BlockSci analysis artifact has invalid integration_diagnostics")
     provenance = artifact.get("image_provenance")

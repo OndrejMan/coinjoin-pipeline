@@ -170,9 +170,14 @@ def compose_env(
     env["NOTEBOOKS_DIR"] = str(notebooks_dir)
     env["EMULATION_LOGS_DIR"] = str(emulation_logs_dir)
     env["EXPORTERS_DIR"] = str(exporters_dir)
+    detector = config.joinmarket
     env["COINJOIN_ENGINE"] = config.engine
     env["BLOCKSCI_COINJOIN_TYPE"] = config.coinjoin_type
     env["BLOCKSCI_MIN_INPUT_COUNT"] = "default" if config.min_input_count is None else str(config.min_input_count)
+    env["BLOCKSCI_JOINMARKET_DETECTOR"] = detector.detector
+    env["BLOCKSCI_JOINMARKET_MIN_BASE_FEE"] = str(detector.min_base_fee)
+    env["BLOCKSCI_JOINMARKET_PERCENTAGE_FEE"] = str(detector.percentage_fee)
+    env["BLOCKSCI_JOINMARKET_MAX_DEPTH"] = str(detector.max_depth)
     env["RUN_TIMEZONE"] = config.run_timezone
     env.setdefault("BLOCKSCI_IMAGE", settings.DEFAULT_BLOCKSCI_IMAGE)
     env.setdefault("COINJOIN_ANALYSIS_IMAGE", settings.DEFAULT_COINJOIN_ANALYSIS_IMAGE)
@@ -436,6 +441,10 @@ def export_command(active_run_id: str, env: dict[str, str]) -> str:
     for name, key in (
         ("coinjoin-type", "BLOCKSCI_COINJOIN_TYPE"),
         ("min-input-count", "BLOCKSCI_MIN_INPUT_COUNT"),
+        ("joinmarket-detector", "BLOCKSCI_JOINMARKET_DETECTOR"),
+        ("joinmarket-min-base-fee", "BLOCKSCI_JOINMARKET_MIN_BASE_FEE"),
+        ("joinmarket-percentage-fee", "BLOCKSCI_JOINMARKET_PERCENTAGE_FEE"),
+        ("joinmarket-max-depth", "BLOCKSCI_JOINMARKET_MAX_DEPTH"),
     ):
         command.extend(["--" + name, env[key]])
     optional_args = [

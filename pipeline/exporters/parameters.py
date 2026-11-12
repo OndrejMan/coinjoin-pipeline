@@ -6,7 +6,14 @@ import argparse
 import os
 from dataclasses import dataclass, field
 
-from exporters.common import DEFAULT_FIRST_WASABI2_BLOCK, digest_from_reference
+from exporters.common import (
+    DEFAULT_FIRST_WASABI2_BLOCK,
+    DEFAULT_JOINMARKET_DETECTOR,
+    DEFAULT_JOINMARKET_MAX_DEPTH,
+    DEFAULT_JOINMARKET_MIN_BASE_FEE,
+    DEFAULT_JOINMARKET_PERCENTAGE_FEE,
+    digest_from_reference,
+)
 from exporters.report_types import DetectorManifest, DetectorParameters, ImageFields
 
 # Images whose reference and digest a report records.
@@ -22,6 +29,10 @@ class Detector:
     min_input_count: int | None = None
     # Read from the parsed index, not an option.
     first_wasabi2_block: int = DEFAULT_FIRST_WASABI2_BLOCK
+    joinmarket_detector: str = DEFAULT_JOINMARKET_DETECTOR
+    joinmarket_min_base_fee: int = DEFAULT_JOINMARKET_MIN_BASE_FEE
+    joinmarket_percentage_fee: float = DEFAULT_JOINMARKET_PERCENTAGE_FEE
+    joinmarket_max_depth: int = DEFAULT_JOINMARKET_MAX_DEPTH
 
     @classmethod
     def from_args(cls, args: argparse.Namespace, first_wasabi2_block: int = DEFAULT_FIRST_WASABI2_BLOCK) -> Detector:
@@ -29,6 +40,10 @@ class Detector:
             coinjoin_type=args.coinjoin_type,
             min_input_count=args.min_input_count,
             first_wasabi2_block=first_wasabi2_block,
+            joinmarket_detector=args.joinmarket_detector,
+            joinmarket_min_base_fee=args.joinmarket_min_base_fee,
+            joinmarket_percentage_fee=args.joinmarket_percentage_fee,
+            joinmarket_max_depth=args.joinmarket_max_depth,
         )
 
     def artifact_parameters(self) -> DetectorParameters:
@@ -36,6 +51,10 @@ class Detector:
         return {
             "coinjoin_type": self.coinjoin_type,
             "min_input_count": self.min_input_count,
+            "joinmarket_detector": self.joinmarket_detector,
+            "joinmarket_min_base_fee": self.joinmarket_min_base_fee,
+            "joinmarket_percentage_fee": self.joinmarket_percentage_fee,
+            "joinmarket_max_depth": self.joinmarket_max_depth,
         }
 
     def manifest(self) -> DetectorManifest:
@@ -46,6 +65,15 @@ class Detector:
         }
         if self.coinjoin_type == "wasabi2":
             detector["first_wasabi2_block"] = self.first_wasabi2_block
+        if self.coinjoin_type == "joinmarket":
+            detector.update(
+                {
+                    "joinmarket_detector": self.joinmarket_detector,
+                    "joinmarket_min_base_fee": self.joinmarket_min_base_fee,
+                    "joinmarket_percentage_fee": self.joinmarket_percentage_fee,
+                    "joinmarket_max_depth": self.joinmarket_max_depth,
+                }
+            )
         return detector
 
 
@@ -106,6 +134,30 @@ def add_detector_arguments(parser: argparse.ArgumentParser) -> None:
         type=parse_min_input_count,
         default=os.environ.get("BLOCKSCI_MIN_INPUT_COUNT"),
         help="Override BlockSci detector min input count; use 'default' for BlockSci's default.",
+    )
+    parser.add_argument(
+        "--joinmarket-detector",
+        choices=("possible", "definite"),
+        default=os.environ.get("BLOCKSCI_JOINMARKET_DETECTOR", DEFAULT_JOINMARKET_DETECTOR),
+        help="JoinMarket detector to use for --coinjoin-type joinmarket.",
+    )
+    parser.add_argument(
+        "--joinmarket-min-base-fee",
+        type=int,
+        default=os.environ.get("BLOCKSCI_JOINMARKET_MIN_BASE_FEE", DEFAULT_JOINMARKET_MIN_BASE_FEE),
+        help="Minimum base fee passed to the BlockSci JoinMarket detector.",
+    )
+    parser.add_argument(
+        "--joinmarket-percentage-fee",
+        type=float,
+        default=os.environ.get("BLOCKSCI_JOINMARKET_PERCENTAGE_FEE", DEFAULT_JOINMARKET_PERCENTAGE_FEE),
+        help="Percentage fee passed to the BlockSci JoinMarket detector.",
+    )
+    parser.add_argument(
+        "--joinmarket-max-depth",
+        type=int,
+        default=os.environ.get("BLOCKSCI_JOINMARKET_MAX_DEPTH", DEFAULT_JOINMARKET_MAX_DEPTH),
+        help="Maximum subset-search depth passed to the BlockSci JoinMarket detector.",
     )
 
 

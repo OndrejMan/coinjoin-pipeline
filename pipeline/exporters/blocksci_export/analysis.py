@@ -16,7 +16,12 @@ if __package__ in {None, ""}:
 
 from exporters.analysis_artifact import ARTIFACT_NAME, SCHEMA_VERSION
 from exporters.artifact_paths import blocksci_analysis_dir
-from exporters.blocksci_export.detector import BLOCKSCI_IMPORT_ERROR, blocksci, export_blocksci_records
+from exporters.blocksci_export.detector import (
+    BLOCKSCI_IMPORT_ERROR,
+    blocksci,
+    export_blocksci_records,
+    export_subset_matching_records,
+)
 from exporters.common import save_json
 from exporters.integration_diagnostics import build_integration_diagnostics
 from exporters.normalization import load_first_wasabi2_block
@@ -27,7 +32,7 @@ from exporters.parameters import (
     add_detector_arguments,
     add_image_arguments,
 )
-from exporters.report_types import BlockSciAnalysisArtifact
+from exporters.report_types import BlockSciAnalysisArtifact, SubsetMatchingAnalysis
 
 # The report stage resolves its own image (manifest.resolve_manifest_images).
 PROVENANCE_IMAGE_NAMES = IMAGE_COMPONENTS[:3]
@@ -44,6 +49,10 @@ def write_analysis(args: argparse.Namespace) -> Path:
 
     detector = Detector.from_args(args, load_first_wasabi2_block(config_path))
     records = export_blocksci_records(config_path, detector)
+    subset_matching: SubsetMatchingAnalysis | None = None
+    if detector.coinjoin_type == "joinmarket":
+        subset_records, skipped_txids = export_subset_matching_records(config_path, detector)
+        subset_matching = SubsetMatchingAnalysis(records=subset_records, skipped_txids=skipped_txids)
     images = ReportImages.from_args(args)
     image_ids = {name: getattr(args, name + "_image_id", None) for name in PROVENANCE_IMAGE_NAMES}
     diagnostics = build_integration_diagnostics(run_dir, config_path, blocksci, records, images, image_ids=image_ids)
@@ -62,6 +71,7 @@ def write_analysis(args: argparse.Namespace) -> Path:
             for name in PROVENANCE_IMAGE_NAMES
         },
         "records": records,
+        "subset_matching": subset_matching,
         "integration_diagnostics": diagnostics,
     }
     output_dir = blocksci_analysis_dir(run_dir)

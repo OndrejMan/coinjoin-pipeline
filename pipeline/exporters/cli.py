@@ -107,6 +107,7 @@ def assemble_report(args: argparse.Namespace) -> int:
         Detector.from_args(args, analysis["first_wasabi2_block"]),
         scenario,
         emulator_data=emulator_data,
+        subset_matching=analysis.get("subset_matching"),
         engine=args.engine,
         images=ReportImages.from_args(args),
         emulator_git_commit=args.emulator_git_commit,

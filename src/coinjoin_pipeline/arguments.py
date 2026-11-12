@@ -65,6 +65,7 @@ SECTIONS = {
         "else the release tag --version.",
     ),
     "blocksci": ("BlockSci", None),
+    "joinmarket": ("JoinMarket detector", None),
 }
 
 # Help text by model path. The YAML key and the default are appended automatically.

@@ -117,6 +117,10 @@ class DetectorManifest(_DetectorManifestFields, total=False):
     """Detector parameters; only the selected CoinJoin type's keys are present."""
 
     first_wasabi2_block: int
+    joinmarket_detector: str
+    joinmarket_min_base_fee: int
+    joinmarket_percentage_fee: float
+    joinmarket_max_depth: int
 
 
 class ScenarioIdentity(TypedDict):
@@ -167,6 +171,17 @@ class DetectorParameters(TypedDict):
 
     coinjoin_type: str
     min_input_count: int | None
+    joinmarket_detector: str
+    joinmarket_min_base_fee: int
+    joinmarket_percentage_fee: float
+    joinmarket_max_depth: int
+
+
+class SubsetMatchingAnalysis(TypedDict):
+    """The deprecated input-subset-matching JoinMarket scan, kept for comparison."""
+
+    records: dict[str, TransactionRecord]
+    skipped_txids: list[str]
 
 
 class BlockSciAnalysisArtifact(TypedDict):
@@ -177,5 +192,7 @@ class BlockSciAnalysisArtifact(TypedDict):
     parameters: DetectorParameters
     first_wasabi2_block: int
     records: dict[str, TransactionRecord]
+    # JoinMarket emulator runs only; None otherwise.
+    subset_matching: SubsetMatchingAnalysis | None
     integration_diagnostics: JsonObject | None
     image_provenance: JsonObject

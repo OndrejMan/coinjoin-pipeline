@@ -20,7 +20,7 @@ from exporters.comparison import (
 from exporters.heuristics import add_blocksci_heuristic_explanations
 from exporters.manifest import build_run_manifest, compare_run_manifests
 from exporters.parameters import Detector, ReportImages
-from exporters.report_types import TransactionRecord
+from exporters.report_types import SubsetMatchingAnalysis, TransactionRecord
 from exporters.scenario import build_scenario_checks
 from exporters.script_metadata import enrich_records_with_script_metadata, load_exported_block_script_metadata
 
@@ -123,6 +123,50 @@ def build_summary(
     return summary
 
 
+def build_subset_matching_comparison(
+    subset_matching: SubsetMatchingAnalysis | None,
+    coinjoin_analysis: dict[str, TransactionRecord],
+    blocksci_records: dict[str, TransactionRecord],
+    detector: Detector,
+) -> JsonObject | None:
+    """The deprecated subset-matching JoinMarket scan against coinjoin-analysis and the protocol heuristic."""
+    if subset_matching is None:
+        return None
+    detected = set(subset_matching["records"])
+    baseline = set(coinjoin_analysis)
+    heuristic = set(blocksci_records)
+    matched = detected & baseline
+    return {
+        "deprecated": True,
+        "reason": (
+            "BlockSci deprecates the input-subset-matching detectors: their backtracking is exponential in the "
+            "number of inputs and impractically slow on mainnet. The report's BlockSci detection uses the "
+            "JoinMarket protocol heuristic instead."
+        ),
+        "parameters": {
+            "detector": detector.joinmarket_detector,
+            "min_base_fee": detector.joinmarket_min_base_fee,
+            "percentage_fee": detector.joinmarket_percentage_fee,
+            "max_depth": detector.joinmarket_max_depth,
+        },
+        "summary": {
+            "detected_coinjoins": len(detected),
+            MATCHED: len(matched),
+            BLOCKSCI_ONLY: len(detected - baseline),
+            MISSED: len(baseline - detected),
+            "agreement_rate": compute_rate(len(matched), len(detected), 1.0 if not baseline else 0.0),
+            "coinjoin_analysis_coverage": compute_rate(len(matched), len(baseline), 1.0),
+            "skipped": len(subset_matching["skipped_txids"]),
+            "also_detected_by_blocksci_heuristic": len(detected & heuristic),
+            "subset_matching_only": len(detected - heuristic),
+            "blocksci_heuristic_only": len(heuristic - detected),
+        },
+        "blocksci_only_txids": sorted(detected - baseline),
+        "missed_by_blocksci_txids": sorted(baseline - detected),
+        "skipped_txids": subset_matching["skipped_txids"],
+    }
+
+
 def build_report(
     run_dir: Path,
     coinjoin_analysis: dict[str, TransactionRecord],
@@ -131,6 +175,7 @@ def build_report(
     scenario: JsonObject | None = None,
     *,
     emulator_data: JsonObject | None = None,
+    subset_matching: SubsetMatchingAnalysis | None = None,
     engine: str | None = None,
     images: ReportImages | None = None,
     emulator_git_commit: str | None = None,
@@ -158,6 +203,10 @@ def build_report(
         if independent_emulator_labels
         else None
     )
+    if detector_evaluations is not None and subset_matching is not None:
+        detector_evaluations["blocksci_subset_matching"] = build_detection_confusion_matrix(
+            emulator_data, subset_matching["records"]
+        )
     summary = build_summary(
         transactions,
         coinjoin_analysis,
@@ -201,6 +250,9 @@ def build_report(
         else None,
         "detector_evaluations": detector_evaluations,
         "evaluation_scope": evaluation_scope(independent_emulator_labels),
+        "blocksci_subset_matching": build_subset_matching_comparison(
+            subset_matching, coinjoin_analysis, blocksci_records, detector
+        ),
         "summary": summary,
         "divergences": divergences,
         "transactions": transactions,
