@@ -40,6 +40,16 @@ Opravy jsou nové commity nad historií ve větvi `clean-history`; existující 
 - Bugy 3 — obnovitelný Kerberos ticket vyžaduje už jen S3 `full-run`; `pbs-from-s3` a
   `mainnet-sync` stačí platný ticket („fix(pbs): require a renewable Kerberos ticket only for the
   S3 full-run“, včetně úpravy kontraktu v `docs/pbs-stage-contract.md`).
+- Nesrovnalosti 30 — report porovnává jen parametry, které čte detektor zvoleného typu, takže změna
+  JoinMarket volby nezneplatní Wasabi artefakt („fix(report): keep a Wasabi analysis valid …“).
+- Nesrovnalosti 34 — `source_commits.exporters` i `source_trees.exporters_git_dirty` byly v report
+  kontejneru vždy null, z manifestu zmizely; zůstává hash stromu, schéma reportu je 3.1
+  („refactor(report): drop the exporters commit and dirty flag …“).
+- Zlepšení 6 — generovaná run ID mají sekundy; report čte čas běhu i z minutových ID starších běhů
+  („feat(runs): put seconds into generated run IDs“).
+- Zlepšení 14 — staging exportérů maže soubory, které checkout už nemá (`s5cmd sync --delete`,
+  ověřeno proti lokálnímu MinIO) („fix(s3): drop staged exporter files …“).
+- Zlepšení 15 — `qsub` má timeout 120 s a hlásí, že job mohl projít („fix(pbs): give qsub a timeout …“).
 - Navíc: commit nástrojů přestavby dostal `.peel/` pod `ruff check .`, opraveno v „style(history): …“.
 
 **Nepotvrdilo se**
@@ -48,6 +58,8 @@ Opravy jsou nové commity nad historií ve větvi `clean-history`; existující 
   ignorované: `option_rules` je mimo S3 emulaci výslovně odmítne a nápověda je uvádí jako S3-only.
 - Zbytečný kód 4 — sdílená hlavička `k8s_s3_access.sh` funkci `write_s3_credentials` jen
   definuje; preflight i uploader ji volají každý jednou.
+- Nesrovnalosti 15 — výchozí image reportu je `python:3.12-slim-bookworm`, ne image projektu,
+  takže ho registry forku přesouvat nemá.
 
 **Ponecháno záměrně / k rozhodnutí**
 
