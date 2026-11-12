@@ -76,6 +76,8 @@ class ArtifactConfiguration(ConfigurationModel):
     uri: str | None = option(None, name="artifact_uri")
     endpoint_url: str | None = option(None, name="s3_endpoint_url")
     secret_name: str | None = option(None, name="s3_secret_name")
+    credentials_file: str | None = option(None, name="s3_credentials_file")
+    profile: str | None = option(None, name="s3_profile")
 
 
 @dataclass(frozen=True, slots=True)

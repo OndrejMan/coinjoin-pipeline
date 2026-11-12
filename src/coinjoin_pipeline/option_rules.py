@@ -94,6 +94,8 @@ def _missing_s3_options(config: PipelineConfiguration) -> list[str]:
         ("--artifact-uri", artifacts.uri),
         ("--s3-endpoint-url", artifacts.endpoint_url),
         ("--s3-secret-name", artifacts.secret_name),
+        ("--s3-credentials-file", artifacts.credentials_file),
+        ("--s3-profile", artifacts.profile),
     )
     return [flag for flag, value in required if not value]
 
