@@ -1,20 +1,47 @@
-"""Configuration rules of the manual Core/Dumplings → BlockSci synchronization on PBS."""
+"""Manual Core/Dumplings → BlockSci PBS chain over a shared working directory."""
 
 from __future__ import annotations
 
+from dataclasses import asdict
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from coinjoin_pipeline.storage.s3 import validate_artifact_uri, validate_run_id
+from coinjoin_pipeline.configuration import required
+from coinjoin_pipeline.paths import EXPORTERS_ROOT
+from coinjoin_pipeline.storage.s3 import shell_value, validate_artifact_uri, validate_run_id
 from .pbs.defaults import MAINNET_SYNC_RESOURCES, PBSResources
-from .pbs.validation import PBSError, require_safe_image, require_safe_pbs_resources
-from .pbs_settings import stage_pbs_resources
+from .pbs.scripts import (
+    APPTAINER,
+    ARTIFACT_PATHS,
+    INDEX_STORE,
+    S5CLIENT,
+    directives,
+    launcher,
+    package_files,
+    runtime_source,
+    write_files,
+)
+from .pbs.submission import PBSJobSpec, persist_pbs_job_id, submit_pbs_job
+from .pbs.validation import PBSError, require_safe_image, require_safe_pbs_resources, walltime_to_seconds
+from .pbs_settings import pbs_image, stage_pbs_resources, with_singularity_scheme
+from .s3_markers import rollback_s3_pbs_submissions
 
 if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import PipelineConfiguration
 
 # Each job depends on the previous one.
 SYNC_STAGES = tuple(MAINNET_SYNC_RESOURCES)
+
+# The mainnet worker: its entry point and every module it imports; each stays stdlib-only Python 3.8.
+MAINNET_RUNTIME_MODULES = (
+    *(Path(__file__).with_name(f"mainnet_{name}.py") for name in ("runtime", "jobs", "worker")),
+    INDEX_STORE,
+    APPTAINER,
+    ARTIFACT_PATHS,
+    S5CLIENT,
+)
+
 
 # Top-level settings mainnet-sync reads besides its mainnet.* and per-job pbs.<stage>.* groups.
 MAINNET_SYNC_OPTIONS = frozenset(
@@ -125,3 +152,105 @@ def _working_directory_errors(config: PipelineConfiguration) -> list[str]:
 
 def resources(config: PipelineConfiguration, stage: str) -> PBSResources:
     return stage_pbs_resources(config, stage, default=MAINNET_SYNC_RESOURCES[stage])
+
+
+def sync_settings(config: PipelineConfiguration, stage: str, budget: PBSResources) -> dict[str, object]:
+    """The settings.json of one job; it holds the credentials path, never the keys."""
+    run_id = required(config.run_id, "run_id")
+    return {
+        **asdict(config.mainnet),
+        "run_id": run_id,
+        "sync_stages": SYNC_STAGES,
+        "log_root": str(config.runs_path / run_id / "logs"),
+        "endpoint": config.artifacts.endpoint_url,
+        "credentials": required(config.artifacts.credentials_file, "artifacts.credentials_file"),
+        "profile": config.artifacts.profile,
+        "index_dir": config.blocksci.index_dir,
+        "blocksci_image": pbs_image(config, "blocksci"),
+        "pbs_resources": {"ncpus": budget.ncpus, "mem": budget.mem},
+        "core_image": with_singularity_scheme(config.mainnet.core_image),
+        "dumplings_image": with_singularity_scheme(config.mainnet.dumplings_image),
+        # BlockSci writes the index.
+        "index_lock": {
+            "blocksci": "exclusive",
+        }.get(stage),
+        # Past the walltime the job is gone, so its lock entry may be cleared.
+        "index_lock_seconds": walltime_to_seconds(budget.walltime) + 600,
+    }
+
+
+def job_script(
+    config: PipelineConfiguration,
+    stage: str,
+    name: str,
+    budget: PBSResources,
+    settings: dict[str, object],
+) -> str:
+    """The PBS script of one job: it ships its modules and settings.json; the data stay on the multijob."""
+    run_id = required(config.run_id, "run_id")
+    credentials = required(config.artifacts.credentials_file, "artifacts.credentials_file")
+    files = {
+        "settings.json": json.dumps(settings),
+        "run.py": launcher("coinjoin_pipeline.execution.mainnet_runtime"),
+        **package_files(*MAINNET_RUNTIME_MODULES),
+        # Run by the BlockSci image's Python, from the bound job directory.
+        "verify_chain.py": runtime_source(EXPORTERS_ROOT / "verify_chain.py"),
+    }
+    identity = f"STAGE=mainnet-{stage}\nRUN_ID={shell_value(run_id)}\n"
+    return f"""{directives(name, budget, getattr(config.pbs, stage).multijob)}
+set -euo pipefail
+umask 077
+export PATH="/usr/local/bin:$PATH"
+{identity}
+test -n "${{SCRATCHDIR:-}}" || {{ echo 'PBS SCRATCHDIR is required' >&2; exit 1; }}
+WORK=$(mktemp -d "$SCRATCHDIR/mainnet.XXXXXX")
+export TMPDIR="$WORK" SINGULARITY_CACHEDIR="$WORK/images" SINGULARITY_TMPDIR="$WORK"
+export APPTAINER_CACHEDIR="$WORK/images" APPTAINER_TMPDIR="$WORK"
+{write_files("$WORK", files)}
+STARTED=0
+finish() {{
+  status=$?
+  trap - EXIT TERM INT
+  if [ "$status" -ne 0 ]; then
+    python3 -s "$WORK/run.py" "$WORK/settings.json" failed "$STAGE" "$STARTED" || true
+  fi
+  # WORK is job-private; never clean the shared data directories.
+  exit "$status"
+}}
+trap finish EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+test -r {shell_value(credentials)} || {{ echo 'S3 credentials file is not readable' >&2; exit 1; }}
+for tool in s5cmd tar zstd; do command -v "$tool" >/dev/null || {{ echo "Required tool missing: $tool" >&2; exit 1; }}; done
+s5cmd pipe --help >/dev/null || {{ echo 's5cmd with pipe support is required' >&2; exit 1; }}
+STARTED=1
+python3 -s "$WORK/run.py" "$WORK/settings.json" {stage}
+"""
+
+
+def render_sync(config: PipelineConfiguration, stage: str) -> str:
+    budget = resources(config, stage)
+    return job_script(config, stage, "mainnet_" + stage, budget, sync_settings(config, stage, budget))
+
+
+def submit_sync(config: PipelineConfiguration) -> None:
+    """Persist every ID immediately and roll back partial submissions.
+
+    The S3 state prefix is fixed: the producer job clears the previous run's state once it
+    holds the dataset lock, so submission checks nothing there.
+    """
+    run_id = required(config.run_id, "run_id")
+    scripts = {stage: render_sync(config, stage) for stage in SYNC_STAGES}
+    submitted: list[tuple[str, str]] = []
+    try:
+        for stage, script in scripts.items():
+            spec = PBSJobSpec(f"mainnet-{stage}", script, tuple(job for _, job in submitted[-1:]))
+            job = submit_pbs_job(spec, config.dry_run)
+            if job:
+                submitted.append((spec.stage, job))
+                persist_pbs_job_id(config.runs_path / run_id, spec.stage, job)
+    except BaseException as error:
+        failed = rollback_s3_pbs_submissions(submitted)
+        if failed:
+            raise RuntimeError(f"Submission failed; could not cancel PBS jobs {[job for _, job in failed]}") from error
+        raise

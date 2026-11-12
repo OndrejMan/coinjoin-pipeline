@@ -33,6 +33,7 @@ def _print_dry_run(args: PipelineConfiguration) -> bool:
         or (args.action == "coinjoin-analysis" and args.stages.analysis)
         or (args.action == "mappings" and args.stages.mappings)
         or (args.action == "pbs-from-s3")
+        or (args.action == "mainnet-sync")
         or (args.action in ("emulate", "full-run") and args.artifacts.backend == "s3")
     )
     if not args.dry_run:
@@ -72,7 +73,15 @@ def run_configuration(args: PipelineConfiguration) -> None:
     if local_build:
         os.environ["COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD"] = "1"
 
-    if args.action == "pbs-from-s3":
+    if args.action == "mainnet-sync":
+        from coinjoin_pipeline.execution.mainnet_sync import submit_sync
+
+        try:
+            with _pbs_credentials(args):
+                submit_sync(args)
+        except (ArtifactTransportError, OSError, PBSError, RuntimeError) as error:
+            exit_with_error(error)
+    elif args.action == "pbs-from-s3":
         try:
             with _pbs_credentials(args):
                 submit_s3_pbs_graph(args)
