@@ -1,0 +1,117 @@
+"""Delete pipeline artifacts from the S3 backend (destructive maintenance)."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+
+from .console import EXIT_ABORTED, EXIT_FAILURE, EXIT_OK, fail
+from .storage.s3 import (
+    ArtifactTransportError,
+    S3Access,
+    add_s3_arguments,
+    run_s5cmd,
+    s3_arguments_access,
+    s3_listing,
+    validate_run_id,
+)
+
+
+class CleanError(RuntimeError):
+    """Raised when the remote objects cannot be cleaned safely."""
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="coinjoin-pipeline clean-s3",
+        description=("Delete every object under an S3 run root (or a single run). This is irreversible."),
+    )
+    add_s3_arguments(parser, "S3 run root to clean, for example s3://<bucket>/runs (default: $ARTIFACT_URI).")
+    parser.add_argument("--run-id", help="Restrict deletion to a single run under the artifact URI.")
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the interactive confirmation prompt.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List what would be deleted without removing anything.",
+    )
+    return parser
+
+
+def list_objects(access: S3Access, prefix: str) -> list[str]:
+    """Return the object URIs living under ``prefix`` (recursively)."""
+    try:
+        entries = s3_listing(access, f"{prefix}/*")
+    except ArtifactTransportError as error:
+        raise CleanError(f"s5cmd could not inspect {prefix}: {error}") from error
+    return [str(entry["key"]) for entry in entries]
+
+
+def delete_prefix(access: S3Access, prefix: str) -> None:
+    """Recursively delete every object under ``prefix``."""
+    result = run_s5cmd(access, "rm", f"{prefix}/*")
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        if "no object found" in detail.lower():
+            return
+        raise CleanError(f"s5cmd delete failed for {prefix} (exit {result.returncode}): {detail}")
+
+
+def _confirm(prefix: str, count: int) -> bool:
+    if not sys.stdin.isatty():
+        fail("refusing to delete without --yes on a non-interactive stdin; preview with --dry-run first")
+        return False
+    print(f"About to delete {count} object(s) under {prefix}")
+    print("This cannot be undone. Type the prefix to confirm:")
+    try:
+        answer = input("> ").strip()
+    except EOFError:
+        return False
+    if answer != prefix:
+        print("Confirmation did not match; aborting.", file=sys.stderr)
+        return False
+    return True
+
+
+def main(argv: list[str] | None = None, *, runs_root: object = None) -> int:
+    del runs_root  # the host dispatch passes it to every utility; S3 cleanup has no local runs
+    args = build_parser().parse_args(argv)
+    try:
+        artifact_uri, access = s3_arguments_access(args)
+        run_id = validate_run_id(args.run_id) if args.run_id else None
+    except ValueError as error:
+        return fail(str(error))
+
+    prefix = artifact_uri if run_id is None else f"{artifact_uri}/{run_id}"
+    try:
+        objects = list_objects(access, prefix)
+    except (CleanError, ArtifactTransportError) as error:
+        return fail(str(error), code=EXIT_FAILURE)
+
+    if not objects:
+        print(f"[clean-s3] Nothing to delete under {prefix}")
+        return EXIT_OK
+
+    if args.dry_run:
+        print(f"[clean-s3] Would delete {len(objects)} object(s) under {prefix}:")
+        for uri in objects:
+            print(f"  {uri}")
+        return EXIT_OK
+
+    if not args.yes and not _confirm(prefix, len(objects)):
+        return EXIT_ABORTED
+
+    try:
+        delete_prefix(access, prefix)
+    except (CleanError, ArtifactTransportError) as error:
+        return fail(str(error), code=EXIT_FAILURE)
+
+    print(f"[clean-s3] Deleted {len(objects)} object(s) under {prefix}")
+    return EXIT_OK
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
