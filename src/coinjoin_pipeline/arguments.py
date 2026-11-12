@@ -151,6 +151,13 @@ HELP = {
     ),
     "blocksci.index_backup_uri": "S3 prefix of the persistent index's backup (one archive and its manifest)",
     "blocksci.index_in_scratch": "script or notebook task: restore the index backup into the job's scratch",
+    "blocksci.restore_index": "notebook task: fill an incomplete index directory from the backup and keep it there",
+    "blocksci.dumplings_uri": (
+        "with --blocksci-index-in-scratch or --blocksci-restore-index: S3 prefix of the Dumplings copy placed "
+        "next to the index, seen at /mnt/dumplings"
+    ),
+    "blocksci.dumplings_dir": "notebook task over an index read in place: Scanner/ read in place, seen at /mnt/dumplings",
+    "blocksci.storage_report_uri": "with --blocksci-restore-index: S3 object receiving the kept copy's size",
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
     **{
         f"images.{component}": f"{component.replace('_', '-')} image (also ${variable})"

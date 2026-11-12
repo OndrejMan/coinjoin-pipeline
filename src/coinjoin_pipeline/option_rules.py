@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from exporters.verify_chain import is_block_hash
 
 from .configuration import cli_flag, config_value, option_specs
-from .execution.pbs.validation import SHARED_STORAGE_ROOTS, multijob_location
+from .execution.pbs.validation import SHARED_STORAGE_ROOTS, kept_between_jobs, multijob_location
 from .execution.stages import runs_unified_report
 from .storage.s3 import RUN_ID_RULE, is_valid_run_id
 
@@ -52,6 +52,10 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
             for flag, value in (
                 ("--blocksci-index-backup-uri", backup_uri),
                 ("--blocksci-index-in-scratch", blocksci.index_in_scratch),
+                ("--blocksci-restore-index", blocksci.restore_index),
+                ("--blocksci-dumplings-uri", blocksci.dumplings_uri),
+                ("--blocksci-dumplings-dir", blocksci.dumplings_dir),
+                ("--blocksci-storage-report-uri", blocksci.storage_report_uri),
             )
             if value
         )
@@ -88,6 +92,27 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
             "--blocksci-index-in-scratch requires --blocksci-index-backup-uri and --blocksci-task "
             "script or notebook"
         )
+    if blocksci.restore_index and (not backup_uri or blocksci.task != "notebook" or blocksci.index_in_scratch):
+        errors.append(
+            "--blocksci-restore-index requires --blocksci-index-backup-uri and --blocksci-task notebook, "
+            "without --blocksci-index-in-scratch"
+        )
+    if blocksci.storage_report_uri and not blocksci.restore_index:
+        errors.append("--blocksci-storage-report-uri requires --blocksci-restore-index")
+    if blocksci.dumplings_uri and not (blocksci.index_in_scratch or blocksci.restore_index):
+        errors.append("--blocksci-dumplings-uri requires --blocksci-index-in-scratch or --blocksci-restore-index")
+    if blocksci.dumplings_dir and (
+        blocksci.task != "notebook"
+        or not blocksci.index_dir
+        or blocksci.index_in_scratch
+        or blocksci.restore_index
+    ):
+        errors.append(
+            "--blocksci-dumplings-dir requires --blocksci-task notebook and --blocksci-index-dir, "
+            "without --blocksci-index-in-scratch or --blocksci-restore-index"
+        )
+    if blocksci.dumplings_dir and not kept_between_jobs(blocksci.dumplings_dir):
+        errors.append("--blocksci-dumplings-dir must be under /scratch/multijob-<location>/ or /storage/, without '..'")
     return errors
 
 

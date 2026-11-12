@@ -28,7 +28,7 @@ import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Mapping
+from typing import TYPE_CHECKING, Iterable, Mapping
 
 from exporters.artifact_paths import BLOCKSCI_DIR
 
@@ -75,6 +75,24 @@ def index_manifest(
         "exported_max_block": exported_max_block,
         **(extra or {}),
     }
+
+
+def directory_usage(root: Path) -> dict[str, int]:
+    """Apparent size and file count of a tree; a missing directory is empty."""
+    size = files = 0
+    for directory, _, names in os.walk(root):
+        for name in names:
+            path = Path(directory) / name
+            if not path.is_symlink():
+                size += path.stat().st_size
+                files += 1
+    return {"bytes": size, "files": files}
+
+
+def usage_report(stage: str, roots: Iterable[Path], **extra: object) -> dict[str, object]:
+    """What a job tells the lab about the directories it keeps on the multijob."""
+    directories = {str(root): directory_usage(root) for root in roots}
+    return {**extra, "stage": stage, "measured_at": utc_now(), "directories": directories}
 
 
 def inventory(index: Path) -> str:

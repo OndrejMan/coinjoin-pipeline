@@ -13,6 +13,7 @@ import re
 import shutil
 import socket
 import subprocess
+import tempfile
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
@@ -29,7 +30,7 @@ from coinjoin_pipeline.execution.pbs.blocksci_index import (
     require_tools,
     restore_index,
 )
-from coinjoin_pipeline.execution.pbs.index_store import IndexStore
+from coinjoin_pipeline.execution.pbs.index_store import IndexStore, usage_report
 from coinjoin_pipeline.execution.pbs.stage import CONTAINER_RUNS_ROOT, Stage, StageFailure
 from coinjoin_pipeline.execution.pbs.stage_settings import BlocksciAnalysisSettings, OutputSettings, PersistentSettings
 from coinjoin_pipeline.storage.s5client import S5Error
@@ -44,12 +45,62 @@ def scratch_index(stage: Stage, settings: PersistentSettings) -> IndexStore:
     return index
 
 
+def kept_index(stage: Stage, settings: PersistentSettings) -> IndexStore:
+    """A shared copy that stays after the job: filled from the backup when it is incomplete."""
+    index = open_index(stage, settings, writer=False)
+    if not index.complete():
+        index.unlock()
+        index.lock_exclusive()
+        index.reconcile()
+        index.unlock()
+        index.lock_shared()
+    return index
+
+
+def report_kept_copy(stage: Stage, directory: Path, uri: str) -> None:
+    """Tell the lab how large the kept copy is; a failed report must not stop the notebook."""
+    try:
+        stage.storage.copy_text(json.dumps(usage_report("notebook", [directory])), uri)
+    except (OSError, subprocess.SubprocessError, S5Error) as error:
+        stage.log(f"[index] the kept copy's size was not reported: {error}")
+
+
+def attach_dumplings(stage: Stage, index: IndexStore, uri: str) -> str:
+    """The bind of the Dumplings copy beside the index; inside it would break the index's file list.
+
+    Only a finished download takes the name, so an interrupted job leaves no partial copy
+    that later jobs would trust. Of two jobs downloading at once, the second drops its own.
+    """
+    root = index.path.parent / "dumplings"
+    scanner = root / "Scanner"
+    if not scanner.is_dir():
+        root.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=".Scanner-", dir=root))
+        try:
+            stage.storage.copy(f"{uri}/Scanner/*", f"{staging}/", timeout=None)
+            try:
+                staging.rename(scanner)
+            except OSError:
+                if not scanner.is_dir():
+                    raise
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+    return f"{os.path.realpath(scanner)}:/mnt/dumplings/Scanner:ro"
+
+
+def dumplings_in_place(directory: str) -> str:
+    """The bind of a Scanner/ read where it is; a cleared synchronization leaves none."""
+    if not Path(directory, "LastProcessedBlockHeight.txt").is_file():
+        raise StageFailure(f"[index] {directory} holds no Dumplings Scanner")
+    return f"{os.path.realpath(directory)}:/mnt/dumplings/Scanner:ro"
+
+
 def read_index(stage: Stage, settings: PersistentSettings) -> IndexStore:
     """Read-only access for an analysis: shared lock, complete copy, run-local config."""
     if settings.get("in_scratch"):
         index = scratch_index(stage, settings)
     else:
-        index = open_index(stage, settings, writer=False)
+        index = kept_index(stage, settings) if settings.get("restore") else open_index(stage, settings, writer=False)
     if not index.complete():
         raise StageFailure(
             f"[index] working copy {index.path} is incomplete; a persistent update restores it from the S3 backup"
@@ -185,6 +236,15 @@ def blocksci_analysis(stage: Stage) -> None:
         index = read_index(stage, persistent)
         binds += index.binds("ro")
         shutil.copyfile(index.path / "manifest.json", output / "blocksci-index-manifest.json")
+        dumplings = persistent.get("dumplings_uri")
+        if dumplings:
+            binds.append(attach_dumplings(stage, index, dumplings))
+        dumplings_dir = persistent.get("dumplings_dir")
+        if dumplings_dir:
+            binds.append(dumplings_in_place(dumplings_dir))
+        report_uri = persistent.get("storage_report_uri")
+        if report_uri:
+            report_kept_copy(stage, index.path.parent, report_uri)
     else:
         cache_run = settings.get("source_run_id") or stage.run_id
         prefix = f"{settings['artifact_uri']}/{cache_run}/{BLOCKSCI_PARSE_DIR}"

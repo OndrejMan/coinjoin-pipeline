@@ -97,6 +97,12 @@ def multijob_location(path: str) -> str | None:
     return next((place for place in PBS_MULTIJOB_LOCATIONS if path.startswith(f"/scratch/multijob-{place}/")), None)
 
 
+def kept_between_jobs(path: str) -> bool:
+    """Whether later jobs find the path again: shared storage or a multijob scratch, without '..'."""
+    on_shared = path.startswith(SHARED_STORAGE_ROOTS) or multijob_location(path) is not None
+    return on_shared and ".." not in Path(path).parts
+
+
 def require_storage_path(run_dir: Path) -> None:
     """PBS jobs need the path on shared MetaCentrum storage (/storage or its /auto mount)."""
     resolved = str(run_dir.resolve())

@@ -191,16 +191,24 @@ def _persistent_settings(blocksci: BlockSciConfiguration, walltime: str) -> Pers
 
     ``index_dir`` is the working copy jobs read and update in place; ``backup_uri`` is the
     S3 prefix of its single backup, written by the backup job and read to restore an
-    incomplete working copy. With ``in_scratch`` a reading job restores that backup into
-    its own scratch and leaves index_dir alone.
+    incomplete working copy. With ``in_scratch`` a reading job restores that backup, and
+    the Dumplings copy at ``dumplings_uri``, into its own scratch and leaves index_dir alone.
+    With ``restore`` it fills an incomplete index_dir from the backup and leaves it there,
+    with the Dumplings copy beside it, for later jobs until it is deleted explicitly.
     """
     if not blocksci.index_dir:
         return None
+    if blocksci.dumplings_uri is not None:
+        validated_s3_uri(blocksci.dumplings_uri, "Dumplings URI")
     seconds = walltime_to_seconds(walltime)
     return {
         "index_dir": blocksci.index_dir,
         "backup_uri": blocksci.index_backup_uri,
         "in_scratch": blocksci.index_in_scratch,
+        "restore": blocksci.restore_index,
+        "dumplings_uri": blocksci.dumplings_uri,
+        "dumplings_dir": blocksci.dumplings_dir,
+        "storage_report_uri": blocksci.storage_report_uri,
         # Past the walltime the job is gone, so its lock entry may be cleared.
         "lock_seconds": seconds + 600,
         "wait_seconds": max(60, seconds // 2),
