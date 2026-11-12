@@ -368,6 +368,10 @@ def load_configuration(argv: list[str]) -> PipelineConfiguration:
             raise ConfigurationError(f"cannot read configuration {path}: {error}") from error
         if not isinstance(data, dict):
             raise ConfigurationError("configuration must be a mapping")
+        # A YAML file names its experiment; the command line's default full-run would start an
+        # emulation the file never asked for.
+        if "action" not in data:
+            raise ConfigurationError(f"configuration {path} has no action; add one, e.g. `action: full-run`")
     routes = option_routes()
     for key, value in parsed.items():
         if key == "action":

@@ -384,8 +384,9 @@ shared-storage paths. The analyze job writes the summary under
 `blocksci-custom-analysis_data/` in the same S3 run. It is detector output
 without emulator ground truth, not a precision/recall unified report.
 
-An explicit CLI option after `cjp run FILE` overrides the same
-value from YAML. Programmatic consumers can load the schema through the
+A YAML file must name its `action`: unlike the command line, it has no default,
+so a file without one never starts a full emulation by accident. An explicit
+CLI option after `cjp run FILE` overrides the same value from YAML. Programmatic consumers can load the schema through the
 immutable typed `PipelineConfiguration.from_yaml()` model exported by
 `coinjoin_pipeline` and call `to_arguments()` when they need the public CLI
 representation.

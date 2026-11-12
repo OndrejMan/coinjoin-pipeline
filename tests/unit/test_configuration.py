@@ -39,7 +39,7 @@ def test_null_is_accepted_only_where_the_field_is_optional():
 
 def test_cli_override_changes_values_without_rendering_arguments(tmp_path):
     path = tmp_path / "experiment.yaml"
-    path.write_text("engine: wasabi\nmin_input_count: 15\njoinmarket:\n  max_depth: 100\n")
+    path.write_text("action: full-run\nengine: wasabi\nmin_input_count: 15\njoinmarket:\n  max_depth: 100\n")
     config = load_configuration(["run", str(path), "--engine", "joinmarket", "--joinmarket-max-depth", "200"])
     assert config.engine == "joinmarket"
     assert config.min_input_count == 15
@@ -152,6 +152,14 @@ def test_existing_examples_load_directly(name):
     config = resolve_configuration(load_configuration(["run", str(root / "examples" / name), "--dry-run"]))
     assert config.dry_run
     assert config.artifacts.backend == "s3"
+
+
+@pytest.mark.parametrize("text", ["engine: wasabi\n", ""])
+def test_a_yaml_configuration_must_name_its_action(tmp_path, text):
+    path = tmp_path / "experiment.yaml"
+    path.write_text(text)
+    with pytest.raises(ConfigurationError, match="has no action"):
+        load_configuration(["run", str(path)])
 
 
 def test_no_explicit_action_alongside_yaml(tmp_path):
