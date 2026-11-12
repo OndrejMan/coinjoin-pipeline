@@ -17,7 +17,7 @@ from exporters.comparison import (
     build_divergences,
     compare_records,
 )
-from exporters.manifest import build_run_manifest
+from exporters.manifest import build_run_manifest, compare_run_manifests
 from exporters.parameters import Detector, ReportImages
 from exporters.report_types import TransactionRecord
 from exporters.scenario import build_scenario_checks
@@ -132,6 +132,7 @@ def build_report(
     engine: str | None = None,
     images: ReportImages | None = None,
     emulator_git_commit: str | None = None,
+    previous_run_manifest: JsonObject | None = None,
     image_provenance: JsonObject | None = None,
 ) -> JsonObject:
     """The unified report. Every top-level key is always present, null when it does not apply."""
@@ -179,6 +180,7 @@ def build_report(
             "scenario_sha256": scenario.get("sha256") if scenario else None,
         },
         "run_manifest": run_manifest,
+        "run_manifest_comparison": compare_run_manifests(previous_run_manifest, run_manifest),
         "warnings": build_warnings(coinjoin_type, min_input_count, blocksci_records, emulator_data),
         "scenario": scenario,
         "emulator_data": {

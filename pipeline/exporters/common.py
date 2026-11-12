@@ -116,6 +116,15 @@ def docker_image_digest(image: str | None) -> str | None:
     return provenance.repo_digest or provenance.image_id
 
 
+def nested_get(data: Mapping[str, object] | None, path: tuple[str, ...]) -> JsonValue:
+    current: JsonValue = data
+    for key in path:
+        if not isinstance(current, Mapping):
+            return None
+        current = current.get(key)
+    return current
+
+
 def parse_run_started_at(run_id: str) -> str | None:
     """The start time a generated run ID begins with; runs named before seconds were added have minutes only."""
     for length, pattern in ((19, "%Y-%m-%d_%H-%M-%S"), (16, "%Y-%m-%d_%H-%M")):
