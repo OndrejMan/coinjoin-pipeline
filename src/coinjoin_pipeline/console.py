@@ -7,6 +7,7 @@ import sys
 EXIT_OK = 0
 EXIT_USAGE = 2
 EXIT_ABORTED = 3
+EXIT_REPORT_INVALID = 4
 EXIT_FAILURE = 5
 EXIT_INTERRUPTED = 130
 
@@ -16,7 +17,8 @@ EXIT_INTERRUPTED = 130
 EXIT_CODES = (
     (EXIT_OK, "success"),
     (EXIT_USAGE, "invalid configuration or arguments, or a failed preflight check"),
-    (EXIT_ABORTED, "clean-s3 was not confirmed"),
+    (EXIT_ABORTED, "clean-s3 was not confirmed, or runs validate found a missing run or stage"),
+    (EXIT_REPORT_INVALID, "runs validate found a report that is not complete"),
     (EXIT_FAILURE, "a failed run reported as [ERROR], a runtime error, or a failed pull, S3 transfer or log source"),
     (EXIT_INTERRUPTED, "interrupted"),
 )

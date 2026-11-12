@@ -89,11 +89,19 @@ def _utility(argv: list[str]) -> int | None:
         return EXIT_OK
     config = PipelineConfiguration.from_flat(supplied)
     reproduction = shlex.join(["cjp", *argv])
-    # Only pull and doctor need images; the others read the runs root alone.
+    # Only pull, doctor and runs validate need images; the others read the runs root alone.
     root = runs_root(config)
     if action in {"watch", "status", "stop", "download-report", "clean-s3"}:
         module = importlib.import_module(f"coinjoin_pipeline.{action.replace('-', '_')}")
         return module.main(remaining, runs_root=root)
+    if action in {"runs"}:
+        from .execution.research import main as research_main
+
+        if action == "runs" and remaining[:1] == ["validate"]:
+            # An explicit image overrides the report's; otherwise it only replaces a missing one.
+            flag = "--blocksci-image" if "blocksci_image" in supplied else "--default-blocksci-image"
+            remaining.extend([flag, RunContext.prepare(config, reproduction).images.blocksci])
+        return research_main(["--runs-root", str(root), "--runtime", config.runtime, action, *remaining])
     context = RunContext.prepare(config, reproduction)
     if remaining:
         return fail(f"unexpected arguments for {action}: {' '.join(remaining)}; see cjp {action} --help")

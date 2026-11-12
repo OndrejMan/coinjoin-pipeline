@@ -6,10 +6,12 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
+from exporters.artifact_paths import report_input_files
 from exporters.common import (
     JsonObject,
     digest_from_reference,
     docker_image_digest,
+    file_sha256,
     first_present,
     nested_get,
     to_json_text,
@@ -41,6 +43,11 @@ MANIFEST_COMPARE_FIELDS = (
     ("sake_seed", ("sake_seed",)),
     ("source_commits.coinjoin_emulator", ("source_commits", "coinjoin_emulator")),
 )
+
+
+def report_input_hashes(run_dir: Path) -> dict[str, str]:
+    """SHA-256 of each report input present in ``run_dir``, keyed by relative path."""
+    return {name: file_sha256(run_dir / name) for name in report_input_files(run_dir)}
 
 
 def resolve_manifest_images(
@@ -112,6 +119,7 @@ def build_run_manifest(
         "source_trees": {
             "exporters_sha256": tree_sha256(exporters_root),
         },
+        "inputs": report_input_hashes(run_dir),
     }
 
 
