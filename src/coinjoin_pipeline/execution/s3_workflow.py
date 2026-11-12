@@ -18,6 +18,7 @@ from exporters.artifact_paths import (
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution.kubernetes import (
     S3_JOB_START_TIMEOUT_SECONDS,
+    collect_s3_emulation_diagnostics,
     delete_s3_emulation_job,
     kubernetes_job_probe,
     resolve_kubeconfig,
@@ -112,7 +113,7 @@ def run_s3_full_run(args: PipelineConfiguration) -> None:
 
 
 def wait_for_emulation_upload(args: PipelineConfiguration, run_prefix: str, access: S3Access) -> None:
-    """Wait for the uploader's marker; a failure deletes the Job."""
+    """Wait for the uploader's marker; a failure collects diagnostics and deletes the Job."""
     kubeconfig_path = resolve_kubeconfig(args.kubernetes.kubeconfig)
     job_name = s3_emulation_job_name(required(args.run_id, "--run-id"))
     print(f"[full-run] Waiting for emulation upload marker {upload_marker_uri(run_prefix, 'done')}")
@@ -127,8 +128,15 @@ def wait_for_emulation_upload(args: PipelineConfiguration, run_prefix: str, acce
             probe=kubernetes_job_probe(kubeconfig_path, args.kubernetes.namespace, job_name),
         )
     except ArtifactTransportError:
+        print(
+            collect_s3_emulation_diagnostics(kubeconfig_path, args.kubernetes.namespace, job_name),
+            file=sys.stderr,
+        )
         delete_s3_emulation_job(kubeconfig_path, args.kubernetes.namespace, job_name)
-        print(f"[full-run] Requested deletion of failed Kubernetes Job {job_name}.", file=sys.stderr)
+        print(
+            f"[full-run] Requested deletion of failed Kubernetes Job {job_name} after collecting diagnostics.",
+            file=sys.stderr,
+        )
         raise
 
 
