@@ -7,9 +7,7 @@ import os
 from pathlib import Path
 
 from coinjoin_pipeline.execution import settings
-from coinjoin_pipeline.paths import SCENARIOS_ROOT as SCENARIO_FILES
-
-SCENARIOS_ROOT = Path(os.environ.get("SCENARIOS_ROOT", SCENARIO_FILES)).expanduser()
+from coinjoin_pipeline import paths
 
 
 def scenario_source_path(value: str | None, scenarios_dir: Path, engine: str = settings.DEFAULT_ENGINE) -> Path:
@@ -29,7 +27,7 @@ def scenario_source_path(value: str | None, scenarios_dir: Path, engine: str = s
 
 
 def resolve_scenario(value: str) -> Path:
-    named = scenario_source_path(value, SCENARIOS_ROOT)
+    named = scenario_source_path(value, paths.scenarios_dir())
     if not named.is_file():
         raise ValueError(f"Scenario not found: {value}")
     return named
@@ -127,7 +125,7 @@ def validate_scenario(path: Path, engine: str) -> dict[str, object]:
 
 def packaged_scenarios(engine: str | None = None) -> list[dict[str, object]]:
     results = []
-    for path in sorted(SCENARIOS_ROOT.glob("*.json")):
+    for path in sorted(paths.scenarios_dir().glob("*.json")):
         data = load_scenario(path)
         inferred = "joinmarket" if data.get("default_version") == "joinmarket" else "wasabi"
         if engine is None or inferred == engine:

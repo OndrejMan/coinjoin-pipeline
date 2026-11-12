@@ -25,9 +25,10 @@ def slugify_run_component(value: str, *, max_length: int) -> str:
 
 def scenario_file(value: str, engine: str) -> Path | None:
     """The scenario file execution will read (a path, or a name in the scenario catalogue), else None."""
-    from .execution.scenarios import SCENARIOS_ROOT, scenario_source_path
+    from .execution.scenarios import scenario_source_path
+    from .paths import scenarios_dir
 
-    named = scenario_source_path(value, SCENARIOS_ROOT, engine)
+    named = scenario_source_path(value, scenarios_dir(), engine)
     return named if named.is_file() else None
 
 

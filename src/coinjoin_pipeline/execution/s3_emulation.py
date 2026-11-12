@@ -13,7 +13,7 @@ from coinjoin_pipeline.execution.kubernetes import (
 )
 from coinjoin_pipeline.execution.pbs_settings import resolve_uploader_image
 from coinjoin_pipeline.images import default_image
-from coinjoin_pipeline.paths import SCENARIOS_ROOT
+from coinjoin_pipeline.paths import scenarios_dir
 from coinjoin_pipeline.registry import pinned_reference
 
 
@@ -37,7 +37,7 @@ def _text(value: int | None) -> str | None:
 
 def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
     """Render and submit a Kubernetes job that uploads its artifacts to S3."""
-    scenario_path = scenario_source_path(args.scenario, SCENARIOS_ROOT, args.engine)
+    scenario_path = scenario_source_path(args.scenario, scenarios_dir(), args.engine)
     if not scenario_path.is_file():
         raise RuntimeError(f"Scenario file not found: {scenario_path}")
     kubernetes = args.kubernetes

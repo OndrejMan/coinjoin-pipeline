@@ -18,7 +18,7 @@ from .configuration import (
     replace_path,
 )
 from .images import Images, resolve_images
-from .paths import EXPORTERS_ROOT, SCENARIOS_ROOT, default_runs_root
+from .paths import EXPORTERS_ROOT, default_runs_root, scenarios_dir
 from .runs import run_id_for
 from .storage.s3 import (
     validate_artifact_uri,
@@ -135,7 +135,7 @@ def host_environment(config: PipelineConfiguration, images: Images, reproduction
     environment = {
         "CONTAINER_RUNTIME": config.runtime,
         "EXPORTERS_DIR": str(EXPORTERS_ROOT),
-        "SCENARIOS_DIR": str(SCENARIOS_ROOT),
+        "SCENARIOS_DIR": str(scenarios_dir()),
         "NOTEBOOKS_DIR": str(root / ".notebooks"),
         "EMULATION_LOGS_DIR": str(root),
         "BLOCKSCI_LAUNCH_JUPYTER": os.environ.get("BLOCKSCI_LAUNCH_JUPYTER") or "0",

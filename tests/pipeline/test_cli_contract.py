@@ -135,3 +135,20 @@ def test_every_option_has_a_description():
 
     undescribed = [path for path, _, item in option_specs() if option_help(path, item).startswith("[YAML:")]
     assert undescribed == []
+
+
+def test_the_scenario_catalogue_is_one_variable_read_when_needed(tmp_path, monkeypatch):
+    from coinjoin_pipeline.execution.containers import compose_env
+    import shutil
+
+    from coinjoin_pipeline.execution.scenarios import packaged_scenarios, resolve_scenario
+    from coinjoin_pipeline.paths import SCENARIOS_ROOT
+
+    catalogue = tmp_path / "catalogue"
+    catalogue.mkdir()
+    shutil.copyfile(SCENARIOS_ROOT / "overactive-local.json", catalogue / "tiny.json")
+    monkeypatch.setenv("SCENARIOS_DIR", str(catalogue))
+    monkeypatch.setenv("EMULATION_LOGS_DIR", str(tmp_path / "runs"))
+    assert resolve_scenario("tiny") == catalogue / "tiny.json"
+    assert [entry["path"] for entry in packaged_scenarios()] == [str(catalogue / "tiny.json")]
+    assert compose_env(include_scenario=False, create_directories=False)["SCENARIOS_DIR"] == str(catalogue)

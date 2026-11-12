@@ -39,6 +39,7 @@ from coinjoin_pipeline.execution.runtime import (
 )
 from coinjoin_pipeline.execution.s3_staging import ensure_local_exporters
 from coinjoin_pipeline.images import default_image, validate_image
+from coinjoin_pipeline.paths import scenarios_dir
 from coinjoin_pipeline.storage.s3 import ArtifactTransportError
 
 from . import settings
@@ -178,21 +179,19 @@ def compose_env(
     env = os.environ.copy()
     host_root_dir = settings.ROOT_DIR
     runs_root = Path(env.get("EMULATION_LOGS_DIR", settings.ROOT_DIR.parent / "coinjoin-runs"))
-    scenarios_dir = settings.ROOT_DIR.parent / "scenarios"
     notebooks_dir = runs_root / ".notebooks"
     emulation_logs_dir = runs_root
     exporters_dir = settings.ROOT_DIR / "exporters"
     env.setdefault(settings.COMPOSE_PROJECT_ENV, compose_project_name(host_root_dir))
     env.setdefault("BLOCKSCI_HOST_PORT", blocksci_host_port(host_root_dir))
-    env.setdefault("SCENARIOS_DIR", str(scenarios_dir))
     env.setdefault("NOTEBOOKS_DIR", str(notebooks_dir))
     env.setdefault("EMULATION_LOGS_DIR", str(emulation_logs_dir))
     env.setdefault("EXPORTERS_DIR", str(exporters_dir))
-    scenarios_dir = Path(env["SCENARIOS_DIR"]).expanduser().resolve()
+    scenario_root = scenarios_dir()
     notebooks_dir = Path(env["NOTEBOOKS_DIR"]).expanduser().resolve()
     emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
     exporters_dir = Path(env["EXPORTERS_DIR"]).expanduser().resolve()
-    env["SCENARIOS_DIR"] = str(scenarios_dir)
+    env["SCENARIOS_DIR"] = str(scenario_root)
     env["NOTEBOOKS_DIR"] = str(notebooks_dir)
     env["EMULATION_LOGS_DIR"] = str(emulation_logs_dir)
     env["EXPORTERS_DIR"] = str(exporters_dir)
@@ -211,12 +210,12 @@ def compose_env(
     env.setdefault("COINJOIN_EMULATOR_IMAGE", default_image("emulator", registry))
     scenario = config.scenario if include_scenario else None
     if scenario:
-        source = scenario_source_path(scenario, scenarios_dir, config.engine)
-        if not source.is_relative_to(scenarios_dir):
-            scenarios_dir = source.parent
-            env["SCENARIOS_DIR"] = str(scenarios_dir)
+        source = scenario_source_path(scenario, scenario_root, config.engine)
+        if not source.is_relative_to(scenario_root):
+            scenario_root = source.parent
+            env["SCENARIOS_DIR"] = str(scenario_root)
         scenario = str(source)
-    env["SCENARIO_CONTAINER_PATH"] = container_scenario_path(scenario, scenarios_dir, config.engine)
+    env["SCENARIO_CONTAINER_PATH"] = container_scenario_path(scenario, scenario_root, config.engine)
     add_image_provenance_env(env)
     if active_run_id:
         env["ACTIVE_RUN_ID"] = active_run_id

@@ -25,6 +25,11 @@ REQUIRED_EXPORTERS = (
 )
 
 
+def scenarios_dir() -> Path:
+    """The scenario catalogue: $SCENARIOS_DIR, which the stages read too, else the packaged one."""
+    return Path(os.environ.get("SCENARIOS_DIR") or SCENARIOS_ROOT).expanduser().resolve()
+
+
 def default_runs_root() -> Path:
     """The runs root when none is configured: $EMULATION_LOGS_DIR, else ./coinjoin-runs."""
     return Path(os.environ.get("EMULATION_LOGS_DIR") or Path.cwd() / "coinjoin-runs").expanduser().resolve()
