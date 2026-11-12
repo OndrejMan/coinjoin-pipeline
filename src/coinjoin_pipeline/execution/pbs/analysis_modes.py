@@ -79,6 +79,6 @@ def analysis_mode_settings(mode: str, blocksci: BlockSciConfiguration) -> Analys
             output["notebooks_dir"] = str(notebook_path)
         settings["connection_help"] = [
             f"[blocksci-notebook] Preferred Jupyter port: {blocksci.notebook_port}",
-            "[blocksci-notebook] Open JupyterLab from Scenario Lab; connection details follow after startup.",
+            "[blocksci-notebook] Connection details follow once JupyterLab has started.",
         ]
     return settings

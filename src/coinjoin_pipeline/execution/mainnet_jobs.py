@@ -22,6 +22,8 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from exporters.artifact_paths import INDEX_MANIFEST_COPY
+
 from coinjoin_pipeline.execution.mainnet_worker import (
     RESUME_CHECKPOINT,
     SIGNATURE_KEYS,
@@ -455,7 +457,7 @@ def blocksci(worker: Worker) -> None:
     # The index is complete; its backup is the checkpoint job's, so a failed upload
     # leaves a usable working copy.
     manifest = IndexStore(str(worker.index), None).publish(config, manifest)
-    worker.publish_json(worker.remote + "/blocksci-index-manifest.json", manifest)
+    worker.publish_json(worker.remote + "/" + INDEX_MANIFEST_COPY, manifest)
     worker.progress("indexed", state="done", height=height)
     worker.complete(manifest)
 

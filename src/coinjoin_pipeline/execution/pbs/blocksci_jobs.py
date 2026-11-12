@@ -27,6 +27,8 @@ from exporters.artifact_paths import (
     EMULATOR_DIR,
     EXPORTED_BLOCK_GLOB,
     EXPORTED_BLOCKS_DIR,
+    INDEX_BACKUP_MANIFEST_COPY,
+    INDEX_MANIFEST_COPY,
     LOGS_DIR,
     MAPPINGS_DIR,
     REPORT_DIR,
@@ -182,7 +184,7 @@ class WrittenIndex:
             return
         stage.log(f"recording persistent index at height {max_block}")
         self.store.publish(config, manifest)
-        stage.storage.copy(self.store.path / "manifest.json", f"{stage.run_prefix}/blocksci-index-manifest.json")
+        stage.storage.copy(self.store.path / "manifest.json", f"{stage.run_prefix}/{INDEX_MANIFEST_COPY}")
         self.store.unlock()
 
 
@@ -476,5 +478,5 @@ def blocksci_backup(stage: Stage) -> None:
     index.backup(threads=stage.settings["ncpus"])
     index.unlock()
     # The lab learns which height the backup holds from the run.
-    stage.storage.copy(index.path / "manifest.json", f"{stage.run_prefix}/blocksci-index-backup.json")
+    stage.storage.copy(index.path / "manifest.json", f"{stage.run_prefix}/{INDEX_BACKUP_MANIFEST_COPY}")
     stage.log(f"index at height {index.height()} backed up to {index.backup_uri}")

@@ -236,7 +236,7 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
         )
     )
     assert notebook["stage"] == "blocksci-notebook" and notebook["inputs"] == []
-    assert "Open JupyterLab from Scenario Lab" in notebook["connection_help"][1]
+    assert "Connection details follow once JupyterLab has started" in notebook["connection_help"][1]
 
 
 def test_notebook_uses_image_python_and_keeps_control_files_outside_saved_notebooks() -> None:

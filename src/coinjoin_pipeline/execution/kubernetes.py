@@ -1,4 +1,8 @@
-"""The S3 emulation Job on Kubernetes: kubectl access, preflight, resources, probe, diagnostics and cleanup."""
+"""Kubernetes for the emulation: kubectl access, the auth preflights of both drivers, and the S3 Job.
+
+The S3 emulation Job's resources, probe, diagnostics and cleanup live here, next to the
+kubectl helpers and the preflight that the shared-storage Kubernetes path uses too.
+"""
 
 from __future__ import annotations
 

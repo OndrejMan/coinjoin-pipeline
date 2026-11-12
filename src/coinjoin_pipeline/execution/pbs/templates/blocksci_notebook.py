@@ -159,7 +159,7 @@ def main():
         temporary = connection.with_suffix(".tmp")
         temporary.write_text(json.dumps(info))
         temporary.replace(connection)
-        print("[blocksci-notebook] Ready: open JupyterLab from Scenario Lab.", flush=True)
+        print("[blocksci-notebook] Ready: JupyterLab accepts connections.", flush=True)
         login, host = info["login"], info["host"]
         frontend = os.environ.get("NOTEBOOK_FRONTEND")
         jump = "-J " + login + "@" + frontend + " " if frontend else ""

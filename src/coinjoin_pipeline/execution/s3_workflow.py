@@ -8,6 +8,15 @@ from __future__ import annotations
 
 import sys
 
+from exporters.artifact_paths import (
+    BLOCKSCI_ANALYSIS_DIR,
+    BLOCKSCI_PARSE_DIR,
+    COINJOIN_ANALYSIS_DIR,
+    LOGS_DIR,
+    MAPPINGS_DIR,
+    REPORT_DIR,
+)
+
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution.kubernetes import (
     S3_JOB_START_TIMEOUT_SECONDS,
@@ -156,7 +165,7 @@ def wait_for_pbs_graph(
 def print_full_run_completed(run_prefix: str) -> None:
     print(
         f"[full-run] Completed; results under {run_prefix}/ "
-        "(coinjoin-analysis_data/, blocksci-analysis_data/, "
-        "coinjoin-mappings_data/ when requested, blocksci-parse_data/ when reusable, "
-        "coinjoinPipeline_data/, logs/)"
+        f"({COINJOIN_ANALYSIS_DIR}/, {BLOCKSCI_ANALYSIS_DIR}/, "
+        f"{MAPPINGS_DIR}/ when requested, {BLOCKSCI_PARSE_DIR}/ when reusable, "
+        f"{REPORT_DIR}/, {LOGS_DIR}/)"
     )

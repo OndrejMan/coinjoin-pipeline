@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, TypedDict
 if TYPE_CHECKING:  # TypeGuard needs Python 3.10; the PBS node never evaluates annotations.
     from typing import TypeGuard
 
-from exporters.artifact_paths import pbs_marker
+from exporters.artifact_paths import INDEX_MANIFEST_COPY, pbs_marker
 
 from coinjoin_pipeline.execution.pbs.apptainer import MISSING_RUNTIME, alias_binds, exec_command, find_runtime
 from coinjoin_pipeline.execution.pbs.index_store import MEMBERS as INDEX_MEMBERS
@@ -282,7 +282,7 @@ class Worker:
         """Clear the previous synchronization's state; its logs stay under logs/<run-id>/."""
         stages = self.c["sync_stages"]
         # <stage>.json is each job's progress; restore.json also says what the restore did.
-        names = ("ready.json", "done.json", "blocksci-index-manifest.json", *(f"{stage}.json" for stage in stages))
+        names = ("ready.json", "done.json", INDEX_MANIFEST_COPY, *(f"{stage}.json" for stage in stages))
         for name in (*names, *(f"{stage}.quiescent" for stage in stages if stage != self.stage)):
             (self.run / name).unlink(missing_ok=True)
         for name in names:

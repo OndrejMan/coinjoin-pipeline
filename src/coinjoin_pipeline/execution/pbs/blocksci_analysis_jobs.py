@@ -20,7 +20,13 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import cast
 
-from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, BLOCKSCI_DIR, BLOCKSCI_PARSE_DIR, STAGED_EXPORTERS_DIR
+from exporters.artifact_paths import (
+    BLOCKSCI_CONFIG_FILE,
+    BLOCKSCI_DIR,
+    BLOCKSCI_PARSE_DIR,
+    INDEX_MANIFEST_COPY,
+    STAGED_EXPORTERS_DIR,
+)
 
 from coinjoin_pipeline.execution.pbs.blocksci_index import (
     canonicalize_index,
@@ -242,7 +248,7 @@ def blocksci_analysis(stage: Stage) -> None:
     if persistent:
         index = read_index(stage, persistent)
         binds += index.binds("ro")
-        shutil.copyfile(index.path / "manifest.json", output / "blocksci-index-manifest.json")
+        shutil.copyfile(index.path / "manifest.json", output / INDEX_MANIFEST_COPY)
         dumplings = persistent.get("dumplings_uri")
         if dumplings:
             binds.append(attach_dumplings(stage, index, dumplings))
