@@ -120,8 +120,7 @@ def blocksci(stage: Stage) -> None:
     The parsed index is published like the reusable workflow's, so cached jobs can reuse it.
     """
     settings = cast(BlocksciSettings, stage.settings)
-    if shutil.which("zstd") is None:
-        raise StageFailure("zstd is required to pack or unpack the BlockSci cache")
+    require_tools("zstd")
     for name in (BITCOIN_DATA_DIR, EMULATOR_DIR, STAGED_EXPORTERS_DIR):
         stage.download(name)
     datadir = emulator_bitcoin_datadir(stage)
