@@ -206,7 +206,12 @@ def render_mappings_s3_pbs(
         target,
         resources,
         None,
-        {"script": mappings_run(settings), "enumerator_image": enumerator_image, "sake_image": sake_image},
+        {
+            "script": mappings_run(settings),
+            # Pinned like every other stage image, so the provenance records the registry digest.
+            "enumerator_image": pinned_reference(enumerator_image),
+            "sake_image": pinned_reference(sake_image),
+        },
     )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -345,9 +346,48 @@ def test_mappings_job_publishes_the_combined_mappings(job: dict[str, Path]) -> N
     assert process.returncode == 0, output
     combined = json.loads(remote(job, "coinjoin-mappings_data/coinjoin_mappings.json").read_text())
     assert combined["status"] == "complete"
+    # The registry is offline in tests, so the tags stay unpinned and record no digest:
+    # the hash of a SIF pulled from a tag differs between pulls of the same image.
     assert combined["provenance"]["enumerator_image"] == "docker://enumerator:1"
-    assert combined["provenance"]["sake_image_digest"].startswith("sha256:")
+    assert combined["provenance"]["sake_image_digest"] is None
     assert remote(job, ".pbs/coinjoin-mappings.done").is_file()
+
+
+def test_mappings_provenance_records_the_registry_digest_of_the_pinned_images(
+    job: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from coinjoin_pipeline import registry
+
+    digest = "sha256:" + "ab" * 32
+    monkeypatch.setattr(registry, "registry_digest", lambda reference, timeout=0: digest)
+    registry.pinned_reference.cache_clear()
+    upload_inputs(job, {"coinjoin-analysis_data/coinjoin_tx_info.json": '{"coinjoins": {}}'})
+    process = start(job, mappings_script(job))
+    output, _ = process.communicate(timeout=60)
+
+    assert process.returncode == 0, output
+    provenance = json.loads(remote(job, "coinjoin-mappings_data/coinjoin_mappings.json").read_text())["provenance"]
+    assert provenance["enumerator_image"] == f"docker://enumerator@{digest}"
+    assert (provenance["enumerator_image_digest"], provenance["sake_image_digest"]) == (digest, digest)
+
+
+def test_mappings_provenance_hashes_a_local_sif_file(job: dict[str, Path]) -> None:
+    sif = job["scratch"].parent / "enumerator.sif"
+    sif.write_text("local enumerator\n")
+    target = S3Target(
+        artifact_uri="s3://bucket/runs",
+        run_id="run-1",
+        endpoint_url="https://s3.example.org",
+        credentials_file=str(job["credentials"]),
+        profile="coinjoin",
+    )
+    upload_inputs(job, {"coinjoin-analysis_data/coinjoin_tx_info.json": '{"coinjoins": {}}'})
+    process = start(job, render_mappings_s3_pbs(target, str(sif), "docker://sake:1"))
+    output, _ = process.communicate(timeout=60)
+
+    assert process.returncode == 0, output
+    provenance = json.loads(remote(job, "coinjoin-mappings_data/coinjoin_mappings.json").read_text())["provenance"]
+    assert provenance["enumerator_image_digest"] == "sha256:" + hashlib.sha256(sif.read_bytes()).hexdigest()
 
 
 def test_failed_mappings_still_publish_their_partial_output(job: dict[str, Path]) -> None:

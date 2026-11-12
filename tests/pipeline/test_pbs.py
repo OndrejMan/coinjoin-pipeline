@@ -313,7 +313,7 @@ class PBSTemplateTest(unittest.TestCase):
         self.assertIn("--timeout 60 --retry-timeout 600", script)
         self.assertIn("--seed 42", script)
         self.assertIn('SINGULARITY_CACHEDIR="$SCRATCHDIR"', script)
-        self.assertIn('ENUMERATOR_DIGEST="sha256:', script)
+        self.assertIn('ENUMERATOR_DIGEST="$(image_digest "$ENUMERATOR_IMAGE" "$ENUMERATOR_SIF")"', script)
         self.assertIn("ENUMERATOR_STATUS=$?", script)
         self.assertIn("SAKE_STATUS=$?", script)
         self.assertIn('get("errors",0)>0', script)

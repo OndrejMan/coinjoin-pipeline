@@ -9,6 +9,7 @@ import shlex
 from pathlib import Path
 
 from coinjoin_pipeline.configuration import MappingsConfiguration
+from coinjoin_pipeline.registry import pinned_reference
 
 from .defaults import DEFAULT_RESOURCES, PBSResources
 from .scripts import directives, mappings_run, template
@@ -98,7 +99,7 @@ def render_mappings_pbs(
         "coinjoin-mappings",
         run_dir,
         resources,
-        enumerator_image=shlex.quote(enumerator_image),
-        sake_image=shlex.quote(sake_image),
+        enumerator_image=shlex.quote(pinned_reference(enumerator_image)),
+        sake_image=shlex.quote(pinned_reference(sake_image)),
         mappings_run=mappings_run(settings),
     )

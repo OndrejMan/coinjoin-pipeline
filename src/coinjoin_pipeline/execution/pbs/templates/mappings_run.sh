@@ -9,8 +9,17 @@ fetch_sif() {{
 }}
 fetch_sif "$ENUMERATOR_IMAGE" "$ENUMERATOR_SIF"
 fetch_sif "$SAKE_IMAGE" "$SAKE_SIF"
-ENUMERATOR_DIGEST="sha256:$(sha256sum "$ENUMERATOR_SIF" | awk '{{print $1}}')"
-SAKE_DIGEST="sha256:$(sha256sum "$SAKE_SIF" | awk '{{print $1}}')"
+# A pinned reference names its registry digest; a pull of a bare tag has none, because the
+# SIF built from it hashes differently on every pull. A local SIF file is its own identity.
+image_digest() {{
+  case "$1" in
+    *@sha256:*) echo "sha256:${{1##*@sha256:}}" ;;
+    docker://*|oras://*|library://*|http://*|https://*) ;;
+    *) echo "sha256:$(sha256sum "$2" | awk '{{print $1}}')" ;;
+  esac
+}}
+ENUMERATOR_DIGEST="$(image_digest "$ENUMERATOR_IMAGE" "$ENUMERATOR_SIF")"
+SAKE_DIGEST="$(image_digest "$SAKE_IMAGE" "$SAKE_SIF")"
 in_enumerator() {{
   singularity exec --bind "$WORK:$WORK:rw" "$ENUMERATOR_SIF" "$@"
 }}
@@ -41,6 +50,6 @@ set -e
 accept_partial "$SAKE_STATUS" "$OUT/sake.json"
 
 in_enumerator python3 -c \
-  'import json,sys; p,ei,si,ed,sd=sys.argv[1:]; e=json.load(open(p+"/enumerator.json")); s=json.load(open(p+"/sake.json")); es=e.get("summary",{{}}); ss=s.get("summary",{{}}); status="partial" if any((es.get("timed_out",0),es.get("errors",0),ss.get("errors",0))) else "complete"; json.dump({{"schema_version":"1.0","status":status,"provenance":{{"enumerator_image":ei,"sake_image":si,"enumerator_image_digest":ed,"sake_image_digest":sd}},"enumerator":e,"sake":s}},open(p+"/coinjoin_mappings.json","w"),indent=2,sort_keys=True)' \
+  'import json,sys; p,ei,si,ed,sd=sys.argv[1:]; e=json.load(open(p+"/enumerator.json")); s=json.load(open(p+"/sake.json")); es=e.get("summary",{{}}); ss=s.get("summary",{{}}); status="partial" if any((es.get("timed_out",0),es.get("errors",0),ss.get("errors",0))) else "complete"; json.dump({{"schema_version":"1.0","status":status,"provenance":{{"enumerator_image":ei,"sake_image":si,"enumerator_image_digest":ed or None,"sake_image_digest":sd or None}},"enumerator":e,"sake":s}},open(p+"/coinjoin_mappings.json","w"),indent=2,sort_keys=True)' \
   "$OUT" "$ENUMERATOR_IMAGE" "$SAKE_IMAGE" "$ENUMERATOR_DIGEST" "$SAKE_DIGEST"
 test -f "$OUT/coinjoin_mappings.json" || {{ echo "CoinJoin mappings did not produce coinjoin_mappings.json" >&2; exit 1; }}
