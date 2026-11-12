@@ -17,6 +17,7 @@ from exporters.common import (
     load_json,
     save_json,
 )
+from exporters.markdown_report import render_report, save_text
 from exporters.normalization import normalize_coinjoin_analysis
 from exporters.parameters import Detector, add_detector_arguments
 from exporters.report_builder import build_report
@@ -41,6 +42,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--blocksci-analysis",
         type=Path,
         help="Consume a precomputed BlockSci analysis artifact instead of querying BlockSci.",
+    )
+    parser.add_argument(
+        "--markdown",
+        action="store_true",
+        help="Also render a Markdown report next to the JSON output.",
     )
     add_detector_arguments(parser)
     return parser.parse_args(argv)
@@ -78,6 +84,10 @@ def assemble_report(args: argparse.Namespace) -> int:
     )
     save_json(output_path, report)
     print(f"Unified report saved to {output_path}")
+    if args.markdown:
+        markdown_path = output_path.with_suffix(".md")
+        save_text(markdown_path, render_report(report))
+        print(f"Markdown report saved to {markdown_path}")
     return 0
 
 

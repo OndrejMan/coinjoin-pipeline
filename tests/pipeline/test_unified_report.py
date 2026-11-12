@@ -26,6 +26,7 @@ from exporters.blocksci_export import detector as unified_report
 from exporters.blocksci_export.detector import export_blocksci_records
 from exporters.cli import parse_args
 from exporters.common import SCHEMA_VERSION, save_json, sha256_json
+from exporters.markdown_report import render_report
 from exporters.parameters import Detector  # noqa: E402
 from exporters.normalization import normalize_coinjoin_analysis
 from exporters.parameters import parse_min_input_count
@@ -257,6 +258,48 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(
             report["divergences"]["shared_tx_mismatches"][0]["mismatch_count"],
             len(mismatches),
+        )
+
+    def test_render_markdown_report(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            run_dir.mkdir()
+
+            coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_fixture())
+            report = build_report(run_dir, coinjoin_analysis, blocksci_fixture("txB"), Detector("wasabi2"))
+
+        markdown = render_report(report)
+
+        self.assertIn("# BlockSci vs Emulator CoinJoin Report", markdown)
+        self.assertIn("| run time | - |", markdown)
+        self.assertIn("| coinjoin-analysis coinjoins | 1 |", markdown)
+        self.assertIn("## Divergence Overview", markdown)
+        self.assertIn("| missed_by_blocksci | [txA](http://localhost:3002/tx/txA) |", markdown)
+        self.assertIn("| blocksci_only | [txB](http://localhost:3002/tx/txB) |", markdown)
+        self.assertIn("## Missed By BlockSci", markdown)
+        self.assertIn("## Missed By BlockSci Details", markdown)
+        self.assertIn("#### Inputs", markdown)
+        self.assertIn("#### Outputs", markdown)
+        self.assertIn("wallet-000", markdown)
+
+    def test_render_io_details_links_prev_txids(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            run_dir.mkdir()
+
+            fixture = coinjoin_analysis_fixture()
+            fixture["coinjoins"]["txA"]["inputs"]["0"]["txid"] = (
+                "4661b71b085395008966182375dd3b74d3b0c2f2617bfade403520da616bdb37"
+            )
+            coinjoin_analysis = normalize_coinjoin_analysis(fixture)
+            report = build_report(run_dir, coinjoin_analysis, blocksci_fixture("txB"), Detector("wasabi2"))
+
+        markdown = render_report(report)
+
+        self.assertIn(
+            "[4661b71b...616bdb37](http://localhost:3002/tx/"
+            "4661b71b085395008966182375dd3b74d3b0c2f2617bfade403520da616bdb37)",
+            markdown,
         )
 
     def test_save_json_is_deterministic(self):

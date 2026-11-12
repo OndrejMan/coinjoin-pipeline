@@ -39,6 +39,7 @@ def parse_args(argv=None):
     args.run_dir = args.run_dir.expanduser().resolve()
     args.config = args.config or args.run_dir / BLOCKSCI_CONFIG_FILE
     args.runs_root = args.run_dir.parent
+    args.markdown = True
     return args
 
 
