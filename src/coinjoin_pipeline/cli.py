@@ -41,8 +41,9 @@ def use_line_buffered_output() -> None:
 def print_dry_run_context(context: RunContext) -> None:
     """What a dry run resolved before execution: where the run lives and which images it uses."""
     print(f"[dry-run] run directory: {context.run_dir or '-'}")
-    for component, image in context.images.as_dict().items():
-        print(f"[dry-run] image {component}: {image}")
+    if context.config.action not in {"clean"}:
+        for component, image in context.images.as_dict().items():
+            print(f"[dry-run] image {component}: {image}")
 
 
 def execute(context: RunContext) -> None:

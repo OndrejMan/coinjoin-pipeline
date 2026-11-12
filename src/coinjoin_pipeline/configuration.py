@@ -33,6 +33,7 @@ PipelineAction = Literal[
     "analyze",
     "export",
     "coinjoin-analysis",
+    "clean",
 ]
 Engine = Literal["wasabi", "joinmarket"]
 CoinjoinType = Literal["wasabi2", "joinmarket"]
@@ -80,6 +81,7 @@ class PipelineConfiguration(ConfigurationModel):
     dry_run: bool = option(False, name="dry_run")
     parallel: bool = option(False, name="parallel", actions=("full-run",))
     all_runs: bool = option(False, name="all_runs", actions=("coinjoin-analysis",))
+    yes: bool = option(False, name="yes", actions=("clean",))
     analysis_action: AnalysisAction = option("collect_docker", name="analysis_action", actions=("coinjoin-analysis",))
     images: ImageConfiguration = field(default_factory=ImageConfiguration)
     _provided: frozenset[str] = field(default_factory=frozenset, repr=False, compare=False)

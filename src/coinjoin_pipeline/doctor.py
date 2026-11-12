@@ -27,7 +27,7 @@ def required_capabilities(config: PipelineConfiguration) -> set[Capability]:
 
 
 def required_image_components(config: PipelineConfiguration) -> set[str]:
-    if config.dry_run:
+    if config.dry_run or config.action == "clean":
         return set()
     return {
         "emulate": {"emulator"},
