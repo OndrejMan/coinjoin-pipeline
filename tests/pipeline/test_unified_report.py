@@ -29,6 +29,11 @@ from exporters.blocksci_export.detector import export_blocksci_records
 from exporters.cli import parse_args
 from exporters.common import SCHEMA_VERSION, save_json, sha256_json
 from exporters.emulator_data import build_emulator_data, load_wasabi_round_labels
+from exporters.heuristics import (
+    WASABI2_BLOCKSCI_DENOMINATIONS,
+    explain_joinmarket_heuristic,
+    explain_wasabi2_heuristic,
+)
 from exporters.manifest import build_run_manifest, compare_run_manifests
 from exporters.markdown_report import render_report
 from exporters.parameters import Detector, ReportImages  # noqa: E402
@@ -81,6 +86,161 @@ def coinjoin_analysis_fixture_with_block_height(height):
     fixture = coinjoin_analysis_fixture()
     fixture["coinjoins"]["txA"]["block_height"] = height
     return fixture
+
+
+def wasabi2_passing_coinjoin_fixture():
+    return {
+        "coinjoins": {
+            "txA": {
+                "txid": "txA",
+                "block_height": 226,
+                "inputs": {
+                    "0": {
+                        "value": 5000,
+                        "address": "input-a0",
+                        "wallet_name": "wallet-000",
+                    },
+                    "1": {
+                        "value": 4000,
+                        "address": "input-a1",
+                        "wallet_name": "wallet-001",
+                    },
+                    "2": {
+                        "value": 3000,
+                        "address": "input-a2",
+                        "wallet_name": "wallet-002",
+                    },
+                    "3": {
+                        "value": 2000,
+                        "address": "input-a3",
+                        "wallet_name": "wallet-003",
+                    },
+                    "4": {
+                        "value": 1000,
+                        "address": "input-a4",
+                        "wallet_name": "wallet-004",
+                    },
+                },
+                "outputs": {
+                    "0": {
+                        "value": 5000,
+                        "address": "output-a0",
+                        "wallet_name": "wallet-000",
+                    },
+                    "1": {
+                        "value": 5000,
+                        "address": "output-a1",
+                        "wallet_name": "wallet-001",
+                    },
+                    "2": {
+                        "value": 5000,
+                        "address": "output-a2",
+                        "wallet_name": "wallet-002",
+                    },
+                    "3": {
+                        "value": 5000,
+                        "address": "output-a3",
+                        "wallet_name": "wallet-003",
+                    },
+                    "4": {
+                        "value": 5000,
+                        "address": "output-a4",
+                        "wallet_name": "wallet-004",
+                    },
+                },
+            }
+        }
+    }
+
+
+def joinmarket_passing_coinjoin_fixture():
+    return {
+        "coinjoins": {
+            "txA": {
+                "txid": "txA",
+                "block_height": 42,
+                "inputs": {
+                    "0": {
+                        "value": 195002,
+                        "address": "input-a0",
+                        "wallet_name": "wallet-000",
+                    },
+                    "1": {
+                        "value": 455004,
+                        "address": "input-a1",
+                        "wallet_name": "wallet-001",
+                    },
+                    "2": {
+                        "value": 46682,
+                        "address": "input-a2",
+                        "wallet_name": "wallet-002",
+                    },
+                    "3": {
+                        "value": 2955004,
+                        "address": "input-a3",
+                        "wallet_name": "wallet-003",
+                    },
+                    "4": {
+                        "value": 2915006,
+                        "address": "input-a4",
+                        "wallet_name": "wallet-004",
+                    },
+                },
+                "outputs": {
+                    "0": {
+                        "value": 40000,
+                        "address": "mix-a0",
+                        "wallet_name": "wallet-000",
+                    },
+                    "1": {
+                        "value": 40000,
+                        "address": "mix-a1",
+                        "wallet_name": "wallet-001",
+                    },
+                    "2": {
+                        "value": 40000,
+                        "address": "mix-a2",
+                        "wallet_name": "wallet-002",
+                    },
+                    "3": {
+                        "value": 40000,
+                        "address": "mix-a3",
+                        "wallet_name": "wallet-003",
+                    },
+                    "4": {
+                        "value": 40000,
+                        "address": "mix-a4",
+                        "wallet_name": "wallet-004",
+                    },
+                    "5": {
+                        "value": 160002,
+                        "address": "change-a0",
+                        "wallet_name": "wallet-000",
+                    },
+                    "6": {
+                        "value": 420004,
+                        "address": "change-a1",
+                        "wallet_name": "wallet-001",
+                    },
+                    "7": {
+                        "value": 11682,
+                        "address": "change-a2",
+                        "wallet_name": "wallet-002",
+                    },
+                    "8": {
+                        "value": 2920004,
+                        "address": "change-a3",
+                        "wallet_name": "wallet-003",
+                    },
+                    "9": {
+                        "value": 2880006,
+                        "address": "change-a4",
+                        "wallet_name": "wallet-004",
+                    },
+                },
+            }
+        }
+    }
 
 
 def blocksci_fixture(txid="txA"):
@@ -1249,6 +1409,142 @@ class UnifiedReportTest(unittest.TestCase):
         )
         self.assertEqual(report["divergences"]["blocksci_only"][0]["txid"], "txB")
         self.assertIsNone(report["divergences"]["blocksci_only"][0]["coinjoin_analysis"])
+        explanation = report["transactions"]["txA"]["coinjoin_analysis"]["blocksci_heuristic_explanation"]
+        self.assertEqual(explanation["heuristic"], "wasabi2")
+        self.assertFalse(explanation["would_pass_python_rules"])
+        self.assertIn("unique_input_addresses", explanation["failed_rules"])
+
+    def test_wasabi2_default_threshold_fails_small_current_missed_shape(self):
+        records = normalize_coinjoin_analysis(coinjoin_analysis_fixture_with_block_height(226))
+        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=None)
+
+        input_count_rule = next(rule for rule in explanation["rules"] if rule["name"] == "input_count")
+        self.assertFalse(input_count_rule["passed"])
+        self.assertIn("input_count", explanation["failed_rules"])
+
+    def test_wasabi2_low_min_input_count_can_pass_input_count_rule(self):
+        records = normalize_coinjoin_analysis(coinjoin_analysis_fixture_with_block_height(226))
+        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=1)
+
+        input_count_rule = next(rule for rule in explanation["rules"] if rule["name"] == "input_count")
+        self.assertTrue(input_count_rule["passed"])
+        self.assertNotIn("input_count", explanation["failed_rules"])
+
+    def test_wasabi2_mirror_includes_powers_of_ten_times_five_denominations(self):
+        record = {
+            "txid": "txA",
+            "block_height": 226,
+            "inputs": [
+                {
+                    "value": 10_000 - index,
+                    "address": f"input-{index}",
+                    "address_type": "WITNESS_PUBKEYHASH",
+                }
+                for index in range(5)
+            ],
+            "outputs": [
+                {
+                    "value": value,
+                    "address": f"output-{index}",
+                    "address_type": "WITNESS_PUBKEYHASH",
+                    "is_standard_denom": True,
+                }
+                for index, value in enumerate(([5_000_000] * 7) + ([20_000] * 47) + ([17_781] * 7))
+            ],
+        }
+
+        explanation = explain_wasabi2_heuristic(record, min_input_count=1)
+
+        denom_rule = next(rule for rule in explanation["rules"] if rule["name"] == "wasabi2_denominations")
+        self.assertIn(5_000_000, WASABI2_BLOCKSCI_DENOMINATIONS)
+        self.assertTrue(denom_rule["passed"])
+        self.assertEqual(denom_rule["observed"], "54/61 outputs")
+        self.assertNotIn("wasabi2_denominations", explanation["failed_rules"])
+
+    def test_wasabi2_non_descending_values_fail_matching_rules(self):
+        records = normalize_coinjoin_analysis(wasabi2_passing_coinjoin_fixture())
+        record = records["txA"]
+        record["inputs"][1]["value"] = 6000
+        record["outputs"][1]["value"] = 2000
+
+        explanation = explain_wasabi2_heuristic(record, min_input_count=1)
+
+        self.assertIn("input_values_descending", explanation["failed_rules"])
+        self.assertIn("output_values_descending", explanation["failed_rules"])
+
+    def test_wasabi2_fewer_than_five_unique_addresses_fail(self):
+        records = normalize_coinjoin_analysis(coinjoin_analysis_fixture_with_block_height(226))
+        explanation = explain_wasabi2_heuristic(records["txA"], min_input_count=1)
+
+        self.assertIn("unique_input_addresses", explanation["failed_rules"])
+        self.assertIn("unique_output_addresses", explanation["failed_rules"])
+
+    def test_joinmarket_explanation_mirrors_the_protocol_heuristic(self):
+        records = normalize_coinjoin_analysis(joinmarket_passing_coinjoin_fixture())
+        explanation = explain_joinmarket_heuristic(records["txA"])
+
+        self.assertEqual(explanation["heuristic"], "joinmarket")
+        self.assertTrue(explanation["would_pass_python_rules"])
+        self.assertEqual(explanation["failed_rules"], [])
+
+    def test_joinmarket_explanation_rejects_fewer_than_five_mix_outputs(self):
+        fixture = joinmarket_passing_coinjoin_fixture()
+        tx = fixture["coinjoins"]["txA"]
+        del tx["inputs"]["4"]
+        del tx["outputs"]["4"]
+        del tx["outputs"]["9"]
+        records = normalize_coinjoin_analysis(fixture)
+
+        explanation = explain_joinmarket_heuristic(records["txA"])
+
+        self.assertEqual(explanation["failed_rules"], ["mix_output_count"])
+
+    def test_joinmarket_explanation_accepts_repeated_change(self):
+        fixture = joinmarket_passing_coinjoin_fixture()
+        tx = fixture["coinjoins"]["txA"]
+        for index in range(5, 9):
+            tx["outputs"][str(index)]["value"] = 460_002
+        records = normalize_coinjoin_analysis(fixture)
+
+        explanation = explain_joinmarket_heuristic(records["txA"])
+
+        self.assertTrue(explanation["would_pass_python_rules"])
+        self.assertEqual(explanation["failed_rules"], [])
+
+    def test_joinmarket_explanation_rejects_tied_mix_denominations(self):
+        fixture = joinmarket_passing_coinjoin_fixture()
+        tx = fixture["coinjoins"]["txA"]
+        for index in range(5, 10):
+            tx["outputs"][str(index)]["value"] = 460_002
+        records = normalize_coinjoin_analysis(fixture)
+
+        explanation = explain_joinmarket_heuristic(records["txA"])
+
+        self.assertFalse(explanation["would_pass_python_rules"])
+        self.assertIn("unique_mix_value", explanation["failed_rules"])
+
+    def test_joinmarket_explanation_rejects_address_reuse_and_small_change(self):
+        fixture = joinmarket_passing_coinjoin_fixture()
+        tx = fixture["coinjoins"]["txA"]
+        tx["outputs"]["5"]["address"] = "input-a0"
+        tx["outputs"]["7"]["value"] = 4_999
+        records = normalize_coinjoin_analysis(fixture)
+
+        explanation = explain_joinmarket_heuristic(records["txA"])
+
+        self.assertEqual(explanation["failed_rules"], ["no_address_reuse", "change_values"])
+
+    def test_build_report_adds_joinmarket_explanation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            run_dir.mkdir()
+
+            coinjoin_analysis = normalize_coinjoin_analysis(joinmarket_passing_coinjoin_fixture())
+            report = build_report(run_dir, coinjoin_analysis, {}, Detector("joinmarket"))
+
+        explanation = report["transactions"]["txA"]["coinjoin_analysis"]["blocksci_heuristic_explanation"]
+        self.assertEqual(explanation["heuristic"], "joinmarket")
+        self.assertIn("mix_output_count", [rule["name"] for rule in explanation["rules"]])
 
     def test_fill_missing_block_height_from_exported_blocks(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1318,7 +1614,7 @@ class UnifiedReportTest(unittest.TestCase):
         )
         self.assertNotIn("| _12 |", markdown)
 
-    def test_exported_block_script_metadata_maps_taproot_to_witness_unknown(self):
+    def test_exported_block_script_metadata_explains_taproot_witness_unknown(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir) / "run"
             block_dir = run_dir / "coinjoin_emulator_data" / "data" / "btc-node"
@@ -1391,7 +1687,23 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(tx_record["outputs"][1]["script_type"], "witness_v1_taproot")
         self.assertEqual(tx_record["outputs"][1]["address_type"], "WITNESS_UNKNOWN")
 
+        explanation = tx_record["blocksci_heuristic_explanation"]
+        output_type_rule = next(rule for rule in explanation["rules"] if rule["name"] == "output_address_types")
+        self.assertTrue(output_type_rule["passed"])
+        self.assertEqual(
+            output_type_rule["observed"],
+            "WITNESS_PUBKEYHASH, WITNESS_UNKNOWN (taproot/witness_v1_taproot)",
+        )
+
         markdown = render_report(report)
+        self.assertIn(
+            "| output_address_types | yes | WITNESS_PUBKEYHASH, WITNESS_UNKNOWN (taproot/witness_v1_taproot) |",
+            markdown,
+        )
+        self.assertIn(
+            "BlockSci classifies taproot / witness v1 outputs as WITNESS_UNKNOWN in this build.",
+            markdown,
+        )
         self.assertIn(
             "| 1 | 50,000 | output-a1 | witness_v1_taproot | WITNESS_UNKNOWN |",
             markdown,
@@ -1434,9 +1746,49 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertIn("| blocksci_only | [txB](http://localhost:3002/tx/txB) |", markdown)
         self.assertIn("## Missed By BlockSci", markdown)
         self.assertIn("## Missed By BlockSci Details", markdown)
+        self.assertIn("#### BlockSci Heuristic Explanation", markdown)
+        self.assertIn("Python mirror result: fail", markdown)
+        self.assertIn("unique_input_addresses", markdown)
         self.assertIn("#### Inputs", markdown)
         self.assertIn("#### Outputs", markdown)
         self.assertIn("wallet-000", markdown)
+
+    def test_render_markdown_pass_but_missed_heuristic_message(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            run_dir.mkdir()
+
+            coinjoin_analysis = normalize_coinjoin_analysis(wasabi2_passing_coinjoin_fixture())
+            report = build_report(
+                run_dir, coinjoin_analysis, blocksci_fixture("txB"), Detector("wasabi2", min_input_count=1)
+            )
+
+        markdown = render_report(report)
+
+        self.assertIn("Python mirror result: pass", markdown)
+        self.assertIn("Failed rules: -", markdown)
+        self.assertIn(
+            "Python mirror passes; likely difference is unavailable address-type data, "
+            "denomination set mismatch, or BlockSci configuration/threshold behavior.",
+            markdown,
+        )
+
+    def test_render_markdown_joinmarket_heuristic_table(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            run_dir.mkdir()
+
+            coinjoin_analysis = normalize_coinjoin_analysis(joinmarket_passing_coinjoin_fixture())
+            report = build_report(run_dir, coinjoin_analysis, {}, Detector("joinmarket"))
+
+        markdown = render_report(report)
+
+        self.assertIn("#### BlockSci Heuristic Explanation", markdown)
+        self.assertIn("mix_output_count", markdown)
+        self.assertIn(
+            "Python mirror passes; likely difference is runtime BlockSci image/cache mismatch",
+            markdown,
+        )
 
     def test_render_io_details_links_prev_txids(self):
         with tempfile.TemporaryDirectory() as tmpdir:

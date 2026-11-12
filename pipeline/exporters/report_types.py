@@ -67,6 +67,7 @@ class TransactionRecord(_TransactionFields, TransactionMetrics, total=False):
 
     round_id: str | None
     block_height_inferred: bool
+    blocksci_heuristic_explanation: JsonObject
 
 
 class RecordSummary(TypedDict):
