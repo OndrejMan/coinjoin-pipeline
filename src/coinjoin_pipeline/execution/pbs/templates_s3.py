@@ -44,6 +44,7 @@ from .scripts import (
     mappings_run,
     launcher,
     package_files,
+    validated_s3_uri,
     write_files,
 )
 from .stage_settings import (
@@ -65,7 +66,9 @@ from .validation import (
     require_storage_path,
 )
 
+EXECUTION_DIR = Path(__file__).parent.parent
 # Standalone helpers some jobs ship besides the worker.
+BLOCK_ARCHIVE = EXECUTION_DIR / "block_archive.py"
 NOTEBOOK_SERVER = Path(__file__).parent / "templates/blocksci_notebook.py"
 BLOCKSCI = DEFAULT_RESOURCES["blocksci"]
 # The fields one job adds to the common StageSettings; its job function reads them.
@@ -139,7 +142,7 @@ def _block_source(blocksci: BlockSciConfiguration) -> SourceSettings:
     """The single block source of a parse or update; kind becomes the cache manifest's source_kind.
 
     The configuration rules allow one source and require its network and last height;
-    an update takes only a Bitcoin datadir.
+    an update takes only a Bitcoin datadir or a block archive.
     """
     if blocksci.external_bitcoin_datadir:
         return {
@@ -148,6 +151,14 @@ def _block_source(blocksci: BlockSciConfiguration) -> SourceSettings:
             "description": "external Bitcoin Core block directory",
             "datadir": _bitcoin_datadir(Path(blocksci.external_bitcoin_datadir)),
             "max_block": required(blocksci.max_block, "--blocksci-max-block"),
+        }
+    if blocksci.bitcoin_blocks_uri:
+        return {
+            "kind": "bitcoin-blocks-s3",
+            "network": required(blocksci.network, "--blocksci-network"),
+            "description": "verified Bitcoin block archive from S3",
+            "max_block": required(blocksci.max_block, "--blocksci-max-block"),
+            "blocks_uri": validated_s3_uri(blocksci.bitcoin_blocks_uri, "Bitcoin block archive URI"),
         }
     if blocksci.external_blocksci_dir:
         blocksci_path = Path(blocksci.external_blocksci_dir).expanduser().resolve()
@@ -187,6 +198,7 @@ def render_blocksci_parse_s3_pbs(
             "command": command,
             "source": _block_source(blocksci),
         },
+        extra_files=(BLOCK_ARCHIVE,) if blocksci.bitcoin_blocks_uri else (),
     )
 
 
@@ -201,7 +213,8 @@ def render_blocksci_update_s3_pbs(
     """Render a job that incrementally updates one S3 cache into a fresh run.
 
     The cache must come from the same source: BlockSci remembers each block by
-    its file number and offset, which only that Bitcoin datadir can resolve.
+    its file number and offset, which only that Bitcoin datadir or block
+    archive can resolve.
     """
     return render_python_stage(
         "blocksci-update",
@@ -214,6 +227,7 @@ def render_blocksci_update_s3_pbs(
             "source_run_id": blocksci.cache_source_run_id,
             "artifact_uri": validate_artifact_uri(target.artifact_uri),
         },
+        extra_files=(BLOCK_ARCHIVE,) if blocksci.bitcoin_blocks_uri else (),
     )
 
 

@@ -138,6 +138,7 @@ HELP = {
     "blocksci.notebook_port": "preferred Jupyter port of --blocksci-task notebook (1024-65535)",
     "blocksci.notebooks_dir": "notebook directory of --blocksci-task notebook",
     "blocksci.external_bitcoin_datadir": "Bitcoin datadir to parse (reusable parse or cached update)",
+    "blocksci.bitcoin_blocks_uri": "S3 prefix of a bitcoin-block-archive to parse (reusable parse or cached update)",
     "blocksci.external_blocksci_dir": "existing BlockSci index directory for a reusable parse",
     "blocksci.network": "chain of an external Bitcoin source",
     "blocksci.max_block": "last height to parse from an external Bitcoin source",

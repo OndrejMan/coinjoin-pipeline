@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
+from coinjoin_pipeline.storage.s3 import validate_artifact_uri
 
 from .defaults import PBSResources
 from .validation import PBSError, require_safe_pbs_resources
@@ -114,3 +115,10 @@ def directives(job_name: str, resources: PBSResources) -> str:
 def mappings_run(settings: MappingsConfiguration) -> str:
     """The enumerator and Sake run shared by the S3 and the shared-storage mappings jobs."""
     return template("mappings_run.sh").format(**asdict(settings))
+
+
+def validated_s3_uri(value: str, description: str) -> str:
+    try:
+        return validate_artifact_uri(value)
+    except ValueError as error:
+        raise PBSError(f"Invalid {description}: {error}") from error

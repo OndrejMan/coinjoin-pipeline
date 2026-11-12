@@ -68,6 +68,7 @@ extend-select = ["ANN401", "TID251"]
 "pipeline/exporters/**/*.py" = "py38"
 # Shipped into PBS jobs and run with the compute node's python3.
 "src/coinjoin_pipeline/storage/s5client.py" = "py38"
+"src/coinjoin_pipeline/execution/block_archive.py" = "py38"
 "src/coinjoin_pipeline/execution/pbs/stage_runtime.py" = "py38"
 "src/coinjoin_pipeline/execution/pbs/stage.py" = "py38"
 "src/coinjoin_pipeline/execution/pbs/stage_settings.py" = "py38"

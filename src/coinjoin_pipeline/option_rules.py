@@ -193,8 +193,10 @@ def _cache_source_errors(config: PipelineConfiguration) -> list[str]:
     if blocksci.task == "update":
         if not source_run_id:
             errors.append("--blocksci-task update requires --blocksci-cache-source-run-id")
-        if not blocksci.external_bitcoin_datadir:
-            errors.append("--blocksci-task update requires --blocksci-external-bitcoin-datadir")
+        if not (blocksci.external_bitcoin_datadir or blocksci.bitcoin_blocks_uri):
+            errors.append(
+                "--blocksci-task update requires --blocksci-external-bitcoin-datadir or --blocksci-bitcoin-blocks-uri"
+            )
         if blocksci.external_blocksci_dir:
             errors.append("--blocksci-task update does not support --blocksci-external-blocksci-dir")
         if source_run_id and config.run_id == source_run_id:
@@ -234,26 +236,29 @@ def _blocksci_source_errors(config: PipelineConfiguration) -> list[str]:
     errors: list[str] = []
     blocksci = config.blocksci
     external_bitcoin = bool(blocksci.external_bitcoin_datadir)
+    blocks_uri = bool(blocksci.bitcoin_blocks_uri)
     external_index = bool(blocksci.external_blocksci_dir)
-    if external_bitcoin and external_index:
+    bitcoin_source = external_bitcoin or blocks_uri
+    if sum((external_bitcoin, blocks_uri, external_index)) > 1:
         errors.append(
-            "choose only one BlockSci source: --blocksci-external-bitcoin-datadir or --blocksci-external-blocksci-dir"
+            "choose only one BlockSci source: --blocksci-external-bitcoin-datadir, "
+            "--blocksci-bitcoin-blocks-uri, or --blocksci-external-blocksci-dir"
         )
-    if external_bitcoin or external_index:
+    if bitcoin_source or external_index:
         on_s3 = config.action == "pbs-from-s3"
         parse_source = on_s3 and blocksci.workflow == "reusable" and blocksci.task == "parse"
         update_source = (
             on_s3
             and blocksci.workflow == "cached"
             and blocksci.task == "update"
-            and external_bitcoin
+            and bitcoin_source
             and not external_index
         )
         if not (parse_source or update_source):
             errors.append("external BlockSci sources require either reusable parse or cached update")
     network_supplied = _supplied(config, "blocksci.network", blocksci.network)
     max_block_supplied = _supplied(config, "blocksci.max_block", blocksci.max_block)
-    if external_bitcoin:
+    if bitcoin_source:
         if not network_supplied or not max_block_supplied:
             errors.append("an external Bitcoin source requires --blocksci-network and --blocksci-max-block")
     elif network_supplied or max_block_supplied:

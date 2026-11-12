@@ -23,6 +23,8 @@ class SourceSettings(_SourceKind, total=False):
     max_block: int
     # external-bitcoin: the shared Bitcoin Core coin directory.
     datadir: str
+    # bitcoin-blocks-s3: the block archive.
+    blocks_uri: str
     # external-blocksci: an existing index to import.
     blocksci_dir: str
 

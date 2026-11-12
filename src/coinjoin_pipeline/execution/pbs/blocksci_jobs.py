@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import cast
 
@@ -181,15 +183,71 @@ def run_parser(stage: Stage, command: str, datadir: Path, max_block: int, messag
     )
 
 
-def parse_source(stage: Stage, source: SourceSettings) -> tuple[Path | None, int]:
-    """Prepare the parse's single source: its datadir (None for a copied index) and height."""
+def download_block_archive(
+    stage: Stage, uri: str, max_block: int, source_manifest: Path | None = None
+) -> tuple[Path, dict]:
+    """Fetch only the archive files below uri a parse, or an update of source_manifest, needs.
+
+    Returns the block directory's datadir and the cache manifest fields that let a later
+    update resume.
+    """
+    datadir = stage.work / BITCOIN_DATA_DIR
+    work = stage.work / "block-archive"
+    for directory in (datadir / "blocks", work / "sidecars"):
+        directory.mkdir(parents=True, exist_ok=True)
+    stage.storage.copy(f"{uri}/blk*.dat.json", f"{work / 'sidecars'}/", timeout=None)
+    # The job ships it at its place in the package, as it is on the frontend.
+    helper = [sys.executable, str(Path(__file__).parents[1] / "block_archive.py")]
+    update = ["--source-manifest", str(source_manifest)] if source_manifest is not None else []
+    commands, fields, packed = work / "download.s5cmd", work / "manifest-fields.json", work / "packed.txt"
+    # A file with both forms is mid-packing: only the raw object is known to be verified.
+    stored = {str(entry["key"]).rsplit("/", 1)[-1] for entry in stage.storage.listing(f"{uri}/*", timeout=None)}
+    packed.write_text(
+        "".join(
+            name[: -len(".zst")] + "\n"
+            for name in sorted(stored)
+            if name.endswith(".dat.zst") and name[:-4] not in stored
+        )
+    )
+    subprocess.run(
+        [
+            *helper,
+            "select",
+            str(work / "sidecars"),
+            str(datadir / "blocks"),
+            "--uri",
+            uri,
+            "--max-block",
+            str(max_block),
+            *update,
+            "--packed",
+            str(packed),
+            "--commands",
+            str(commands),
+            "--manifest-fields",
+            str(fields),
+        ],
+        check=True,
+    )
+    stage.storage.run("run", str(commands), check=True, timeout=None)
+    subprocess.run([*helper, "unpack", str(datadir / "blocks")], check=True)
+    subprocess.run([*helper, "verify", str(datadir / "blocks"), "--max-block", str(max_block), *update], check=True)
+    # The helper writes the fields as they follow another manifest field.
+    return datadir, json.loads("{" + fields.read_text().strip().lstrip(",") + "}")
+
+
+def parse_source(stage: Stage, source: SourceSettings) -> tuple[Path | None, int, dict]:
+    """Prepare the parse's single source: its datadir (None for a copied index), height and manifest fields."""
     kind = source["kind"]
     stage.log(f"preparing {source['description']}")
     if kind == "external-bitcoin":
         datadir = Path(str(source["datadir"]))
         if not (datadir / "blocks").is_dir():
             raise StageFailure(f"External Bitcoin coin directory must contain blocks/: {datadir}")
-        return datadir, int(source["max_block"])
+        return datadir, int(source["max_block"]), {}
+    if kind == "bitcoin-blocks-s3":
+        datadir, extra = download_block_archive(stage, source["blocks_uri"], int(source["max_block"]))
+        return datadir, int(source["max_block"]), extra
     if kind == "external-blocksci":
         index = Path(str(source["blocksci_dir"]))
         for relative in ("config.json", "parsed/chain/block.dat"):
@@ -202,10 +260,10 @@ def parse_source(stage: Stage, source: SourceSettings) -> tuple[Path | None, int
             raise StageFailure("External BlockSci config has no positive parser.maxBlockNum")
         max_block = int(found.group(1)) - 1
         stage.log(f"imported external index through block {max_block}")
-        return None, max_block
+        return None, max_block, {}
     stage.download(BITCOIN_DATA_DIR)
     stage.download(EXPORTED_BLOCKS_DIR)
-    return emulator_bitcoin_datadir(stage), emulator_max_block(stage)
+    return emulator_bitcoin_datadir(stage), emulator_max_block(stage), {}
 
 
 def blocksci_parse(stage: Stage) -> None:
@@ -214,7 +272,7 @@ def blocksci_parse(stage: Stage) -> None:
     require_tools("zstd")
     stage.download(STAGED_EXPORTERS_DIR)
     source = settings["source"]
-    datadir, max_block = parse_source(stage, source)
+    datadir, max_block, extra = parse_source(stage, source)
     if datadir is not None:
         run_parser(
             stage,
@@ -225,7 +283,7 @@ def blocksci_parse(stage: Stage) -> None:
         )
     for relative in INDEX_FILES:
         stage.require_file(relative, f"BlockSci parser did not produce {relative}")
-    publish_index(stage, source["kind"], source["network"], max_block, {})
+    publish_index(stage, source["kind"], source["network"], max_block, extra)
     stage.log("reusable cache upload complete")
 
 
@@ -233,7 +291,7 @@ def blocksci_update(stage: Stage) -> None:
     """Extend an index through a higher block from the same block source.
 
     BlockSci remembers each block by its file number and offset, which only the source
-    that was parsed can resolve, so the update reads the same datadir.
+    that was parsed can resolve, so the update reads the same datadir or block archive.
     """
     settings = cast(BlocksciUpdateSettings, stage.settings)
     source = settings["source"]
@@ -260,9 +318,13 @@ def blocksci_update(stage: Stage) -> None:
             f"Target maximum block {max_block} must be greater than source maximum block {source_max_block}"
         )
     extra: dict[str, object] = {}
-    datadir = Path(str(source["datadir"]))
-    if not (datadir / "blocks").is_dir():
-        raise StageFailure(f"External Bitcoin coin directory must contain blocks/: {datadir}")
+    if kind == "bitcoin-blocks-s3":
+        stage.log(f"downloading block archive files after block {source_max_block}")
+        datadir, extra = download_block_archive(stage, source["blocks_uri"], max_block, source_cache / "manifest.json")
+    else:
+        datadir = Path(str(source["datadir"]))
+        if not (datadir / "blocks").is_dir():
+            raise StageFailure(f"External Bitcoin coin directory must contain blocks/: {datadir}")
     canonicalize_index(stage)
     set_max_block(stage, max_block)
     run_parser(

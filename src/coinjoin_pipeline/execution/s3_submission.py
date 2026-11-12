@@ -148,7 +148,7 @@ class S3StageRunner:
 
     def _parse(self, stage: StagePlan) -> None:
         blocksci = self.args.blocksci
-        if blocksci.external_bitcoin_datadir:
+        if blocksci.external_bitcoin_datadir or blocksci.bitcoin_blocks_uri:
             # An external chain is mounted as the coin directory itself, bounded by the requested height.
             command = blocksci_parse_pbs_command(
                 self.target.run_id,
