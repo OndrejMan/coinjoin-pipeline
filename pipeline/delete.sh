@@ -30,10 +30,11 @@ fi
 
 # Reap Compose projects abandoned by earlier runs.
 #
-# The project name carries the launching process's pid, so the teardown above
-# can only ever address the project this run is about to create, and no later run
-# names an earlier project again. Each leftover holds a Docker subnet until the
-# default address pools run out ("all predefined address pools have been fully
+# The end-to-end tests name their project cjp-<scenario>-<pid> (the CLI's own is
+# blocksci-emulator-<checkout hash>), so the teardown above can only ever address
+# the project this run is about to create, and no later run names an earlier
+# test project again. Each leftover holds a Docker subnet until the default
+# address pools run out ("all predefined address pools have been fully
 # subnetted").
 #
 # Only projects whose owning pid is gone are touched. Tests run back to back and
