@@ -11,6 +11,7 @@ from exporters.common import (
     docker_image_digest,
     first_present,
     to_json_text,
+    tree_sha256,
 )
 from exporters.parameters import IMAGE_COMPONENTS, Detector, ReportImages
 from exporters.report_types import ImageFields, RunManifest
@@ -50,6 +51,7 @@ def build_run_manifest(
     emulator_git_commit: str | None = None,
     image_provenance: JsonObject | None = None,
 ) -> RunManifest:
+    exporters_root = Path(__file__).resolve().parent
     coinjoin_type = detector.coinjoin_type
     # Every caller passes --engine (default $COINJOIN_ENGINE); a direct call without it guesses.
     inferred_engine = engine or ("joinmarket" if coinjoin_type == "joinmarket" else "wasabi")
@@ -76,5 +78,11 @@ def build_run_manifest(
                 emulator_git_commit,
                 os.environ.get("COINJOIN_EMULATOR_GIT_COMMIT"),
             ),
+        },
+        # The report container mounts the exporters without their checkout's .git,
+        # so no commit can be read there. The tree hash names the exact code that
+        # produced the report in every case. Informational only — nothing branches on it.
+        "source_trees": {
+            "exporters_sha256": tree_sha256(exporters_root),
         },
     }
