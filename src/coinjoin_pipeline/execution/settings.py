@@ -38,11 +38,3 @@ IMAGE_PROVENANCE_ENV = {
         "COINJOIN_EMULATOR_IMAGE_DIGEST",
     ),
 }
-PEER_CONTAINERS = (
-    "blocksci_analyzer",
-    "coinjoin_analysis",
-    "emulator_manager",
-    "btc_data_wiper",
-    "dind_image_prefetch",
-    "isolated_docker_daemon",
-)

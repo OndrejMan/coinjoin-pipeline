@@ -49,27 +49,45 @@ _CLEANUP_DONE = False
 DEFAULT_CONFIGURATION = PipelineConfiguration()
 
 
+def compose_project_containers(runtime: str, project: str) -> list[str]:
+    """IDs of the running containers Compose started under ``project``.
+
+    Compose names its containers ``<project>-<service>-<n>`` (or ``-run-<id>``), so
+    they are found by the project label rather than by a fixed name.
+    """
+    listed = subprocess.run(
+        [runtime, "ps", "-q", "--filter", f"label=com.docker.compose.project={project}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return listed.stdout.split()
+
+
 def cleanup_peer_containers() -> None:
-    """Stop peer containers and release locks; safe to call more than once."""
+    """Stop this checkout's Compose containers and release locks; safe to call more than once."""
     global _CLEANUP_DONE  # pylint: disable=global-statement  # one cleanup per process, shared by both signals
     if _CLEANUP_DONE:
         return
     _CLEANUP_DONE = True
     runtime = os.environ.get(CONTAINER_RUNTIME_ENV, DEFAULT_CONTAINER_RUNTIME)
     if shutil.which(runtime):
-        subprocess.run(
-            [runtime, "stop", *settings.PEER_CONTAINERS],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        if runtime == "podman":
+        project = os.environ.get(settings.COMPOSE_PROJECT_ENV) or compose_project_name(default_host_root_dir())
+        running = compose_project_containers(runtime, project)
+        if running:
             subprocess.run(
-                [runtime, "rm", "-f", "-i", *settings.PEER_CONTAINERS],
+                [runtime, "stop", *running],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
             )
+            if runtime == "podman":
+                subprocess.run(
+                    [runtime, "rm", "-f", "-i", *running],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
     close_pipeline_locks()
 
 

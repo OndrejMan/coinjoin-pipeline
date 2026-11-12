@@ -21,7 +21,8 @@ FAKE_BIN="${TMP_DIR}/bin"
 LOGS_ROOT="${TMP_DIR}/logs"
 mkdir -p "${FAKE_BIN}" "${LOGS_ROOT}"
 
-PEERS="blocksci_analyzer coinjoin_analysis emulator_manager btc_data_wiper dind_image_prefetch isolated_docker_daemon"
+# The IDs the stub reports for the Compose project's running containers.
+PEERS="cid-manager cid-dind"
 
 # A docker stub that blocks only while Compose starts the emulation, so the
 # signal arrives while the wrapper is mid-stage. Teardown commands must return
@@ -34,6 +35,10 @@ if [[ "$1" == "compose" && " $* " == *" up -d "* ]]; then
   echo "$$" >"${STAGE_PID_FILE:?}"
   touch "${STAGE_STARTED:?}"
   while true; do sleep 1; done
+fi
+if [[ "$1" == "ps" && " $* " == *" label=com.docker.compose.project="* ]]; then
+  printf 'cid-manager\ncid-dind\n'
+  exit 0
 fi
 # A real `docker stop` terminates the containers, which is what unblocks the
 # compose call the wrapper is waiting on. Mirror that, or the wrapper hangs on
@@ -132,8 +137,11 @@ PY
     exit 1
   fi
 
-  if ! grep -q "^stop .*blocksci_analyzer" "${docker_log}"; then
-    echo "FAIL: [${signal}] the wrapper did not stop its peer containers" >&2
+  # The cleanup must look up the very project the emulation was started under.
+  local project
+  project="$(sed -n 's/^compose .*-p \([^ ]*\) .* up -d .*/\1/p' "${docker_log}" | head -n 1)"
+  if [[ -z "${project}" ]] || ! grep -q "^ps -q --filter label=com.docker.compose.project=${project} " "${docker_log}"; then
+    echo "FAIL: [${signal}] the wrapper did not look up the containers of Compose project '${project}'" >&2
     echo "Observed: $(cat "${docker_log}")" >&2
     exit 1
   fi
@@ -141,17 +149,17 @@ PY
   local missing
   for missing in ${PEERS}; do
     if ! grep -q "^stop .*${missing}" "${docker_log}"; then
-      echo "FAIL: [${signal}] peer container ${missing} was not stopped" >&2
+      echo "FAIL: [${signal}] container ${missing} of the Compose project was not stopped" >&2
       echo "Observed: $(cat "${docker_log}")" >&2
       exit 1
     fi
   done
 
-  echo "  [${signal}] exit 130 and all six peer containers stopped."
+  echo "  [${signal}] exit 130 and the Compose project's containers stopped."
 }
 
 echo "Checking bare-wrapper signal cleanup..."
 run_signal_case INT
 run_signal_case TERM
 
-echo "PASS: the bare wrapper cleans up peer containers on SIGINT and SIGTERM."
+echo "PASS: the bare wrapper stops its Compose project's containers on SIGINT and SIGTERM."
