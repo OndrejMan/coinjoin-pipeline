@@ -8,6 +8,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=tests/support/local-runit.sh
+source "${SCRIPT_DIR}/support/local-runit.sh"
 REPO_ROOT="$(cd "${PROJECT_DIR}/.." && pwd)"
 LOGS_DIR="${EMULATION_LOGS_DIR:-${PROJECT_DIR}/emulation_logs}"
 TMP_DIR="$(mktemp -d)"
@@ -54,12 +56,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-list_run_dirs() {
-  find "${LOGS_DIR}" -mindepth 1 -maxdepth 1 -type d \
-    -exec test -s "{}/coinjoin_emulator_data/scenario.json" \; -print |
-    LC_ALL=C sort
-}
-
 python3 "${SCRIPT_DIR}/support/check_inotify.py"
 
 if ! command -v podman >/dev/null 2>&1; then
@@ -89,14 +85,7 @@ list_run_dirs >"${BEFORE_FILE}"
 
 if [[ "${IMAGE_MODE}" == "local" ]]; then
   if [[ "${LOCAL_IMAGES_PREBUILT}" != "1" ]]; then
-    echo "Building local BlockSci images with Podman..."
-    podman build -t "${LOCAL_BLOCKSCI_BASE_IMAGE}" -f "${BLOCKSCI_SOURCE_DIR}/Dockerfile" "${BLOCKSCI_SOURCE_DIR}"
-    podman build --build-arg "BLOCKSCI_BASE_IMAGE=${LOCAL_BLOCKSCI_BASE_IMAGE}" \
-      -t "${LOCAL_BLOCKSCI_IMAGE}" -f "${BLOCKSCI_SOURCE_DIR}/Dockerfile_complete" "${BLOCKSCI_SOURCE_DIR}"
-    echo "Building local emulator and analysis images with Podman..."
-    podman build -t "${LOCAL_EMULATOR_IMAGE}" "${EMULATOR_SOURCE_DIR}"
-    podman build -t "${LOCAL_COINJOIN_ANALYSIS_IMAGE}" \
-      -f "${COINJOIN_ANALYSIS_SOURCE_DIR}/docker/analysis.Dockerfile" "${COINJOIN_ANALYSIS_SOURCE_DIR}"
+    build_local_images podman
   fi
   BLOCKSCI_IMAGE="${LOCAL_BLOCKSCI_IMAGE}"
   COINJOIN_EMULATOR_IMAGE="${LOCAL_EMULATOR_IMAGE}"
@@ -141,40 +130,7 @@ echo "Running complete Podman workflow with logs in ${LOGS_DIR}..."
 ) &
 RUN_PID=$!
 
-run_finished=false
-for ((elapsed = 0; elapsed < RUN_TIMEOUT_SECONDS; elapsed++)); do
-  if ! kill -0 "${RUN_PID}" >/dev/null 2>&1; then
-    run_finished=true
-    break
-  fi
-  if grep -q "Use Control-C to stop this server" "${RUN_LOG}" ||
-    grep -q "http://127.0.0.1:8888/tree?token" "${RUN_LOG}"; then
-    echo "FAIL: noninteractive pipeline launched the BlockSci Jupyter server" >&2
-    stop_pipeline
-    wait "${RUN_PID}" >/dev/null 2>&1 || true
-    RUN_PID=""
-    exit 1
-  fi
-  sleep 1
-done
-
-if [[ "${run_finished}" == "false" ]] && kill -0 "${RUN_PID}" >/dev/null 2>&1; then
-  echo "FAIL: Podman pipeline did not exit within ${RUN_TIMEOUT_SECONDS}s" >&2
-  stop_pipeline
-  wait "${RUN_PID}" >/dev/null 2>&1 || true
-  RUN_PID=""
-  exit 1
-fi
-
-set +e
-wait "${RUN_PID}"
-RUN_EXIT_CODE=$?
-set -e
-RUN_PID=""
-if [[ "${RUN_EXIT_CODE}" -ne 0 ]]; then
-  echo "FAIL: Podman pipeline exited with code ${RUN_EXIT_CODE}" >&2
-  exit "${RUN_EXIT_CODE}"
-fi
+wait_for_runit "Podman pipeline" stop_pipeline
 if [[ -e "${DOCKER_LOG}" ]]; then
   echo "FAIL: the Podman E2E path invoked host Docker" >&2
   exit 1

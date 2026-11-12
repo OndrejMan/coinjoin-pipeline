@@ -10,6 +10,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=tests/support/local-images.sh
 source "${SCRIPT_DIR}/support/local-images.sh"
+# shellcheck source=tests/support/pbs-images.sh
+source "${SCRIPT_DIR}/support/pbs-images.sh"
 PBS_SUPPORT_ROOT="${PBS_SUPPORT_ROOT:-${SCRIPT_DIR}/support/pbs}"
 PBS_HELPER="${PBS_HELPER:-${PBS_SUPPORT_ROOT}/local-pbs.sh}"
 PBS_ENV="${PBS_ENV:-${PBS_SUPPORT_ROOT}/pbs-env.sh}"
@@ -119,19 +121,6 @@ ensure_source_image() {
 
   echo "Pulling missing source image ${image}..."
   docker pull "${image}"
-}
-
-export_pbs_docker_archive() {
-  local image="$1" archive_name="$2" image_flag="$3"
-  docker image inspect "${image}" >/dev/null 2>&1 || {
-    echo "FAIL: local image for PBS docker-archive export not found: ${image}" >&2
-    exit 2
-  }
-  mkdir -p "${WORK_ROOT}/pbs-images"
-  echo "Exporting ${image} as ${archive_name}.tar for offline PBS execution..."
-  docker save "${image}" -o "${WORK_ROOT}/pbs-images/${archive_name}.tar"
-  chmod 0644 "${WORK_ROOT}/pbs-images/${archive_name}.tar"
-  PBS_IMAGE_ARGS+=("${image_flag}" "docker-archive:${WORK_ROOT}/pbs-images/${archive_name}.tar")
 }
 
 dump_kubernetes_diagnostics() {

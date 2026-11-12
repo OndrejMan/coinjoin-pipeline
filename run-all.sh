@@ -501,33 +501,13 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
         LOCAL_IMAGES_PREBUILT=1 \
         RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
         bash "${test_script}" "${CHILD_IMAGE_MODE}"
-    elif [[ "${test_script}" == "tests/test-kubernetes-pbs-analysis.sh" ]]; then
+    elif [[ "${test_script}" == "tests/test-kubernetes-pbs-analysis.sh" ||
+      "${test_script}" == "tests/test-parallel-pbs-analysis.sh" ]]; then
       # PBS executes analyzer images inside Apptainer, which cannot see host
       # Docker tags. In github mode the analyzers stay registry-backed docker://
       # references (MetaCentrum parity); in local mode the test exports the
       # freshly built analyzer images as docker-archive tarballs so the whole
       # suite runs offline against local code.
-      pbs_local_image_env=()
-      if [[ "${IMAGE_MODE}" == "local" ]]; then
-        pbs_local_image_env=(
-          "PBS_BLOCKSCI_LOCAL_IMAGE=${BLOCKSCI_IMAGE}"
-          "PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE=${COINJOIN_ANALYSIS_IMAGE}"
-        )
-      fi
-      run_in_dir "${SCRIPT_DIR}" env \
-        EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
-        COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
-        COINJOIN_EMULATOR_PULL_POLICY="${COINJOIN_EMULATOR_PULL_POLICY_VALUE}" \
-        BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
-        COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
-        "${pbs_local_image_env[@]}" \
-        IMAGE_PREFIX="${UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX}" \
-        COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD= \
-        bash "${test_script}" all
-    elif [[ "${test_script}" == "tests/test-parallel-pbs-analysis.sh" ]]; then
-      # Same image constraints as the serial Kubernetes+PBS test: registry-backed
-      # docker:// analyzer references in github mode, docker-archive exports of
-      # the local analyzer images in local mode.
       pbs_local_image_env=()
       if [[ "${IMAGE_MODE}" == "local" ]]; then
         pbs_local_image_env=(
@@ -585,21 +565,8 @@ if [[ "${RUN_TESTS}" == "1" ]]; then
         RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
         bash "${test_script}"
     elif [[ "${test_script}" == "tests/test-runIt-overactive-local-docker.sh" ||
-      "${test_script}" == "tests/test-runIt-liquidity-local-docker.sh" ]]; then
-      run_in_dir "${SCRIPT_DIR}" env \
-        EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
-        LOCAL_TAG="${LOCAL_TAG}" \
-        LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE}" \
-        LOCAL_BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
-        LOCAL_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
-        LOCAL_COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
-        BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
-        COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
-        COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
-        LOCAL_IMAGES_PREBUILT=1 \
-        RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
-        bash "${test_script}" "${CHILD_IMAGE_MODE}"
-    elif [[ "${test_script}" == "tests/test-runIt-parallel-local-docker.sh" ]]; then
+      "${test_script}" == "tests/test-runIt-liquidity-local-docker.sh" ||
+      "${test_script}" == "tests/test-runIt-parallel-local-docker.sh" ]]; then
       run_in_dir "${SCRIPT_DIR}" env \
         EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
         LOCAL_TAG="${LOCAL_TAG}" \

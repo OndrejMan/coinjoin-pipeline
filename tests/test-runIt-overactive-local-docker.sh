@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=tests/support/local-runit.sh
+source "${SCRIPT_DIR}/support/local-runit.sh"
 REPO_ROOT="$(cd "${PROJECT_DIR}/.." && pwd)"
 LOGS_DIR="${EMULATION_LOGS_DIR:-${PROJECT_DIR}/emulation_logs}"
 BEFORE_FILE="$(mktemp)"
@@ -32,14 +34,18 @@ LOCAL_IMAGES_PREBUILT="${LOCAL_IMAGES_PREBUILT:-0}"
 E2E_SCENARIO_FILE="${E2E_SCENARIO_FILE:-scenarios/overactive-local.json}"
 E2E_SCENARIO_NAME="${E2E_SCENARIO_NAME:-overactive-local}"
 read -r -a E2E_LIQUIDITY_CHECKS <<<"${E2E_LIQUIDITY_CHECKS:-}"
+# test-runIt-parallel-local-docker.sh sets E2E_PARALLEL=1: the run adds
+# --parallel, so both analyzers must run under the "Parallel analysis" stage.
+E2E_PARALLEL="${E2E_PARALLEL:-0}"
+PARALLEL_ARGS=()
+WORKFLOW="Docker"
+if [[ "${E2E_PARALLEL}" == 1 ]]; then
+  PARALLEL_ARGS=(--parallel)
+  WORKFLOW="Docker --parallel"
+fi
 # delete.sh reaps every cjp-*-<pid> project whose pid is gone, so the suffix
 # must be this script's pid, alive for the whole run.
 COMPOSE_PROJECT="cjp-${E2E_SCENARIO_NAME}-$$"
-
-stop_blocksci() {
-  docker compose -f "${PROJECT_DIR}/pipeline/compose.yaml" -p "${COMPOSE_PROJECT}" \
-    stop blocksci >/dev/null 2>&1 || true
-}
 
 cleanup() {
   if [[ -n "${RUN_PID}" ]] && kill -0 "${RUN_PID}" >/dev/null 2>&1; then
@@ -49,12 +55,6 @@ cleanup() {
   rm -f "${BEFORE_FILE}" "${AFTER_FILE}" "${RUN_LOG}"
 }
 trap cleanup EXIT
-
-list_run_dirs() {
-  find "${LOGS_DIR}" -mindepth 1 -maxdepth 1 -type d \
-    -exec test -s "{}/coinjoin_emulator_data/scenario.json" \; -print |
-    LC_ALL=C sort
-}
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "FAIL: docker command not found" >&2
@@ -71,22 +71,7 @@ list_run_dirs >"${BEFORE_FILE}"
 
 if [[ "${IMAGE_MODE}" == "local" ]]; then
   if [[ "${LOCAL_IMAGES_PREBUILT}" != "1" ]]; then
-    echo "Building local BlockSci base image ${LOCAL_BLOCKSCI_BASE_IMAGE} from ${BLOCKSCI_SOURCE_DIR}..."
-    docker build -t "${LOCAL_BLOCKSCI_BASE_IMAGE}" -f "${BLOCKSCI_SOURCE_DIR}/Dockerfile" "${BLOCKSCI_SOURCE_DIR}"
-
-    echo "Building local BlockSci complete image ${LOCAL_BLOCKSCI_IMAGE} from ${BLOCKSCI_SOURCE_DIR}..."
-    docker build \
-      --build-arg "BLOCKSCI_BASE_IMAGE=${LOCAL_BLOCKSCI_BASE_IMAGE}" \
-      -t "${LOCAL_BLOCKSCI_IMAGE}" \
-      -f "${BLOCKSCI_SOURCE_DIR}/Dockerfile_complete" \
-      "${BLOCKSCI_SOURCE_DIR}"
-
-    echo "Building local CoinJoin emulator image ${LOCAL_EMULATOR_IMAGE} from ${EMULATOR_SOURCE_DIR}..."
-    docker build -t "${LOCAL_EMULATOR_IMAGE}" "${EMULATOR_SOURCE_DIR}"
-
-
-    echo "Building local coinjoin-analysis image ${LOCAL_COINJOIN_ANALYSIS_IMAGE} from ${COINJOIN_ANALYSIS_SOURCE_DIR}..."
-    docker build -t "${LOCAL_COINJOIN_ANALYSIS_IMAGE}" -f "${COINJOIN_ANALYSIS_SOURCE_DIR}/docker/analysis.Dockerfile" "${COINJOIN_ANALYSIS_SOURCE_DIR}"
+    build_local_images docker
   fi
 
   BLOCKSCI_IMAGE="${LOCAL_BLOCKSCI_IMAGE}"
@@ -114,7 +99,7 @@ if [[ "${IMAGE_MODE}" == "local" ]]; then
     'command -v blocksci_parser >/dev/null && python3 -c "import blocksci"'
 fi
 
-echo "Running real Docker workflow in ${IMAGE_MODE} image mode with logs in ${LOGS_DIR}..."
+echo "Running real ${WORKFLOW} workflow in ${IMAGE_MODE} image mode with logs in ${LOGS_DIR}..."
 echo "Using BlockSci image ${BLOCKSCI_IMAGE}, emulator image ${COINJOIN_EMULATOR_IMAGE}, and analyzer image ${COINJOIN_ANALYSIS_IMAGE}."
 (
   (
@@ -130,53 +115,41 @@ echo "Using BlockSci image ${BLOCKSCI_IMAGE}, emulator image ${COINJOIN_EMULATOR
     COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD}" \
     COINJOIN_COMPOSE_PROJECT="${COMPOSE_PROJECT}" \
     bash runIt.sh --engine wasabi --scenario "${E2E_SCENARIO_FILE}" \
-      --min-input-count 15
+      --min-input-count 15 "${PARALLEL_ARGS[@]}"
   ) 2>&1 | tee "${RUN_LOG}"
 ) &
 RUN_PID=$!
 
-run_finished=false
-for ((elapsed = 0; elapsed < RUN_TIMEOUT_SECONDS; elapsed++)); do
-  if ! kill -0 "${RUN_PID}" >/dev/null 2>&1; then
-    run_finished=true
-    break
-  fi
-
-  if grep -q "Use Control-C to stop this server" "${RUN_LOG}" ||
-    grep -q "http://127.0.0.1:8888/tree?token" "${RUN_LOG}"; then
-    echo "FAIL: noninteractive runIt.sh launched the BlockSci Jupyter server" >&2
-    echo "Expected BLOCKSCI_LAUNCH_JUPYTER=0 to make analysis exit after exports." >&2
-    stop_blocksci
-    wait "${RUN_PID}" >/dev/null 2>&1 || true
-    RUN_PID=""
-    exit 1
-  fi
-
-  sleep 1
-done
-
-if [[ "${run_finished}" == "false" ]] && kill -0 "${RUN_PID}" >/dev/null 2>&1; then
-  echo "FAIL: runIt.sh did not exit within ${RUN_TIMEOUT_SECONDS}s" >&2
-  stop_blocksci
-  wait "${RUN_PID}" >/dev/null 2>&1 || true
-  RUN_PID=""
-  exit 1
-fi
-
-set +e
-wait "${RUN_PID}"
-RUN_EXIT_CODE=$?
-set -e
-RUN_PID=""
-
-if [[ "${RUN_EXIT_CODE}" -ne 0 ]]; then
-  echo "FAIL: runIt.sh exited with code ${RUN_EXIT_CODE}" >&2
-  exit "${RUN_EXIT_CODE}"
-fi
+wait_for_runit runIt.sh stop_blocksci
 
 if ! grep -q "Parsing complete. Skipping interactive BlockSci environment." "${RUN_LOG}"; then
   echo "FAIL: expected analysis to skip the interactive BlockSci environment" >&2
   exit 1
+fi
+
+if [[ "${E2E_PARALLEL}" == 1 ]]; then
+  # --parallel must drive both analyzers through the shared "Parallel analysis"
+  # stage instead of the serial per-stage scheduling.
+  if ! grep -q "\[pipeline\] START: Parallel analysis" "${RUN_LOG}"; then
+    echo "FAIL: expected --parallel to open the 'Parallel analysis' pipeline stage" >&2
+    echo "Observed log tail:" >&2
+    tail -n 80 "${RUN_LOG}" >&2 || true
+    exit 1
+  fi
+  if ! grep -q "\[pipeline\] DONE: Parallel analysis" "${RUN_LOG}"; then
+    echo "FAIL: expected 'Parallel analysis' pipeline stage to complete" >&2
+    exit 1
+  fi
+  # The report is a node of the analysis graph: it may start only after both
+  # analyzers have finished.
+  report_line="$(grep -n '\[pipeline\] stage unified-report: started' "${RUN_LOG}" | head -n 1 | cut -d: -f1)"
+  for analyzer in coinjoin-analysis blocksci; do
+    done_line="$(grep -n "\[pipeline\] stage ${analyzer}: done" "${RUN_LOG}" | head -n 1 | cut -d: -f1)"
+    if [[ -z "${report_line}" || -z "${done_line}" || "${done_line}" -gt "${report_line}" ]]; then
+      echo "FAIL: expected the unified report to start after ${analyzer} finished" >&2
+      exit 1
+    fi
+  done
 fi
 
 list_run_dirs >"${AFTER_FILE}"
@@ -204,13 +177,14 @@ for artifact in \
   fi
 done
 
-python3 - "${RUN_DIR}" "${E2E_SCENARIO_NAME}" <<'PY'
+python3 - "${RUN_DIR}" "${E2E_SCENARIO_NAME}" "${E2E_PARALLEL}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 run_dir = Path(sys.argv[1])
 expected = sys.argv[2]
+parallel = sys.argv[3] == "1"
 scenario = json.loads((run_dir / "coinjoin_emulator_data" / "scenario.json").read_text(encoding="utf-8"))
 report = json.loads((run_dir / "coinjoinPipeline_data" / "unified_report.json").read_text(encoding="utf-8"))
 
@@ -220,6 +194,25 @@ if scenario.get("name") != expected:
 run = report.get("run") or {}
 if run.get("scenario_name") != expected:
     raise SystemExit(f"FAIL: expected report scenario_name {expected}, got {run.get('scenario_name')!r}")
+
+if parallel:
+    if run.get("coinjoin_type") != "wasabi2":
+        raise SystemExit(f"FAIL: expected report coinjoin_type wasabi2, got {run.get('coinjoin_type')!r}")
+    summary = report.get("summary") or {}
+    baseline = json.loads((run_dir / "coinjoin-analysis_data" / "coinjoin_tx_info.json").read_text(encoding="utf-8"))
+    baseline_coinjoins = baseline.get("coinjoins") or {}
+    if not baseline_coinjoins:
+        raise SystemExit("FAIL: coinjoin-analysis produced no CoinJoin transactions")
+    if summary.get("coinjoin_analysis_coinjoins") != len(baseline_coinjoins):
+        raise SystemExit(
+            "FAIL: report baseline count "
+            f"{summary.get('coinjoin_analysis_coinjoins')!r} != "
+            f"{len(baseline_coinjoins)} CoinJoins in coinjoin_tx_info.json"
+        )
+    if summary.get("blocksci_detected_coinjoins", 0) < 1:
+        raise SystemExit("FAIL: BlockSci detected no CoinJoin transactions")
+    if "blocksci_agreement_rate" not in summary:
+        raise SystemExit("FAIL: unified report has no analyzer agreement metrics")
 PY
 
 # Local images are built from the checked-out analyzers, which classify every
@@ -230,4 +223,4 @@ if [[ "${IMAGE_MODE}" == "local" ]]; then
 fi
 python3 "${SCRIPT_DIR}/support/check_liquidity.py" "${RUN_DIR}/coinjoinPipeline_data" "${LIQUIDITY_CHECKS[@]}"
 
-echo "PASS: real Docker runIt workflow completed and produced artifacts in ${RUN_DIR}."
+echo "PASS: real ${WORKFLOW} runIt workflow completed and produced artifacts in ${RUN_DIR}."

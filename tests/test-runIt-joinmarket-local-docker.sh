@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=tests/support/local-runit.sh
+source "${SCRIPT_DIR}/support/local-runit.sh"
 LOGS_DIR="${EMULATION_LOGS_DIR:-${PROJECT_DIR}/emulation_logs}"
 BEFORE_FILE="$(mktemp)"
 AFTER_FILE="$(mktemp)"
@@ -42,21 +44,18 @@ BLOCKSCI_SOURCE_DIR="${BLOCKSCI_SOURCE_DIR:-${REPO_ROOT}/blocksci}"
 EMULATOR_SOURCE_DIR="${EMULATOR_SOURCE_DIR:-${REPO_ROOT}/coinjoin-emulator}"
 COINJOIN_ANALYSIS_SOURCE_DIR="${COINJOIN_ANALYSIS_SOURCE_DIR:-${REPO_ROOT}/coinjoin-analysis}"
 LOCAL_IMAGES_PREBUILT="${LOCAL_IMAGES_PREBUILT:-0}"
+# delete.sh reaps every cjp-*-<pid> project whose pid is gone, so the suffix
+# must be this script's pid, alive for the whole run.
+COMPOSE_PROJECT="cjp-default-joinmarket-$$"
 
 cleanup() {
   if [[ -n "${RUN_PID}" ]] && kill -0 "${RUN_PID}" >/dev/null 2>&1; then
-    docker stop blocksci_analyzer >/dev/null 2>&1 || true
+    stop_blocksci
     wait "${RUN_PID}" >/dev/null 2>&1 || true
   fi
   rm -f "${BEFORE_FILE}" "${AFTER_FILE}" "${RUN_LOG}"
 }
 trap cleanup EXIT
-
-list_run_dirs() {
-  find "${LOGS_DIR}" -mindepth 1 -maxdepth 1 -type d \
-    -exec test -s "{}/coinjoin_emulator_data/scenario.json" \; -print |
-    LC_ALL=C sort
-}
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "FAIL: docker command not found" >&2
@@ -72,22 +71,7 @@ mkdir -p "${LOGS_DIR}"
 list_run_dirs >"${BEFORE_FILE}"
 
 if [[ "${BUILD_LOCAL_IMAGES}" != "0" && "${LOCAL_IMAGES_PREBUILT}" != "1" ]]; then
-  echo "Building local BlockSci base image ${LOCAL_BLOCKSCI_BASE_IMAGE} from ${BLOCKSCI_SOURCE_DIR}..."
-  docker build -t "${LOCAL_BLOCKSCI_BASE_IMAGE}" -f "${BLOCKSCI_SOURCE_DIR}/Dockerfile" "${BLOCKSCI_SOURCE_DIR}"
-
-  echo "Building local BlockSci complete image ${LOCAL_BLOCKSCI_IMAGE} from ${BLOCKSCI_SOURCE_DIR}..."
-  docker build \
-    --build-arg "BLOCKSCI_BASE_IMAGE=${LOCAL_BLOCKSCI_BASE_IMAGE}" \
-    -t "${LOCAL_BLOCKSCI_IMAGE}" \
-    -f "${BLOCKSCI_SOURCE_DIR}/Dockerfile_complete" \
-    "${BLOCKSCI_SOURCE_DIR}"
-
-  echo "Building local JoinMarket emulator image ${LOCAL_EMULATOR_IMAGE} from ${EMULATOR_SOURCE_DIR}..."
-  docker build -t "${LOCAL_EMULATOR_IMAGE}" "${EMULATOR_SOURCE_DIR}"
-
-
-  echo "Building local coinjoin-analysis image ${LOCAL_COINJOIN_ANALYSIS_IMAGE} from ${COINJOIN_ANALYSIS_SOURCE_DIR}..."
-  docker build -t "${LOCAL_COINJOIN_ANALYSIS_IMAGE}" -f "${COINJOIN_ANALYSIS_SOURCE_DIR}/docker/analysis.Dockerfile" "${COINJOIN_ANALYSIS_SOURCE_DIR}"
+  build_local_images docker
 fi
 
 if [[ "${IMAGE_MODE}" == "local" ]]; then
@@ -132,49 +116,13 @@ echo "Using BlockSci image ${BLOCKSCI_IMAGE}, emulator image ${COINJOIN_EMULATOR
     COINJOIN_EMULATOR_JOINMARKET_CLIENT_SERVER_IMAGE="${COINJOIN_EMULATOR_JOINMARKET_CLIENT_SERVER_IMAGE:-}" \
     COINJOIN_EMULATOR_IRC_SERVER_IMAGE="${COINJOIN_EMULATOR_IRC_SERVER_IMAGE:-}" \
     COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-}" \
+    COINJOIN_COMPOSE_PROJECT="${COMPOSE_PROJECT}" \
     bash runIt.sh full-run --engine joinmarket
   ) 2>&1 | tee "${RUN_LOG}"
 ) &
 RUN_PID=$!
 
-run_finished=false
-for ((elapsed = 0; elapsed < RUN_TIMEOUT_SECONDS; elapsed++)); do
-  if ! kill -0 "${RUN_PID}" >/dev/null 2>&1; then
-    run_finished=true
-    break
-  fi
-
-  if grep -q "Use Control-C to stop this server" "${RUN_LOG}" ||
-    grep -q "http://127.0.0.1:8888/tree?token" "${RUN_LOG}"; then
-    echo "FAIL: noninteractive runIt.sh launched the BlockSci Jupyter server" >&2
-    echo "Expected BLOCKSCI_LAUNCH_JUPYTER=0 to make analysis exit after exports." >&2
-    docker stop blocksci_analyzer >/dev/null 2>&1 || true
-    wait "${RUN_PID}" >/dev/null 2>&1 || true
-    RUN_PID=""
-    exit 1
-  fi
-
-  sleep 1
-done
-
-if [[ "${run_finished}" == "false" ]] && kill -0 "${RUN_PID}" >/dev/null 2>&1; then
-  echo "FAIL: runIt.sh did not exit within ${RUN_TIMEOUT_SECONDS}s" >&2
-  docker stop blocksci_analyzer >/dev/null 2>&1 || true
-  wait "${RUN_PID}" >/dev/null 2>&1 || true
-  RUN_PID=""
-  exit 1
-fi
-
-set +e
-wait "${RUN_PID}"
-RUN_EXIT_CODE=$?
-set -e
-RUN_PID=""
-
-if [[ "${RUN_EXIT_CODE}" -ne 0 ]]; then
-  echo "FAIL: runIt.sh exited with code ${RUN_EXIT_CODE}" >&2
-  exit "${RUN_EXIT_CODE}"
-fi
+wait_for_runit runIt.sh stop_blocksci
 
 if ! grep -q "Parsing complete. Skipping interactive BlockSci environment." "${RUN_LOG}"; then
   echo "FAIL: expected analysis to skip the interactive BlockSci environment" >&2
