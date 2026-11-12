@@ -50,6 +50,24 @@ Opravy jsou nové commity nad historií ve větvi `clean-history`; existující 
 - Zlepšení 14 — staging exportérů maže soubory, které checkout už nemá (`s5cmd sync --delete`,
   ověřeno proti lokálnímu MinIO) („fix(s3): drop staged exporter files …“).
 - Zlepšení 15 — `qsub` má timeout 120 s a hlásí, že job mohl projít („fix(pbs): give qsub a timeout …“).
+- Nesrovnalosti 4 — `pbs-from-s3` a `mainnet-sync` s výslovným `--artifact-backend shared-storage`
+  skončí chybou místo tichého přepsání na S3 („fix(config): reject shared storage …“).
+- Nesrovnalosti 7 — knihovní funkce místo `[ERROR]` + `sys.exit(2)` vyhazují `ValueError`
+  (`RuntimeError` u chybějícího skriptu); CLI je vypíše jako ostatní chyby a stejný exit kód 2
+  zůstává. Tvrzení o záznamu spuštění neplatilo: `cli.main` chytá `SystemExit` a kód zapíše.
+  Skutečný přínos je jinde: lokální analýza teď u selhání jmenuje stage
+  („refactor(execution): raise errors from library functions …“).
+- Nesrovnalosti 19 — parse/update i ověření řetězce běží s `--cleanenv` jako kombinovaný job
+  („fix(pbs): parse and verify the BlockSci index without the host environment“).
+- Nesrovnalosti 21 — mappings job připne enumerátor i Sake na digest z registry a ten zapíše;
+  u lokálního SIF souboru jeho hash, u nepřipnutého tagu nic
+  („fix(mappings): record the registry digest …“).
+- Zlepšení 5 — `IMAGE_NAMES` a výchozí image odvozené při importu zmizely; `default_image` a
+  `default_pbs_image` se volají až s registry z konfigurace a `cjp runs validate` dostane
+  výchozí BlockSci image vyřešenou z voleb CLI („fix(images): resolve default images …“).
+- Zlepšení 1 — všech 44 voleb bez popisu (coinjoin-analysis, mainnet, JoinMarket, mappings,
+  `--network`) má nápovědu; test hlídá, že žádná volba neukazuje jen YAML klíč
+  („docs(cli): describe every configuration option in --help“).
 - Navíc: commit nástrojů přestavby dostal `.peel/` pod `ruff check .`, opraveno v „style(history): …“.
 
 **Nepotvrdilo se**
@@ -68,6 +86,9 @@ Opravy jsou nové commity nad historií ve větvi `clean-history`; existující 
 - Refaktoring 11 — `embedded_file` je inverze `write_files` a sdílí s ním `_delimiter`.
 - Zlepšení 13 — `restore_archive` čte archiv z vlastního bucketu a ověřuje SHA-256; tvrdší
   kontrola členů zůstává jako zlepšení.
+- Refaktoring 1 — sjednocení dvou formátů archivu indexu čeká na rozhodnutí: změna formátu cache
+  běhu rozbije kontrolu v Labu (`scenario-lab/server/run-notebook.ts` čte `archive`, sidecar a
+  `blocksci_data.tar.zst`) a cache už existujících běhů by šla znovu použít jen po novém parsování.
 
 Ostatní položky jsou dál otevřené.
 
