@@ -88,7 +88,12 @@ def run_configuration(args: PipelineConfiguration) -> None:
     elif args.action == "full-run" and args.artifacts.backend == "s3":
         try:
             with _pbs_credentials(args):
-                run_s3_full_run(args)
+                if args.resume_run:
+                    from coinjoin_pipeline.execution.s3_resume import resume_s3_full_run
+
+                    resume_s3_full_run(args)
+                else:
+                    run_s3_full_run(args)
         except (OSError, PBSError, RuntimeError) as error:
             exit_with_error(error)
     else:

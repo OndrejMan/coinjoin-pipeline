@@ -86,9 +86,15 @@ class S3StageRunner:
     plan: StageGraph
     submitted_jobs: list[tuple[str, str]]
     jobs: dict[str, str] = field(default_factory=dict)
+    #: Stages a resumed run already finished: never submitted, and satisfied as dependencies.
+    completed: frozenset[str] = frozenset()
 
     def submit_all(self) -> None:
-        """Submit the selected graph nodes in the established qsub order."""
+        """Submit the selected graph nodes in the established qsub order.
+
+        Stages already in ``jobs`` (live jobs a resume adopts) or in ``completed``
+        are skipped; their dependents depend on the adopted job or on nothing.
+        """
         handlers = {
             StageKind.BASELINE: self._analysis,
             StageKind.MAPPINGS: self._mappings,
@@ -98,7 +104,8 @@ class S3StageRunner:
             StageKind.REPORT: self._report,
         }
         for stage in self.plan.scheduled():
-            handlers[stage.kind](stage)
+            if stage.name not in self.jobs and stage.name not in self.completed:
+                handlers[stage.kind](stage)
 
     def _submit(self, stage: StagePlan, script: str, *, depends: bool = False) -> None:
         dependencies = self.plan.dependency_ids(stage.name, self.jobs) if depends else ()
@@ -203,7 +210,8 @@ class S3StageRunner:
         self._submit(stage, script, depends=True)
 
     def _report(self, stage: StagePlan) -> None:
-        if not self.args.dry_run and len(self.plan.dependency_ids(stage.name, self.jobs)) != len(stage.dependencies):
+        satisfied = len(self.plan.dependency_ids(stage.name, self.jobs)) + len(self.completed & set(stage.dependencies))
+        if not self.args.dry_run and satisfied != len(stage.dependencies):
             raise PBSError("Could not obtain analyzer job IDs for the unified report dependency")
         report_image = resolve_unified_report_image(self.args)
         script = render_unified_report_s3_pbs(
@@ -221,29 +229,45 @@ class S3StageRunner:
         self._submit(stage, script, depends=True)
 
 
-def submit_s3_pbs_graph(args: PipelineConfiguration) -> dict[str, str]:
-    """Serialise one S3 PBS submission and roll it back on submit failure; return job IDs by stage."""
+@dataclass(frozen=True)
+class ResumedGraph:
+    """What a resumed run keeps: finished stages and live jobs that still serve the graph."""
+
+    completed: frozenset[str] = frozenset()
+    adopted: dict[str, str] = field(default_factory=dict)
+
+
+def submit_s3_pbs_graph(args: PipelineConfiguration, resumed: ResumedGraph | None = None) -> dict[str, str]:
+    """Serialise one S3 PBS submission and roll it back on submit failure; return job IDs by stage.
+
+    With ``resumed`` only the stages it neither completed nor adopted are submitted;
+    the returned mapping includes the adopted jobs, and rollback cancels only new ones.
+    """
     if not args.dry_run:
         run_id = required(args.run_id, "--run-id")
         acquire_lock(pbs_submit_lock_path(args.runs_path, run_id))
-        ensure_no_active_s3_pbs_submission(args.runs_path / run_id)
+        if resumed is None:
+            # A resume adopts the live jobs this check refuses, after cancelling the rest itself.
+            ensure_no_active_s3_pbs_submission(args.runs_path / run_id)
 
     submitted_jobs: list[tuple[str, str]] = []
     try:
-        return _submit_s3_pbs_stages(args, submitted_jobs)
+        return _submit_s3_pbs_stages(args, submitted_jobs, resumed)
     except BaseException:
         rollback_s3_pbs_submissions(submitted_jobs)
         raise
 
 
-def _submit_s3_pbs_stages(args: PipelineConfiguration, submitted_jobs: list[tuple[str, str]]) -> dict[str, str]:
+def _submit_s3_pbs_stages(
+    args: PipelineConfiguration, submitted_jobs: list[tuple[str, str]], resumed: ResumedGraph | None = None
+) -> dict[str, str]:
     """Submit the concrete S3 PBS DAG while preserving marker semantics."""
     target = S3Target.from_args(args)
     access = target.access
     plan = s3_full_run_plan_from_args(args)
     source_run_id = args.blocksci.cache_source_run_id
     # Update and read-only analyses both start a fresh run from another run's published cache.
-    if source_run_id and not args.dry_run:
+    if source_run_id and not args.dry_run and resumed is None:
         s3_access_preflight(access, target.artifact_uri)
         if not s3_object_exists(
             access,
@@ -263,6 +287,7 @@ def _submit_s3_pbs_stages(args: PipelineConfiguration, submitted_jobs: list[tupl
             )
     if not args.dry_run and (args.stage_exporters or pbs_stages_need_exporters(args)):
         ensure_staged_exporters(args)
-    runner = S3StageRunner(args, target, plan, submitted_jobs)
+    resumed = resumed or ResumedGraph()
+    runner = S3StageRunner(args, target, plan, submitted_jobs, dict(resumed.adopted), resumed.completed)
     runner.submit_all()
     return runner.jobs

@@ -107,6 +107,10 @@ HELP = {
     ),
     "dry_run": "validate and print the plan without starting containers, jobs or uploads",
     "parallel": "run the local analysis stages of a full-run in parallel",
+    "resume_run": (
+        "continue the S3 full-run of --run-id from its markers and recorded PBS jobs "
+        "after the process that drove it died; give the original configuration"
+    ),
     "all_runs": "run coinjoin-analysis over every run in the runs root",
     "yes": "confirm the destructive clean action",
     "analysis_action": "collect_docker collects the emulator logs first; analyze_only needs an existing baseline",

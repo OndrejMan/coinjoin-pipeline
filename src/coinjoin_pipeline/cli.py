@@ -156,9 +156,10 @@ def start_host_manifest(
     target = None
     if context.run_dir is not None and (config.run_dir or config.action in {"emulate", "full-run"}):
         target = context.run_dir / RUN_MANIFEST
-    if target and not config.run_dir and "host_launcher" in read_host_manifest(target):
+    if target and not config.run_dir and not config.resume_run and "host_launcher" in read_host_manifest(target):
         raise ValueError(
-            f"run {config.run_id} already records a launch in {target}; start the new run under a fresh --run-id"
+            f"run {config.run_id} already records a launch in {target}; start the new run "
+            "under a fresh --run-id, or continue an S3 full-run with --resume-run"
         )
     effective = asdict(config)
     effective.pop("_provided", None)
