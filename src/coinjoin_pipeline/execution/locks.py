@@ -30,8 +30,8 @@ def acquire_lock(path: Path) -> TextIO:
     except PermissionError as error:
         raise RuntimeError(
             f"Cannot open the pipeline lock {path}: {error.strerror}. "
-            "A runs root written by the old containerized wrapper holds root-owned "
-            f"files; take it over with `sudo chown -R $(id -u):$(id -g) {path.parent}` "
+            "Files a root container wrote into the runs root cannot be opened by this user; "
+            f"take them over with `sudo chown -R $(id -u):$(id -g) {path.parent}` "
             "(or point --runs-root somewhere else)"
         ) from error
     try:

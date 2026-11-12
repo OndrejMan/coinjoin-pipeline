@@ -126,7 +126,7 @@ def ensure_staged_exporters(args: PipelineConfiguration) -> None:
         prefix = staged_exporters_uri(target.run_prefix)
         raise ArtifactTransportError(
             f"run prefix {prefix} carries an exporter tree without {', '.join(missing)}; "
-            "it predates the blocksci_export rename or a previous upload died halfway. "
+            "an older pipeline staged it or a previous upload died halfway. "
             "Re-staging it here would mix exporter versions across the run's stages, so "
             "start a fresh --run-id (or delete the prefix and restage it deliberately)"
         )
