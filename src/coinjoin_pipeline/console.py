@@ -6,6 +6,7 @@ import sys
 
 EXIT_OK = 0
 EXIT_USAGE = 2
+EXIT_ABORTED = 3
 EXIT_FAILURE = 5
 EXIT_INTERRUPTED = 130
 
@@ -15,6 +16,7 @@ EXIT_INTERRUPTED = 130
 EXIT_CODES = (
     (EXIT_OK, "success"),
     (EXIT_USAGE, "invalid configuration or arguments, or a failed preflight check"),
+    (EXIT_ABORTED, "clean-s3 was not confirmed"),
     (EXIT_FAILURE, "a failed run reported as [ERROR], a runtime error, or a failed pull or S3 transfer"),
     (EXIT_INTERRUPTED, "interrupted"),
 )

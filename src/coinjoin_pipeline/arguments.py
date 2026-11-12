@@ -39,13 +39,15 @@ UTILITIES = (
     "doctor",
     "pull",
     "download-report",
+    "clean-s3",
 )
-DELEGATING_UTILITIES = frozenset({"download-report"})
+DELEGATING_UTILITIES = frozenset({"download-report", "clean-s3"})
 UTILITY_SUMMARIES = {
     "version": "print the CLI version and the default component images",
     "doctor": "check the container runtime, the runs root and the default images",
     "pull": "pull every component image with the container runtime",
     "download-report": "download the finished unified report of an S3 run",
+    "clean-s3": "delete S3 artifacts of one run or a whole run root",
 }
 ACTION_SUMMARIES = {
     "full-run": "emulate a new run, then analyze it and export its report",
@@ -250,7 +252,9 @@ def _epilog() -> str:
     width = max(map(len, (*ACTION_SUMMARIES, *UTILITY_SUMMARIES)))
     lines = ["actions:"]
     lines += [f"  {name:<{width}}  {summary}" for name, summary in ACTION_SUMMARIES.items()]
-    lines += ["", "utilities (download-report accepts its own --help):"]
+    delegating = [name for name in UTILITIES if name in DELEGATING_UTILITIES]
+    own_help = ", ".join(delegating[:-1]) + " and " + delegating[-1]
+    lines += ["", f"utilities ({own_help} accept their own --help):"]
     lines += [f"  {name:<{width}}  {summary}" for name, summary in UTILITY_SUMMARIES.items()]
     lines += [
         "",
