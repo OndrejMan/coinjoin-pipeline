@@ -10,7 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from coinjoin_pipeline.execution.pbs.blocksci_jobs import publish_index, restore_index
+from coinjoin_pipeline.execution.pbs.blocksci_index import restore_index
+from coinjoin_pipeline.execution.pbs.blocksci_jobs import publish_index
 from coinjoin_pipeline.execution.pbs.stage import Stage
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_blocksci_analyze_s3_pbs,

@@ -6,6 +6,8 @@ import re
 
 import exporters.artifact_paths as layout
 
+from coinjoin_pipeline.execution.mainnet_sync import MAINNET_RUNTIME_MODULES
+from coinjoin_pipeline.execution.pbs.scripts import STAGE_RUNTIME_MODULES
 from coinjoin_pipeline.paths import EXECUTION_ROOT, PIPELINE_ROOT
 
 RUN_DIRECTORIES = {
@@ -14,14 +16,17 @@ RUN_DIRECTORIES = {
     if name.endswith("_DIR") and isinstance(value, str) and value.endswith("_data")
 }
 # Scratch directories and volumes inside a job, not entries of a run directory.
-SCRATCH_DIRECTORIES = {"bitcoin_data", "btc_data", "source-blocksci-parse_data"}
+SCRATCH_DIRECTORIES = {"btc_data", "source-blocksci-parse_data"}
 DIRECTORY_TOKEN = re.compile(r"\b[A-Za-z][A-Za-z_-]*_data\b")
 JOB_SOURCES = (
     *sorted(EXECUTION_ROOT.glob("*.sh")),
     *sorted((EXECUTION_ROOT / "pbs" / "templates").glob("*.sh")),
     EXECUTION_ROOT / "pbs" / "templates_s3.py",
     EXECUTION_ROOT / "pbs" / "templates_local.py",
+    EXECUTION_ROOT / "pbs" / "analysis_modes.py",
     EXECUTION_ROOT / "kubernetes.py",
+    # The Python jobs a compute node runs; they import the names, so anything left is a literal.
+    *(module for module in (*STAGE_RUNTIME_MODULES, *MAINNET_RUNTIME_MODULES) if module.name != "artifact_paths.py"),
     *sorted(PIPELINE_ROOT.glob("*.sh")),
     PIPELINE_ROOT / "compose.yaml",
 )

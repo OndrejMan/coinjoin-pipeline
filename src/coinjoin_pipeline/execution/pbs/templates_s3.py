@@ -3,7 +3,8 @@
 Every job is ``directives`` and a few lines of shell that write the stage worker's
 modules (``scripts.STAGE_RUNTIME_MODULES``) and a ``settings.json`` to the node's
 scratch and run them. The renderers here validate the options and assemble those
-settings; the work itself is ``analyzer_jobs``' and ``blocksci_jobs``'.
+settings; the work itself is ``analyzer_jobs``', ``blocksci_jobs``' and
+``blocksci_analysis_jobs``'.
 """
 
 from __future__ import annotations

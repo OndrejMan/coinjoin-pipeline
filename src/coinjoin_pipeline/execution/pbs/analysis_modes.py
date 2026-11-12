@@ -34,7 +34,7 @@ MODE_OUTPUTS = {
 
 
 def analysis_mode_settings(mode: str, blocksci: BlockSciConfiguration) -> AnalysisModeSettings:
-    """Settings of detection, an external comparison, a user script or a notebook (blocksci_jobs.blocksci_analysis)."""
+    """Settings of detection, an external comparison, a user script or a notebook (blocksci_analysis_jobs)."""
     output: OutputSettings = {"relative": MODE_OUTPUTS[mode]}
     inputs: list[InputSettings] = []
     settings: AnalysisModeSettings = {"output": output, "inputs": inputs, "output_check": None}

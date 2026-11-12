@@ -56,7 +56,9 @@
       "coinjoin_pipeline/execution/pbs/stage_settings.py",
       "coinjoin_pipeline/execution/pbs/stage.py",
       "coinjoin_pipeline/execution/pbs/analyzer_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_index.py",
       "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
+      "coinjoin_pipeline/execution/pbs/blocksci_analysis_jobs.py",
       "coinjoin_pipeline/execution/pbs/stage_runtime.py"
     ]
   }

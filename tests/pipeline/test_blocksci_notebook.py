@@ -9,7 +9,7 @@ from types import ModuleType, SimpleNamespace
 from coinjoin_pipeline.execution.pbs.templates import blocksci_notebook
 from coinjoin_pipeline.configuration import BlockSciConfiguration
 from coinjoin_pipeline.execution.pbs.analysis_modes import analysis_mode_settings
-from coinjoin_pipeline.execution.pbs.blocksci_jobs import analysis_output, notebook_control
+from coinjoin_pipeline.execution.pbs.blocksci_analysis_jobs import analysis_output, notebook_control
 
 
 def test_notebook_paths_use_submission_home_when_pbs_changes_home(tmp_path, monkeypatch):

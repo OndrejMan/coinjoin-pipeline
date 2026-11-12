@@ -22,14 +22,14 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from coinjoin_pipeline.execution.pbs import analyzer_jobs, blocksci_jobs
+from coinjoin_pipeline.execution.pbs import analyzer_jobs, blocksci_analysis_jobs, blocksci_jobs
 from coinjoin_pipeline.execution.pbs.stage import Stage, StageFailure, with_job_log
 from coinjoin_pipeline.execution.pbs.stage_settings import StageSettings
 
 JOBS: dict[str, Callable[[Stage], None]] = {
     "blocksci-parse": blocksci_jobs.blocksci_parse,
     "blocksci-update": blocksci_jobs.blocksci_update,
-    "blocksci-analysis": blocksci_jobs.blocksci_analysis,
+    "blocksci-analysis": blocksci_analysis_jobs.blocksci_analysis,
     "blocksci-backup": blocksci_jobs.blocksci_backup,
     "blocksci": blocksci_jobs.blocksci,
     "coinjoin-mappings": analyzer_jobs.coinjoin_mappings,

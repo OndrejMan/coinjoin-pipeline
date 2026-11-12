@@ -9,7 +9,7 @@ import pytest
 
 from coinjoin_pipeline.configuration import BlockSciConfiguration
 from coinjoin_pipeline.execution.pbs.analysis_modes import analysis_mode_settings
-from coinjoin_pipeline.execution.pbs.blocksci_jobs import notebook_connection, seed_notebook
+from coinjoin_pipeline.execution.pbs.blocksci_analysis_jobs import notebook_connection, seed_notebook
 from coinjoin_pipeline.execution.pbs.stage import StageFailure
 
 

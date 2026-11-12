@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore, IndexStoreError, index_manifest
-from coinjoin_pipeline.execution.pbs.blocksci_jobs import (
+from coinjoin_pipeline.execution.pbs.blocksci_analysis_jobs import (
     attach_dumplings,
     dumplings_in_place,
     kept_index,

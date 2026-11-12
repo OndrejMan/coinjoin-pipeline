@@ -31,7 +31,10 @@ STAGE_RUNTIME_MODULES = (
     APPTAINER,
     ARTIFACT_PATHS,
     *(Path(__file__).with_name(name) for name in ("stage_settings.py", "stage.py", "analyzer_jobs.py")),
-    *(Path(__file__).with_name(name) for name in ("blocksci_jobs.py", "stage_runtime.py")),
+    *(
+        Path(__file__).with_name(name)
+        for name in ("blocksci_index.py", "blocksci_jobs.py", "blocksci_analysis_jobs.py", "stage_runtime.py")
+    ),
 )
 
 

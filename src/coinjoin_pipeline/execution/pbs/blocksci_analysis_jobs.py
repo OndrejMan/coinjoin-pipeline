@@ -1,0 +1,308 @@
+"""The S3 PBS job that reads a BlockSci index: detection, an external comparison, a user script or a notebook.
+
+The index comes from this run's cache, read-only from another run's, or in place from a
+persistent directory (``blocksci_index``).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import tempfile
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
+from pathlib import Path
+from typing import cast
+
+from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, BLOCKSCI_DIR, BLOCKSCI_PARSE_DIR, STAGED_EXPORTERS_DIR
+
+from coinjoin_pipeline.execution.pbs.blocksci_index import (
+    canonicalize_index,
+    check_manifest,
+    container_run,
+    open_index,
+    require_tools,
+    restore_index,
+)
+from coinjoin_pipeline.execution.pbs.index_store import IndexStore, usage_report
+from coinjoin_pipeline.execution.pbs.stage import CONTAINER_RUNS_ROOT, Stage, StageFailure
+from coinjoin_pipeline.execution.pbs.stage_settings import BlocksciAnalysisSettings, OutputSettings, PersistentSettings
+from coinjoin_pipeline.storage.s5client import S5Error
+
+
+def scratch_index(stage: Stage, settings: PersistentSettings) -> IndexStore:
+    """A private copy of the backup in the job's scratch; nobody else reads it, so no lock."""
+    require_tools("zstd")
+    index = IndexStore(str(stage.scratch / "index"), settings["backup_uri"], storage=stage.storage)
+    index.path.mkdir(parents=True, exist_ok=True)
+    index.restore()
+    return index
+
+
+def kept_index(stage: Stage, settings: PersistentSettings) -> IndexStore:
+    """A shared copy that stays after the job: filled from the backup when it is incomplete."""
+    index = open_index(stage, settings, writer=False)
+    if not index.complete():
+        index.unlock()
+        index.lock_exclusive()
+        index.reconcile()
+        index.unlock()
+        index.lock_shared()
+    return index
+
+
+def report_kept_copy(stage: Stage, directory: Path, uri: str) -> None:
+    """Tell the lab how large the kept copy is; a failed report must not stop the notebook."""
+    try:
+        stage.storage.copy_text(json.dumps(usage_report("notebook", [directory])), uri)
+    except (OSError, subprocess.SubprocessError, S5Error) as error:
+        stage.log(f"[index] the kept copy's size was not reported: {error}")
+
+
+def attach_dumplings(stage: Stage, index: IndexStore, uri: str) -> str:
+    """The bind of the Dumplings copy beside the index; inside it would break the index's file list.
+
+    Only a finished download takes the name, so an interrupted job leaves no partial copy
+    that later jobs would trust. Of two jobs downloading at once, the second drops its own.
+    """
+    root = index.path.parent / "dumplings"
+    scanner = root / "Scanner"
+    if not scanner.is_dir():
+        root.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=".Scanner-", dir=root))
+        try:
+            stage.storage.copy(f"{uri}/Scanner/*", f"{staging}/", timeout=None)
+            try:
+                staging.rename(scanner)
+            except OSError:
+                if not scanner.is_dir():
+                    raise
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+    return f"{os.path.realpath(scanner)}:/mnt/dumplings/Scanner:ro"
+
+
+def dumplings_in_place(directory: str) -> str:
+    """The bind of a Scanner/ read where it is; a cleared synchronization leaves none."""
+    if not Path(directory, "LastProcessedBlockHeight.txt").is_file():
+        raise StageFailure(f"[index] {directory} holds no Dumplings Scanner")
+    return f"{os.path.realpath(directory)}:/mnt/dumplings/Scanner:ro"
+
+
+def read_index(stage: Stage, settings: PersistentSettings) -> IndexStore:
+    """Read-only access for an analysis: shared lock, complete copy, run-local config."""
+    if settings.get("in_scratch"):
+        index = scratch_index(stage, settings)
+    else:
+        index = kept_index(stage, settings) if settings.get("restore") else open_index(stage, settings, writer=False)
+    if not index.complete():
+        raise StageFailure(
+            f"[index] working copy {index.path} is incomplete; a persistent update restores it from the S3 backup"
+        )
+    check_manifest(index.manifest(), "Persistent BlockSci index", stage.settings["image_name"])
+    index.link_into_run(stage.work)
+    shutil.copyfile(index.path / "config.json", stage.work / BLOCKSCI_CONFIG_FILE)
+    canonicalize_index(stage)
+    stage.log(f"[index] reading {index.path} at height {index.height()}")
+    return index
+
+
+def submission_home() -> Path:
+    """The submitting user's home: the node may set HOME to another storage volume."""
+    return Path(os.environ.get("PBS_O_HOME") or os.environ["HOME"])
+
+
+def notebook_control(stage: Stage) -> Path:
+    """Where the notebook publishes its connection details for the frontend."""
+    return submission_home() / ".local/share/coinjoin-pipeline/jupyter" / stage.run_id
+
+
+def analysis_output(stage: Stage, output: OutputSettings) -> Path:
+    """Where the mode writes; a notebook writes to the submitting user's home by default."""
+    if output.get("notebooks_dir"):
+        return Path(str(output["notebooks_dir"]))
+    if output.get("notebook"):
+        return submission_home() / "coinjoin-notebooks" / stage.run_id
+    return stage.work / str(output["relative"])
+
+
+def seed_notebook(stage: Stage, output: Path) -> None:
+    """The submitting container stages an optional initial file in private S3 metadata."""
+    uri = f"{stage.run_prefix}/.notebook/initial.json"
+    if not stage.storage.exists(uri):
+        return
+    seed = stage.storage.cat_json(uri)
+    name, text = seed.get("name"), seed.get("text")
+    if (
+        not isinstance(name, str)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _.-]{0,119}\.(py|ipynb)", name)
+        or not isinstance(text, str)
+        or len(text.encode("utf-8")) > 256 * 1024
+        or "\0" in text
+    ):
+        raise StageFailure("Invalid initial notebook file in S3")
+    if name.endswith(".ipynb"):
+        document = json.loads(text)
+        if (
+            not isinstance(document, dict)
+            or document.get("nbformat") != 4
+            or not isinstance(document.get("cells"), list)
+        ):
+            raise StageFailure("Invalid version 4 initial notebook")
+    # Never overwrite an edited notebook, including when the same run is retried.
+    descriptor = os.open(str(output / name), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        stream.write(text)
+
+
+@contextmanager
+def notebook_connection(stage: Stage, control: Path) -> Iterator[None]:
+    """Publish the current job's private connection while Jupyter is running.
+
+    The frontend container has no shared /storage mount. Its only discovery path is
+    this S3 object, checked against qstat before opening a direct node SSH tunnel.
+    """
+    uri = f"{stage.run_prefix}/.notebook/connection.json"
+    stopping = threading.Event()
+
+    def publish() -> None:
+        warned = False
+        while not stopping.wait(0.2):
+            try:
+                path = control / "connection.json"
+                if not path.is_file():
+                    continue
+                info = json.loads(path.read_text())
+                if info.get("jobId") != os.environ.get("PBS_JOBID") or info.get("runId") != stage.run_id:
+                    continue
+                stage.storage.copy(path, uri, timeout=15)
+                return
+            except (OSError, ValueError, subprocess.SubprocessError, S5Error):
+                if not warned:
+                    stage.log("Notebook connection publication failed; retrying (connection token is not logged)")
+                    warned = True
+                stopping.wait(1)
+
+    thread = threading.Thread(target=publish, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stopping.set()
+        thread.join(timeout=16)
+        # Stale objects are also rejected by run ID, PBS job ID and terminal qstat state.
+        # Wait for an in-flight upload before deleting, so it cannot republish afterwards.
+        if not thread.is_alive():
+            try:
+                if not stage.storage.remove(uri, timeout=15):
+                    stage.log("Could not remove ended notebook connection metadata")
+            except (OSError, subprocess.SubprocessError, S5Error):
+                stage.log("Could not remove ended notebook connection metadata")
+
+
+def blocksci_analysis(stage: Stage) -> None:
+    """Detection, an external comparison, a user script or a notebook over an existing index.
+
+    Outputs are published even when the work fails. The index comes from this run's cache,
+    read-only from another run's, or in place from a persistent directory.
+    """
+    settings = cast(BlocksciAnalysisSettings, stage.settings)
+    mode = stage.name
+    output = analysis_output(stage, settings["output"])
+    stage.finalizers.append(lambda: stage.upload(output, settings["output"]["relative"]))
+    require_tools("zstd")
+    stage.log(f"[{mode}] downloading required reusable BlockSci inputs")
+    for download in settings["inputs"]:
+        if "run" in download:
+            stage.download(download["run"])
+            continue
+        target = stage.work / download["to"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            stage.storage.copy(download["uri"], str(target))
+        except subprocess.CalledProcessError:
+            if not download.get("optional"):
+                raise
+            stage.log(f"[{mode}] the baseline has no {target.name}")
+    (stage.work / STAGED_EXPORTERS_DIR).mkdir(parents=True, exist_ok=True)
+    binds = [f"{stage.runs_root}:{CONTAINER_RUNS_ROOT}:rw", f"{stage.work / STAGED_EXPORTERS_DIR}:/mnt/exporters:ro"]
+    environment = [
+        f"PBS_RUN_ID={stage.run_id}",
+        f"ACTIVE_RUN_ID={stage.run_id}",
+        f"BLOCKSCI_CONFIG={container_run(stage)}/{BLOCKSCI_CONFIG_FILE}",
+        f"BLOCKSCI_RUN_DIR={container_run(stage)}",
+    ]
+    if settings["output"].get("notebooks_dir") and not output.is_dir():
+        raise StageFailure(f"BlockSci notebooks directory does not exist on the compute node: {output}")
+    output.mkdir(parents=True, exist_ok=True)
+    persistent = settings["persistent"]
+    if persistent:
+        index = read_index(stage, persistent)
+        binds += index.binds("ro")
+        shutil.copyfile(index.path / "manifest.json", output / "blocksci-index-manifest.json")
+        dumplings = persistent.get("dumplings_uri")
+        if dumplings:
+            binds.append(attach_dumplings(stage, index, dumplings))
+        dumplings_dir = persistent.get("dumplings_dir")
+        if dumplings_dir:
+            binds.append(dumplings_in_place(dumplings_dir))
+        report_uri = persistent.get("storage_report_uri")
+        if report_uri:
+            report_kept_copy(stage, index.path.parent, report_uri)
+    else:
+        cache_run = settings.get("source_run_id") or stage.run_id
+        prefix = f"{settings['artifact_uri']}/{cache_run}/{BLOCKSCI_PARSE_DIR}"
+        cache = stage.work / BLOCKSCI_PARSE_DIR
+        restore_index(stage, cache, prefix, cache_run, "BlockSci index")
+        if settings.get("source_run_id"):
+            # Record which published index the outputs were computed from.
+            shutil.copyfile(cache / "manifest.json", output / "blocksci-cache-manifest.json")
+            (output / "blocksci-source.json").write_text(
+                json.dumps({"source_run_id": cache_run}, separators=(",", ":")) + "\n"
+            )
+            parsed = f"{BLOCKSCI_DIR}/parsed"
+            binds.append(f"{stage.work / parsed}:{container_run(stage)}/{parsed}:ro")
+    if settings.get("user_script"):
+        script = Path(str(settings["user_script"]))
+        shutil.copyfile(script, output / "script.py")
+        digest = hashlib.sha256(script.read_bytes()).hexdigest()
+        (output / "script.py.sha256").write_text(f"{digest}  {script}\n")
+        binds.append(f"{script}:/mnt/user-analysis.py:ro")
+    control = None
+    if settings["output"].get("notebook"):
+        seed_notebook(stage, output)
+        control = notebook_control(stage)
+        control.mkdir(parents=True, exist_ok=True)
+        control.chmod(0o700)
+        (control / "connection.json").unlink(missing_ok=True)
+        notebook = Path(__file__).parent / "templates/blocksci_notebook.py"
+        binds += [
+            f"{output}:/mnt/notebooks:rw",
+            f"{control}:/mnt/notebook-control:rw",
+            f"{notebook}:/mnt/blocksci_notebook.py:ro",
+        ]
+        environment += [
+            f"NOTEBOOK_JOB_ID={os.environ['PBS_JOBID']}",
+            f"NOTEBOOK_FRONTEND={os.environ.get('PBS_O_HOST', '')}",
+            f"NOTEBOOK_LOGIN={os.environ.get('PBS_O_LOGNAME') or os.environ.get('USER', '')}",
+        ]
+    stage.log(f"[{mode}] starting on {socket.getfqdn()}")
+    for line in settings.get("connection_help", ()):
+        stage.log(line)
+    with notebook_connection(stage, control) if control is not None else nullcontext():
+        stage.singularity(
+            f'cd "{CONTAINER_RUNS_ROOT}/$PBS_RUN_ID" && {settings["command"]}',
+            binds=binds,
+            environment=environment,
+            cleanenv=True,
+        )
+    check = settings.get("output_check")
+    if check:
+        stage.require_file(check[0], check[1])
+    stage.log(f"[{mode}] completed")
