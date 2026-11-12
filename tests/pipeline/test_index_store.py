@@ -201,6 +201,19 @@ def test_a_remote_size_mismatch_publishes_no_manifest(tmp_path):
     assert not (s3(tmp_path) / "manifest.json").exists()
 
 
+def test_the_backup_names_its_members_for_the_mainnet_restore_job(tmp_path):
+    parse_index(tmp_path)
+    backup(tmp_path)
+
+    # mainnet-sync's restore job reads the index backup with the same call.
+    manifest = store(tmp_path).storage.restore_backup(BACKUP + "/manifest.json", tmp_path / "copy")
+
+    assert manifest["members"] == ["config.json", "files.txt", "manifest.json", "parsed"]
+    assert set(manifest["member_bytes"]) == set(manifest["members"])
+    assert (tmp_path / "copy/parsed/chain/block.dat").read_text() == "blocks-100"
+    assert not list(tmp_path.glob("copy.restoring-*"))
+
+
 def test_a_killed_restore_leaves_nothing_in_the_restored_index(tmp_path):
     parse_index(tmp_path)
     backup(tmp_path)

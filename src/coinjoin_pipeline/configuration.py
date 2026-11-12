@@ -233,6 +233,7 @@ class PBSConfiguration(ConfigurationModel):
     mappings: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     unified_report: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     producer: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
+    restore: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     checkpoint: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
 
 
