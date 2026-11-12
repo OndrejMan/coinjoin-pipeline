@@ -62,6 +62,7 @@ def required_image_components(config: PipelineConfiguration) -> set[str]:
         "coinjoin-analysis": {"coinjoin_analysis"},
         "analyze": {"blocksci", "coinjoin_analysis"},
         "export": set(),
+        "mappings": {"mappings", "sake"},
     }.get(config.action, {"emulator", "coinjoin_analysis", "blocksci"})
     return selected - delegated
 

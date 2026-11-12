@@ -5,10 +5,14 @@ Not part of the Kubernetes → S3 → PBS path that the thesis results come from
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
+from coinjoin_pipeline.configuration import MappingsConfiguration
+from coinjoin_pipeline.registry import pinned_reference
+
 from .defaults import DEFAULT_RESOURCES, PBSResources
-from .scripts import directives, template
+from .scripts import directives, mappings_run, template
 from .validation import require_safe_image, require_safe_pbs_token, require_safe_template_path
 
 
@@ -78,4 +82,24 @@ def render_coinjoin_analysis_pbs(
         input_data_dir=input_data_dir,
         image=image,
         command=command,
+    )
+
+
+def render_mappings_pbs(
+    run_dir: Path,
+    enumerator_image: str,
+    sake_image: str,
+    settings: MappingsConfiguration = MappingsConfiguration(),
+    resources: PBSResources = DEFAULT_RESOURCES["mappings"],
+) -> str:
+    require_safe_image(enumerator_image, "enumerator image")
+    require_safe_image(sake_image, "Sake image")
+    return _render(
+        "local_mappings.sh",
+        "coinjoin-mappings",
+        run_dir,
+        resources,
+        enumerator_image=shlex.quote(pinned_reference(enumerator_image)),
+        sake_image=shlex.quote(pinned_reference(sake_image)),
+        mappings_run=mappings_run(settings),
     )

@@ -22,6 +22,7 @@ def shared_storage_analysis_plan(args: PipelineConfiguration):
     return analysis_plan(
         analysis_pbs=args.stages.analysis,
         blocksci_pbs=args.stages.blocksci,
+        mappings_pbs=args.stages.mappings,
     )
 
 
@@ -33,6 +34,7 @@ class SharedStorageStageRunner:
         if stage.runner == "pbs":
             submitters: dict[StageKind, Callable[..., None]] = {
                 StageKind.BASELINE: shared_storage_pbs.run_coinjoin_analysis_stage,
+                StageKind.MAPPINGS: shared_storage_pbs.run_mappings_stage,
                 StageKind.BLOCKSCI_WORK: shared_storage_pbs.run_blocksci_stage,
                 StageKind.REPORT: shared_storage_pbs.run_blocksci_export_stage,
             }

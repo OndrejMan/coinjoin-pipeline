@@ -29,6 +29,7 @@ from . import containers
 from .pbs.submission_local import (
     submit_blocksci_pbs,
     submit_coinjoin_analysis_pbs,
+    submit_mappings_pbs,
     wait_for_pbs_marker,
 )
 
@@ -126,3 +127,19 @@ def run_coinjoin_analysis_stage(args: PipelineConfiguration, run_dir: Path, *, w
         dry_run=args.dry_run,
     )
     _wait_for_stage(args, run_dir, "coinjoin-analysis", resources.walltime, wait=wait)
+
+
+def run_mappings_stage(args: PipelineConfiguration, run_dir: Path, *, wait: bool = True) -> None:
+    """Run both Wasabi mapping tools in one PBS allocation."""
+    if args.engine != "wasabi" or args.coinjoin_type != "wasabi2":
+        raise PBSError("CoinJoin mappings are supported only for Wasabi/wasabi2 runs")
+    resources = stage_pbs_resources(args, "mappings")
+    submit_mappings_pbs(
+        run_dir,
+        pbs_image(args, "mappings_enumerator"),
+        pbs_image(args, "sake"),
+        args.mappings,
+        resources,
+        dry_run=args.dry_run,
+    )
+    _wait_for_stage(args, run_dir, "coinjoin-mappings", resources.walltime, wait=wait)
