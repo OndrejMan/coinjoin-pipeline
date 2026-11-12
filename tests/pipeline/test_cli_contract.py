@@ -127,3 +127,11 @@ def test_every_preflight_error_gets_its_own_line(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr("coinjoin_pipeline.cli.doctor_check", lambda *_args, **_kwargs: ["first", "second"])
     assert main(["emulate", "--runs-root", str(tmp_path), "--run-id", "run-a"]) == 2
     assert capsys.readouterr().err.splitlines() == ["ERROR: first", "ERROR: second"]
+
+
+def test_every_option_has_a_description():
+    from coinjoin_pipeline.arguments import option_help
+    from coinjoin_pipeline.configuration import option_specs
+
+    undescribed = [path for path, _, item in option_specs() if option_help(path, item).startswith("[YAML:")]
+    assert undescribed == []

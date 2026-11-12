@@ -205,6 +205,64 @@ HELP = {
     "external.false_cjtxs": "false_cjtxs.json applied to the baseline (repeatable)",
     "external.min_free_gb": "free space the run directory needs, in GiB (default: 20)",
     "external.resume": "resume the external analysis of --run-id",
+    "external.network": "chain of the external Bitcoin datadir",
+    "joinmarket.detector": "deprecated subset-matching JoinMarket scan of the report; definite matches more strictly",
+    "joinmarket.min_base_fee": (
+        "deprecated subset-matching scan: smallest fee allowance of one participant, in satoshis"
+    ),
+    "joinmarket.percentage_fee": (
+        "deprecated subset-matching scan: fee allowance as a fraction of the participant's amount, if larger"
+    ),
+    "joinmarket.max_depth": "deprecated subset-matching scan: backtracking steps per transaction before it gives up",
+    "mappings.mining_fee_rate": "enumerator: mining fee rate deducted from the inputs, in sat/vB",
+    "mappings.coordination_fee_rate": "enumerator: coordination fee rate deducted from the inputs, as a fraction",
+    "mappings.max_decomposition_fee": (
+        "enumerator: largest difference between the inputs and outputs of one sub-mapping, in satoshis"
+    ),
+    "mappings.mode": "enumerator: numeric counts mappings between amounts, all counts every mapping between coins",
+    "mappings.timeout": "enumerator: seconds per transaction before its first attempt stops",
+    "mappings.retry_timeout": "enumerator: seconds of the one retry a timed-out transaction gets",
+    "mappings.sake_seed": "seed of Sake's random decompositions; one seed reproduces a result",
+    "mainnet.target_height": (
+        "height at which Core stops downloading and the chain is frozen for the other jobs (default: the tip)"
+    ),
+    "mainnet.network": "chain to synchronize; bitcoin_regtest is for isolated validation runs",
+    "mainnet.scan_start_height": "regtest validation only: first height Dumplings scans (mainnet: 336861)",
+    "mainnet.root": "dataset directory on the multijob scratch holding Core, Dumplings and the block archive state",
+    "mainnet.state_uri": "fixed S3 prefix of the synchronization's markers, progress and per-run logs",
+    "mainnet.backup_uri": "S3 prefix of the Core checkpoint backup",
+    "mainnet.blocks_uri": "S3 prefix of the bitcoin-block-archive the producer writes",
+    "mainnet.dumplings_uri": "S3 prefix of the published Dumplings Scanner/ copy and its manifest",
+    "mainnet.core_image": "image running Bitcoin Core and the block archiver",
+    "mainnet.dumplings_image": "image running the Dumplings scanner",
+    "mainnet.dbcache_mb": "Core -dbcache in MB; keep it at half the producer job's memory",
+    "mainnet.reorg_reserve": "blocks below the frozen tip that pruning keeps, so a reorganization can be undone",
+    "mainnet.poll_seconds": "seconds between progress checks of the running jobs",
+    "mainnet.clear_after_sync": "empty the dataset after the last job; the next restore job refills it from S3",
+    "mainnet.notebook_root": "notebook data kept beside the dataset, measured in the storage report",
+    "coinjoin_analysis.program": (
+        "coinjoin-analysis program to run alone: locally with coinjoin-analysis, on PBS with pbs-from-s3"
+    ),
+    "coinjoin_analysis.cjtype": "--cjtype of the program; parse_cj_logs and the positional programs take none",
+    "coinjoin_analysis.load_config": "configuration file of parse_cj_logs or parse_dumplings, relative to the input",
+    "coinjoin_analysis.env_vars": "the program's --env_vars: KEY=VALUE pairs separated by ';' that set its switches",
+    "coinjoin_analysis.filename": "scan_results_plot: the Scanner file to plot, without .json",
+    "coinjoin_analysis.data_mode": "whether the input is labelled emulation data or unlabelled mainnet data",
+    "coinjoin_analysis.research.txid": "analyze_tx_size: transaction to analyze",
+    "coinjoin_analysis.research.tx_hex": "analyze_tx_size: raw transaction hex, instead of looking it up",
+    "coinjoin_analysis.research.transaction_file": "analyze_tx_size: input file holding the raw transaction",
+    "coinjoin_analysis.research.allow_network": (
+        "mainnet only: let analyze_tx_size fetch the transaction and update_txids_with_wabisator the coordinators"
+    ),
+    "coinjoin_analysis.research.min_wallets": "generate_llm_inputs: fewest wallets a coinjoin needs to be included",
+    "coinjoin_analysis.research.depth": "generate_llm_inputs: how many coinjoins deep the inputs are traced",
+    "coinjoin_analysis.research.permute_inputs": "generate_llm_inputs: shuffle the inputs of each sample",
+    "coinjoin_analysis.research.permute_outputs": "generate_llm_inputs: shuffle the outputs of each sample",
+    "coinjoin_analysis.research.force_limit_anon_score": "generate_llm_inputs: cap on the anonymity score of a coin",
+    "coinjoin_analysis.research.plot": "generate_llm_inputs: also plot where the wallets leave the coinjoins",
+    "coinjoin_analysis.research.coordinator_file": (
+        "update_txids_with_wabisator: coordinator mapping to update (default: the image's txid_coord.json)"
+    ),
     **{
         f"images.{component}": f"{component.replace('_', '-')} image (also ${variable})"
         for component, variable in IMAGE_ENVIRONMENT.items()
