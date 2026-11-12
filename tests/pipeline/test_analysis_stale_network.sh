@@ -49,7 +49,7 @@ if ! grep -q -- "compose -f ${PROJECT_DIR}/compose.yaml -p blocksci-emulator --p
   exit 1
 fi
 
-if ! grep -q -- "compose -f ${PROJECT_DIR}/compose.yaml -p blocksci-emulator --profile analysis up --build --force-recreate " "${DOCKER_LOG}"; then
+if ! grep -q -- "compose -f ${PROJECT_DIR}/compose.yaml -p blocksci-emulator --profile analysis up --force-recreate " "${DOCKER_LOG}"; then
   echo "FAIL: expected analysis.sh to force-recreate analysis containers" >&2
   echo "Observed: $(cat "${DOCKER_LOG}")" >&2
   exit 1
@@ -68,7 +68,7 @@ if ! grep -q -- "inspect --format \\\{\\\{.State.ExitCode\\\}\\\} blocksci-conta
 fi
 
 rm_line="$(grep -n -- " rm -sf blocksci coinjoin_analysis " "${DOCKER_LOG}" | head -n 1 | cut -d: -f1)"
-up_line="$(grep -n -- " up --build --force-recreate " "${DOCKER_LOG}" | head -n 1 | cut -d: -f1)"
+up_line="$(grep -n -- " up --force-recreate " "${DOCKER_LOG}" | head -n 1 | cut -d: -f1)"
 if [[ -z "${rm_line}" || -z "${up_line}" || "${rm_line}" -ge "${up_line}" ]]; then
   echo "FAIL: stale-container cleanup must happen before analysis up" >&2
   echo "Observed: $(cat "${DOCKER_LOG}")" >&2

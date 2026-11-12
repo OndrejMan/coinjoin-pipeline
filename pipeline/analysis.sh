@@ -36,7 +36,7 @@ fi
 
 PROJECT_NAME="${COINJOIN_COMPOSE_PROJECT:-blocksci-emulator}"
 "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile analysis rm -sf blocksci coinjoin_analysis
-"${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile analysis up --build --force-recreate
+"${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile analysis up --force-recreate
 
 BLOCKSCI_CONTAINER_ID="$("${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile analysis ps -a -q blocksci)"
 if [[ -z "${BLOCKSCI_CONTAINER_ID}" ]]; then
