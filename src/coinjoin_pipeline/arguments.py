@@ -91,7 +91,7 @@ SECTIONS = {
     "mappings": ("Wasabi mappings and Sake", "Used with --mappings-pbs (Wasabi runs only)."),
     "coinjoin_analysis": (
         "coinjoin-analysis programs",
-        "Run one upstream program instead of the default baseline.",
+        "Run one upstream program instead of the default baseline; see docs/coinjoin-analysis-operations.md.",
     ),
     "pbs": (
         "PBS resources and images",
