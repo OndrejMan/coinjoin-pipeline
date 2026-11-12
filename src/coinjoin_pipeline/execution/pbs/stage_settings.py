@@ -9,6 +9,22 @@ from __future__ import annotations
 from typing import TypedDict
 
 
+class _SourceKind(TypedDict):
+    kind: str
+    network: str
+
+
+class SourceSettings(_SourceKind, total=False):
+    """The single block source of a parse; ``kind`` becomes the manifest's source_kind."""
+
+    # What a parse logs it is preparing.
+    description: str
+    # The last height to parse.
+    max_block: int
+    # external-bitcoin: the shared Bitcoin Core coin directory.
+    datadir: str
+
+
 class _OutputDirectory(TypedDict):
     # Run-relative directory uploaded after the job.
     relative: str
@@ -95,6 +111,10 @@ class BlocksciSettings(CommandSettings):
 
     include_report: bool
     export_analysis: bool
+
+
+class BlocksciParseSettings(CommandSettings):
+    source: SourceSettings
 
 
 class BlocksciAnalysisSettings(CommandSettings, AnalysisModeSettings):

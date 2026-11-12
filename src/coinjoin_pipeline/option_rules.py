@@ -86,6 +86,7 @@ def _action_errors(config: PipelineConfiguration) -> list[str]:
         *_blocksci_task_errors(config, stages),
         *_cache_source_errors(config),
         *_height_errors(config),
+        *_blocksci_source_errors(config),
         *_s3_errors(config, stages),
         *_remaining_errors(config, stages),
     ]
@@ -215,6 +216,24 @@ def _height_errors(config: PipelineConfiguration) -> list[str]:
         errors.append("--blocksci-scan-start-height must be below --blocksci-scan-end-height")
     if pin_height is not None and scan_end is not None and scan_end > pin_height + 1:
         errors.append("--blocksci-scan-end-height must not exceed --blocksci-pin-height + 1")
+    return errors
+
+
+def _blocksci_source_errors(config: PipelineConfiguration) -> list[str]:
+    """Rules for parsing an index from an external Bitcoin datadir."""
+    errors: list[str] = []
+    blocksci = config.blocksci
+    external_bitcoin = bool(blocksci.external_bitcoin_datadir)
+    if external_bitcoin:
+        if not (config.action == "pbs-from-s3" and blocksci.workflow == "reusable" and blocksci.task == "parse"):
+            errors.append("an external Bitcoin source requires a reusable parse")
+    network_supplied = _supplied(config, "blocksci.network", blocksci.network)
+    max_block_supplied = _supplied(config, "blocksci.max_block", blocksci.max_block)
+    if external_bitcoin:
+        if not network_supplied or not max_block_supplied:
+            errors.append("an external Bitcoin source requires --blocksci-network and --blocksci-max-block")
+    elif network_supplied or max_block_supplied:
+        errors.append("--blocksci-network and --blocksci-max-block require an external Bitcoin source")
     return errors
 
 

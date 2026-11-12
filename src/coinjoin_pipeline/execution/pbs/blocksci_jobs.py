@@ -38,8 +38,9 @@ from coinjoin_pipeline.execution.pbs.blocksci_index import (
 from coinjoin_pipeline.execution.pbs.index_store import index_manifest
 from coinjoin_pipeline.execution.pbs.stage import CONTAINER_RUNS_ROOT, Stage, StageFailure
 from coinjoin_pipeline.execution.pbs.stage_settings import (
+    BlocksciParseSettings,
     BlocksciSettings,
-    CommandSettings,
+    SourceSettings,
 )
 
 
@@ -152,22 +153,35 @@ def run_parser(stage: Stage, command: str, datadir: Path, max_block: int, messag
     )
 
 
-def blocksci_parse(stage: Stage) -> None:
-    """Parse once and publish a checksummed reusable index."""
-    settings = cast(CommandSettings, stage.settings)
-    require_tools("zstd")
-    stage.download(STAGED_EXPORTERS_DIR)
+def parse_source(stage: Stage, source: SourceSettings) -> tuple[Path, int]:
+    """Prepare the parse's single source: its datadir and height."""
+    kind = source["kind"]
+    stage.log(f"preparing {source['description']}")
+    if kind == "external-bitcoin":
+        datadir = Path(str(source["datadir"]))
+        if not (datadir / "blocks").is_dir():
+            raise StageFailure(f"External Bitcoin coin directory must contain blocks/: {datadir}")
+        return datadir, int(source["max_block"])
     stage.download(BITCOIN_DATA_DIR)
     stage.download(EXPORTED_BLOCKS_DIR)
-    max_block = emulator_max_block(stage)
+    return emulator_bitcoin_datadir(stage), emulator_max_block(stage)
+
+
+def blocksci_parse(stage: Stage) -> None:
+    """Parse once and publish a checksummed reusable index."""
+    settings = cast(BlocksciParseSettings, stage.settings)
+    require_tools("zstd")
+    stage.download(STAGED_EXPORTERS_DIR)
+    source = settings["source"]
+    datadir, max_block = parse_source(stage, source)
     run_parser(
         stage,
         settings["command"],
-        emulator_bitcoin_datadir(stage),
+        datadir,
         max_block,
-        f"parsing emulator Bitcoin and exported-block inputs through block {max_block}",
+        f"parsing {source['description']} through block {max_block}",
     )
     for relative in INDEX_FILES:
         stage.require_file(relative, f"BlockSci parser did not produce {relative}")
-    publish_index(stage, "emulator", "bitcoin_regtest", max_block, {})
+    publish_index(stage, source["kind"], source["network"], max_block, {})
     stage.log("reusable cache upload complete")

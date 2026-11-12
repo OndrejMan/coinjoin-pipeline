@@ -44,6 +44,7 @@ ArtifactBackend = Literal["shared-storage", "s3"]
 ContainerRuntime = Literal["docker", "podman"]
 BlockSciWorkflow = Literal["combined", "reusable", "cached"]
 BlockSciTask = Literal["detect", "parse", "script", "notebook"]
+BlockSciNetwork = Literal["bitcoin", "bitcoin_testnet", "bitcoin_regtest"]
 JoinMarketDetector = Literal["possible", "definite"]
 MappingMode = Literal["numeric", "all"]
 AnalysisAction = Literal["collect_docker", "analyze_only"]
@@ -121,6 +122,9 @@ class BlockSciConfiguration(ConfigurationModel):
     cache_source_run_id: str | None = option(None, name="blocksci_cache_source_run_id")
     notebook_port: int = option(8888, name="blocksci_notebook_port", minimum=1)
     notebooks_dir: str | None = option(None, name="blocksci_notebooks_dir")
+    external_bitcoin_datadir: str | None = option(None, name="blocksci_external_bitcoin_datadir")
+    network: BlockSciNetwork | None = option(None, name="blocksci_network")
+    max_block: int | None = option(None, name="blocksci_max_block", minimum=0)
     # Script task only: the last height the analysis may see (Blockchain(config, pin_height + 1))
     # and the half-open range [scan_start_height, scan_end_height) it scans.
     pin_height: int | None = option(None, name="blocksci_pin_height", minimum=0)

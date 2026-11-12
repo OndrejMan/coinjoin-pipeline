@@ -138,9 +138,18 @@ class S3StageRunner:
         }
 
     def _parse(self, stage: StagePlan) -> None:
-        script = render_blocksci_parse_s3_pbs(
-            **self._blocksci(), command=blocksci_parse_pbs_command(self.target.run_id)
-        )
+        blocksci = self.args.blocksci
+        if blocksci.external_bitcoin_datadir:
+            # An external chain is mounted as the coin directory itself, bounded by the requested height.
+            command = blocksci_parse_pbs_command(
+                self.target.run_id,
+                coin_type=required(blocksci.network, "--blocksci-network"),
+                disk_path="/mnt/data",
+                max_block_expression=str(required(blocksci.max_block, "--blocksci-max-block") + 1),
+            )
+        else:
+            command = blocksci_parse_pbs_command(self.target.run_id)
+        script = render_blocksci_parse_s3_pbs(**self._blocksci(), **self._index(), command=command)
         self._submit(stage, script)
 
     def _blocksci_work(self, stage: StagePlan) -> None:

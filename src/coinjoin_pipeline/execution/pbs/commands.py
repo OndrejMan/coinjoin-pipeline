@@ -23,12 +23,18 @@ def blocksci_pbs_command(run_id: str, config: PipelineConfiguration, include_rep
     return command
 
 
-def blocksci_parse_pbs_command(run_id: str) -> str:
+def blocksci_parse_pbs_command(
+    run_id: str,
+    *,
+    coin_type: str = "bitcoin_regtest",
+    disk_path: str = "/mnt/data/regtest",
+    max_block_expression: str = "$((PBS_EXPORTED_MAX_BLOCK + 1))",
+) -> str:
     return (
         f"{BLOCKSCI_IMAGE_PYTHON_COMMAND} /mnt/exporters/worker.py parse "
         f"--run-dir {shlex.quote('/runs/emulation/logs/' + run_id)} "
-        "--network bitcoin_regtest --disk /mnt/data/regtest "
-        "--max-block $((PBS_EXPORTED_MAX_BLOCK + 1))"
+        f"--network {shlex.quote(coin_type)} --disk {shlex.quote(disk_path)} "
+        f"--max-block {max_block_expression}"
     )
 
 

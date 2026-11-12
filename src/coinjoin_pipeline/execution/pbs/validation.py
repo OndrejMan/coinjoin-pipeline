@@ -96,3 +96,9 @@ def require_storage_path(run_dir: Path) -> None:
     if not resolved.startswith(SHARED_STORAGE_ROOTS):
         raise PBSError(f"PBS jobs need run-dir on shared MetaCentrum storage (/storage), not: {resolved}")
     require_safe_template_path(run_dir.resolve(), "PBS path")
+
+
+def require_existing_path(path: Path, description: str) -> None:
+    """Ensure a path used by the PBS job exists before submitting."""
+    if not path.exists():
+        raise PBSError(f"{description} does not exist: {path}")
