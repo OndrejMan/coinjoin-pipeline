@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+LAUNCHER="${PROJECT_DIR}/runIt.sh"
+TMP_DIR="$(mktemp -d)"
+
+cleanup() {
+  rm -rf "${TMP_DIR}"
+}
+trap cleanup EXIT
+
+FAKE_BIN="${TMP_DIR}/bin"
+FAKE_LOG="${TMP_DIR}/docker.args"
+FAKE_LOGS="${TMP_DIR}/logs"
+mkdir -p "${FAKE_BIN}" "${FAKE_LOGS}"
+
+cat >"${FAKE_BIN}/docker" <<'EOF'
+#!/usr/bin/env bash
+printf '%q ' "$@" >>"${DOCKER_LOG:?}"
+printf '\n' >>"${DOCKER_LOG:?}"
+
+if [[ "$1" == "info" && "${FAIL_INFO:-0}" == "1" ]]; then
+  exit 1
+fi
+if [[ "$1" == "image" && "$2" == "inspect" ]]; then
+  [[ "${LOCAL_IMAGES:-0}" == "1" ]] && exit 0
+  exit 1
+fi
+if [[ "$1" == "manifest" && "$2" == "inspect" && "${FAIL_MANIFEST:-0}" == "1" ]]; then
+  exit 1
+fi
+exit 0
+EOF
+chmod +x "${FAKE_BIN}/docker"
+
+export DOCKER_LOG="${FAKE_LOG}"
+
+RUN_OUT="${TMP_DIR}/run.out"
+
+run_it() {
+  : >"${FAKE_LOG}"
+  (
+  cd "${PROJECT_DIR}"
+    EMULATION_LOGS_DIR="${FAKE_LOGS}" \
+    BLOCKSCI_IMAGE="ghcr.io/ondrejman/blocksci-complete:latest" \
+    COINJOIN_EMULATOR_IMAGE="ghcr.io/ondrejman/emulator-manager:latest" \
+    COINJOIN_ANALYSIS_IMAGE="ghcr.io/ondrejman/coinjoin-analysis:latest" \
+    PATH="${FAKE_BIN}:${PATH}" \
+    "$@"
+  ) >"${RUN_OUT}" 2>&1
+  RUN_STATUS=$?
+  cat "${RUN_OUT}"
+  return "${RUN_STATUS}"
+}
+
+# The CLI prints the run configuration only after every gate has passed.
+launched() {
+  grep -q '^Run configuration: ' "${RUN_OUT}"
+}
+
+# `doctor` probes the runtime and every workload image.
+run_it bash "${LAUNCHER}" doctor
+grep -q '^info ' "${FAKE_LOG}"
+grep -q '^manifest inspect ghcr.io/ondrejman/blocksci-complete:latest ' "${FAKE_LOG}"
+grep -q '^doctor OK' "${RUN_OUT}"
+# The retired wrapper image must not be probed any more.
+if grep -q 'coinjoin-pipeline:latest' "${FAKE_LOG}"; then
+  echo "FAIL: the wrapper image is gone and must not be preflighted" >&2
+  exit 1
+fi
+
+# A dry run passes the configuration gates without contacting the runtime;
+# the runtime and image gates apply to live runs (exercised below).
+run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/overactive-local.json --dry-run
+launched
+if [[ -s "${FAKE_LOG}" ]]; then
+  echo "FAIL: a dry run contacted the container runtime" >&2
+  exit 1
+fi
+
+# A runtime failure and a strict scenario failure both prevent launch. The
+# daemon gate runs only for live runs; it fails before anything is executed.
+set +e
+FAIL_INFO=1 run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/overactive-local.json >"${TMP_DIR}/daemon.out" 2>&1
+daemon_exit=$?
+set -e
+[[ "${daemon_exit}" -ne 0 ]]
+grep -q 'daemon/API is not reachable' "${TMP_DIR}/daemon.out"
+if launched; then
+  echo "FAIL: daemon failure launched the wrapper" >&2
+  exit 1
+fi
+
+set +e
+run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/missing.json --dry-run >"${TMP_DIR}/scenario.out" 2>&1
+scenario_exit=$?
+set -e
+[[ "${scenario_exit}" -ne 0 ]]
+if launched; then
+  echo "FAIL: invalid scenario launched the wrapper" >&2
+  exit 1
+fi
+
+# Images may be supplied locally; otherwise an inaccessible registry blocks execution.
+run_it env LOCAL_IMAGES=1 bash "${LAUNCHER}" doctor
+grep -q '^image inspect ghcr.io/ondrejman/blocksci-complete:latest ' "${FAKE_LOG}"
+if grep -q '^manifest inspect ' "${FAKE_LOG}"; then
+  echo "FAIL: locally available image was unnecessarily resolved from registry" >&2
+  exit 1
+fi
+
+# A live `analyze` needs the BlockSci and coinjoin-analysis images locally;
+# the image gate fails before anything is executed.
+mkdir -p "${FAKE_LOGS}/existing-run"
+set +e
+FAIL_MANIFEST=1 run_it bash "${LAUNCHER}" analyze --engine wasabi --run-dir existing-run >"${TMP_DIR}/image.out" 2>&1
+image_exit=$?
+set -e
+[[ "${image_exit}" -ne 0 ]]
+grep -q 'image is unavailable locally and from its registry' "${TMP_DIR}/image.out"
+if launched; then
+  echo "FAIL: inaccessible image launched the wrapper" >&2
+  exit 1
+fi
+
+# Kubernetes preflight fails before launch when the kubeconfig is missing.
+set +e
+# Not a dry run: the kubeconfig gate only applies to live runs, and it fails
+# before anything is executed.
+run_it bash "${LAUNCHER}" emulate --engine wasabi --scenario scenarios/overactive-local.json --driver kubernetes --kubeconfig "${TMP_DIR}/missing-kubeconfig" >"${TMP_DIR}/kube.out" 2>&1
+kube_exit=$?
+set -e
+[[ "${kube_exit}" -ne 0 ]]
+grep -q 'kubeconfig not found' "${TMP_DIR}/kube.out"
+if launched; then
+  echo "FAIL: Kubernetes preflight failure launched the wrapper" >&2
+  exit 1
+fi
+
+echo "PASS: runIt.sh doctor gates pipeline actions without creating runtime resources."
