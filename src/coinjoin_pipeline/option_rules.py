@@ -208,6 +208,8 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
         if _supplied(config, path, value) and not s3_emulation:
             errors.append(f"{flag} applies only to the S3 emulation Job (--driver kubernetes --artifact-backend s3)")
     if s3_backend and action == "full-run":
+        if config.blocksci.workflow == "cached":
+            errors.append("full-run cannot reuse a cache before emulation; use --blocksci-workflow reusable")
         # Any analyzer subset runs, emulation alone included. Mappings read the
         # coinjoin-analysis baseline, which a fresh run has only if it computes it.
         if stages.mappings and not stages.analysis:
