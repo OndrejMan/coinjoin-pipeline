@@ -167,3 +167,89 @@ existing command flags load the same typed configuration directly. Defaults,
 image selection and run identity are resolved before execution; YAML is never
 translated to a second command line. The interactive builder and generated
 command metadata have been removed. See [Current architecture](docs/architecture.md).
+
+## Commands and contracts
+
+The report label provenance, BlockSci threshold precedence, and distinction
+between raw and linked detector results are documented in
+[Analysis semantics](docs/analysis-semantics.md). The PBS filesystem, marker,
+and scheduler contract is documented in
+[PBS stage contract](docs/pbs-stage-contract.md).
+
+Host commands are `doctor`, `pull`, `version`, `watch`, `clean-s3`, and
+`download-report`. `watch` discovers the outer Kubernetes pod from `--run-id`
+and streams prefixed controller output without starting a container. Pass
+`--all` to multiplex the controller, S3 uploader, and the selected engine
+service (Wasabi coordinator or the stable JoinMarket distributor);
+the namespace defaults to the pipeline default `coinjoin` (pass
+`--namespace man5-ns` for the remote examples below). The host-level
+`--runs-root` is also used when discovering `.pbs/*.jobid` files.
+`--frontend-log` adds an existing `tee` transcript, replayed from its start
+rather than its last `--tail` lines, and `--save` preserves the
+unified output. `--pbs` adds PBS stdout/stderr to the Kubernetes stream, while
+`--pbs-only` needs no kubeconfig. PBS job IDs are discovered from
+`.pbs/*.jobid`, from `$HOME/<run-id>-full-run.log`, or supplied explicitly with
+repeatable `--pbs-job STAGE=JOB_ID`; job state changes are included in the
+prefixed stream. Pipeline actions are `full-run`, `emulate`, `clean`, `analyze`,
+`export`, `coinjoin-analysis`, `pbs-from-s3`, `mappings`, `mainnet-sync`, and
+`initialize`, plus the `runs`, `scenarios`, and `external` command groups.
+
+`cjp --help` lists every option grouped by configuration section, each with
+its YAML key and default, so a flag and its YAML spelling can be looked up in
+one place; every utility answers `--help` too. Options given after
+`cjp run CONFIG.yaml` override the file. A `--dry-run` prints the resolved
+run directory and component images before the execution plan. Exit codes:
+`0` success; `2` invalid configuration or arguments, a failed preflight check
+(each problem on its own `ERROR:` line), or an execution failure reported as
+`[ERROR] ...`; `3` `clean-s3` not confirmed; `5` an unexpected runtime error,
+or a failed `pull`, S3 transfer or log source of a utility; `130` interrupted.
+A failed local container may also pass its own exit code through.
+
+Before a new full run, the CLI atomically creates `research_manifest.json` in
+the expected run directory. Stage-only commands update the explicitly selected
+run. Host data is namespaced as `host_launcher`, preserving established
+report fields. It records the resolved configuration, original user command,
+requested version, effective images, runtime, timestamps,
+working directory, status, and exit code. Sensitive-looking keys are redacted.
+`host_launcher.environment` records effective `BLOCKSCI_`, `COINJOIN_`,
+`KUBERNETES_`, `MAPPINGS_`, `SAKE_`, and `PBS_` environment options, with resolved
+launcher values taking precedence over inherited values. Secret-bearing keys
+are omitted from this environment snapshot.
+The analytical report separately records resolved image IDs and repository digests.
+
+## Artifact backends
+
+`shared-storage` remains the default. Kubernetes and PBS continue to use the
+same `/storage` paths in this mode.
+
+The optional `s3` backend uses CESNET/MetaCentrum S3-compatible object storage,
+not Amazon AWS. Kubernetes uploads from inside its Job. PBS compute nodes
+download into `$SCRATCHDIR`, analyze locally, and upload results. The frontend
+only submits `kubectl` and `qsub`.
+
+The bucket must already exist. MetaCentrum PBS jobs use `s5cmd` with a named
+profile in a credentials file such as
+`/storage/brno2/home/<login>/.aws/credentials`:
+
+```ini
+[coinjoin]
+aws_access_key_id = <access_key_from_gatekeeper>
+aws_secret_access_key = <secret_key_from_gatekeeper>
+max_concurrent_requests = 200
+max_queue_size = 20000
+multipart_threshold = 128MB
+multipart_chunksize = 32MB
+```
+
+Those two `aws_*` names are credentials-file fields consumed by `s5cmd`, not
+supported environment-variable configuration. The pipeline never accepts
+credential values through CLI arguments.
+
+Provision the Kubernetes Secret separately:
+
+```bash
+kubectl create secret generic coinjoin-s3-credentials \
+  --from-literal=S3_ACCESS_KEY_ID='<access-key>' \
+  --from-literal=S3_SECRET_ACCESS_KEY='<secret-key>' \
+  --from-literal=S3_DEFAULT_REGION='us-east-1'
+```
