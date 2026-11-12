@@ -35,8 +35,12 @@ class PersistentSettings(TypedDict):
 
     index_dir: str
     backup_uri: str | None
-    # A reading job restores the backup into its own scratch.
+    # A reading job restores the backup into its own scratch, or fills index_dir and keeps it.
     in_scratch: bool
+    restore: bool
+    dumplings_uri: str | None
+    dumplings_dir: str | None
+    storage_report_uri: str | None
     # How long the job's lock entry lives, and how long the job waits for the lock.
     lock_seconds: int
     wait_seconds: int
