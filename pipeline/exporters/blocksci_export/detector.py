@@ -45,6 +45,8 @@ class BlocksciChain(Blockchain, Protocol):
 
     def address_from_string(self, address: str) -> object: ...
 
+    def classify_coinjoin_mix_events(self, coinjoin_txes: list[object]) -> dict[object, dict[str, list[str]]]: ...
+
     def __getitem__(self, height: int) -> BlocksciBlock: ...
 
 
@@ -350,6 +352,31 @@ def export_subset_matching_records(
     window = scan_window(chain, start_height, end_height)
     txes, skipped_txids = _scan_coinjoins_by_subset_matching(chain, detector, window)
     return _records_by_txid(txes), skipped_txids
+
+
+def export_blocksci_mix_events(
+    config_path: Path,
+    coinjoin_txids: Iterable[str],
+) -> tuple[dict[str, dict[str, list[str]]] | None, str | None]:
+    """Liquidity event of every input and output of the detected CoinJoins, by txid.
+
+    The detection result is the mix, as for clustering: an input spending one of
+    these CoinJoins is a remix, an output spent by one of them is a remix.
+    """
+    coinjoin_txids = sorted(set(coinjoin_txids))
+    if not coinjoin_txids:
+        return None, "BlockSci detected no CoinJoins to classify."
+    try:
+        chain = _require_blocksci().Blockchain(str(config_path))
+        _require_binding(chain, "classify_coinjoin_mix_events", "liquidity event classification binding")
+        classified = chain.classify_coinjoin_mix_events([chain.tx_with_hash(txid) for txid in coinjoin_txids])
+    except Exception as exc:
+        return None, f"BlockSci liquidity event classification failed: {exc}"
+    return {
+        txid: {"inputs": list(events["inputs"]), "outputs": list(events["outputs"])}
+        for tx, events in classified.items()
+        if (txid := to_json_text(safe_attr(tx, "hash")))
+    }, None
 
 
 def build_default_coinjoin_clustering_heuristic() -> ClusteringHeuristic:

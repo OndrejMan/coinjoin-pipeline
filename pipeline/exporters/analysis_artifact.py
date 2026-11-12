@@ -42,7 +42,7 @@ def load_analysis(
         raise ValueError("BlockSci analysis mode does not match the requested report mode")
     if mode == "emulator" and not isinstance(artifact.get("integration_diagnostics"), dict):
         raise ValueError("BlockSci analysis artifact has invalid integration_diagnostics")
-    for field in ("predicted_address_clusters",):
+    for field in ("predicted_address_clusters", "mix_events"):
         if artifact.get(field) is not None and not isinstance(artifact[field], dict):
             raise ValueError(f"BlockSci analysis artifact has invalid {field}")
     provenance = artifact.get("image_provenance")

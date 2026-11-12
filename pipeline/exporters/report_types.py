@@ -215,6 +215,8 @@ class BlockSciAnalysisArtifact(TypedDict):
     image_provenance: JsonObject
     predicted_address_clusters: dict[str, str] | None
     cluster_export_error: str | None
+    mix_events: dict[str, dict[str, list[str]]] | None
+    mix_events_error: str | None
     # External-chain analyses only: the heights scanned and where the baseline's
     # transactions sit in this index (None when the index does not hold one).
     scan_window: JsonObject | None
