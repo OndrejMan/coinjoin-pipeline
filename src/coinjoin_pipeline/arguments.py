@@ -342,7 +342,7 @@ def _canonical_action(action: str) -> str:
 
 
 def load_configuration(argv: list[str]) -> PipelineConfiguration:
-    """Merge YAML and explicit options as values, without rendering/parsing argv."""
+    """Decode the YAML file, when given, and the explicit options into one configuration."""
     index = action_index(argv)
     if index is not None:
         head, action, tail = argv[:index], argv[index], argv[index + 1 :]
