@@ -339,10 +339,6 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-
 def run_external_configuration(config):
     """Adapt the research operation to the common resolved configuration."""
     args = argparse.Namespace(
@@ -361,3 +357,7 @@ def run_external_configuration(config):
         blocksci_image=config.images.blocksci,
     )
     external_analyze(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
