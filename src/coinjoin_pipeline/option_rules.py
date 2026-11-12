@@ -49,7 +49,10 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
         # Without an index directory these would be dropped silently: the job uses the S3 cache.
         errors.extend(
             f"{flag} requires --blocksci-index-dir"
-            for flag, value in (("--blocksci-index-backup-uri", backup_uri),)
+            for flag, value in (
+                ("--blocksci-index-backup-uri", backup_uri),
+                ("--blocksci-index-in-scratch", blocksci.index_in_scratch),
+            )
             if value
         )
         if multijob:
@@ -78,6 +81,10 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
         errors.append("--blocksci-index-dir must not contain '..'")
     if blocksci.task == "backup" and not backup_uri:
         errors.append("--blocksci-task backup requires --blocksci-index-backup-uri")
+    if blocksci.index_in_scratch and (not backup_uri or blocksci.task not in {"script", "notebook"}):
+        errors.append(
+            "--blocksci-index-in-scratch requires --blocksci-index-backup-uri and --blocksci-task script or notebook"
+        )
     return errors
 
 
