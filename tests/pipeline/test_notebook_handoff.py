@@ -1,4 +1,4 @@
-"""Notebook connection handoff with mocked S3; no PBS, network or containers."""
+"""Notebook connection/seed handoff with mocked S3; no PBS, network or containers."""
 
 import json
 import threading
@@ -9,11 +9,36 @@ import pytest
 
 from coinjoin_pipeline.configuration import BlockSciConfiguration
 from coinjoin_pipeline.execution.pbs.analysis_modes import analysis_mode_settings
-from coinjoin_pipeline.execution.pbs.blocksci_analysis_jobs import notebook_connection
+from coinjoin_pipeline.execution.pbs.blocksci_analysis_jobs import notebook_connection, seed_notebook
+from coinjoin_pipeline.execution.pbs.stage import StageFailure
 
 
 def stage():
     return SimpleNamespace(run_id="r1", run_prefix="s3://bucket/runs/r1", storage=Mock(), log=Mock())
+
+
+def test_seed_is_exclusive_and_rejects_paths(tmp_path):
+    job = stage()
+    job.storage.cat_json.return_value = {"name": "analysis.py", "text": "print(1)"}
+    seed_notebook(job, tmp_path)
+    output = tmp_path / "analysis.py"
+    assert output.read_text() == "print(1)"
+    assert output.stat().st_mode & 0o777 == 0o600
+    output.write_text("user edits")
+    with pytest.raises(FileExistsError):
+        seed_notebook(job, tmp_path)
+    assert output.read_text() == "user edits"
+    job.storage.cat_json.return_value = {"name": "../escape.py", "text": "x"}
+    with pytest.raises(StageFailure, match="Invalid initial"):
+        seed_notebook(job, tmp_path)
+
+
+def test_missing_seed_does_not_write_anything(tmp_path):
+    job = stage()
+    job.storage.exists.return_value = False
+    seed_notebook(job, tmp_path)
+    assert not list(tmp_path.iterdir())
+    job.storage.cat_json.assert_not_called()
 
 
 def test_publishes_only_current_pbs_job_and_removes_connection_on_failure(tmp_path, monkeypatch):
