@@ -30,6 +30,12 @@ def image_names(registry: str | None = None) -> dict[str, str]:
     return {component: f"{prefix}/{repository}" for component, repository in REPOSITORIES.items()}
 
 
+# The tags a local build of each component's repository produces.
+LOCAL_IMAGES = {
+    "emulator": "coinjoin-emulator:local",
+    "coinjoin_analysis": "coinjoin-analysis:local",
+    "blocksci": "blocksci-complete:local",
+}
 IMAGE_ENVIRONMENT = {
     "emulator": "COINJOIN_EMULATOR_IMAGE",
     "coinjoin_analysis": "COINJOIN_ANALYSIS_IMAGE",
@@ -67,9 +73,10 @@ def resolve_images(
     version: str | None,
     overrides: dict[str, str | None],
     *,
+    local: bool = False,
     registry: str | None = None,
 ) -> Images:
-    """Each component's configured image, else its environment variable, else the release tag."""
+    """Each component's configured image, else its environment variable, else the release or local tag."""
     effective_version = version or DEFAULT_VERSION
     validate_version(effective_version)
     resolved: dict[str, str] = {}
@@ -79,7 +86,7 @@ def resolve_images(
             validate_image(override)
             resolved[component] = override
         else:
-            resolved[component] = f"{name}:{effective_version}"
+            resolved[component] = LOCAL_IMAGES[component] if local else f"{name}:{effective_version}"
     return Images(**resolved)
 
 

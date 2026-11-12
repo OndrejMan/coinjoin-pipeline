@@ -48,7 +48,8 @@ SECTIONS = {
     "": ("run options", None),
     "images": (
         "component images",
-        "Each image is the explicit option, else its environment variable, else the release tag --version.",
+        "Each image is the explicit option, else its environment variable, else the --local-build tag, "
+        "else the release tag --version.",
     ),
 }
 
@@ -72,6 +73,7 @@ HELP = {
         "registry and owner of the project's images, e.g. ghcr.io/you (also $COINJOIN_IMAGE_REGISTRY; "
         "default: ghcr.io/ondrejman)"
     ),
+    "images.local_build": "use locally built images (*:local)",
     "images.unified_report": ("unified-report job image (default: container/unified-report.image)"),
     **{
         f"images.{component}": f"{component.replace('_', '-')} image (also ${variable})"
