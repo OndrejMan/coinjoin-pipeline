@@ -10,7 +10,6 @@ its manifest is copied to the run.
 from __future__ import annotations
 
 import json
-import re
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -36,16 +35,31 @@ def require_tools(*tools: str) -> None:
             raise StageFailure(f"{tool} is required to pack or unpack the BlockSci cache")
 
 
+def edit_config(stage: Stage, section: str, key: str, value: object) -> None:
+    """Set one existing key of the run's BlockSci config.json, such as parser.maxBlockNum."""
+    config = stage.work / BLOCKSCI_CONFIG_FILE
+    try:
+        content = json.loads(config.read_text())
+        if key not in content[section]:
+            raise KeyError(key)
+        content[section][key] = value
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise StageFailure(f"Could not set {section}.{key} in the BlockSci config") from error
+    config.write_text(json.dumps(content, indent=4) + "\n")
+
+
+def config_value(stage: Stage, section: str, key: str) -> object:
+    """One key of the run's BlockSci config.json, or None when it has none."""
+    try:
+        content = json.loads((stage.work / BLOCKSCI_CONFIG_FILE).read_text())
+        return content[section][key]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def canonicalize_index(stage: Stage) -> None:
     """Point config.json at parsed/ as this job's container sees it; a copied index still names its old one."""
-    config = stage.work / BLOCKSCI_CONFIG_FILE
-    parsed = f"{container_run(stage)}/{BLOCKSCI_DIR}/parsed"
-    text, replaced = re.subn(
-        r'("dataDirectory"\s*:\s*)"[^"]*"', lambda match: f'{match.group(1)}"{parsed}"', config.read_text()
-    )
-    if not replaced:
-        raise StageFailure("Could not canonicalize BlockSci dataDirectory")
-    config.write_text(text)
+    edit_config(stage, "chainConfig", "dataDirectory", f"{container_run(stage)}/{BLOCKSCI_DIR}/parsed")
 
 
 def check_manifest(manifest: dict, label: str, image_name: str, run_id: str | None = None) -> None:

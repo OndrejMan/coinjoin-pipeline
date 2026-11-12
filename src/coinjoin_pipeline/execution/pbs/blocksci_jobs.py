@@ -7,7 +7,6 @@ what both share.
 from __future__ import annotations
 
 import json
-import re
 import shlex
 import shutil
 import subprocess
@@ -40,7 +39,9 @@ from coinjoin_pipeline.execution.pbs.blocksci_index import (
     INDEX_FILES,
     canonicalize_index,
     check_manifest,
+    config_value,
     container_run,
+    edit_config,
     open_index,
     require_tools,
     restore_index,
@@ -148,13 +149,7 @@ def blocksci(stage: Stage) -> None:
 
 def set_max_block(stage: Stage, max_block: int) -> None:
     """Let the parser read through max_block: BlockSci's maxBlockNum is exclusive."""
-    config = stage.work / BLOCKSCI_CONFIG_FILE
-    text, replaced = re.subn(
-        r'("maxBlockNum"\s*:\s*)-?\d+', lambda match: f"{match.group(1)}{max_block + 1}", config.read_text()
-    )
-    if not replaced:
-        raise StageFailure("Could not update parser.maxBlockNum")
-    config.write_text(text)
+    edit_config(stage, "parser", "maxBlockNum", max_block + 1)
 
 
 def check_source(manifest: dict, source_kind: str, network: str) -> None:
@@ -329,10 +324,10 @@ def parse_source(stage: Stage, source: SourceSettings) -> tuple[Path | None, int
         shutil.copyfile(index / "config.json", imported / "config.json")
         shutil.copytree(index / "parsed", imported / "parsed")
         canonicalize_index(stage)
-        found = re.search(r'"maxBlockNum"\s*:\s*(\d+)', (stage.work / BLOCKSCI_CONFIG_FILE).read_text())
-        if found is None or int(found.group(1)) <= 0:
+        limit = config_value(stage, "parser", "maxBlockNum")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
             raise StageFailure("External BlockSci config has no positive parser.maxBlockNum")
-        max_block = int(found.group(1)) - 1
+        max_block = limit - 1
         stage.log(f"imported external index through block {max_block}")
         return None, max_block, {}
     stage.download(BITCOIN_DATA_DIR)

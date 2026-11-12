@@ -445,3 +445,27 @@ def test_blocksci_parser_and_chain_check_run_without_the_host_environment(tmp_pa
     settings = {"source": {"network": "bitcoin_regtest"}, "python_command": "python3"}
     assert blocksci_jobs.verify_chain(stage, settings, 5, update=False, index_binds=()) == (5, "00")
     assert stage.image_command.call_args.kwargs["cleanenv"] is True
+
+
+def test_blocksci_config_edits_keep_the_rest_of_the_file(tmp_path: Path) -> None:
+    from unittest import mock
+
+    from coinjoin_pipeline.execution.pbs import blocksci_index, blocksci_jobs
+    from coinjoin_pipeline.execution.pbs.stage import StageFailure
+
+    stage = mock.Mock(run_id="run-1", work=tmp_path)
+    config = tmp_path / blocksci_jobs.BLOCKSCI_CONFIG_FILE
+    config.parent.mkdir(parents=True)
+    # A path with a quote would end the old regex's match early.
+    original = {"chainConfig": {"coinName": "bitcoin_regtest", "dataDirectory": '/old/"run"/parsed'},
+                "parser": {"maxBlockNum": 10, "disk": {"coinDirectory": "/mnt/data"}}}
+    config.write_text(json.dumps(original), encoding="utf-8")
+    blocksci_index.canonicalize_index(stage)
+    blocksci_jobs.set_max_block(stage, 41)
+    edited = json.loads(config.read_text())
+    assert edited["chainConfig"] == {"coinName": "bitcoin_regtest", "dataDirectory": "/runs/emulation/logs/run-1/blocksci_data/parsed"}
+    assert edited["parser"] == {"maxBlockNum": 42, "disk": {"coinDirectory": "/mnt/data"}}
+    assert blocksci_index.config_value(stage, "parser", "maxBlockNum") == 42
+    config.write_text(json.dumps({"chainConfig": {}}), encoding="utf-8")
+    with pytest.raises(StageFailure, match="chainConfig.dataDirectory"):
+        blocksci_index.canonicalize_index(stage)
