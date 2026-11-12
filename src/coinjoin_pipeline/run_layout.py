@@ -13,7 +13,7 @@ import sys
 
 from exporters import artifact_paths as paths
 
-from .storage.s3 import KUBERNETES_MARKER_DIR, PBS_MARKER_DIR, RUN_ID_MAX_LENGTH, RUN_ID_RE
+from .storage.s3 import RUN_ID_MAX_LENGTH, RUN_ID_RE
 
 EMULATION_STAGE = "kubernetes-emulation"
 BASELINE_STAGE = "coinjoin-analysis"
@@ -29,7 +29,7 @@ def run_layout() -> dict[str, object]:
     return {
         "$comment": GENERATED_NOTE,
         "runId": {"pattern": RUN_ID_RE.pattern, "maxLength": RUN_ID_MAX_LENGTH},
-        "markers": [KUBERNETES_MARKER_DIR, PBS_MARKER_DIR],
+        "markers": [paths.KUBERNETES_MARKER_DIR, paths.PBS_MARKER_DIR],
         "files": {
             "dataset": f"{paths.REPORT_DIR}/{paths.LIQUIDITY_DATASET}",
             "scenario": paths.SCENARIO_FILE,

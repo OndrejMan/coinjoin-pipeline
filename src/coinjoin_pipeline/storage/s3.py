@@ -12,10 +12,13 @@ import re
 import shlex
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import urlparse
+
+from exporters.artifact_paths import KUBERNETES_MARKER_DIR, pbs_marker
 
 from coinjoin_pipeline.configuration import required
 from coinjoin_pipeline.storage.s5client import S5Client, S5Error, no_object_found
@@ -25,9 +28,6 @@ if TYPE_CHECKING:
 
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
 RUN_ID_MAX_LENGTH = 63
-#: Directories of a run prefix holding terminal markers: PBS stages and the Kubernetes uploader.
-PBS_MARKER_DIR = ".pbs"
-KUBERNETES_MARKER_DIR = ".k8s"
 PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 # The variables the in-pod s5 wrapper (k8s_s3_access.sh) unsets, as a test checks;
@@ -213,11 +213,21 @@ def s5_client(access: S3Access) -> S5Client:
     return S5Client(access.endpoint_url, access.credentials_file, access.profile)
 
 
-def run_s5cmd(access: S3Access, *arguments: str) -> subprocess.CompletedProcess[str]:
+T = TypeVar("T")
+
+
+def _s5(access: S3Access, call: Callable[[S5Client], T]) -> T:
+    """call with an S5Client for access; a missing s5cmd or a failed listing raises ArtifactTransportError."""
     try:
-        return s5_client(access).run(*arguments)
+        return call(s5_client(access))
     except FileNotFoundError as error:
         raise ArtifactTransportError("s5cmd is required on the frontend for S3-compatible transfers") from error
+    except S5Error as error:
+        raise ArtifactTransportError(str(error)) from error
+
+
+def run_s5cmd(access: S3Access, *arguments: str) -> subprocess.CompletedProcess[str]:
+    return _s5(access, lambda client: client.run(*arguments))
 
 
 def run_prefix_uri(artifact_uri: str, run_id: str) -> str:
@@ -227,7 +237,7 @@ def run_prefix_uri(artifact_uri: str, run_id: str) -> str:
 
 def stage_marker_uri(run_prefix: str, stage: str, outcome: str) -> str:
     """``<run-prefix>/.pbs/<stage>.<outcome>``: the terminal marker a PBS stage's trap uploads."""
-    return f"{run_prefix}/{PBS_MARKER_DIR}/{stage}.{outcome}"
+    return f"{run_prefix}/{pbs_marker(stage, outcome)}"
 
 
 def upload_marker_uri(run_prefix: str, outcome: str) -> str:
@@ -237,17 +247,12 @@ def upload_marker_uri(run_prefix: str, outcome: str) -> str:
 
 def s3_listing(access: S3Access, pattern: str) -> list[dict[str, object]]:
     """The objects ``ls`` lists for pattern, empty when none; any other failure raises."""
-    try:
-        return s5_client(access).listing(pattern, timeout=None)
-    except FileNotFoundError as error:
-        raise ArtifactTransportError("s5cmd is required on the frontend for S3-compatible transfers") from error
-    except S5Error as error:
-        raise ArtifactTransportError(str(error)) from error
+    return _s5(access, lambda client: client.listing(pattern, timeout=None))
 
 
 def s3_object_exists(access: S3Access, object_uri: str) -> bool:
     """Whether exactly this key exists: ``ls`` of a key also lists every longer key it starts."""
-    return any(entry.get("key") == object_uri for entry in s3_listing(access, object_uri))
+    return _s5(access, lambda client: client.exists(object_uri, timeout=None))
 
 
 def s3_prefix_has_objects(access: S3Access, prefix: str) -> bool:

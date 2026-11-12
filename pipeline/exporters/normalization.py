@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterator
 from pathlib import Path
 
-from exporters.artifact_paths import EXPORTED_BLOCKS_DIR, FALSE_CJTXS_GLOB
+from exporters.artifact_paths import (
+    EXPORTED_BLOCK_GLOB,
+    EXPORTED_BLOCKS_DIR,
+    FALSE_CJTXS_GLOB,
+    block_height_from_path,
+)
 from exporters.common import (
     DEFAULT_FIRST_WASABI2_BLOCK,
     JsonObject,
@@ -111,13 +115,6 @@ def normalize_coinjoin_analysis(data: JsonObject) -> dict[str, TransactionRecord
     return {txid: normalize_coinjoin_analysis_record(txid, tx) for txid, tx in sorted_items(coinjoins)}
 
 
-def block_height_from_path(path: Path) -> int | None:
-    match = re.fullmatch(r"block_(\d+)\.json", path.name)
-    if match is None:
-        return None
-    return int(match.group(1))
-
-
 def is_coinbase_tx(tx: JsonObject) -> bool:
     inputs = tx.get("vin", [])
     return bool(inputs) and "coinbase" in inputs[0]
@@ -128,7 +125,7 @@ def exported_block_paths(run_dir: Path) -> list[Path]:
     block_dir = run_dir / EXPORTED_BLOCKS_DIR
     if not block_dir.is_dir():
         return []
-    return sorted(block_dir.glob("block_*.json"), key=lambda path: block_height_from_path(path) or -1)
+    return sorted(block_dir.glob(EXPORTED_BLOCK_GLOB), key=lambda path: block_height_from_path(path) or -1)
 
 
 def iter_exported_blocks(run_dir: Path) -> Iterator[tuple[Path, int | None, JsonObject]]:

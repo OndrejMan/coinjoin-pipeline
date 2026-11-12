@@ -1,7 +1,7 @@
 """Entry point of a mainnet synchronization PBS job: ``python3 run.py settings.json <stage>``.
 
-The job ships this module and those it imports at their paths below ``src/``
-(``pbs.scripts.package_files``), as the S3 stage worker does. Besides a stage, the
+The job ships this module and those it imports at their paths below ``src/`` or
+``pipeline/`` (``pbs.scripts.package_files``), as the S3 stage worker does. Besides a stage, the
 arguments can name an explicit recovery (``restore <manifest> <new directory>``,
 ``restore-dumplings <manifest> <new directory>``) or ``failed <stage> <started>``, which
 the job's shell trap runs. Standard library only and Python 3.8 syntax.
@@ -14,6 +14,8 @@ import signal
 import sys
 from collections.abc import Callable
 from pathlib import Path
+
+from exporters.artifact_paths import pbs_marker
 
 from coinjoin_pipeline.execution.mainnet_jobs import blocksci, checkpoint, clear, pack, producer, restore
 from coinjoin_pipeline.execution.mainnet_worker import Worker
@@ -45,7 +47,8 @@ def main(argv: list[str] | None = None) -> None:
         if (len(args) > 3 and args[3] == "0") or (worker.run / f"{worker.stage}.quiescent").is_file():
             worker.release_dataset()
         worker.progress("failed", state="failed", error="PBS stage failed; inspect the persistent job logs")
-        worker.publish_json(worker.remote + f"/.pbs/mainnet-{worker.stage}.failed", {"run_id": worker.run_id})
+        failed = pbs_marker("mainnet-" + worker.stage, "failed")
+        worker.publish_json(f"{worker.remote}/{failed}", {"run_id": worker.run_id})
         worker.report_storage()
         return
     worker.stage = args[1]

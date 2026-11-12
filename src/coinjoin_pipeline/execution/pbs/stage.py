@@ -14,7 +14,7 @@ import threading
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from exporters.artifact_paths import LOGS_DIR
+from exporters.artifact_paths import LOGS_DIR, pbs_marker
 
 from coinjoin_pipeline.execution.pbs.apptainer import MISSING_RUNTIME, exec_command, find_runtime
 from coinjoin_pipeline.execution.pbs.stage_settings import StageSettings
@@ -130,10 +130,10 @@ class Stage:
         return status
 
     def publish_marker(self, outcome: str) -> None:
-        marker = self.work / ".pbs" / f"{self.name}.{outcome}"
+        marker = self.work / pbs_marker(self.name, outcome)
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(outcome + "\n")
-        self.storage.copy(marker, f"{self.run_prefix}/.pbs/{self.name}.{outcome}")
+        self.storage.copy(marker, f"{self.run_prefix}/{pbs_marker(self.name, outcome)}")
 
     def finish(self, status: int) -> int:
         """Publish the terminal marker; a done marker that fails to upload turns into a failure."""

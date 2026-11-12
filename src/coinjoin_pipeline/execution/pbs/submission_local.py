@@ -9,7 +9,7 @@ import sys
 import time
 from pathlib import Path
 
-from exporters.artifact_paths import BASELINE_FILE
+from exporters.artifact_paths import BASELINE_FILE, pbs_marker
 
 from coinjoin_pipeline.configuration import MappingsConfiguration
 from coinjoin_pipeline.execution.probes import PROBE_QUEUED, PROBE_RUNNING, PROBE_TERMINAL
@@ -92,8 +92,8 @@ def wait_for_pbs_marker(
     timeout_seconds: int | None = None,
 ) -> None:
     """Block until the PBS stage writes a marker, with qstat and deadline fallbacks."""
-    done = run_dir / ".pbs" / f"{stage}.done"
-    failed = run_dir / ".pbs" / f"{stage}.failed"
+    done = run_dir / pbs_marker(stage, "done")
+    failed = run_dir / pbs_marker(stage, "failed")
     job_id = job_id or submission.read_pbs_job_id(run_dir, stage)
     deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
     terminal_state_seen: str | None = None
@@ -138,7 +138,7 @@ def _submit_script(run_dir: Path, stage: str, script: str, dry_run: bool) -> str
         return None
     require_qsub()
     (run_dir / "logs").mkdir(parents=True, exist_ok=True)
-    script_path = run_dir / ".pbs" / f"{stage}.pbs"
+    script_path = run_dir / pbs_marker(stage, "pbs")
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(script, encoding="utf-8")
     job_id = submission.submit_pbs(script_path)

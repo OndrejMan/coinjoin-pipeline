@@ -8,6 +8,7 @@ they use only the directory names defined here.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 BLOCKSCI_DIR = "blocksci_data"
@@ -51,6 +52,13 @@ LIQUIDITY_EVENTS_CSV = "liquidity_events.csv"
 REPORT_FILE = REPORT_DIR + "/" + REPORT_JSON
 REPORT_MARKDOWN_FILE = REPORT_DIR + "/" + REPORT_MARKDOWN
 EXPORTED_BLOCKS_DIR = EMULATOR_DATA_DIR + "/btc-node"
+#: One exported block below EXPORTED_BLOCKS_DIR: block_<height>.json.
+EXPORTED_BLOCK_GLOB = "block_*.json"
+_EXPORTED_BLOCK_NAME = re.compile(r"block_(\d+)\.json")
+#: Directories of a run, and of its S3 prefix, holding job IDs and terminal markers:
+#: <stage>.jobid|done|failed of the PBS stages, upload.done|failed of the Kubernetes uploader.
+PBS_MARKER_DIR = ".pbs"
+KUBERNETES_MARKER_DIR = ".k8s"
 
 # A run the emulator has finished. The host writes RUN_MANIFEST before the
 # emulator starts, so the manifest alone must not count here.
@@ -70,6 +78,17 @@ REPORT_INPUT_FILES = (
     ANALYSIS_ARTIFACT_FILE,
     MAPPINGS_FILE,
 )
+
+
+def block_height_from_path(path: Path) -> int | None:
+    """The height an exported block_<height>.json file is named after; None for any other name."""
+    match = _EXPORTED_BLOCK_NAME.fullmatch(path.name)
+    return None if match is None else int(match.group(1))
+
+
+def pbs_marker(stage: str, suffix: str) -> str:
+    """``.pbs/<stage>.<suffix>``, relative to the run directory or to the run's S3 prefix."""
+    return f"{PBS_MARKER_DIR}/{stage}.{suffix}"
 
 
 def _tool_dir(run_dir: Path, name: str) -> Path:

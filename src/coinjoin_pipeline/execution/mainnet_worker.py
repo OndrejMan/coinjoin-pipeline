@@ -11,7 +11,6 @@ import fcntl
 import hashlib
 import json
 import os
-import re
 import shlex
 import shutil
 import signal
@@ -27,11 +26,13 @@ from typing import TYPE_CHECKING, TypedDict
 if TYPE_CHECKING:  # TypeGuard needs Python 3.10; the PBS node never evaluates annotations.
     from typing import TypeGuard
 
+from exporters.artifact_paths import pbs_marker
+
 from coinjoin_pipeline.execution.pbs.apptainer import MISSING_RUNTIME, alias_binds, exec_command, find_runtime
 from coinjoin_pipeline.execution.pbs.index_store import MEMBERS as INDEX_MEMBERS
 from coinjoin_pipeline.execution.pbs.index_store import inventory as index_inventory
 from coinjoin_pipeline.execution.pbs.index_store import usage_report, utc_now
-from coinjoin_pipeline.storage.s5client import S5Client, S5Error, new_staging
+from coinjoin_pipeline.storage.s5client import SHA256, S5Client, S5Error, new_staging
 
 # Core spans methods; cleanup below owns its lifetime rather than a single local with block.
 # pylint: disable=consider-using-with
@@ -98,7 +99,7 @@ def is_count(value: object) -> TypeGuard[int]:
 
 
 def is_sha256(value: object) -> bool:
-    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+    return isinstance(value, str) and SHA256.fullmatch(value) is not None
 
 
 def file_sizes(root: Path) -> dict[str, int]:
@@ -271,7 +272,7 @@ class Worker:
 
     def complete(self, value: JsonObject) -> None:
         """Publish this job's .done marker, which releases its PBS dependents, and free the dataset."""
-        self.publish_json(f"{self.remote}/.pbs/mainnet-{self.stage}.done", value)
+        self.publish_json(f"{self.remote}/{pbs_marker('mainnet-' + self.stage, 'done')}", value)
         self.release_dataset()
 
     def index_matches_inventory(self) -> bool:
@@ -288,7 +289,7 @@ class Worker:
             self.storage.remove(f"{self.remote}/{name}")
         for stage in stages:
             for outcome in ("done", "failed"):
-                self.storage.remove(f"{self.remote}/.pbs/mainnet-{stage}.{outcome}")
+                self.storage.remove(f"{self.remote}/{pbs_marker('mainnet-' + stage, outcome)}")
 
     def container_command(
         self,

@@ -1,8 +1,8 @@
 """Entry point of every S3 PBS job: ``python3 run.py settings.json`` on the compute node.
 
 A job ships this module, the modules it imports and its ``settings.json`` to the
-node's scratch at their paths below ``src/`` (``scripts.package_files``), so they
-import each other there exactly as on the frontend. Standard library only and
+node's scratch at their paths below ``src/`` or ``pipeline/`` (``scripts.package_files``),
+so they import each other there exactly as on the frontend. Standard library only and
 Python 3.8 syntax.
 
 Whatever happens, the job writes and uploads ``.pbs/<stage>.done`` or
@@ -21,6 +21,8 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
+
+from exporters.artifact_paths import LOGS_DIR, PBS_MARKER_DIR
 
 from coinjoin_pipeline.execution.pbs import analyzer_jobs, blocksci_analysis_jobs, blocksci_jobs
 from coinjoin_pipeline.execution.pbs.stage import Stage, StageFailure, with_job_log
@@ -67,7 +69,7 @@ def run(stage: Stage) -> int:
             raise StageFailure(f"S3 credentials file is not readable: {stage.settings['credentials']}")
         if shutil.which("s5cmd") is None:
             raise StageFailure("s5cmd is required")
-        for directory in (stage.work / ".pbs", stage.work / "logs"):
+        for directory in (stage.work / PBS_MARKER_DIR, stage.work / LOGS_DIR):
             directory.mkdir(parents=True, exist_ok=True)
         JOBS[stage.settings["job"]](stage)
     except subprocess.CalledProcessError as error:

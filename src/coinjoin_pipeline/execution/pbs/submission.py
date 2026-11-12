@@ -10,6 +10,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from exporters.artifact_paths import PBS_MARKER_DIR, pbs_marker
+
 from coinjoin_pipeline.execution.probes import PROBE_UNKNOWN
 
 from .status import (
@@ -83,7 +85,7 @@ def submit_pbs(script: Path | str, dependencies: Sequence[str] = ()) -> str:
 
 def pbs_job_id_path(run_dir: Path, stage: str) -> Path:
     """``<run>/.pbs/<stage>.jobid``: read by watch, overlap detection, cancellation and scenario-lab."""
-    return run_dir / ".pbs" / f"{stage}.jobid"
+    return run_dir / pbs_marker(stage, "jobid")
 
 
 def read_pbs_job_id(run_dir: Path, stage: str) -> str | None:
@@ -97,7 +99,7 @@ def read_pbs_job_id(run_dir: Path, stage: str) -> str | None:
 def recorded_pbs_job_ids(run_dir: Path) -> dict[str, str]:
     """Every recorded job ID of the run by stage; the files are never pruned, so finished jobs stay."""
     jobs: dict[str, str] = {}
-    for path in sorted((run_dir / ".pbs").glob("*.jobid")):
+    for path in sorted((run_dir / PBS_MARKER_DIR).glob("*.jobid")):
         job_id = read_pbs_job_id(run_dir, path.stem)
         if job_id:
             jobs[path.stem] = job_id

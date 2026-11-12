@@ -26,12 +26,14 @@ from exporters.artifact_paths import (
     BLOCKSCI_PARSE_DIR,
     COINJOIN_ANALYSIS_DIR,
     EMULATOR_DIR,
+    EXPORTED_BLOCK_GLOB,
     EXPORTED_BLOCKS_DIR,
     LOGS_DIR,
     MAPPINGS_DIR,
     REPORT_DIR,
     REPORT_FILE,
     STAGED_EXPORTERS_DIR,
+    block_height_from_path,
 )
 
 from coinjoin_pipeline.execution.pbs.blocksci_index import (
@@ -63,9 +65,9 @@ SOURCE_CACHE_DIR = "source-blocksci-parse_data"
 def emulator_max_block(stage: Stage) -> int:
     """The highest block_<height>.json the emulator exported, which bounds the parser."""
     heights = [
-        int(path.stem[len("block_") :])
-        for path in (stage.work / EXPORTED_BLOCKS_DIR).glob("block_*.json")
-        if path.stem[len("block_") :].isdigit()
+        height
+        for path in (stage.work / EXPORTED_BLOCKS_DIR).glob(EXPORTED_BLOCK_GLOB)
+        if (height := block_height_from_path(path)) is not None
     ]
     if not heights:
         raise StageFailure("BlockSci parsing could not determine the exported maximum block")
