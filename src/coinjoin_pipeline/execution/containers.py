@@ -195,6 +195,9 @@ def compose_env(
     env["NOTEBOOKS_DIR"] = str(notebooks_dir)
     env["EMULATION_LOGS_DIR"] = str(emulation_logs_dir)
     env["EXPORTERS_DIR"] = str(exporters_dir)
+    if create_directories:
+        # The BlockSci service mounts it; Docker would create a missing one owned by root.
+        notebooks_dir.mkdir(parents=True, exist_ok=True)
     detector = config.joinmarket
     env["COINJOIN_ENGINE"] = config.engine
     env["BLOCKSCI_COINJOIN_TYPE"] = config.coinjoin_type

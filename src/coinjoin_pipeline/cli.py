@@ -169,8 +169,7 @@ def start_host_manifest(
     """
     config = context.config
     root = config.runs_path
-    for path in (root, root / ".notebooks"):
-        path.mkdir(parents=True, exist_ok=True)
+    root.mkdir(parents=True, exist_ok=True)
     if config.action != "external-analyze":
         from .execution.locks import acquire_lock, command_lock_path
 
