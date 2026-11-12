@@ -314,7 +314,7 @@ and recovery of both Core and the index against local MinIO. Histories that fit
 in the two active block files recover those files from the Core checkpoint.
 The automatic
 `mainnet-sync-bounded` CI job builds its components and retains diagnostics on
-failure. See [the bounded mainnet E2E runbook](docs/mainnet-synchronization.md#omezený-mainnet-e2e-v-ci)
+failure. See [the bounded mainnet E2E runbook](docs/mainnet-synchronization.md#bounded-mainnet-e2e-in-ci)
 for limits, retained evidence and the standalone command.
 
 The same run can be described in YAML and loaded with `cjp run CONFIG.yaml`
