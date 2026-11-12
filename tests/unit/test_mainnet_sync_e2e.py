@@ -3,11 +3,13 @@
 import json
 import os
 from pathlib import Path
+import re
 import runpy
 import subprocess
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.context import resolve_configuration
@@ -198,6 +200,46 @@ def test_ci_diagnostics_keep_logs_and_results_without_copying_raw_data_or_creden
     assert not (result / "credentials").exists()
     assert not (result / "images").exists()
     assert not (result / "recovered").exists()
+
+
+def test_mainnet_ci_is_automatic_and_publishes_diagnostics_on_failure():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/tests.yaml").read_text())
+    triggers = workflow.get("on", workflow.get(True))
+    assert "push" in triggers and "pull_request" in triggers
+    job = workflow["jobs"]["mainnet-sync-bounded"]
+    assert job["needs"] == "pbs-apptainer-image" and "if" not in job
+    assert job["env"]["MAINNET_TEST_TARGET_HEIGHT"] == "400000"
+    run = next(step for step in job["steps"] if "test-mainnet-sync-mainnet.sh" in step.get("run", ""))
+    assert "timeout " in run["run"]
+    upload = next(step for step in job["steps"] if step.get("uses") == "actions/upload-artifact@v4")
+    assert upload["if"] == "always()"
+    assert upload["with"]["path"] == "github-test-results/mainnet-sync-mainnet/"
+    checkouts = {step.get("with", {}).get("repository") for step in job["steps"]}
+    assert {"OndrejMan/bitcoin-block-archive", "OndrejMan/Dumplings", "OndrejMan/blocksci"} <= checkouts
+
+
+def test_mainnet_timeouts_cover_every_job_of_a_generation_and_cleanup(tmp_path):
+    workflow = yaml.safe_load((ROOT / ".github/workflows/tests.yaml").read_text())
+    job = workflow["jobs"]["mainnet-sync-bounded"]
+    config = support.configuration(tmp_path, "http://127.0.0.1:9000", "sync-test", "mainnet", 400000)
+
+    def seconds(value):
+        hours, minutes, secs = map(int, value.split(":"))
+        return hours * 3600 + minutes * 60 + secs
+
+    walltimes = {stage: seconds(config["pbs"][stage]["walltime"]) for stage in mainnet_sync.SYNC_STAGES}
+    # Core synchronization alone took 80 minutes in the failed 400000-block run.
+    assert walltimes["producer"] >= 6 * 3600
+    # BlockSci reached only 88.8 % of the 400000-block parse in 3 hours.
+    assert walltimes["blocksci"] >= 8 * 3600
+    generation = int(job["env"]["MAINNET_TEST_GENERATION_TIMEOUT"])
+    assert generation >= sum(walltimes.values()) + 1800
+    script = (ROOT / "tests/test-mainnet-sync-local.sh").read_text()
+    assert f"MAINNET_TEST_GENERATION_TIMEOUT:-{generation}" in script
+    command = next(step["run"] for step in job["steps"] if "test-mainnet-sync-mainnet.sh" in step.get("run", ""))
+    test_timeout = int(re.search(r"(\d+)m\b", command).group(1)) * 60
+    assert test_timeout >= 2 * generation + 3600
+    assert job["timeout-minutes"] * 60 >= test_timeout + 3600
 
 
 @pytest.mark.parametrize("target", ["0", "-1", "400001", "900000", "not-a-height"])
