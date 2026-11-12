@@ -729,7 +729,8 @@ def test_s3_emulation_forwards_timeout_to_uploader_manifest(
     ],
 )
 def test_unified_report_image_keeps_existing_uri_schemes(reference: str, expected: str) -> None:
-    from coinjoin_pipeline.execution.pbs_settings import resolve_unified_report_image, with_singularity_scheme
+    from coinjoin_pipeline.images import resolve_unified_report_image
+    from coinjoin_pipeline.execution.pbs_settings import with_singularity_scheme
 
     args = configuration(unified_report_image=reference)
     assert with_singularity_scheme(resolve_unified_report_image(args)) == expected

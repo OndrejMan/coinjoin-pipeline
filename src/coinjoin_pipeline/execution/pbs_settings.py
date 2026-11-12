@@ -1,8 +1,7 @@
-"""Pure PBS resource and image-reference resolution helpers."""
+"""Pure PBS resource and Singularity image-reference resolution helpers."""
 
 from __future__ import annotations
 
-import os
 from dataclasses import fields
 from typing import TYPE_CHECKING
 
@@ -13,16 +12,9 @@ from coinjoin_pipeline.execution.pbs.defaults import (
     default_pbs_image,
 )
 from coinjoin_pipeline.execution.pbs.validation import walltime_to_seconds
-from coinjoin_pipeline.paths import CONTAINER_ROOT
-from coinjoin_pipeline.images import in_registry
 
 if TYPE_CHECKING:
     from coinjoin_pipeline.configuration import PipelineConfiguration
-
-
-def truthy_env(name: str) -> bool:
-    """Interpret the conventional false-like environment values as false."""
-    return os.environ.get(name, "").lower() not in ("", "0", "false", "no")
 
 
 IMAGE_URI_SCHEMES = (
@@ -53,28 +45,6 @@ def pbs_image(args: PipelineConfiguration, component: str) -> str:
         getattr(args.pbs, f"{component}_image") or args.pbs.image or default_pbs_image(component, args.images.registry)
     )
     return with_singularity_scheme(image)
-
-
-def read_image_lock(name: str) -> str:
-    """Read a committed image reference from the checkout's container/ dir."""
-    path = CONTAINER_ROOT / name
-    try:
-        reference = path.read_text(encoding="utf-8").strip()
-    except OSError as error:
-        raise RuntimeError(f"image lock file is unreadable: {path}") from error
-    if not reference:
-        raise RuntimeError(f"image lock file is empty: {path}")
-    return reference
-
-
-def resolve_uploader_image(args: PipelineConfiguration) -> str:
-    """Configured uploader image, else the lock file."""
-    return args.images.uploader or in_registry(read_image_lock("uploader.image"), args.images.registry)
-
-
-def resolve_unified_report_image(args: PipelineConfiguration) -> str:
-    """Configured report image, else the lock file."""
-    return args.images.unified_report or read_image_lock("unified-report.image")
 
 
 def stage_pbs_resources(

@@ -25,7 +25,7 @@ from coinjoin_pipeline.execution.locks import (
     close_locks as close_pipeline_locks,
 )
 from coinjoin_pipeline.execution.pbs.validation import PBSError
-from coinjoin_pipeline.execution.pbs_settings import resolve_unified_report_image
+from coinjoin_pipeline.images import resolve_unified_report_image
 from coinjoin_pipeline.execution.pipeline_logging import (
     captured_pipeline_stage,
 )

@@ -14,7 +14,6 @@ from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.locks import acquire_lock, command_lock_path
 from coinjoin_pipeline.execution.pbs.kerberos import kerberos_ticket_renewal
 from coinjoin_pipeline.execution.pbs.validation import PBSError
-from coinjoin_pipeline.execution.pbs_settings import truthy_env
 from coinjoin_pipeline.execution.pipeline_logging import exit_with_error
 from coinjoin_pipeline.execution.s3_emulation import run_s3_kubernetes_emulation
 from coinjoin_pipeline.execution.s3_staging import stage_kubernetes_s3_run
@@ -51,6 +50,11 @@ def _print_dry_run(args: PipelineConfiguration) -> bool:
         return True
     print("[dry-run] No containers, files, reports, or Kubernetes resources will be created.")
     return False
+
+
+def truthy_env(name: str) -> bool:
+    """Interpret the conventional false-like environment values as false."""
+    return os.environ.get(name, "").lower() not in ("", "0", "false", "no")
 
 
 def _pbs_credentials(args: PipelineConfiguration) -> AbstractContextManager[None]:

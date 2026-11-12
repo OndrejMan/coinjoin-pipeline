@@ -17,10 +17,10 @@ from coinjoin_pipeline.execution.pbs.commands import (
 )
 from coinjoin_pipeline.execution.pbs.defaults import PBSResources
 from coinjoin_pipeline.execution.pbs.validation import PBSError
+from coinjoin_pipeline.images import resolve_unified_report_image
 from coinjoin_pipeline.execution.pbs_settings import (
     pbs_image,
     pbs_wait_timeout,
-    resolve_unified_report_image,
     stage_pbs_resources,
     with_singularity_scheme,
 )

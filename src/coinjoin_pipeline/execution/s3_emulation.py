@@ -11,7 +11,7 @@ from coinjoin_pipeline.execution.kubernetes import (
     render_s3_emulation_resources,
     resolve_kubeconfig,
 )
-from coinjoin_pipeline.execution.pbs_settings import resolve_uploader_image
+from coinjoin_pipeline.images import resolve_uploader_image
 from coinjoin_pipeline.images import default_image
 from coinjoin_pipeline.paths import scenarios_dir
 from coinjoin_pipeline.registry import pinned_reference

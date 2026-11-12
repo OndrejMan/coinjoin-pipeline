@@ -5,6 +5,12 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING
+
+from .paths import CONTAINER_ROOT
+
+if TYPE_CHECKING:
+    from .configuration import PipelineConfiguration
 
 # Where the project's images are published; a fork publishing its own sets
 # images.registry (--image-registry, $COINJOIN_IMAGE_REGISTRY).
@@ -110,3 +116,25 @@ def default_image(component: str, registry: str | None = None) -> str:
     A module constant would fix the registry at import, before a configuration names one.
     """
     return f"{image_names(registry)[component]}:{DEFAULT_VERSION}"
+
+
+def read_image_lock(name: str) -> str:
+    """Read a committed image reference from the checkout's container/ dir."""
+    path = CONTAINER_ROOT / name
+    try:
+        reference = path.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        raise RuntimeError(f"image lock file is unreadable: {path}") from error
+    if not reference:
+        raise RuntimeError(f"image lock file is empty: {path}")
+    return reference
+
+
+def resolve_uploader_image(args: PipelineConfiguration) -> str:
+    """Configured uploader image, else the lock file in the configured registry."""
+    return args.images.uploader or in_registry(read_image_lock("uploader.image"), args.images.registry)
+
+
+def resolve_unified_report_image(args: PipelineConfiguration) -> str:
+    """Configured report image, else the lock file."""
+    return args.images.unified_report or read_image_lock("unified-report.image")

@@ -33,13 +33,8 @@ from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_unified_report_s3_pbs,
 )
 from coinjoin_pipeline.execution.pbs.validation import PBSError
-from coinjoin_pipeline.execution.pbs_settings import (
-    pbs_image,
-    resolve_unified_report_image,
-    resolve_uploader_image,
-    stage_pbs_resources,
-    with_singularity_scheme,
-)
+from coinjoin_pipeline.images import resolve_unified_report_image, resolve_uploader_image
+from coinjoin_pipeline.execution.pbs_settings import pbs_image, stage_pbs_resources, with_singularity_scheme
 from coinjoin_pipeline.execution.s3_markers import rollback_s3_pbs_submissions
 from coinjoin_pipeline.execution.s3_staging import ensure_staged_exporters, pbs_stages_need_exporters
 from coinjoin_pipeline.execution.stages import StageGraph, StageKind, StagePlan, s3_full_run_plan
