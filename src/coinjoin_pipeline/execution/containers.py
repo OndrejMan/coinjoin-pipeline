@@ -115,6 +115,12 @@ def compose_project_name(host_root_dir: Path) -> str:
     return f"{settings.COMPOSE_PROJECT}-{checkout_hash}"
 
 
+def blocksci_host_port(host_root_dir: Path) -> str:
+    """Pick a stable unprivileged notebook port for one pipeline checkout."""
+    checkout_hash = hashlib.sha256(str(host_root_dir).encode("utf-8")).hexdigest()
+    return str(20000 + int(checkout_hash[:8], 16) % 10000)
+
+
 def host_registry_config() -> Path | None:
     """Path to the host's Docker registry credentials, when there are any.
 
@@ -146,16 +152,21 @@ def compose_env(
     host_root_dir = settings.ROOT_DIR
     runs_root = Path(env.get("EMULATION_LOGS_DIR", settings.ROOT_DIR.parent / "coinjoin-runs"))
     scenarios_dir = settings.ROOT_DIR.parent / "scenarios"
+    notebooks_dir = runs_root / ".notebooks"
     emulation_logs_dir = runs_root
     exporters_dir = settings.ROOT_DIR / "exporters"
     env.setdefault(settings.COMPOSE_PROJECT_ENV, compose_project_name(host_root_dir))
+    env.setdefault("BLOCKSCI_HOST_PORT", blocksci_host_port(host_root_dir))
     env.setdefault("SCENARIOS_DIR", str(scenarios_dir))
+    env.setdefault("NOTEBOOKS_DIR", str(notebooks_dir))
     env.setdefault("EMULATION_LOGS_DIR", str(emulation_logs_dir))
     env.setdefault("EXPORTERS_DIR", str(exporters_dir))
     scenarios_dir = Path(env["SCENARIOS_DIR"]).expanduser().resolve()
+    notebooks_dir = Path(env["NOTEBOOKS_DIR"]).expanduser().resolve()
     emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
     exporters_dir = Path(env["EXPORTERS_DIR"]).expanduser().resolve()
     env["SCENARIOS_DIR"] = str(scenarios_dir)
+    env["NOTEBOOKS_DIR"] = str(notebooks_dir)
     env["EMULATION_LOGS_DIR"] = str(emulation_logs_dir)
     env["EXPORTERS_DIR"] = str(exporters_dir)
     env["COINJOIN_ENGINE"] = config.engine

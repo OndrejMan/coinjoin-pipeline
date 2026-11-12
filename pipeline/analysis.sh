@@ -4,6 +4,7 @@ set -euo pipefail
 
 HOST_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SCENARIOS_DIR="${SCENARIOS_DIR:-${HOST_ROOT_DIR}/../scenarios}"
+export NOTEBOOKS_DIR="${NOTEBOOKS_DIR:-${HOST_ROOT_DIR}/../coinjoin-runs/.notebooks}"
 export EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR:-${HOST_ROOT_DIR}/../coinjoin-runs}"
 export EXPORTERS_DIR="${EXPORTERS_DIR:-${HOST_ROOT_DIR}/exporters}"
 if [[ -n "${ACTIVE_RUN_ID:-}" ]]; then

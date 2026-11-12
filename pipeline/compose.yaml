@@ -132,12 +132,15 @@ services:
       pull_policy: ${BLOCKSCI_PULL_POLICY:-always}
       volumes:
         - btc_data:/mnt/data:ro # Mount the BTC data as Read-Only for analysis
+        - ${EMULATION_LOGS_DIR:-./emulation_logs}/${ACTIVE_RUN_ID:-}/blocksci_data:/mnt/anal:rw # Current run-local BlockSci output for notebooks
+        - ${NOTEBOOKS_DIR:-./notebooks}:/mnt/blocksci/Notebooks:rw # Mount notebooks for interactive analysis
         - ${EMULATION_LOGS_DIR:-./emulation_logs}:/runs/emulation/logs:rw
         - ${EXPORTERS_DIR:-./exporters}:/mnt/exporters:ro
       environment:
         - ACTIVE_RUN_ID=${ACTIVE_RUN_ID:-}
         - BLOCKSCI_COINJOIN_TYPE=${BLOCKSCI_COINJOIN_TYPE:-wasabi2}
         - BLOCKSCI_MIN_INPUT_COUNT=${BLOCKSCI_MIN_INPUT_COUNT:-default}
+        - BLOCKSCI_LAUNCH_JUPYTER=${BLOCKSCI_LAUNCH_JUPYTER:-true}
         - BLOCKSCI_SCRIPT=${BLOCKSCI_SCRIPT:-}
         - BLOCKSCI_EXPORT_REPORT=${BLOCKSCI_EXPORT_REPORT:-true}
       depends_on:
@@ -147,6 +150,8 @@ services:
         coinjoin_analysis:
           condition: service_completed_successfully
           required: true
+      ports:
+        - "${BLOCKSCI_HOST_PORT:-8888}:8888"
       entrypoint: ["/bin/bash"]
       command:
         - "-c"
@@ -157,6 +162,13 @@ services:
             set -- --report
           fi
           python3 /mnt/exporters/worker.py run --share-output "$$@"
+          if [ "${BLOCKSCI_LAUNCH_JUPYTER:-true}" = "0" ] || [ "${BLOCKSCI_LAUNCH_JUPYTER:-true}" = "false" ]; then
+            echo 'Parsing complete. Skipping interactive BlockSci environment.'
+          else
+            echo 'Parsing complete. Launching final environment...'
+            cd /mnt/blocksci
+            ./build.sh
+          fi
 
   coinjoin_analysis:
       profiles: ["analysis"]

@@ -142,7 +142,8 @@ def start_host_manifest(
     """
     config = context.config
     root = config.runs_path
-    root.mkdir(parents=True, exist_ok=True)
+    for path in (root, root / ".notebooks"):
+        path.mkdir(parents=True, exist_ok=True)
     from .execution.locks import acquire_lock, command_lock_path
 
     # The orchestrator takes the same lock again; this process already holds it.
