@@ -11,13 +11,14 @@ import sys
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterator, TextIO
 
 from .run_records import add_namespace_argument
 from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, fail
 from .execution.kubernetes import kubectl_command, resolve_kubeconfig
+from .execution.pbs.defaults import MAINNET_SYNC_RESOURCES
 from .execution.pbs.status import job_details, job_phase
 from .execution.pbs.submission import recorded_pbs_job_ids
 from .execution.probes import PROBE_TERMINAL
@@ -59,6 +60,7 @@ class PbsJob:
     job_id: str
     output_path: Path
     state: str
+    log_dir: Path | None = None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -270,6 +272,14 @@ def _pbs_reader(
             elif not announced_wait:
                 messages.put((name, "PBS output file is not available yet; component logs are followed separately"))
                 announced_wait = True
+
+            # Mainnet workers write directly to shared storage. PBS may keep its
+            # own stdout in node-local spool until the job finishes.
+            if job.log_dir is not None:
+                for path in sorted(job.log_dir.glob("*.log")):
+                    for line in _log_lines(path, positions, tail):
+                        emitted = True
+                        messages.put((name, f"[{path.stem}] {line}"))
             if not follow:
                 break
             try:
@@ -370,6 +380,10 @@ def stream_sources(
     return EXIT_FAILURE if failures else EXIT_OK
 
 
+# Mainnet synchronization jobs write their logs next to the run, not to PBS Output_Path.
+MAINNET_SYNC_JOBS = frozenset(f"mainnet-{stage}" for stage in MAINNET_SYNC_RESOURCES)
+
+
 class _SourceError(Exception):
     """A log source cannot be discovered; main reports it as a usage error."""
 
@@ -450,6 +464,8 @@ def _pbs_sources(args: argparse.Namespace, runs_root: Path | None, frontend_log:
             continue
         except FileNotFoundError as error:
             raise _SourceError(str(error)) from error
+        if stage in MAINNET_SYNC_JOBS:
+            job = replace(job, log_dir=run_dir / "logs" / stage)
         pbs_jobs[f"pbs:{stage}"] = job
     if not pbs_jobs:
         raise _SourceError(f"none of the discovered PBS jobs could be inspected: {', '.join(skipped)}")
