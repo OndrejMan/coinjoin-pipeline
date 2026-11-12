@@ -68,6 +68,10 @@ HELP = {
     ),
     "dry_run": "validate and print the plan without starting containers, jobs or uploads",
     "images.version": "release tag of every component image",
+    "images.registry": (
+        "registry and owner of the project's images, e.g. ghcr.io/you (also $COINJOIN_IMAGE_REGISTRY; "
+        "default: ghcr.io/ondrejman)"
+    ),
     "images.unified_report": ("unified-report job image (default: container/unified-report.image)"),
     **{
         f"images.{component}": f"{component.replace('_', '-')} image (also ${variable})"

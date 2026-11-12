@@ -6,8 +6,10 @@ import os
 import re
 from dataclasses import asdict, dataclass
 
-# Where the project's images are published.
+# Where the project's images are published; a fork publishing its own sets
+# images.registry (--image-registry, $COINJOIN_IMAGE_REGISTRY).
 DEFAULT_REGISTRY = "ghcr.io/ondrejman"
+REGISTRY_ENVIRONMENT = "COINJOIN_IMAGE_REGISTRY"
 REPOSITORIES = {
     "emulator": "emulator-manager",
     "coinjoin_analysis": "coinjoin-analysis",
@@ -15,9 +17,17 @@ REPOSITORIES = {
 }
 
 
-def image_names() -> dict[str, str]:
-    """Each component's image name, without a tag."""
-    return {component: f"{DEFAULT_REGISTRY}/{repository}" for component, repository in REPOSITORIES.items()}
+def image_registry(configured: str | None = None) -> str:
+    """The configured registry, else ``$COINJOIN_IMAGE_REGISTRY``, else the project's own."""
+    registry = (configured or os.environ.get(REGISTRY_ENVIRONMENT) or DEFAULT_REGISTRY).rstrip("/")
+    validate_image(registry)
+    return registry
+
+
+def image_names(registry: str | None = None) -> dict[str, str]:
+    """Each component's image name, without a tag, in that registry."""
+    prefix = image_registry(registry)
+    return {component: f"{prefix}/{repository}" for component, repository in REPOSITORIES.items()}
 
 
 IMAGE_ENVIRONMENT = {
@@ -56,12 +66,14 @@ def validate_image(image: str) -> None:
 def resolve_images(
     version: str | None,
     overrides: dict[str, str | None],
+    *,
+    registry: str | None = None,
 ) -> Images:
     """Each component's configured image, else its environment variable, else the release tag."""
     effective_version = version or DEFAULT_VERSION
     validate_version(effective_version)
     resolved: dict[str, str] = {}
-    for component, name in image_names().items():
+    for component, name in image_names(registry).items():
         override = overrides.get(component) or os.environ.get(IMAGE_ENVIRONMENT[component])
         if override:
             validate_image(override)
@@ -71,4 +83,6 @@ def resolve_images(
     return Images(**resolved)
 
 
+# The names in the registry $COINJOIN_IMAGE_REGISTRY names (else the project's own), for the
+# defaults that are read before a configuration exists; a run resolves images.registry.
 IMAGE_NAMES = image_names()

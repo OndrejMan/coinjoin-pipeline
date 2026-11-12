@@ -52,6 +52,7 @@ def resolve_run_images(config: PipelineConfiguration) -> tuple[PipelineConfigura
     images = resolve_images(
         config.images.version,
         {item.name: getattr(config.images, item.name) for item in fields(Images)},
+        registry=config.images.registry,
     )
     config = replace(
         config,

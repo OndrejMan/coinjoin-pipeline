@@ -56,6 +56,7 @@ class ConfigurationModel:
 @dataclass(frozen=True, slots=True)
 class ImageConfiguration(ConfigurationModel):
     version: str | None = option(None, name="version")
+    registry: str | None = option(None, name="image_registry")
     emulator: str | None = option(None, name="emulator_image")
     coinjoin_analysis: str | None = option(None, name="coinjoin_analysis_image")
     blocksci: str | None = option(None, name="blocksci_image")
