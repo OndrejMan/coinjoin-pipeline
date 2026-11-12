@@ -212,6 +212,12 @@ class S5Client:
                 raise S5Error(f"Streaming {root} to {uri} failed")
             return digest.hexdigest(), size
 
+    def discard(self, uri: str) -> None:
+        """Read an object to its end and keep nothing: the speed of S3 alone."""
+        with _stage(self.command("cat", uri), stdout=subprocess.DEVNULL, env=self.environment) as source:
+            if source.wait() != 0:
+                raise S5Error(f"Reading {uri} failed")
+
     @contextlib.contextmanager
     def unpacked(self, uri: str, expected_sha256: str | None = None) -> Iterator[IO[bytes]]:
         """The content of the zstd object ``uri`` as a stream.

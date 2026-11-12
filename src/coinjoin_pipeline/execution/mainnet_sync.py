@@ -33,6 +33,10 @@ if TYPE_CHECKING:
 # Each job depends on the previous one.
 SYNC_STAGES = tuple(MAINNET_SYNC_RESOURCES)
 
+# Unpacks a whole dataset (about 143 GB at height 500027) into scratch; only streams otherwise.
+RESTORE_CHECK_RESOURCES = PBSResources(2, "4gb", "200gb", "12:00:00")
+# Stands for the job's scratch directory, known only when the job starts.
+WORK_TOKEN = "@WORK@"
 # The mainnet worker: its entry point and every module it imports; each stays stdlib-only Python 3.8.
 MAINNET_RUNTIME_MODULES = (
     *(Path(__file__).with_name(f"mainnet_{name}.py") for name in ("runtime", "jobs", "worker")),
@@ -197,6 +201,8 @@ def job_script(
     name: str,
     budget: PBSResources,
     settings: dict[str, object],
+    prepare: str = "",
+    cleanup: str = "",
 ) -> str:
     """The PBS script of one job: it ships its modules and settings.json; the data stay on the multijob."""
     run_id = required(config.run_id, "run_id")
@@ -219,6 +225,7 @@ WORK=$(mktemp -d "$SCRATCHDIR/mainnet.XXXXXX")
 export TMPDIR="$WORK" SINGULARITY_CACHEDIR="$WORK/images" SINGULARITY_TMPDIR="$WORK"
 export APPTAINER_CACHEDIR="$WORK/images" APPTAINER_TMPDIR="$WORK"
 {write_files("$WORK", files)}
+{prepare}
 STARTED=0
 finish() {{
   status=$?
@@ -226,6 +233,7 @@ finish() {{
   if [ "$status" -ne 0 ]; then
     python3 -s "$WORK/run.py" "$WORK/settings.json" failed "$STAGE" "$STARTED" || true
   fi
+  {cleanup}
   # WORK is job-private; never clean the shared data directories.
   exit "$status"
 }}
@@ -243,6 +251,35 @@ python3 -s "$WORK/run.py" "$WORK/settings.json" {stage}
 def render_sync(config: PipelineConfiguration, stage: str) -> str:
     budget = resources(config, stage)
     return job_script(config, stage, "mainnet_" + stage, budget, sync_settings(config, stage, budget))
+
+
+def render_restore_check(config: PipelineConfiguration) -> str:
+    """The real restore job, run into the job's own scratch instead of the working dataset.
+
+    It reads the three backups and proves they restore; the multijob data, the backups and
+    the synchronization state stay untouched, because restore clears its state prefix.
+    restore.json reports duration and speed per part, for estimating a full-chain restore.
+    """
+    budget = RESTORE_CHECK_RESOURCES
+    run_id = required(config.run_id, "run_id")
+    settings = {
+        **sync_settings(config, "restore", budget),
+        "root": WORK_TOKEN + "/dataset/core",
+        "index_dir": WORK_TOKEN + "/dataset/index",
+        "log_root": WORK_TOKEN + "/logs",
+        "state_uri": f"{required(config.mainnet.state_uri, 'mainnet.state_uri').rstrip('/')}-restore-check/{run_id}",
+        "index_lock": None,
+        "measure_download": True,
+    }
+    return job_script(
+        config,
+        "restore",
+        "mainnet_restore_check",
+        budget,
+        settings,
+        prepare=f'sed -i "s#{WORK_TOKEN}#$WORK#g" "$WORK/settings.json"',
+        cleanup='du -sh "$WORK/dataset" || true\n  rm -rf "$WORK/dataset"',
+    )
 
 
 def submit_sync(config: PipelineConfiguration) -> None:

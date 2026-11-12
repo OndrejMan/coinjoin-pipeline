@@ -516,3 +516,11 @@ def test_a_body_leaving_an_unpacked_stream_early_keeps_its_error(tmp_path):
     with pytest.raises(LookupError, match="stopped reading"):
         with store(tmp_path).storage.unpacked("s3://bucket/object.zst"):
             raise LookupError("stopped reading")
+
+
+def test_discard_reads_an_object_and_reports_a_missing_one(tmp_path):
+    compressed_object(tmp_path)
+    storage = store(tmp_path).storage
+    storage.discard("s3://bucket/object.zst")
+    with pytest.raises(S5Error, match="Reading s3://bucket/missing failed"):
+        storage.discard("s3://bucket/missing")

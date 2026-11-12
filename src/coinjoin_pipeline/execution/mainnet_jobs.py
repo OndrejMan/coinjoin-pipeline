@@ -86,6 +86,16 @@ def measured(name: str, action: Callable[[], object], downloaded: int, target: P
     return part
 
 
+def raw_download(worker: Worker, name: str, uri: str, size: int) -> JsonObject:
+    """Read an archive and discard it: the S3 speed without unpacking or disk writes."""
+    started = time.monotonic()
+    worker.storage.discard(uri)
+    seconds = time.monotonic() - started
+    raw = {"raw_download_seconds": round(seconds, 1), "raw_download_mb_per_s": megabytes_per_second(size, seconds)}
+    print(f"raw download {name}: {json.dumps(raw)}", flush=True)
+    return raw
+
+
 def restore(worker: Worker) -> None:
     """Job 0: fill an empty working dataset from the S3 backups, otherwise do nothing.
 
@@ -152,6 +162,13 @@ def restore(worker: Worker) -> None:
     if unfinished:
         worker.discard_dataset()
     started = time.monotonic()
+    raw = {}
+    if worker.c.get("measure_download"):
+        worker.progress("raw-download", height=core["height"])
+        raw = {
+            name: raw_download(worker, name, value["archive_uri"], value["archive_size"])
+            for name, value in (("core", core), ("index", index))
+        }
     worker.progress("restore-download", height=core["height"])
     staging = worker.root / f".restore-{worker.run_id}"
     index_staging = worker.index / f".restore-{worker.run_id}"
@@ -198,7 +215,7 @@ def restore(worker: Worker) -> None:
         height=core["height"],
         hash=core["hash"],
         backups=backups,
-        parts=parts,
+        parts={name: {**part, **raw.get(name, {})} for name, part in parts.items()},
         total_seconds=round(time.monotonic() - started, 1),
         host=socket.gethostname(),
     )
