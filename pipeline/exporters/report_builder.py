@@ -20,6 +20,7 @@ from exporters.comparison import (
 )
 from exporters.heuristics import add_blocksci_heuristic_explanations
 from exporters.manifest import build_run_manifest, compare_run_manifests
+from exporters.normalization import baseline_filter_summary
 from exporters.parameters import Detector, ReportImages
 from exporters.report_types import SubsetMatchingAnalysis, TransactionRecord
 from exporters.scenario import build_scenario_checks
@@ -185,6 +186,7 @@ def build_report(
     previous_run_manifest: JsonObject | None = None,
     integration_diagnostics: JsonObject | None = None,
     image_provenance: JsonObject | None = None,
+    baseline_filter: JsonObject | None = None,
 ) -> JsonObject:
     """The unified report. Every top-level key is always present, null when it does not apply."""
     coinjoin_type, min_input_count = detector.coinjoin_type, detector.min_input_count
@@ -261,6 +263,7 @@ def build_report(
         "blocksci_subset_matching": build_subset_matching_comparison(
             subset_matching, coinjoin_analysis, blocksci_records, detector
         ),
+        "baseline_filter": baseline_filter if baseline_filter is not None else baseline_filter_summary([], set(), []),
         "summary": summary,
         "divergences": divergences,
         "transactions": transactions,
