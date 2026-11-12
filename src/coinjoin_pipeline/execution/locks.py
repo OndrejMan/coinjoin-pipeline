@@ -59,7 +59,7 @@ def close_locks() -> None:
 
 
 def pbs_submit_lock_path(logs_root: Path, run_id: str) -> Path:
-    """Return the per-run lock serialising decomposed S3 PBS submissions."""
+    """The per-run lock that serialises the pbs-from-s3 and mainnet-sync submissions of a run."""
     return logs_root / run_id / PBS_SUBMIT_LOCK_NAME
 
 

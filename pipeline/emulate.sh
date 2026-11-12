@@ -97,9 +97,7 @@ echo "Using engine: ${COINJOIN_ENGINE}"
 STACK_STARTED=true
 SCENARIO_PATH="${SCENARIO_PATH}" COINJOIN_ENGINE="${COINJOIN_ENGINE}" "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile emulate up -d
 
-# 2. Start streaming logs in the background 
-# The `-f` flag "follows" the logs in real-time.
-# The `&` at the end runs this command in the background so the script can move on.
+# 2. Stream the logs in the background.
 # ``podman compose`` runs an external provider (docker-compose) as a child and
 # does not forward SIGTERM to it; killing only the wrapper orphaned a follower
 # that kept this script's stdout pipe open and hung the caller after the stage
@@ -111,7 +109,6 @@ else
   "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile emulate logs -f &
 fi
 
-# Capture the Process ID (PID) of that background log stream
 LOG_PID=$!
 
 # 3. Wait ONLY for the manager to exit and capture its exit code
@@ -146,6 +143,5 @@ if [[ "${EXIT_CODE}" -ne 0 ]]; then
     logs --no-color --tail 200 manager >&2 || true
 fi
 
-# Exit your terminal or CI/CD pipeline with the manager's exit code.
-# The EXIT trap tears the compose stack down while preserving this status.
+# The manager's exit code; the EXIT trap tears the compose stack down and keeps it.
 exit "${EXIT_CODE}"

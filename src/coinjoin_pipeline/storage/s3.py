@@ -30,7 +30,8 @@ PBS_MARKER_DIR = ".pbs"
 KUBERNETES_MARKER_DIR = ".k8s"
 PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
-# The variables the in-job shell s5 wrapper unsets; S5Client drops every AWS_* variable.
+# The variables the in-pod s5 wrapper (k8s_s3_access.sh) unsets, as a test checks;
+# S5Client drops every AWS_* variable.
 AWS_SCRUB_VARIABLES = (
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
@@ -297,9 +298,9 @@ def s5cmd_version() -> tuple[int, ...] | None:
 def require_s5cmd_version(minimum: tuple[int, ...] = MINIMUM_S5CMD_VERSION) -> None:
     """Reject an s5cmd too old for the flags this client relies on.
 
-    Only the frontend binary is a variable — the in-cluster and PBS sides use
-    pinned images — and an unparsable version is not treated as a failure, so a
-    vendored build cannot block a run it would have handled fine.
+    Only the frontend binary is checked: the uploader runs a pinned image and a PBS
+    node its own s5cmd. An unparsable version passes, so a vendored build cannot block
+    a run it would have handled fine.
     """
     version = s5cmd_version()
     if version is not None and version < minimum:

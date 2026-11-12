@@ -105,7 +105,7 @@ def kept_between_jobs(path: str) -> bool:
 
 
 def require_storage_path(run_dir: Path) -> None:
-    """PBS jobs need the run directory on shared MetaCentrum storage (/storage)."""
+    """PBS jobs need the path on shared MetaCentrum storage (/storage or its /auto mount)."""
     resolved = str(run_dir.resolve())
     if not resolved.startswith(SHARED_STORAGE_ROOTS):
         raise PBSError(f"PBS jobs need run-dir on shared MetaCentrum storage (/storage), not: {resolved}")

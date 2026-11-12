@@ -38,8 +38,8 @@ def run_kubernetes_emulation(
     and creates pods for btc-node, wasabi-backend, wasabi-coordinator,
     wasabi-clients, etc.
 
-    By default the btc-node pod writes directly to a shared host path. The
-    legacy Kubernetes API download remains available through ``copy_to_host``.
+    By default the btc-node pod writes directly to a shared host path; with
+    ``copy_to_host`` the data is downloaded through the Kubernetes API instead.
     """
     scenario, engine, kubernetes = config.scenario, config.engine, config.kubernetes
     copy_to_host = kubernetes.copy_to_host
@@ -188,11 +188,8 @@ def kubernetes_emulator_command(
 def populate_btc_data_volume(btc_data_dir: Path) -> None:
     """Copy downloaded btc-data into the Docker named volume used by blocksci.
 
-    The analysis compose services expect blockchain data in this checkout's
-    Compose-managed ``btc_data`` volume. After a Kubernetes
-    emulation run, the data lives in a local directory.  This helper copies
-    it into the volume so that the existing analysis pipeline works
-    unchanged.
+    The Compose analysis services read blockchain data from this checkout's
+    ``btc_data`` volume, while a Kubernetes emulation leaves it in a local directory.
     """
     volume_name = f"{containers.compose_env()[settings.COMPOSE_PROJECT_ENV]}_btc_data"
     runtime = container_runtime()

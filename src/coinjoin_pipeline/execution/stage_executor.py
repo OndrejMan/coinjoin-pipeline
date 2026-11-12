@@ -1,4 +1,7 @@
-"""Execute every stage in a dependency graph with bounded concurrency. Backend adapters own submission, waiting and cancellation."""
+"""Execute a stage graph with bounded concurrency for the experimental local and shared-storage paths.
+
+The adapter owns submission, waiting and cancellation; the S3 path submits through ``s3_submission``.
+"""
 
 from __future__ import annotations
 
@@ -24,7 +27,7 @@ class StageSubmission:
 
 
 class StageRunner(Protocol):
-    """Adapter implemented by a local, Kubernetes, or PBS execution backend."""
+    """The backend adapter; ``workflow.SharedStorageStageRunner`` implements it."""
 
     def submit(self, stage: StagePlan) -> StageSubmission:
         """Submit or prepare ``stage`` and return its lifecycle handle."""

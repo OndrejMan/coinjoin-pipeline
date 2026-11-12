@@ -76,8 +76,7 @@ def cleanup_peer_containers() -> None:
 def handle_termination(signum: int, _frame: object) -> None:
     """Exit 130 after cleanup, matching the launcher's interrupt contract.
 
-    SIGTERM never unwinds through ``atexit``, so the lock release lived only in
-    the launcher's trap until now; both signals route here.
+    SIGTERM never unwinds through ``atexit``, so both signals route here to release the locks.
     """
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
@@ -393,10 +392,9 @@ def exists_or_unreadable(path: Path) -> bool:
     """True when ``path`` is present, or hidden behind a directory we may not read.
 
     The analysis containers run as root, and ``blocksci_parser`` creates its
-    ``parsed/`` directory with mode 0700. The wrapper now runs as the invoking
-    user instead of as root inside its own container, so ``Path.is_file()``
-    turns the resulting EACCES into a plain ``False`` and a finished BlockSci
-    run reads as one that never happened. Everything that consumes these paths
+    ``parsed/`` directory with mode 0700. This process runs as the invoking user,
+    so a lookup there fails with EACCES and a finished BlockSci run would read as
+    one that never happened. Everything that consumes these paths
     runs as root in a container, so "cannot look" must not mean "not there".
 
     ``os.path`` rather than ``Path``: before Python 3.14, ``Path.is_file()`` and
@@ -428,8 +426,7 @@ def stage_blocksci_script(script: str | None, run_dir: Path) -> str | None:
 def stage_pbs_exporters(run_dir: Path, exporters_dir: Path) -> Path:
     """Snapshot exporters into the shared run directory for PBS compute nodes.
 
-    The bare wrapper executes from a checkout that need not be visible on the
-    compute node. Keep the first complete snapshot so retries use the same code
+    The CLI runs from a checkout that need not be visible on the compute node. Keep the first complete snapshot so retries use the same code
     as the original submission, matching the S3 staged-exporters contract.
     """
     staged = run_dir / ".pipeline" / "exporters"

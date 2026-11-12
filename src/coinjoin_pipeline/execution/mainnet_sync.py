@@ -204,7 +204,7 @@ def job_script(
     prepare: str = "",
     cleanup: str = "",
 ) -> str:
-    """Self-contained job: only small helpers/config are copied, data stay in place."""
+    """The PBS script of one job: it ships its modules and settings.json; the data stay on the multijob."""
     run_id = required(config.run_id, "run_id")
     credentials = required(config.artifacts.credentials_file, "artifacts.credentials_file")
     files = {

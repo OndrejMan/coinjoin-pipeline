@@ -133,7 +133,7 @@ def analysis_output(stage: Stage, output: OutputSettings) -> Path:
 
 
 def seed_notebook(stage: Stage, output: Path) -> None:
-    """The submitting container stages an optional initial file in private S3 metadata."""
+    """Write the optional initial file the submitter staged in ``.notebook/initial.json`` into the notebook directory."""
     uri = f"{stage.run_prefix}/.notebook/initial.json"
     if not stage.storage.exists(uri):
         return

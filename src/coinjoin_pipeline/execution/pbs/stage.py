@@ -80,7 +80,7 @@ class Stage:
         environment: Sequence[str] = (),
         cleanenv: bool = False,
     ) -> list[str]:
-        """``singularity exec`` of command in the stage image, with these binds and variables."""
+        """The Apptainer ``exec`` of command in the stage image, with these binds and variables."""
         runtime = find_runtime()
         if runtime is None:
             raise StageFailure(MISSING_RUNTIME)

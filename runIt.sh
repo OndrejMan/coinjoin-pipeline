@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Backward-compatible entrypoint for the installed Python CLI.
+# The installed CLI, else this checkout's sources (scenario-lab's direct launcher runs it so).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if command -v coinjoin-pipeline >/dev/null 2>&1; then

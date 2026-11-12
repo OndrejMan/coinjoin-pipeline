@@ -1,13 +1,8 @@
 """Declarative stage plans for the CoinJoin analysis pipeline.
 
-This module deliberately contains no Docker, Kubernetes, PBS, or subprocess
-code.  It defines the dependency graph once; the runners execute that graph
-with the existing, proven backend helpers.
-
-The graph is the single source of truth for a run: submission derives its
-scheduler dependencies from it, the orchestrator derives its wait order and
-its cancellation policy from it, and ``--dry-run`` prints it.  Adding a stage
-therefore means editing one plan function, not four call sites.
+No Docker, Kubernetes, PBS or subprocess code lives here: this is the dependency
+graph, defined once. Submission derives its scheduler dependencies from it, the
+orchestrator its wait order and cancellation policy, and ``--dry-run`` prints it.
 """
 
 from __future__ import annotations

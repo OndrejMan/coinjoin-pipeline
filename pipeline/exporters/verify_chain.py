@@ -1,4 +1,4 @@
-"""Verify the parsed index before publishing an S3 block-archive cache."""
+"""Check a parsed index's tip height and hash, and that an update kept its source's blocks, before a job publishes it."""
 
 from __future__ import annotations
 

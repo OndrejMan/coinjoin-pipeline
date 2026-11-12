@@ -15,7 +15,7 @@ from urllib.request import Request, urlopen
 
 
 def available_port(preferred):
-    """Allow two notebook jobs to share a node without competing for port 8888."""
+    """The preferred port when it is free, else any free one, so two notebook jobs can share a node."""
     with socket.socket() as probe:
         try:
             probe.bind(("127.0.0.1", preferred))

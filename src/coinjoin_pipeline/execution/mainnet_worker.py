@@ -24,7 +24,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
-if TYPE_CHECKING:  # TypeGuard needs Python 3.10; the PBS node only evaluates no annotation.
+if TYPE_CHECKING:  # TypeGuard needs Python 3.10; the PBS node never evaluates annotations.
     from typing import TypeGuard
 
 from coinjoin_pipeline.execution.pbs.apptainer import MISSING_RUNTIME, alias_binds, exec_command, find_runtime
@@ -151,8 +151,8 @@ def scanner_complete(scanner: Path, height: int) -> None:
 
 @contextmanager
 def stopped_core(datadir: Path) -> Iterator[None]:
-    # Same POSIX record-lock handshake as the archive snapshot branch. This also
-    # prevents an independently started Core from opening the datadir mid-backup.
+    # A running Core holds a POSIX write lock on .lock: the shared lock fails while one
+    # runs, and while it is held no Core can start and open the datadir mid-backup.
     with (datadir / ".lock").open("rb") as handle:
         fcntl.lockf(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
         if (datadir / ".cookie").exists():

@@ -1,4 +1,4 @@
-"""Unified live log watcher for Kubernetes-backed CoinJoin runs."""
+"""Follow a run's live logs: its Kubernetes pods, its PBS jobs and the frontend transcript."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Kubernetes access preflight for the emulation pipeline."""
+"""The S3 emulation Job on Kubernetes: kubectl access, preflight, resources, probe, diagnostics and cleanup."""
 
 from __future__ import annotations
 

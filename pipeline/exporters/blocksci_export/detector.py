@@ -180,8 +180,7 @@ def _address_text(address: object) -> str | None:
 
     ``str()`` is only the bare address for the pubkey family; script-hash and
     witness-unknown (Taproot) scripts render as ``WitnessUnknownAddress(bcrt1p…)``,
-    which made every P2TR input and output a shared_tx_mismatch against the
-    baseline. ``address_string`` is the bare form wherever BlockSci defines one.
+    which would make every P2TR input and output mismatch the baseline. ``address_string`` is the bare form wherever BlockSci defines one.
     """
     if address is None:
         return None
@@ -418,8 +417,7 @@ def _run_coinjoin_clustering(
     """Cluster around the CoinJoins the detection step found.
 
     Seeding the clustering with the detection result keeps both on one CoinJoin
-    set; ``create_clustering`` would run its own protocol detector, which for
-    JoinMarket is not the subset-matching scan the report evaluates.
+    set; ``create_clustering`` would detect CoinJoins again on its own.
     """
     manager = _require_blocksci().cluster.CoinjoinClusterManager
     if not hasattr(manager, "create_clustering_from_txes"):

@@ -45,11 +45,8 @@ STAGED_EXPORTERS_PARTIAL = "partial"
 def staged_exporters_state(access: S3Access, run_prefix: str) -> tuple[str, list[str]]:
     """Classify the exporter tree already staged under a run prefix.
 
-    One entry point is not proof of a usable tree. A prefix staged before the
-    ``blocksci/`` → ``blocksci_export/`` rename still carries
-    ``unified_report.py``, so a resumed run would clear the frontend check and
-    only fail on the compute node, which runs the renamed analysis path. The
-    same holds for an upload that died halfway through.
+    One file is no proof of a usable tree: an upload that died halfway leaves some, and
+    the compute node would fail only later, on a file that is missing.
     """
     prefix = staged_exporters_uri(run_prefix)
     missing = [relative for relative in REQUIRED_EXPORTERS if not s3_object_exists(access, f"{prefix}{relative}")]
@@ -63,9 +60,8 @@ def staged_exporters_state(access: S3Access, run_prefix: str) -> tuple[str, list
 def upload_exporters(access: S3Access, run_prefix: str, exporters_dir: Path) -> None:
     """Stage the checkout's exporters into the run prefix before the Job starts.
 
-    Running bare from a checkout means the tree can hold host bytecode; shipping
-    a 3.14 ``__pycache__`` into BlockSci's Python 3.8 is at best noise, so the
-    sync filters it out rather than snapshotting the tree somewhere first.
+    A checkout can hold the host's bytecode; a 3.14 ``__pycache__`` is useless to
+    BlockSci's Python 3.8, so the sync leaves it out.
     """
     ensure_local_exporters(exporters_dir)
     # Informational provenance for "what exactly was staged": the upload takes

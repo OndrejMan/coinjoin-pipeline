@@ -31,12 +31,10 @@ fi
 # Reap Compose projects abandoned by earlier runs.
 #
 # The project name carries the launching process's pid, so the teardown above
-# can only ever address the project this run is about to create — on a fresh run
-# that is a no-op, and no later run ever names an earlier project again. The
-# leftovers cost nothing but a Docker subnet each, which is why they went
-# unnoticed: 29 of them accumulated from 2026-08-26 on and exhausted the default
-# address pools, failing a suite two hours in with "all predefined address pools
-# have been fully subnetted".
+# can only ever address the project this run is about to create, and no later run
+# names an earlier project again. Each leftover holds a Docker subnet until the
+# default address pools run out ("all predefined address pools have been fully
+# subnetted").
 #
 # Only projects whose owning pid is gone are touched. Tests run back to back and
 # --parallel starts several runs at once, so a live pid must never be reaped;
@@ -66,11 +64,9 @@ reap_abandoned_projects() {
     fi
     echo "Reaping abandoned Compose project ${project} (pid ${pid} gone)"
     # Volumes go too. The teardown above keeps dind_cache so a project can reuse
-    # its image cache — but a pid-scoped project never recurs, so its cache is
-    # never read again and only occupies disk: 13 of them held ~11 GB each on
-    # 2026-09-13. The other volumes are ones the teardown above already removes
-    # for its own project, so nothing here is treated as more precious than the
-    # current run treats its own data.
+    # its image cache, but a pid-scoped project never recurs, so its cache (about
+    # 11 GB) is never read again. The other volumes are ones the teardown above
+    # already removes for its own project.
     "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${project}" \
       --profile emulate --profile analysis down --remove-orphans --volumes >/dev/null 2>&1 || true
   done

@@ -143,8 +143,7 @@ def check(
     errors: list[str] = []
     if runtime not in {"docker", "podman"}:
         return [f"unsupported runtime {runtime!r}; expected docker or podman"]
-    # `None` keeps the historical behaviour (always probe the runtime) for
-    # callers such as `cjp doctor` that have no action to derive from.
+    # `None` means no action to derive from (as for `cjp doctor`): always probe the runtime.
     wants_runtime = capabilities is None or Capability.CONTAINER_RUNTIME in capabilities
     executable = shutil.which(runtime)
     if wants_runtime:

@@ -62,9 +62,8 @@ POLL_INTERVAL_SECONDS = 30
 # to copy that log back after the marker appears.
 STAGE_LOG_TAIL_LINES = 80
 STAGE_LOG_SETTLE_SECONDS = 15
-# Single source of truth for qstat job_state handling. "X" is emitted for
-# finished subjobs (and by some PBS Pro builds for expired jobs), so it is
-# terminal here as well as in the watcher.
+# qstat job_state values; status.job_phase classifies every state by them. "X" marks
+# finished subjobs (and, in some PBS Pro builds, expired jobs), so it is terminal.
 PBS_TERMINAL_STATES = {"C", "F", "X"}
 PBS_QUEUED_STATES = {"H", "Q", "W"}
 PBS_ACTIVE_STATES = {"B", "E", "M", "R", "S", "T", "U"} | PBS_QUEUED_STATES

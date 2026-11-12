@@ -461,7 +461,7 @@ def render_python_stage(
     multijob: str | None = None,
     extra_files: tuple[Path, ...] = (),
 ) -> str:
-    """A job that runs ``stage_runtime.py`` on the node in place of a shell template.
+    """The job script: write the worker's modules and settings.json to scratch and run ``stage_runtime``.
 
     The worker publishes the job's terminal marker; only an absent SCRATCHDIR or python3
     ends the job before it can.

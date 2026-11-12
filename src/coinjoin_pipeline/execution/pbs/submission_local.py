@@ -54,11 +54,9 @@ def report_stage_log(
 ) -> Path | None:
     """Print the tail of a finished stage's job log and return its path.
 
-    A marker only says *that* a stage ended; the reason lives in the job's own
-    output, which nothing else reads -- so a failed PBS stage used to be
-    reported as a bare "PBS stage failed: <stage>" with the evidence left on a
-    compute node. PBS copies the spooled log back around the same time the
-    marker lands, so wait briefly for it to appear before giving up.
+    A marker only says *that* a stage ended; the reason is in the job's own output.
+    PBS copies the spooled log back around the time the marker lands, so wait briefly
+    for it to appear before giving up.
     """
     log_path = stage_log_path(run_dir, stage)
     if not log_path.exists() and log_path.parent.is_dir():

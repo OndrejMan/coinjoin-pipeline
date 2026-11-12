@@ -1,4 +1,4 @@
-"""Inner report integration diagnostics for unified reports."""
+"""Integration diagnostics of the unified report: image provenance and BlockSci's view of the exported targets."""
 
 from __future__ import annotations
 

@@ -1,8 +1,7 @@
 """High-level Kubernetes-to-S3-to-PBS full-run orchestration.
 
 The module owns only ordering, marker waiting, and the deliberately asymmetric
-cancellation policy — and it derives all three from the declared stage graph
-rather than from a second, hand-maintained copy of the pipeline.
+cancellation policy, and derives all three from the stage graph in ``stages``.
 """
 
 from __future__ import annotations

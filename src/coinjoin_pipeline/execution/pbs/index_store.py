@@ -1,6 +1,6 @@
-"""Persistent BlockSci index shared by PBS jobs (scenario-lab/mainnet-analysis-plan-v2.md §2.6).
+"""Persistent BlockSci index shared by PBS jobs.
 
-Standard library only and Python 3.8 syntax: jobs ship this file next to their worker.
+Standard library only and Python 3.8 syntax, like every module a PBS job ships.
 
 The working copy (multijob scratch or /storage) holds parsed/, config.json,
 manifest.json and files.txt (every other file with its size). It is complete when it

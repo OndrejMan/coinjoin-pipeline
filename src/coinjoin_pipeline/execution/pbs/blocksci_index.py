@@ -39,7 +39,7 @@ def require_tools(*tools: str) -> None:
 
 
 def canonicalize_index(stage: Stage) -> None:
-    """An index copied from another location still names its old parsed directory."""
+    """Point config.json at parsed/ as this job's container sees it; a copied index still names its old one."""
     config = stage.work / BLOCKSCI_CONFIG_FILE
     parsed = f"{container_run(stage)}/{BLOCKSCI_DIR}/parsed"
     text, replaced = re.subn(

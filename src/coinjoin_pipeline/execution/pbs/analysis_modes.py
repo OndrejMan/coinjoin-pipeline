@@ -24,7 +24,7 @@ from .scripts import validated_s3_uri
 from .stage_settings import AnalysisModeSettings, InputSettings, OutputSettings
 from .validation import require_storage_path
 
-# Uploaded after the job, and given the index provenance.
+# The run directory each mode writes: uploaded after the job, with the manifest of the index it read.
 MODE_OUTPUTS = {
     "blocksci-analyze": BLOCKSCI_ANALYSIS_DIR,
     "blocksci-script": BLOCKSCI_CUSTOM_ANALYSIS_DIR,
@@ -70,8 +70,6 @@ def analysis_mode_settings(mode: str, blocksci: BlockSciConfiguration) -> Analys
         require_storage_path(script_path)
         settings["user_script"] = str(script_path)
     else:
-        # The execution node can set HOME to another storage volume; the submission home
-        # is where the frontend stages files and looks for readiness.
         output["notebook"] = True
         if blocksci.notebooks_dir:
             notebook_path = Path(blocksci.notebooks_dir).expanduser().resolve()
