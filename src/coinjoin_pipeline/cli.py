@@ -121,7 +121,7 @@ def _utility(argv: list[str]) -> int | None:
 def print_dry_run_context(context: RunContext) -> None:
     """What a dry run resolved before execution: where the run lives and which images it uses."""
     print(f"[dry-run] run directory: {context.run_dir or '-'}")
-    if context.config.action not in {"clean"}:
+    if context.config.action not in {"clean", "mainnet-sync"}:
         for component, image in context.images.as_dict().items():
             print(f"[dry-run] image {component}: {image}")
 

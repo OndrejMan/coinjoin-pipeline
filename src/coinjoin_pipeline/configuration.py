@@ -35,6 +35,7 @@ PipelineAction = Literal[
     "coinjoin-analysis",
     "mappings",
     "pbs-from-s3",
+    "mainnet-sync",
     "initialize",
     "clean",
     "external-analyze",
@@ -230,6 +231,24 @@ class PBSConfiguration(ConfigurationModel):
     blocksci: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     mappings: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     unified_report: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
+    producer: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
+
+
+@dataclass(frozen=True, slots=True)
+class MainnetSyncConfiguration(ConfigurationModel):
+    target_height: int | None = option(None, name="mainnet_target_height", minimum=1)
+    network: Literal["bitcoin", "bitcoin_regtest"] = option("bitcoin", name="mainnet_network")
+    scan_start_height: int | None = option(None, name="mainnet_scan_start_height", minimum=1)
+    root: str | None = option(None, name="mainnet_root")
+    # Fixed S3 prefix of the synchronization's state, markers and per-run logs.
+    state_uri: str | None = option(None, name="mainnet_state_uri")
+    blocks_uri: str | None = option(None, name="mainnet_blocks_uri")
+    core_image: str = option("ghcr.io/ondrejman/bitcoin-block-archive:latest", name="mainnet_core_image")
+    dumplings_image: str = option("ghcr.io/ondrejman/dumplings:latest", name="mainnet_dumplings_image")
+    dbcache_mb: int = option(4096, name="mainnet_dbcache_mb", minimum=1)
+    poll_seconds: int = option(30, name="mainnet_poll_seconds", minimum=1)
+    # Kept notebook data beside the dataset; only measured, so the storage report covers it.
+    notebook_root: str | None = option(None, name="mainnet_notebook_root")
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,7 +308,9 @@ class PipelineConfiguration(ConfigurationModel):
     driver: Driver = option("docker", name="driver")
     scenario: str | None = option(None, name="scenario")
     run_dir: str | None = option(None, name="run_dir", actions=("analyze", "mappings", "export", "coinjoin-analysis"))
-    run_id: str | None = option(None, name="run_id", actions=("emulate", "full-run", "pbs-from-s3", "external-analyze"))
+    run_id: str | None = option(
+        None, name="run_id", actions=("emulate", "full-run", "pbs-from-s3", "mainnet-sync", "external-analyze")
+    )
     run_timezone: str = option("Europe/Prague", name="run_timezone")
     min_input_count: int | None = option(None, name="min_input_count", minimum=1)
     dry_run: bool = option(False, name="dry_run")
@@ -306,6 +327,7 @@ class PipelineConfiguration(ConfigurationModel):
     images: ImageConfiguration = field(default_factory=ImageConfiguration)
     coinjoin_analysis: CoinjoinAnalysisConfiguration = field(default_factory=CoinjoinAnalysisConfiguration)
     blocksci: BlockSciConfiguration = field(default_factory=BlockSciConfiguration)
+    mainnet: MainnetSyncConfiguration = field(default_factory=MainnetSyncConfiguration)
     joinmarket: JoinMarketConfiguration = field(default_factory=JoinMarketConfiguration)
     mappings: MappingsConfiguration = field(default_factory=MappingsConfiguration)
     external: ExternalAnalysisConfiguration = field(default_factory=ExternalAnalysisConfiguration)

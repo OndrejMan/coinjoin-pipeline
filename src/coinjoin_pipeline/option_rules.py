@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from exporters.verify_chain import is_block_hash
 
 from .configuration import cli_flag, config_value, option_specs
+from .execution.pbs.defaults import MAINNET_SYNC_RESOURCES
 from .execution.pbs.validation import SHARED_STORAGE_ROOTS, kept_between_jobs, multijob_location
 from .execution.stages import runs_unified_report
 from .storage.s3 import RUN_ID_RULE, is_valid_run_id
@@ -19,6 +20,8 @@ if TYPE_CHECKING:
 # Tasks that may read the index of another run (--blocksci-cache-source-run-id) without writing to it.
 READ_ONLY_CACHE_TASKS = frozenset({"script", "external", "notebook"})
 PERSISTENT_INDEX_TASKS = frozenset({"parse", "update", "backup"}) | READ_ONLY_CACHE_TASKS
+# Resource groups only the mainnet synchronization submits; other actions use pbs.blocksci too.
+MAINNET_ONLY_PBS_GROUPS = tuple(f"pbs.{stage}." for stage in MAINNET_SYNC_RESOURCES if stage != "blocksci")
 # The jobs that only maintain the index; their state can live at one fixed S3 prefix.
 INDEX_STATE_TASKS = ("parse", "update", "backup")
 
@@ -124,11 +127,20 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
 
 def cross_option_errors(config: PipelineConfiguration) -> list[str]:
     """Return every violated rule in order, retaining CLI spellings in diagnostics."""
-    return _action_errors(config) + _general_errors(config)
+    if config.action == "mainnet-sync":
+        from .execution.mainnet_sync import configuration_errors
+
+        errors = configuration_errors(config)
+    elif any(path.startswith(("mainnet.", *MAINNET_ONLY_PBS_GROUPS)) for path in config.provided):
+        groups = ", ".join(group.rstrip(".") for group in MAINNET_ONLY_PBS_GROUPS)
+        errors = [f"mainnet, {groups} settings require action: mainnet-sync"]
+    else:
+        errors = _action_errors(config)
+    return errors + _general_errors(config)
 
 
 def _general_errors(config: PipelineConfiguration) -> list[str]:
-    """Rules that hold for every action."""
+    """Rules that hold for every action, mainnet-sync included."""
     errors: list[str] = []
     for path, destination, item in option_specs():
         permitted = item.metadata.get("actions")
@@ -189,7 +201,7 @@ class _PbsStages:
 
 
 def _action_errors(config: PipelineConfiguration) -> list[str]:
-    """Rules of the emulation and analysis actions."""
+    """Rules of the emulation and analysis actions (everything except mainnet-sync)."""
     from .execution.coinjoin_tools import option_errors
 
     stages = _PbsStages.requested(config)

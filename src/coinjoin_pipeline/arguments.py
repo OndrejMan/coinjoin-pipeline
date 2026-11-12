@@ -69,6 +69,7 @@ ACTION_SUMMARIES = {
     "coinjoin-analysis": "baseline coinjoin-analysis of --run-dir or --all-runs",
     "mappings": "Wasabi mappings and Sake of --run-dir on PBS",
     "pbs-from-s3": "submit PBS analysis jobs for a run already in S3",
+    "mainnet-sync": "synchronize Bitcoin Core, Dumplings and the BlockSci index on PBS",
     "initialize": "pull the emulation and analysis images through Compose",
     "clean": "remove the local pipeline containers and volumes (needs --yes)",
     "external-analyze": "analyze an external Bitcoin datadir against a baseline",
@@ -97,6 +98,7 @@ SECTIONS = {
         "A stage-specific --pbs-<stage>-* value overrides the shared --pbs-* fallback, "
         "which overrides the stage's default.",
     ),
+    "mainnet": ("mainnet-sync", "Only for action mainnet-sync."),
     "external": ("external-analyze", "Only for `cjp external-analyze`."),
 }
 
