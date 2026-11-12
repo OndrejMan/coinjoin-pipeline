@@ -1,0 +1,182 @@
+# Current execution architecture
+
+Updated 2026-11-12. The thesis results come from the Kubernetes → S3 → PBS
+path. Every module outside that path carries an `EXPERIMENTAL` header and is
+listed under "Experimental paths" below.
+
+```text
+YAML or CLI options
+  → PipelineConfiguration (one schema)
+  → RunContext.prepare (defaults, validation, identity, images)
+  → host preflight
+  → execution.orchestrator (same process)
+       ├─ Kubernetes → S3 → PBS stage graph            (orchestrator.py, s3_*.py)
+       └─ EXPERIMENTAL local Docker/Podman, Kubernetes
+          without S3, shared-storage PBS                (local.py)
+```
+
+`arguments.py` is an input adapter. It merges explicitly provided values into
+YAML before decoding, and owns the `--help` text (grouped by configuration
+section, each option with its YAML key). `configuration.py` owns field types,
+option spellings, action aliases and value bounds; `option_rules.py` owns every
+cross-field rule (`PipelineConfiguration.validate` only calls it).
+`console.py` holds the exit codes and `ERROR:` output shared by `cli.py` and
+the `watch`, `download-report` and `clean-s3` utilities. The existing CLI
+flags remain available to scripts, but there is no YAML-to-argv conversion,
+metadata snapshot or second host Python process. `cjp run FILE.yaml` is the
+preferred entry point. An explicit `stages.<name>: false` is respected; assigning
+PBS resources to that disabled stage is an error.
+Cross-field rules read typed configuration attributes directly. The `provided`
+field set distinguishes explicit values from defaults; CLI option names are
+used only in validation messages.
+
+`context.py` resolves run ID, output root and image selection, and restores
+environment, bytecode policy, signal handlers and locks after execution.
+`research_manifest.json` records top-level schema, mode and run ID, with the
+redacted launcher record of the latest invocation under `host_launcher`. A later
+invocation over the same run (`--resume-run`, a stage with `--run-dir`) moves the
+previous record to `earlier_host_launchers`. The record is written only once the
+command lock is held, and a new run refuses a run ID that already records a
+launch. External import manifests keep their input provenance. The report's
+manifest remains a distinct analytical artifact with image digests and exporter
+hashes.
+
+On the S3 path nothing can inspect an image afterwards: the MetaCentrum frontend
+and PBS nodes have no Docker. `registry.py` therefore pins each tag to its current
+registry digest at submission, and the jobs run that `name@sha256:` reference, so
+the report reads the digest straight from it. `full-run` also pins the emulator and
+uploader of its Kubernetes Job. A separate `pbs-from-s3` does not know what the
+emulation ran, so it keeps those tags and the report flags their digests as missing.
+Index manifests keep the configured BlockSci name (`IMAGE_NAME`), so a rebuild
+under the same tag still reuses an existing index. A failed lookup only warns and
+runs the tag.
+
+## Module ownership
+
+| Responsibility | Owner |
+|---|---|
+| Configuration and loading | `configuration.py`, `arguments.py`, `option_rules.py` |
+| Exit codes and error output of the host commands | `console.py` |
+| Resolved run and host lifetime | `context.py`, `runs.py`, `manifest.py` |
+| Action dispatch and the S3 `emulate`/`full-run`/`pbs-from-s3` branches | `execution/orchestrator.py` |
+| S3 full-run: staging, emulation Job, PBS graph, marker waits, rollback | `execution/s3_workflow.py`, `s3_staging.py`, `s3_emulation.py`, `s3_submission.py`, `s3_markers.py` |
+| In-cluster prefix preflight and artifact uploader | `execution/k8s_s3_prefix_preflight.sh`, `k8s_s3_uploader.sh`, their shared `k8s_s3_access.sh` header |
+| Kubernetes resource generation and diagnosis | `execution/kubernetes.py` |
+| Graph definitions and dependency queries | `execution/stages.py`, `stage_executor.py` |
+| S3 index archive transport shared by emulation caches, persistent backups and mainnet checkpoints | `storage/s5client.py` (`upload_archive`, `restore_archive`) |
+| Format of a single backup (persistent index, Core checkpoint): archive, `.sha256`, manifest written last | `storage/s5client.py` (`replace_backup`, `restore_backup`) |
+| Persistent index lock, completeness, backup and restore; the index manifest every parse and update records | `execution/pbs/index_store.py` (`IndexStore`, `index_manifest`) |
+| Run-directory layout (every run-relative path, marker sets, report inputs), imported by the host, the exporters and the PBS jobs | `pipeline/exporters/artifact_paths.py` (stdlib only; the jobs ship it) |
+| Command locks and S3 PBS overlap detection | `execution/locks.py` |
+| PBS submit, qdel, state probes; S3 job scripts | `execution/pbs/submission.py`, `templates_s3.py`, `analysis_modes.py`, `scripts.py`, `templates/`, `commands.py` |
+| qstat transport and what a qstat state means (queued, running, terminal) to every client | `execution/pbs/status.py` (`job_details`, `job_phase`) |
+| Recorded PBS job IDs of a run (`.pbs/<stage>.jobid`) | `execution/pbs/submission.py` (`recorded_pbs_job_ids`) |
+| PBS resources and image references | `execution/pbs/defaults.py` (`DEFAULT_RESOURCES`), `execution/pbs_settings.py` |
+| Scenario lookup and host/container scenario paths | `execution/scenarios.py` |
+| S3 targets, validation, listing and exact-key existence for run, watch/download/cleanup consumers | `storage/s3.py` |
+| Frontend marker wait and the remote-job probe states it decides by | `execution/s3_markers.py` (`wait_for_s3_marker`), `execution/probes.py` |
+| Required exporter files and their staging into a run prefix | `paths.py` (`REQUIRED_EXPORTERS`), `execution/s3_staging.py` |
+| s5cmd calls shared by the frontend, the mainnet worker and the Python PBS stages | `storage/s5client.py` |
+| Mainnet synchronization jobs on the node: entry, the six jobs, their shared dataset/Core/Dumplings services | `execution/mainnet_runtime.py`, `mainnet_jobs.py`, `mainnet_worker.py` (rendered by `mainnet_sync.py`) |
+| Every S3 PBS job (shell only writes and starts it): entry, job frame, settings types, jobs | `execution/pbs/stage_runtime.py`, `stage.py`, `stage_settings.py`, `analyzer_jobs.py`, `blocksci_jobs.py` (index writers), `blocksci_analysis_jobs.py` (index reader), `blocksci_index.py` (what both share) |
+| Apptainer/Singularity on the node: runtime, `exec` command line, binds of multijob aliases | `execution/pbs/apptainer.py` (S3 stages and mainnet jobs alike) |
+| Container workload shared by Docker and Apptainer | `pipeline/exporters/worker.py` |
+| Parsed block-archive cache height, checkpoint and update continuity verification | `pipeline/exporters/verify_chain.py` |
+| Heavy BlockSci results | `pipeline/exporters/blocksci_export/analysis.py` |
+| Artifact reader independent of BlockSci | `pipeline/exporters/analysis_artifact.py` |
+| Container image inspection shared by the host and standalone exporters | `pipeline/exporters/image_provenance.py` |
+| Pinning registry tags to digests at submission | `registry.py` |
+| Report assembly and presentation | `pipeline/exporters/cli.py`, `report_builder.py`, `markdown_report.py` |
+
+## One analyzer/report flow
+
+For emulator comparisons, both analyzers produce artifacts; the report depends
+on both. Mappings, when enabled, depends on baseline analysis and also gates the
+report. Serial execution uses one worker; parallel execution allows several
+ready stages. Report is an ordinary node executed by the same executor.
+
+The S3 frontend submits `PBSJobSpec(stage, script, dependencies)` through one
+scheduler boundary. The ordered graph supplies dependencies. Before submission,
+each stage's stale terminal markers are cleared; job IDs are recorded immediately
+for overlap detection and rollback. Shared-storage failure cancels running
+siblings; S3 wait failure cancels only dependent jobs. These policies remain
+explicit and distinct.
+Stage adapters call their script renderers directly and pass a completed
+`PBSJobSpec` to submission. PBS worker commands consume the typed configuration;
+`pbs/commands.py` renders detector arguments for both analysis and report phases.
+`pbs/analysis_modes.py` prepares each cached-index consumer's inputs, mounts and
+output checks; `templates_s3.py` adds the shared cache/index access and job lifecycle.
+The BlockSci job renderers take the validated `BlockSciConfiguration` itself and
+write its values into `settings.json`, whose parts are typed in `stage_settings.py`.
+They do not repeat the rules of `option_rules.py`; what they still check is what
+only submission can know or what protects the job script: shared-storage paths
+that must exist, S3 URIs no configuration validator covers, and values
+interpolated into the script or its `#PBS` directives.
+
+`worker.py` supports parse, update, analyze, report, or parse+analyze (`run`).
+Docker and PBS choose mounts and interpreter, then invoke this same payload.
+The report always consumes `blocksci-analysis_data/blocksci_analysis.json`.
+It never performs an implicit detector scan. The reader accepts only artifact
+schema 1.3, which records the mode and preserves detector parameters, the
+deprecated JoinMarket subset-matching scan, diagnostics and clustering; older runs
+need `cjp analyze` again.
+
+All S3 parsers publish `blocksci-parse_data/` as a zstd archive, manifest and
+SHA-256; `combined` and `reusable` differ only in job arrangement. The working
+`blocksci_data/` stays on job scratch. `S5Client` shares the streaming
+upload/restore with the persistent index backup and the mainnet checkpoints;
+uploads need `s5cmd pipe` (2.2 or later). Consumers run only after verification.
+Persistent mainnet indexes still stay in shared storage and are read/updated in
+place; emulations do not introduce a persistent working copy.
+
+The host requires Python 3.10+. Exporter code retains Python 3.8 syntax for the
+BlockSci image. Their input options share `exporters/parameters.py`; exporters
+are staged as a standalone tree and do not import the host package. The modules
+PBS jobs ship to compute nodes (`scripts.STAGE_RUNTIME_MODULES`,
+`mainnet_sync.MAINNET_RUNTIME_MODULES` and the extra helpers) are linted as
+Python 3.8 through ruff's `per-file-target-version`;
+`tests/unit/test_shipped_modules.py` fails when a shipped module is missing there.
+
+Standalone [coinjoin-analysis operations](coinjoin-analysis-operations.md) select
+the analyzer's existing public commands through `coinjoin_analysis.*`.
+`execution/coinjoin_tools.py` owns their CLI arguments and input rules; the S3
+runner uses the ordinary analysis job lifecycle. These jobs retain separate
+invocation outputs in `coinjoin-analysis-tools_data/` and do not replace the
+comparison baseline or run the report. Local Docker/Podman uses the same CLI
+arguments on a copy of its input dataset.
+The optional research adapters invoke existing functions for transaction size,
+labeled emulation sequences and mainnet coordinator refresh. They are delivered
+with each invocation rather than rebuilt into the analyzer image. Data-origin
+validation keeps wallet-ground-truth operations in emulation and public-chain
+lookups/coordinator refresh in mainnet.
+
+## Verification boundary
+
+Focused tests use fake scheduler, process and storage boundaries. They verify
+configuration errors, graph order, rollback/cancellation, job persistence,
+rendered shell behavior, artifact validation and report calculations. They do
+not prove a live emulator, image, parser or MetaCentrum run.
+
+`tests/pipeline/test_rendered_jobs.py` renders every S3 example in `examples/`
+and a few index-job configurations through the real renderers and compares each
+job's `settings.json` and `#PBS` directives with `tests/pipeline/rendered_jobs/`.
+A change in how an option reaches a job shows up there as a diff; after an
+intended one, refresh the stored files with `UPDATE_RENDERED_JOBS=1` and review
+them. `tests/unit/test_index_job_rules.py` names the configuration rule each
+unsupported index job fails on.
+
+The live paths are covered by the local suite (`run-all.sh local`): Docker,
+k3d, shared-storage PBS and Kubernetes → MinIO → PBS end-to-end tests. Historic
+reports retain their original provenance; new exporter source hashes differ.
+
+## Experimental paths
+
+Kept for local development and reproduction, not read for the thesis review:
+
+| Path | Modules |
+|---|---|
+| Dispatch of every non-S3 action | `execution/local.py` |
+| Local Docker/Podman commands and Compose | `execution/containers.py`, `runtime.py`, `pipeline/compose.yaml`, `pipeline/*.sh` |
+| Kubernetes emulation without S3 | `execution/kubernetes_launch.py` |
+| Shared-storage PBS stages and graph | `execution/shared_storage_pbs.py`, `workflow.py`, `pbs/submission_local.py`, `pbs/templates_local.py`, `pbs/templates/local_*.sh` |
+| `runs`, `scenarios` and `external-analyze` commands | `execution/research.py`, `run_catalog.py` |
