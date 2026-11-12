@@ -57,7 +57,7 @@ def run_configuration(args: PipelineConfiguration, logs_root: Path, local_build:
     action = args.action
     if action in {"full-run", "clean"}:
         with captured_pipeline_stage(logs_root, "Clean containers and volumes", logs_root / "_maintenance"):
-            containers.run_script(settings.DELETE_SCRIPT)
+            containers.run_script(settings.DELETE_SCRIPT, config=args)
     if action == "emulate":
         _emulate(args, logs_root, local_build, full_run=False)
     elif action == "full-run":
@@ -99,10 +99,10 @@ def run_configuration(args: PipelineConfiguration, logs_root: Path, local_build:
                 lambda: shared_storage_pbs.run_coinjoin_analysis_stage(args, run_dir),
             )
         else:
-            containers.run_coinjoin_analysis(args.run_dir, args.all_runs, args.analysis_action)
+            containers.run_coinjoin_analysis(args, args.run_dir, args.all_runs, args.analysis_action)
     elif action == "initialize":
         with captured_pipeline_stage(logs_root, "Initialize container images", logs_root / "_maintenance"):
-            containers.initialize_images()
+            containers.initialize_images(args)
 
 
 def run_analysis(args: PipelineConfiguration, run_dir: Path, logs_root: Path) -> None:

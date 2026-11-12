@@ -49,7 +49,7 @@ class SharedStorageStageRunner:
             )
         actions = {
             StageKind.BASELINE: lambda: containers.run_coinjoin_analysis_docker_stage(
-                self.run_dir.name, self.args.analysis_action
+                self.args, self.run_dir.name, self.args.analysis_action
             ),
             StageKind.BLOCKSCI_WORK: lambda: containers.run_blocksci_docker_stage(
                 self.args, self.run_dir, include_report=False

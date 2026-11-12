@@ -297,8 +297,8 @@ def run_script(
         sys.exit(exc.returncode)
 
 
-def initialize_images() -> None:
-    env = compose_env()
+def initialize_images(config: PipelineConfiguration) -> None:
+    env = compose_env(config)
     compose_cmd = compose_base_command(env)
     try:
         run_command(
@@ -328,11 +328,12 @@ def initialize_images() -> None:
 
 
 def run_coinjoin_analysis(
+    config: PipelineConfiguration,
     run_dir_arg: str | None = None,
     all_runs: bool = False,
     analysis_action: str = "collect_docker",
 ) -> None:
-    env = compose_env()
+    env = compose_env(config)
     emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"])
     if all_runs:
         active_run_ids = [path.name for path in sorted(run_dirs(emulation_logs_dir))]
@@ -348,14 +349,16 @@ def run_coinjoin_analysis(
             raise ValueError(f"analyze_only requires an existing baseline: {baseline_path}")
         with captured_pipeline_stage(emulation_logs_dir, "coinjoin-analysis baseline", run_dir):
             try:
-                run_coinjoin_analysis_docker_stage(active_run_id, analysis_action)
+                run_coinjoin_analysis_docker_stage(config, active_run_id, analysis_action)
             except subprocess.CalledProcessError as exc:
                 sys.exit(exc.returncode)
 
 
-def run_coinjoin_analysis_docker_stage(active_run_id: str, analysis_action: str = "collect_docker") -> None:
+def run_coinjoin_analysis_docker_stage(
+    config: PipelineConfiguration, active_run_id: str, analysis_action: str = "collect_docker"
+) -> None:
     """Run only coinjoin-analysis through Compose, without starting BlockSci."""
-    run_env = compose_env(active_run_id=active_run_id)
+    run_env = compose_env(config, active_run_id)
     run_env["COINJOIN_ANALYSIS_ACTION"] = analysis_action
     compose_cmd = compose_base_command(run_env)
     run_command(

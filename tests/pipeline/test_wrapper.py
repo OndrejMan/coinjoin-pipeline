@@ -15,6 +15,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from config_support import build_parser
 
+from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.run_context import run_dir_under_root
 from coinjoin_pipeline.execution.scenarios import container_scenario_path, host_scenario_path
 from coinjoin_pipeline.execution.containers import (
@@ -875,7 +876,7 @@ class WrapperExportTest(unittest.TestCase):
                 mock.patch.dict(os.environ, env, clear=False),
                 mock.patch("coinjoin_pipeline.execution.containers.run_command") as run_mock,
             ):
-                run_coinjoin_analysis("run-a")
+                run_coinjoin_analysis(PipelineConfiguration(), "run-a")
 
             run_env = run_mock.call_args.kwargs["env"]
             self.assertEqual(
@@ -915,7 +916,7 @@ class WrapperExportTest(unittest.TestCase):
                 mock.patch.dict(os.environ, env, clear=False),
                 mock.patch("coinjoin_pipeline.execution.containers.run_command") as run_mock,
             ):
-                run_coinjoin_analysis(all_runs=True)
+                run_coinjoin_analysis(PipelineConfiguration(), all_runs=True)
 
             compose_calls = [call for call in run_mock.call_args_list if "coinjoin_analysis" in call.args[0]]
             self.assertEqual(len(compose_calls), 2)
@@ -948,7 +949,7 @@ class WrapperExportTest(unittest.TestCase):
                 mock.patch.dict(os.environ, env, clear=False),
                 mock.patch("coinjoin_pipeline.execution.containers.run_command") as run_mock,
             ):
-                run_coinjoin_analysis("run-a", analysis_action="analyze_only")
+                run_coinjoin_analysis(PipelineConfiguration(), "run-a", analysis_action="analyze_only")
 
             self.assertEqual(
                 run_mock.call_args.kwargs["env"]["COINJOIN_ANALYSIS_ACTION"],
@@ -974,7 +975,7 @@ class WrapperExportTest(unittest.TestCase):
                 mock.patch("coinjoin_pipeline.execution.containers.run_command") as run_mock,
                 self.assertRaisesRegex(ValueError, "analyze_only requires an existing baseline"),
             ):
-                run_coinjoin_analysis("run-a", analysis_action="analyze_only")
+                run_coinjoin_analysis(PipelineConfiguration(), "run-a", analysis_action="analyze_only")
             run_mock.assert_not_called()
 
     def test_kubernetes_emulator_command_places_driver_before_subcommand(self):
