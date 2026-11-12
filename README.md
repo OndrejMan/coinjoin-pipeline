@@ -253,3 +253,248 @@ kubectl create secret generic coinjoin-s3-credentials \
   --from-literal=S3_SECRET_ACCESS_KEY='<secret-key>' \
   --from-literal=S3_DEFAULT_REGION='us-east-1'
 ```
+
+### Single-command full run
+
+`full-run --artifact-backend s3` orchestrates the whole chain from a
+MetaCentrum frontend and waits for every stage: it submits the Kubernetes
+emulation Job, polls the bucket for `.k8s/upload.done`, submits both PBS
+analyzers in parallel followed by a report job dependent on both, and polls
+all three `.pbs/*.done` markers until the results land in the bucket.
+The analyzers are selectable: drop `--analysis-pbs`, `--blocksci-pbs` or both to run
+only part of the chain. Without coinjoin-analysis there is no baseline, so BlockSci
+publishes its results without the unified report and `--mappings-pbs` is refused;
+without either analyzer the run ends at the emulation upload and never calls `qsub`.
+Requirements: kubeconfig + `qsub` + `s5cmd` on
+the frontend, and a pre-created namespace with the
+Secret (`--reuse-namespace` is required). Run it inside `screen`/`tmux` —
+the process blocks for the whole emulation and analysis.
+
+```bash
+coinjoin-pipeline full-run \
+  --engine wasabi \
+  --coinjoin-type wasabi2 \
+  --driver kubernetes \
+  --namespace man5-ns --reuse-namespace \
+  --artifact-backend s3 \
+  --artifact-uri s3://coinjoin-thesis/runs \
+  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
+  --s3-secret-name coinjoin-s3-credentials \
+  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
+  --s3-profile coinjoin \
+  --run-id '<id>' \
+  --min-input-count 15 \
+  --analysis-pbs \
+  --blocksci-pbs \
+  --mappings-pbs \
+  --emulation-timeout 21600
+```
+
+The orchestrator refuses a `--run-id` whose bucket prefix contains any object,
+cancels dependent mappings/report jobs if a prerequisite fails, and prints `kubectl`
+diagnostics if the emulation fails. A still-running sibling analyzer job is
+deliberately left in place on failure — its results upload to the bucket
+independently and remain usable; cancel it with `qdel` if they are not needed. `--parallel`
+and full-run `--blocksci-script` are not supported in S3 mode. Optional
+`--mappings-pbs` is supported for Wasabi 2: it runs after coinjoin-analysis and
+the unified-report job waits for and embeds its uploaded mapping results. The
+`.pipeline.lock` in the runs root is held for the whole duration — one S3
+full-run at a time per frontend. The end-to-end test for this path is
+`tests/test-kubernetes-s3-minio.sh` (k3d + local PBS rig + MinIO). The
+separate archive contract is `tests/test-bitcoin-block-archive-s3-minio.sh`:
+it downloads only public mainnet heights 0 and 1, builds and runs the
+`bitcoin-block-archive` Docker image to archive them into MinIO using S3
+environment secrets, and verifies the PBS BlockSci S3 restore and parse.
+
+`tests/test-mainnet-sync-mainnet.sh` exercises real Bitcoin Core P2P synchronization
+near height 400000, Dumplings scanning beyond its mainnet start height 336861,
+completed-file archival, two PBS/BlockSci generations,
+and recovery of both Core and the index against local MinIO. Histories that fit
+in the two active block files recover those files from the Core checkpoint.
+The automatic
+`mainnet-sync-bounded` CI job builds its components and retains diagnostics on
+failure. See [the bounded mainnet E2E runbook](docs/mainnet-synchronization.md#omezený-mainnet-e2e-v-ci)
+for limits, retained evidence and the standalone command.
+
+The same run can be described in YAML and loaded with `cjp run CONFIG.yaml`
+(or `--from-configuration CONFIG.yaml`). YAML and
+CLI options decode into the same typed configuration (explicit CLI options
+override YAML values), so the same S3/PBS checks and research manifest apply. For an S3 `full-run`, a
+missing `run_id` is generated automatically; `pbs.analysis`, `pbs.blocksci`,
+and `pbs.mappings` enable their corresponding PBS stages.
+
+```bash
+./runIt.sh run examples/metacentrum-regtest-s3.yaml
+```
+
+`examples/metacentrum-regtest-s3.yaml` is the recommended regtest full-run
+configuration. Mainnet is deliberately split into two submissions:
+
+For the default JoinMarket regtest scenario, use the measured MetaCentrum
+profile. It requests 2 CPUs, 16 GB RAM, and 8 GB scratch for BlockSci, plus
+2 CPUs and 8 GB RAM for coinjoin-analysis:
+
+```bash
+./runIt.sh \
+  --from-configuration examples/metacentrum-joinmarket-regtest-s3.yaml
+```
+
+The profile uses `scenarios/defaultJoinMarket.json`, enables regtest detector
+thresholds, and leaves the larger global/mainnet PBS defaults unchanged.
+
+```bash
+# Produces a checksummed reusable BlockSci cache from the external mainnet datadir.
+./runIt.sh \
+  --from-configuration examples/metacentrum-mainnet-parse.yaml
+
+# Reuses that run ID and cache to produce joinmarket-mainnet-summary.json.
+./runIt.sh \
+  --from-configuration examples/metacentrum-mainnet-analyze.yaml
+```
+
+When the Bitcoin Core node is pruned after archival by
+`bitcoin-block-archive`, use the S3 archive variant instead. The parser job
+downloads every schema-1 `blkNNNNN.dat.json` sidecar, then only the prefix
+`blk00000.dat…` of block files that holds heights up to the requested maximum
+(plus a six-block selection margin).
+It checks each downloaded file's size and SHA-256 against its sidecar and
+refuses a requested height that the sidecars' `height_ranges` do not cover from
+height 0. Height ranges are only a preflight: they can include different forks.
+Before publishing the cache, the job opens the actual parsed BlockSci index,
+requires exactly `max_block + 1` blocks, and verifies the target block hash.
+Mainnet archive parses and updates require `blocksci.expected_block_hash`
+(`--blocksci-expected-block-hash`), pinned independently from a trusted Core
+with `bitcoin-cli getblockhash HEIGHT`. Change this hash whenever `max_block`
+changes. PBS does not fetch a checkpoint from an external service.
+The manifest records the observed `exported_max_block` and `exported_block_hash`,
+the last archive file scanned and a digest
+of the scanned files, which an incremental update needs. The second job compares the cached BlockSci index with a
+`coinjoin_tx_info.json` produced from Dumplings; it reports baseline agreement,
+not ground-truth precision/recall.
+
+```bash
+./runIt.sh --from-configuration examples/metacentrum-mainnet-s3-blocks-parse.yaml
+./runIt.sh --from-configuration examples/metacentrum-mainnet-dumplings-report.yaml
+```
+
+Before submission, set the same `run_id` and immutable `images.version` in
+both mainnet files, update the inclusive `blocksci.max_block`, and replace the
+shared-storage paths. The analyze job writes the summary under
+`blocksci-custom-analysis_data/` in the same S3 run. It is detector output
+without emulator ground truth, not a precision/recall unified report.
+
+An explicit CLI option after `cjp run FILE` overrides the same
+value from YAML. Programmatic consumers can load the schema through the
+immutable typed `PipelineConfiguration.from_yaml()` model exported by
+`coinjoin_pipeline` and call `to_arguments()` when they need the public CLI
+representation.
+
+The typed schema also covers the advanced modes used by decomposed and mainnet
+workflows:
+
+- `blocksci`: `workflow`, `task`, custom script/notebook settings, cache source,
+  external Bitcoin or BlockSci source, network, and inclusive maximum block;
+- `joinmarket`: detector selection, base fee, percentage fee, and search depth;
+- `mappings`: fee model, decomposition limit, mode, timeouts, and Sake seed;
+- `external`: external Bitcoin datadir, baseline JSON, repeatable false-positive
+  files, network, minimum free disk space, and resume mode for
+  `action: external-analyze`;
+- `images`: coordinated version/local-build selection and every component image
+  override, including the separately versioned `uploader` and
+  `unified_report` images;
+- `pbs`: shared and per-stage resources, PBS image overrides, Bitcoin datadir,
+  and unified-report resources;
+- top-level operational fields such as `action`, `runtime`, `runs_root`,
+  `run_dir`, `analysis_action`, and `emulation_timeout`.
+
+External mainnet analysis can therefore use the same typed configuration path:
+
+```bash
+./runIt.sh --from-configuration examples/external-analysis.yaml
+```
+
+For an existing external run, retain `run_id`, remove `bitcoin_datadir` and
+`baseline`, and set `external.resume: true`.
+
+Cross-field restrictions remain identical to CLI validation. For example,
+external Bitcoin and external BlockSci sources are mutually exclusive, and
+external parsing is valid only for the appropriate `pbs-from-s3` reusable or
+cached task.
+
+### Decomposed two-command workflow
+
+The same chain can run as two independent commands — emulation from any
+machine with a kubeconfig, analysis later from the frontend.
+
+Submit Kubernetes emulation and upload:
+
+```bash
+coinjoin-pipeline emulate \
+  --driver kubernetes \
+  --namespace man5-ns --reuse-namespace \
+  --artifact-backend s3 \
+  --artifact-uri s3://coinjoin-thesis/runs \
+  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
+  --s3-secret-name coinjoin-s3-credentials \
+  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
+  --s3-profile coinjoin \
+  --run-id '<id>' \
+  --engine wasabi
+```
+
+Submit PBS analysis for the existing run:
+
+```bash
+coinjoin-pipeline pbs-from-s3 \
+  --run-id '<id>' \
+  --artifact-uri s3://coinjoin-thesis/runs \
+  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
+  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
+  --s3-profile coinjoin \
+  --engine wasabi \
+  --min-input-count 15 \
+  --analysis-pbs \
+  --blocksci-pbs
+```
+
+`s5cmd` must be available on PBS compute nodes and is included in the pipeline
+image used by the Kubernetes uploader; the single-command full run additionally
+needs it on the frontend PATH for marker polling. In the two-command workflow
+nothing waits — monitor the jobs with `qstat` and check markers in the bucket
+yourself. Submission is serialized per run under
+`<runs-root>/<run-id>/.pbs-submit.lock`; every obtained job ID is persisted
+under `.pbs/`, and a later invocation refuses to overlap jobs that are still
+queued/running or whose state cannot be verified.
+
+When both PBS stages are selected, coinjoin-analysis and BlockSci analysis run
+independently. The BlockSci job persists detector, diagnostics, and clustering
+results in `blocksci-analysis_data/blocksci_analysis.json`. A lightweight
+report-only PBS job is submitted with an `afterok` dependency on both analyzer
+job IDs; it merges precomputed artifacts without loading BlockSci or raw
+Bitcoin data and uploads `coinjoinPipeline_data`. The single-command
+`full-run` waits for the emulation upload, both analyzer jobs, and that final
+report job before returning. The decomposed `pbs-from-s3` command submits this
+three-job analysis graph without waiting; adding mappings expands it to four
+jobs.
+
+For Wasabi 2, add `--mappings-pbs` to either S3 analysis command. The mappings
+job uses `afterok` on coinjoin-analysis when both are submitted together,
+uploads `coinjoin-mappings_data/{enumerator.json,sake.json,coinjoin_mappings.json}`
+and becomes a third dependency of the report job. To run mappings later against
+an existing baseline without rerunning either analyzer:
+
+```bash
+./runIt.sh pbs-from-s3 \
+  --run-id '<id>' \
+  --artifact-uri s3://coinjoin-thesis/runs \
+  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
+  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
+  --s3-profile coinjoin \
+  --engine wasabi \
+  --coinjoin-type wasabi2 \
+  --mappings-pbs
+```
+
+This mappings-only form expects
+`coinjoin-analysis_data/coinjoin_tx_info.json` to already exist in the run
+prefix and does not regenerate the unified report by itself.
