@@ -13,6 +13,7 @@ from exporters.common import (
     parse_run_started_at,
 )
 from exporters.comparison import (
+    build_detection_confusion_matrix,
     build_divergences,
     compare_records,
 )
@@ -81,6 +82,10 @@ def build_warnings(
     return warnings
 
 
+def evaluation_scope(independent_emulator_labels: bool) -> str:
+    return "emulator_ground_truth" if independent_emulator_labels else "emulator_labels_unavailable"
+
+
 def build_summary(
     transactions: JsonObject,
     coinjoin_analysis: dict[str, TransactionRecord],
@@ -123,6 +128,18 @@ def build_report(
     """The unified report. Every top-level key is always present, null when it does not apply."""
     coinjoin_type, min_input_count = detector.coinjoin_type, detector.min_input_count
     transactions = compare_transactions(coinjoin_analysis, blocksci_records)
+
+    independent_emulator_labels = bool(
+        emulator_data and (emulator_data.get("label_provenance") or {}).get("independent")
+    )
+    detector_evaluations = (
+        {
+            "blocksci": build_detection_confusion_matrix(emulator_data, blocksci_records),
+            "coinjoin_analysis": build_detection_confusion_matrix(emulator_data, coinjoin_analysis),
+        }
+        if independent_emulator_labels
+        else None
+    )
     summary = build_summary(transactions, coinjoin_analysis, blocksci_records, emulator_data)
     divergences = build_divergences(transactions)
     summary["divergence_counts"] = {name: len(items) for name, items in divergences.items()}
@@ -145,6 +162,8 @@ def build_report(
         }
         if emulator_data
         else None,
+        "detector_evaluations": detector_evaluations,
+        "evaluation_scope": evaluation_scope(independent_emulator_labels),
         "summary": summary,
         "divergences": divergences,
         "transactions": transactions,
