@@ -168,14 +168,14 @@ def runs_unified_report(*, action: str, analysis_pbs: bool, blocksci_pbs: bool, 
     return blocksci_pbs and blocksci_task == "detect" and (analysis_pbs or action != "full-run")
 
 
-def analysis_plan() -> StageGraph:
+def analysis_plan(*, analysis_pbs: bool, blocksci_pbs: bool) -> StageGraph:
     """Declare the experimental local graph: the same analyzer/report dependencies
     as ``s3_full_run_plan``, without an emulation node. Its node order is the
     serial execution order."""
-    baseline = StagePlan("coinjoin-analysis", StageKind.BASELINE, "local")
-    blocksci = StagePlan("blocksci", StageKind.BLOCKSCI_WORK, "local")
+    baseline = StagePlan("coinjoin-analysis", StageKind.BASELINE, "pbs" if analysis_pbs else "local")
+    blocksci = StagePlan("blocksci", StageKind.BLOCKSCI_WORK, "pbs" if blocksci_pbs else "local")
     stages = [baseline, blocksci]
-    stages.append(_report_stage("local", baseline, blocksci))
+    stages.append(_report_stage("pbs" if blocksci_pbs else "local", baseline, blocksci))
     return StageGraph(tuple(stages))
 
 

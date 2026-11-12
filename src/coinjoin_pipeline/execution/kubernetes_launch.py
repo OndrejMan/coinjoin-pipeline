@@ -28,6 +28,7 @@ def run_kubernetes_emulation(
     *,
     local_build: bool = False,
     btc_datadir: str | None = None,
+    prepare_local_analysis: bool = True,
 ) -> None:
     """Run the coinjoin emulation on a Kubernetes cluster.
 
@@ -132,7 +133,8 @@ def run_kubernetes_emulation(
             file=sys.stderr,
         )
         sys.exit(exc.returncode)
-    populate_btc_data_volume(local_download_path if copy_to_host else shared_btc_data_path)
+    if prepare_local_analysis:
+        populate_btc_data_volume(local_download_path if copy_to_host else shared_btc_data_path)
     print("[kubernetes] Emulation complete. BTC data ready for analysis.")
 
 

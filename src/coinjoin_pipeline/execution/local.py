@@ -19,7 +19,7 @@ from . import containers, kubernetes_launch, settings, shared_storage_pbs
 from .stage_executor import execute_analysis
 
 
-def _emulate(args: PipelineConfiguration, logs_root: Path, local_build: bool) -> Path:
+def _emulate(args: PipelineConfiguration, logs_root: Path, local_build: bool, *, full_run: bool) -> Path:
     """Run the emulator on Docker or Kubernetes and file its log under the run it created."""
     on_kubernetes = args.driver == "kubernetes"
     with captured_pipeline_stage(logs_root, "Kubernetes emulation" if on_kubernetes else "Docker emulation") as log:
@@ -27,7 +27,8 @@ def _emulate(args: PipelineConfiguration, logs_root: Path, local_build: bool) ->
             kubernetes_launch.run_kubernetes_emulation(
                 args,
                 local_build=local_build,
-                btc_datadir=args.kubernetes.btc_datadir,
+                btc_datadir=args.kubernetes.btc_datadir or (args.pbs.bitcoin_datadir if full_run else None),
+                prepare_local_analysis=not (full_run and args.stages.blocksci),
             )
         else:
             containers.run_script(settings.EMULATE_SCRIPT, config=args)
@@ -58,9 +59,9 @@ def run_configuration(args: PipelineConfiguration, logs_root: Path, local_build:
         with captured_pipeline_stage(logs_root, "Clean containers and volumes", logs_root / "_maintenance"):
             containers.run_script(settings.DELETE_SCRIPT)
     if action == "emulate":
-        _emulate(args, logs_root, local_build)
+        _emulate(args, logs_root, local_build, full_run=False)
     elif action == "full-run":
-        run_dir = _emulate(args, logs_root, local_build)
+        run_dir = _emulate(args, logs_root, local_build, full_run=True)
         try:
             run_analysis(args, run_dir, logs_root)
         except (PBSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
