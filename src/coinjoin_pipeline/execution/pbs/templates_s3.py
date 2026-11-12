@@ -165,7 +165,7 @@ def render_coinjoin_analysis_dumplings_s3_pbs(
 ) -> str:
     """Render the mainnet baseline: coinjoin-analysis over the published Dumplings copy.
 
-    ``<dumplings_uri>/Scanner/`` is the published copy, kept incrementally, and
+    ``<dumplings_uri>/Scanner/`` is the copy mainnet-sync keeps incrementally and
     ``manifest.json`` (written last) its height and file sizes. The run gets
     ``coinjoin_tx_info.json``, the image's curated ``false_cjtxs.json`` and the manifest as
     ``dumplings-snapshot.json`` for the external comparison.

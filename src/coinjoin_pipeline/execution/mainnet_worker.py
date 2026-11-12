@@ -7,6 +7,7 @@ library only and Python 3.8 syntax, like every module a PBS job ships.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -17,7 +18,8 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
@@ -55,7 +57,10 @@ class Settings(TypedDict, total=False):
     scan_start_height: int | None
     target_height: int | None
     state_uri: str
+    backup_uri: str
     blocks_uri: str
+    dumplings_uri: str
+    index_backup_uri: str
     endpoint: str
     credentials: str
     profile: str
@@ -63,6 +68,7 @@ class Settings(TypedDict, total=False):
     dumplings_image: str
     blocksci_image: str
     dbcache_mb: int
+    reorg_reserve: int
     poll_seconds: float
     pbs_resources: PbsResources
     sync_stages: list[str]
@@ -90,6 +96,11 @@ def is_count(value: object) -> TypeGuard[int]:
 
 def is_sha256(value: object) -> bool:
     return isinstance(value, str) and SHA256.fullmatch(value) is not None
+
+
+def file_sizes(root: Path) -> dict[str, int]:
+    """Relative path -> size of every regular file below root."""
+    return {str(path.relative_to(root)): path.stat().st_size for path in sorted(root.rglob("*")) if path.is_file()}
 
 
 def atomic_json(path: Path, value: object) -> None:
@@ -129,6 +140,17 @@ def scanner_complete(scanner: Path, height: int) -> None:
     anchor = read_json(scanner / "ChainCheckpoint.json")
     if anchor.get("height") != height or not is_sha256(anchor.get("hash")):
         raise ValueError("Dumplings checkpoint has no matching chain anchor")
+
+
+@contextmanager
+def stopped_core(datadir: Path) -> Iterator[None]:
+    # A running Core holds a POSIX write lock on .lock: the shared lock fails while one
+    # runs, and while it is held no Core can start and open the datadir mid-backup.
+    with (datadir / ".lock").open("rb") as handle:
+        fcntl.lockf(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        if (datadir / ".cookie").exists():
+            raise ValueError("Core still has an RPC cookie; checkpoint refused")
+        yield
 
 
 def resume_file(index: Path, blocks: Path) -> int:
@@ -185,6 +207,8 @@ class Worker:
         self.storage = S5Client(settings["endpoint"], settings["credentials"], settings["profile"])
         self.core: subprocess.Popen | None = None
         self.children: list[subprocess.Popen] = []
+        # Manifest URI -> sizes of the backups this job uploaded, for done.json.
+        self.uploaded: dict[str, JsonObject] = {}
         self.port: int | None = None
         self.stage = ""
         self.container = find_runtime()
@@ -386,7 +410,12 @@ class Worker:
         if require_clean_exit and code != 0:
             raise RuntimeError("Core did not shut down cleanly")
 
-    def archive(self) -> None:
+    def archive(self, prune: bool = False, height: int = 0, number: int = 0) -> None:
+        # Bitcoin Core 29.1 refuses pruning before these network thresholds.
+        # The regtest worker starts Core with -fastprune.
+        if prune and height < (100 if self.chain == "regtest" else 100000):
+            print("Historical test chain is too short for Core pruning; retaining all blocks", flush=True)
+            return
         wrapper = self.work / "archive-bitcoin-cli"
         wrapper.write_text(
             "#!/bin/sh\nexec bitcoin-cli -chain="
@@ -422,7 +451,45 @@ class Worker:
             # Credentials are bound only to the archiver, never copied into the dataset.
             binds=alias_binds(self.c["credentials"], "ro"),
         )
-        self.run_command(command, "archiver")
+        if prune:
+            ceiling = self.work / "prune-ceiling.txt"
+            ceiling.write_text(str(max(0, height - self.c["reorg_reserve"])))
+            command += ["--prune-only", "--prune-ceiling-file", str(ceiling), "--prune-retain-from-file", str(number)]
+        self.run_command(command, "pruning" if prune else "archiver")
+
+    def backup(self, root: Path, members: Sequence[str], prefix: str, metadata: JsonObject, name: str) -> str:
+        """Replace the single backup under prefix (s5client.replace_backup); its manifest URI."""
+        manifest = self.storage.replace_backup(
+            root, members, prefix, name, {**metadata, "run_id": self.run_id}, self.c["pbs_resources"]["ncpus"]
+        )
+        manifest_uri = prefix.rstrip("/") + "/manifest.json"
+        self.uploaded[manifest_uri] = {key: manifest[key] for key in ("archive_size", "member_bytes")}
+        return manifest_uri
+
+    def publish_dumplings(self, height: int) -> str:
+        """Mirror Scanner/ incrementally; manifest.json, written last, makes the copy readable.
+
+        Only changed files travel. The copy is checked by object sizes, never read back.
+        """
+        scanner = self.dumps / "Scanner"
+        scanner_complete(scanner, height)
+        prefix = self.c["dumplings_uri"].rstrip("/")
+        manifest_uri = prefix + "/manifest.json"
+        files = file_sizes(scanner)
+        self.storage.remove(manifest_uri)
+        self.progress("dumplings-backup")
+        self.storage.run("sync", "--delete", str(scanner) + "/", prefix + "/Scanner/", check=True, timeout=6 * 3600)
+        if self.storage.sizes(prefix + "/Scanner/") != files:
+            raise ValueError("The Dumplings copy in S3 does not match Scanner/")
+        manifest = {
+            "run_id": self.run_id,
+            "last_processed_height": height,
+            "files": files,
+            "upload_validation": "size-only",
+            "uploaded_at": utc_now(),
+        }
+        self.publish_json(manifest_uri, manifest)
+        return manifest_uri
 
     def synchronize_core(self) -> JsonObject:
         target = self.c.get("target_height")

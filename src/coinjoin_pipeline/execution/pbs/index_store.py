@@ -9,7 +9,8 @@ has no .writing marker and its files match files.txt.
 The backup prefix holds one backup in the format of s5client.py (replace_backup,
 restore_backup): blocksci_index.tar.zst, its .sha256 and manifest.json, written last.
 A new backup deletes the old one first, so S3 never holds two copies; until its
-manifest exists there is no valid backup. A run's own index in
+manifest exists there is no valid backup. The mainnet checkpoint job writes the same
+backup, so either job's backup restores in the other. A run's own index in
 <run prefix>/blocksci-parse_data is a backup of this format too, of an index that
 lived in the job's scratch.
 

@@ -3,8 +3,8 @@
 Standard library only and Python 3.8 syntax: a PBS job copies this file next to its
 worker script and runs it with the node's ``python3``.
 
-It also owns the format of a single backup (a run's index, the persistent index):
-one archive, its ``.sha256`` and ``manifest.json`` under a prefix. ``replace_backup``
+It also owns the format of a single backup (a run's index, the persistent index, the Core
+checkpoint): one archive, its ``.sha256`` and ``manifest.json`` under a prefix. ``replace_backup``
 writes it and ``restore_backup`` reads it, so the two cannot drift apart.
 """
 
@@ -175,6 +175,14 @@ class S5Client:
             if entry.get("key") == uri:
                 return entry.get("size", 0)
         return None
+
+    def sizes(self, prefix: str, timeout: float | None = 600) -> dict[str, object]:
+        """Relative key -> size of every object below prefix, which ends with a slash."""
+        return {
+            str(entry["key"])[len(prefix) :]: entry.get("size", 0)
+            for entry in self.listing(prefix + "*", timeout)
+            if entry.get("type", "file") == "file" and str(entry.get("key", "")).startswith(prefix)
+        }
 
     def cat(self, uri: str, timeout: float | None = 60) -> str:
         return self.run("cat", uri, check=True, timeout=timeout).stdout

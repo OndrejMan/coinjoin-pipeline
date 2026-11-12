@@ -228,10 +228,13 @@ HELP = {
     "mainnet.scan_start_height": "regtest validation only: first height Dumplings scans (mainnet: 336861)",
     "mainnet.root": "dataset directory on the multijob scratch holding Core, Dumplings and the block archive state",
     "mainnet.state_uri": "fixed S3 prefix of the synchronization's markers, progress and per-run logs",
+    "mainnet.backup_uri": "S3 prefix of the Core checkpoint backup",
     "mainnet.blocks_uri": "S3 prefix of the bitcoin-block-archive the producer writes",
+    "mainnet.dumplings_uri": "S3 prefix of the published Dumplings Scanner/ copy and its manifest",
     "mainnet.core_image": "image running Bitcoin Core and the block archiver",
     "mainnet.dumplings_image": "image running the Dumplings scanner",
     "mainnet.dbcache_mb": "Core -dbcache in MB; keep it at half the producer job's memory",
+    "mainnet.reorg_reserve": "blocks below the frozen tip that pruning keeps, so a reorganization can be undone",
     "mainnet.poll_seconds": "seconds between progress checks of the running jobs",
     "mainnet.notebook_root": "notebook data kept beside the dataset, measured in the storage report",
     "coinjoin_analysis.program": (

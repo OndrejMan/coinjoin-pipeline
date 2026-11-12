@@ -1,5 +1,5 @@
-# Mainnet coinjoin-analysis baseline from a Dumplings copy kept in S3.
-# The copy mirrors Scanner/ to <dumplings_uri>/Scanner/, with manifest.json written last;
+# Mainnet coinjoin-analysis baseline from the Dumplings copy mainnet-sync keeps in S3.
+# mainnet-sync mirrors Scanner/ to <dumplings_uri>/Scanner/ and writes manifest.json last;
 # this job runs parse_dumplings over that copy and stores coinjoin_tx_info.json,
 # the image's curated false_cjtxs.json and dumplings-snapshot.json under its own run.
 # The comparison (blocksci.task: external) then points at them:

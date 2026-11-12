@@ -122,7 +122,7 @@ def coinjoin_tools(stage: Stage) -> None:
 
 
 def dumplings_baseline(stage: Stage) -> None:
-    """The mainnet baseline: coinjoin-analysis over a published Dumplings copy.
+    """The mainnet baseline: coinjoin-analysis over the Dumplings copy mainnet-sync publishes.
 
     ``manifest.json``, written last, names the copy's height and file sizes; a copy
     without it is being replaced or its upload failed.
