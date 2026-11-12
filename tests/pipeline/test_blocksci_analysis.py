@@ -14,6 +14,7 @@ from exporters import cli as report_cli  # noqa: E402
 from exporters.analysis_artifact import load_analysis
 from exporters.blocksci_export.analysis import (  # noqa: E402
     SCHEMA_VERSION,
+    exported_addresses,
     write_analysis,
 )
 from exporters.normalization import load_first_wasabi2_block  # noqa: E402
@@ -37,6 +38,28 @@ def parameters() -> dict:
     ).artifact_parameters()
 
 
+def test_exported_addresses_reads_all_exported_block_outputs(tmp_path: Path) -> None:
+    block_dir = tmp_path / "coinjoin_emulator_data" / "data" / "btc-node"
+    block_dir.mkdir(parents=True)
+    (block_dir / "block_1.json").write_text(
+        json.dumps(
+            {
+                "tx": [
+                    {
+                        "vout": [
+                            {"scriptPubKey": {"address": "bcrt1-one"}},
+                            {"scriptPubKey": {"addresses": ["bcrt1-two"]}},
+                        ]
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert exported_addresses(tmp_path) == {"bcrt1-one", "bcrt1-two"}
+
+
 def test_load_analysis_rejects_parameter_mismatch(tmp_path: Path) -> None:
     artifact = tmp_path / "blocksci_analysis.json"
     artifact.write_text(
@@ -49,6 +72,7 @@ def test_load_analysis_rejects_parameter_mismatch(tmp_path: Path) -> None:
                 "records": {},
                 "subset_matching": None,
                 "integration_diagnostics": {"status": "ok"},
+                "predicted_address_clusters": {},
             }
         ),
         encoding="utf-8",
@@ -97,6 +121,14 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
             return_value={"status": "ok"},
         ),
         mock.patch(
+            "exporters.blocksci_export.analysis.exported_addresses",
+            return_value={"bcrt1-address"},
+        ),
+        mock.patch(
+            "exporters.blocksci_export.analysis.export_blocksci_cluster_assignments_for_addresses",
+            return_value=({"bcrt1-address": "7"}, None),
+        ) as export_cluster_assignments,
+        mock.patch(
             "exporters.blocksci_export.analysis.load_first_wasabi2_block",
             return_value=850237,
         ),
@@ -105,7 +137,9 @@ def test_write_analysis_persists_all_heavy_results(tmp_path: Path) -> None:
 
     artifact = json.loads(output.read_text(encoding="utf-8"))
     assert artifact["records"] == {"tx": {"txid": "tx"}}
+    assert artifact["predicted_address_clusters"] == {"bcrt1-address": "7"}
     assert artifact["integration_diagnostics"] == {"status": "ok"}
+    assert list(export_cluster_assignments.call_args.args[2]) == ["tx"]
     assert artifact["subset_matching"] is None
 
 
@@ -123,6 +157,7 @@ def test_joinmarket_analysis_keeps_the_deprecated_subset_scan(tmp_path: Path) ->
         joinmarket_min_base_fee=5000,
         joinmarket_percentage_fee=0.00004,
         joinmarket_max_depth=200000,
+        skip_clustering=True,
     )
     with (
         mock.patch("exporters.blocksci_export.analysis.blocksci", mock.Mock()),
@@ -169,6 +204,8 @@ def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:
                 "records": {},
                 "subset_matching": None,
                 "integration_diagnostics": {"status": "ok"},
+                "predicted_address_clusters": {},
+                "cluster_export_error": None,
             }
         ),
         encoding="utf-8",

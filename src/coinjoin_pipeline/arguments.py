@@ -79,7 +79,7 @@ HELP = {
     "run_id": "run ID; emulate and full-run generate <timestamp>_<scenario> when omitted",
     "run_timezone": "IANA timezone of generated run IDs",
     "min_input_count": (
-        "Wasabi minimum input count for BlockSci detection "
+        "Wasabi minimum input count for BlockSci detection and clustering "
         "(default: BlockSci's height-aware threshold; small regtest rounds need an explicit value)"
     ),
     "dry_run": "validate and print the plan without starting containers, jobs or uploads",

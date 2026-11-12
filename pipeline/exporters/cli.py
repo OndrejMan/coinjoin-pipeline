@@ -48,6 +48,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-name", default=REPORT_JSON)
     parser.add_argument("--emulator-git-commit", default=os.environ.get("COINJOIN_EMULATOR_GIT_COMMIT"))
     parser.add_argument(
+        "--cluster-output-dir",
+        type=Path,
+        help="Directory for temporary BlockSci CoinJoin clustering data.",
+    )
+    parser.add_argument(
+        "--skip-clustering",
+        action="store_true",
+        help="Skip BlockSci cluster assignment export and only report detection metrics.",
+    )
+    parser.add_argument(
         "--blocksci-analysis",
         type=Path,
         help="Consume a precomputed BlockSci analysis artifact instead of querying BlockSci.",
@@ -98,6 +108,11 @@ def assemble_report(args: argparse.Namespace) -> int:
     save_json(output_dir / "emulator_data.json", emulator_data)
 
     analysis = load_run_analysis(args, run_dir)
+    predicted_address_clusters = analysis.get("predicted_address_clusters")
+    cluster_export_error = analysis.get("cluster_export_error")
+    if args.skip_clustering:
+        predicted_address_clusters = None
+        cluster_export_error = "Clustering was explicitly skipped during report assembly."
     scenario = load_scenario(run_dir)
     output_path = output_dir / args.output_name
     report = build_report(
@@ -107,6 +122,8 @@ def assemble_report(args: argparse.Namespace) -> int:
         Detector.from_args(args, analysis["first_wasabi2_block"]),
         scenario,
         emulator_data=emulator_data,
+        predicted_address_clusters=predicted_address_clusters,
+        cluster_export_error=cluster_export_error,
         subset_matching=analysis.get("subset_matching"),
         engine=args.engine,
         images=ReportImages.from_args(args),

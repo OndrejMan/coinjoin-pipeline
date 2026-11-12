@@ -39,6 +39,9 @@ def load_analysis(
         raise ValueError("BlockSci analysis artifact has invalid subset_matching")
     if not isinstance(artifact.get("integration_diagnostics"), dict):
         raise ValueError("BlockSci analysis artifact has invalid integration_diagnostics")
+    for field in ("predicted_address_clusters",):
+        if artifact.get(field) is not None and not isinstance(artifact[field], dict):
+            raise ValueError(f"BlockSci analysis artifact has invalid {field}")
     provenance = artifact.get("image_provenance")
     if provenance is not None:
         if not isinstance(provenance, dict):

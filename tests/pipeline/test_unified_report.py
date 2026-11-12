@@ -25,10 +25,14 @@ else:
     _ = _blocksci
 
 from exporters.blocksci_export import detector as unified_report
-from exporters.blocksci_export.detector import export_blocksci_records
+from exporters.blocksci_export.detector import (
+    export_blocksci_cluster_assignments_for_addresses,
+    export_blocksci_records,
+)
 from exporters.cli import parse_args
 from exporters.common import SCHEMA_VERSION, save_json, sha256_json
-from exporters.emulator_data import build_emulator_data, load_wasabi_round_labels
+from exporters.comparison import evaluate_cluster_assignments
+from exporters.emulator_data import build_emulator_data, load_wasabi_round_labels, wallet_address_labels
 from exporters.heuristics import (
     WASABI2_BLOCKSCI_DENOMINATIONS,
     explain_joinmarket_heuristic,
@@ -1666,6 +1670,260 @@ class UnifiedReportTest(unittest.TestCase):
             "wasabi_production_threshold_zero_detections",
         )
         self.assertIn("production minimum-input threshold", render_report(report))
+
+    def test_clustering_unavailable_reason_is_reported(self):
+        evaluation = evaluate_cluster_assignments(
+            emulator_data_fixture(),
+            unavailable_reason="cluster export failed",
+        )
+
+        self.assertFalse(evaluation["available"])
+        self.assertEqual(evaluation["reason"], "cluster export failed")
+        self.assertEqual(evaluation["labeled_addresses"], 0)
+
+    def test_build_report_includes_cluster_export_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            run_dir.mkdir()
+            coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_fixture())
+            report = build_report(
+                run_dir,
+                coinjoin_analysis,
+                blocksci_fixture(),
+                Detector("wasabi2"),
+                emulator_data=emulator_data_fixture(),
+                cluster_export_error="cluster export failed",
+            )
+
+        self.assertFalse(report["clustering_evaluation"]["available"])
+        self.assertEqual(report["clustering_evaluation"]["reason"], "cluster export failed")
+
+    def test_export_blocksci_cluster_assignments_skips_empty_clusters(self):
+        class FakeHeuristic:
+            def __and__(self, _other):
+                return self
+
+        class FakeCoinjoinHeuristics:
+            one_output_consolidation_2hops = FakeHeuristic()
+            two_equal_output_consolidation_1hop = FakeHeuristic()
+
+        class FakeCluster:
+            def __init__(self, index, count):
+                self.index = index
+                self.count = count
+
+            def address_count(self):
+                return self.count
+
+        class FakeClusterer:
+            def cluster_with_address(self, address):
+                if address == "known-a":
+                    return FakeCluster(7, 2)
+                return FakeCluster(0, 0)
+
+        class FakeCoinjoinClusterManager:
+            arguments = None
+
+            @staticmethod
+            def create_clustering_from_txes(**kwargs):
+                FakeCoinjoinClusterManager.arguments = kwargs
+                return FakeClusterer()
+
+        class FakeClusterBlockchain:
+            def __init__(self, _config):
+                pass
+
+            def address_from_string(self, address):
+                return address
+
+            def tx_with_hash(self, txid):
+                return f"tx:{txid}"
+
+        previous_blocksci = unified_report.blocksci
+        unified_report.blocksci = types.SimpleNamespace(
+            Blockchain=FakeClusterBlockchain,
+            heuristics=types.SimpleNamespace(coinjoin=FakeCoinjoinHeuristics()),
+            cluster=types.SimpleNamespace(CoinjoinClusterManager=FakeCoinjoinClusterManager),
+        )
+        try:
+            predicted, error = export_blocksci_cluster_assignments_for_addresses(
+                Path("/tmp/config.json"),
+                wallet_address_labels(
+                    {
+                        "transactions": {
+                            "tx": {
+                                "inputs": [{"address": "known-a", "wallet_name": "wallet-a"}],
+                                "outputs": [{"address": "unknown-a", "wallet_name": "wallet-b"}],
+                            }
+                        }
+                    }
+                ),
+                ["cj-b", "cj-a", "cj-b"],
+                Path("/tmp/clusters"),
+            )
+        finally:
+            unified_report.blocksci = previous_blocksci
+
+        self.assertIsNone(error)
+        self.assertEqual(predicted, {"known-a": "7"})
+        self.assertEqual(
+            FakeCoinjoinClusterManager.arguments["coinjoin_txes"],
+            ["tx:cj-a", "tx:cj-b"],
+        )
+
+    def test_export_blocksci_cluster_assignments_creates_output_parent(self):
+        class FakeHeuristic:
+            def __and__(self, _other):
+                return self
+
+        class FakeCoinjoinHeuristics:
+            one_output_consolidation_2hops = FakeHeuristic()
+            two_equal_output_consolidation_1hop = FakeHeuristic()
+
+        class FakeCluster:
+            index = 3
+
+            def address_count(self):
+                return 1
+
+        class FakeClusterer:
+            def cluster_with_address(self, _address):
+                return FakeCluster()
+
+        class FakeCoinjoinClusterManager:
+            @staticmethod
+            def create_clustering_from_txes(**kwargs):
+                output_path = Path(kwargs["output_path"])
+                if not output_path.parent.is_dir():
+                    raise RuntimeError("missing clustering parent")
+                return FakeClusterer()
+
+        class FakeClusterBlockchain:
+            def __init__(self, _config):
+                pass
+
+            def address_from_string(self, address):
+                return address
+
+            def tx_with_hash(self, txid):
+                return f"tx:{txid}"
+
+        previous_blocksci = unified_report.blocksci
+        unified_report.blocksci = types.SimpleNamespace(
+            Blockchain=FakeClusterBlockchain,
+            heuristics=types.SimpleNamespace(coinjoin=FakeCoinjoinHeuristics()),
+            cluster=types.SimpleNamespace(CoinjoinClusterManager=FakeCoinjoinClusterManager),
+        )
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                output_dir = Path(tmpdir) / "missing" / "joinmarket_emulator_report"
+                predicted, error = export_blocksci_cluster_assignments_for_addresses(
+                    Path("/tmp/config.json"),
+                    wallet_address_labels(
+                        {
+                            "transactions": {
+                                "tx": {
+                                    "inputs": [{"address": "known-a", "wallet_name": "wallet-a"}],
+                                    "outputs": [],
+                                }
+                            }
+                        }
+                    ),
+                    ["cj"],
+                    output_dir,
+                )
+        finally:
+            unified_report.blocksci = previous_blocksci
+
+        self.assertIsNone(error)
+        self.assertEqual(predicted, {"known-a": "3"})
+
+    def test_export_blocksci_cluster_assignments_needs_detected_coinjoins(self):
+        previous_blocksci = unified_report.blocksci
+        unified_report.blocksci = types.SimpleNamespace()
+        try:
+            predicted, error = export_blocksci_cluster_assignments_for_addresses(
+                Path("/tmp/config.json"),
+                wallet_address_labels(
+                    {
+                        "transactions": {
+                            "tx": {
+                                "inputs": [{"address": "a", "wallet_name": "w"}],
+                                "outputs": [],
+                            }
+                        }
+                    }
+                ),
+                [],
+                Path("/tmp/clusters"),
+            )
+        finally:
+            unified_report.blocksci = previous_blocksci
+
+        self.assertIsNone(predicted)
+        self.assertEqual(error, "BlockSci detected no CoinJoins to cluster around.")
+
+    def test_export_blocksci_cluster_assignments_asks_for_rebuild_without_binding(self):
+        class FakeClusterBlockchain:
+            def __init__(self, _config):
+                pass
+
+        previous_blocksci = unified_report.blocksci
+        unified_report.blocksci = types.SimpleNamespace(
+            Blockchain=FakeClusterBlockchain,
+            cluster=types.SimpleNamespace(CoinjoinClusterManager=types.SimpleNamespace()),
+        )
+        try:
+            predicted, error = export_blocksci_cluster_assignments_for_addresses(
+                Path("/tmp/config.json"),
+                wallet_address_labels(
+                    {
+                        "transactions": {
+                            "tx": {
+                                "inputs": [{"address": "a", "wallet_name": "w"}],
+                                "outputs": [],
+                            }
+                        }
+                    }
+                ),
+                ["cj"],
+                Path("/tmp/clusters"),
+            )
+        finally:
+            unified_report.blocksci = previous_blocksci
+
+        self.assertIsNone(predicted)
+        self.assertIn("create_clustering_from_txes", error)
+
+    def test_evaluate_cluster_assignments_detects_overmerge_and_undermerge(self):
+        emulator_data = {
+            "transactions": {
+                "txA": {
+                    "inputs": [
+                        {"address": "a1", "wallet_name": "wallet-a"},
+                        {"address": "b1", "wallet_name": "wallet-b"},
+                    ],
+                    "outputs": [
+                        {"address": "a2", "wallet_name": "wallet-a"},
+                        {"address": "b2", "wallet_name": "wallet-b"},
+                    ],
+                }
+            }
+        }
+        predicted = {
+            "a1": "cluster-1",
+            "a2": "cluster-2",
+            "b1": "cluster-1",
+            "b2": "cluster-3",
+        }
+
+        evaluation = evaluate_cluster_assignments(emulator_data, predicted)
+
+        self.assertTrue(evaluation["available"])
+        self.assertEqual(evaluation["overmerged_clusters"], 1)
+        self.assertEqual(evaluation["undermerged_wallets"], 2)
+        self.assertEqual(evaluation["pairwise_false_positives"], 1)
+        self.assertEqual(evaluation["pairwise_false_negatives"], 2)
 
     def test_build_report_blocksci_only_and_missed_by_blocksci(self):
         with tempfile.TemporaryDirectory() as tmpdir:

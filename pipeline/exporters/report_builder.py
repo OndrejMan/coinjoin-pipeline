@@ -16,6 +16,7 @@ from exporters.comparison import (
     build_detection_confusion_matrix,
     build_divergences,
     compare_records,
+    evaluate_cluster_assignments,
 )
 from exporters.heuristics import add_blocksci_heuristic_explanations
 from exporters.manifest import build_run_manifest, compare_run_manifests
@@ -175,6 +176,8 @@ def build_report(
     scenario: JsonObject | None = None,
     *,
     emulator_data: JsonObject | None = None,
+    predicted_address_clusters: dict[str, str] | None = None,
+    cluster_export_error: str | None = None,
     subset_matching: SubsetMatchingAnalysis | None = None,
     engine: str | None = None,
     images: ReportImages | None = None,
@@ -250,6 +253,11 @@ def build_report(
         else None,
         "detector_evaluations": detector_evaluations,
         "evaluation_scope": evaluation_scope(independent_emulator_labels),
+        "clustering_evaluation": evaluate_cluster_assignments(
+            emulator_data,
+            predicted_address_clusters,
+            unavailable_reason=cluster_export_error,
+        ),
         "blocksci_subset_matching": build_subset_matching_comparison(
             subset_matching, coinjoin_analysis, blocksci_records, detector
         ),

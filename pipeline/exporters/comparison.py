@@ -1,10 +1,11 @@
-"""Comparison, divergence and detection metrics."""
+"""Comparison, divergence, detection, and clustering metrics."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 
 from exporters.common import JsonObject, compute_optional_rate, f1_score, wallet_names
+from exporters.emulator_data import wallet_address_labels
 from exporters.report_types import DetectionConfusionMatrix, IORecord, RecordSummary, TransactionRecord
 
 
@@ -181,4 +182,79 @@ def build_detection_confusion_matrix(
         "false_positive_txids": sorted(false_positives),
         "false_negative_txids": sorted(false_negatives),
         "out_of_scope_detected_txids": out_of_scope_detected_txids,
+    }
+
+
+def pairs_by_partition(labels_by_item: dict[str, str]) -> set[tuple[str, str]]:
+    grouped: dict[str, list[str]] = {}
+    for item, label in labels_by_item.items():
+        grouped.setdefault(label, []).append(item)
+
+    pairs = set()
+    for items in grouped.values():
+        sorted_group_items = sorted(items)
+        for left_index, left in enumerate(sorted_group_items):
+            for right in sorted_group_items[left_index + 1 :]:
+                pairs.add((left, right))
+    return pairs
+
+
+def evaluate_cluster_assignments(
+    emulator_data: JsonObject | None,
+    predicted_address_clusters: dict[str, str] | None = None,
+    unavailable_reason: str | None = None,
+) -> JsonObject:
+    labels_by_address = wallet_address_labels(emulator_data)
+    if not predicted_address_clusters:
+        return {
+            "available": False,
+            "reason": unavailable_reason or "BlockSci cluster assignments were not exported for this run.",
+            "labeled_addresses": len(labels_by_address),
+            "clustered_labeled_addresses": 0,
+            "unclustered_labeled_addresses": len(labels_by_address),
+        }
+
+    comparable_addresses = sorted(set(labels_by_address) & set(predicted_address_clusters))
+    truth_pairs = pairs_by_partition({address: labels_by_address[address] for address in comparable_addresses})
+    predicted_pairs = pairs_by_partition(
+        {address: str(predicted_address_clusters[address]) for address in comparable_addresses}
+    )
+    true_positive_pairs = len(truth_pairs & predicted_pairs)
+    false_positive_pairs = len(predicted_pairs - truth_pairs)
+    false_negative_pairs = len(truth_pairs - predicted_pairs)
+    precision = compute_optional_rate(true_positive_pairs, true_positive_pairs + false_positive_pairs)
+    recall = compute_optional_rate(true_positive_pairs, true_positive_pairs + false_negative_pairs)
+
+    wallets_by_cluster: dict[str, set[str]] = {}
+    clusters_by_wallet: dict[str, set[str]] = {}
+    for address in comparable_addresses:
+        wallet = labels_by_address[address]
+        cluster = str(predicted_address_clusters[address])
+        wallets_by_cluster.setdefault(cluster, set()).add(wallet)
+        clusters_by_wallet.setdefault(wallet, set()).add(cluster)
+
+    overmerged = {cluster: sorted(wallets) for cluster, wallets in wallets_by_cluster.items() if len(wallets) > 1}
+    undermerged = {wallet: sorted(clusters) for wallet, clusters in clusters_by_wallet.items() if len(clusters) > 1}
+
+    return {
+        "available": True,
+        "labeled_addresses": len(labels_by_address),
+        "clustered_labeled_addresses": len(comparable_addresses),
+        "unclustered_labeled_addresses": len(set(labels_by_address) - set(comparable_addresses)),
+        "pairwise_true_positives": true_positive_pairs,
+        "pairwise_false_positives": false_positive_pairs,
+        "pairwise_false_negatives": false_negative_pairs,
+        "pairwise_precision": precision,
+        "pairwise_recall": recall,
+        "pairwise_f1": f1_score(precision, recall),
+        "overmerged_clusters": len(overmerged),
+        "undermerged_wallets": len(undermerged),
+        "largest_overmerged_clusters": [
+            {"cluster": cluster, "wallets": wallets, "wallet_count": len(wallets)}
+            for cluster, wallets in sorted(overmerged.items(), key=lambda item: (-len(item[1]), item[0]))[:10]
+        ],
+        "largest_undermerged_wallets": [
+            {"wallet": wallet, "clusters": clusters, "cluster_count": len(clusters)}
+            for wallet, clusters in sorted(undermerged.items(), key=lambda item: (-len(item[1]), item[0]))[:10]
+        ],
     }

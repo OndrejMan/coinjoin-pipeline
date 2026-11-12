@@ -522,3 +522,16 @@ def load_wasabi_round_labels(run_dir: Path, log_paths: list[Path]) -> list[JsonO
                     "source_file": str(path.relative_to(run_dir)),
                 }
     return [labels_by_txid[txid] for txid in sorted(labels_by_txid)]
+
+
+def wallet_address_labels(emulator_data: JsonObject | None) -> dict[str, str]:
+    if not emulator_data:
+        return {}
+    labels = {}
+    for tx in (emulator_data.get("transactions") or {}).values():
+        for item in io_items(tx):
+            address = item.get("address")
+            item_wallet_name = item.get("wallet_name")
+            if address and item_wallet_name:
+                labels[str(address)] = str(item_wallet_name)
+    return labels

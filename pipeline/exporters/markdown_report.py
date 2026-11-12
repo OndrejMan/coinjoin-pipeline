@@ -251,6 +251,42 @@ def render_emulator_detection(report: JsonObject, explorer_base_url: str) -> lis
     return lines
 
 
+def render_clustering_evaluation(report: JsonObject) -> list[str]:
+    clustering = report.get("clustering_evaluation")
+    if not clustering:
+        return []
+
+    lines = section(
+        "Clustering Evaluation",
+        *key_values(
+            [
+                ["available", clustering.get("available")],
+                ["labeled addresses", clustering.get("labeled_addresses")],
+                ["clustered labeled addresses", clustering.get("clustered_labeled_addresses")],
+                ["unclustered labeled addresses", clustering.get("unclustered_labeled_addresses")],
+                ["pairwise precision", metric_value(clustering.get("pairwise_precision"))],
+                ["pairwise recall", metric_value(clustering.get("pairwise_recall"))],
+                ["pairwise F1", metric_value(clustering.get("pairwise_f1"))],
+                ["overmerged clusters", clustering.get("overmerged_clusters")],
+                ["undermerged wallets", clustering.get("undermerged_wallets")],
+            ]
+        ),
+    )
+    if not clustering.get("available"):
+        lines.extend(["", clustering.get("reason") or "BlockSci clustering data is not available for this run."])
+        return lines
+
+    for title, field, name, members, count in (
+        ("Largest Overmerged Clusters", "largest_overmerged_clusters", "cluster", "wallets", "wallet_count"),
+        ("Largest Undermerged Wallets", "largest_undermerged_wallets", "wallet", "clusters", "cluster_count"),
+    ):
+        items = clustering.get(field) or []
+        if items:
+            rows = [[item.get(name), ", ".join(item.get(members) or []), item.get(count)] for item in items]
+            lines.extend(section(title, *table([name, members, count.replace("_", " ")], rows), level=3))
+    return lines
+
+
 def render_subset_matching(report: JsonObject, explorer_base_url: str) -> list[str]:
     comparison = report.get("blocksci_subset_matching") or {}
     if not comparison:
@@ -784,6 +820,7 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
         *render_run_manifest(report),
         *render_emulator_detection(report, explorer_base_url),
         *render_subset_matching(report, explorer_base_url),
+        *render_clustering_evaluation(report),
         *render_analyzer_diagnostic(report, explorer_base_url),
     ]
     return "\n".join(lines).rstrip() + "\n"
