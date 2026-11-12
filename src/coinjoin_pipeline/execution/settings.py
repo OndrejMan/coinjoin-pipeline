@@ -19,6 +19,7 @@ DEFAULT_ENGINE = "wasabi"
 CONTAINER_SCENARIOS_DIR = "/mnt/scenarios"
 DEFAULT_CONTAINER_SCENARIO = "/mnt/scenarios/overactive-local.json"
 DEFAULT_JOINMARKET_CONTAINER_SCENARIO = "/mnt/scenarios/defaultJoinMarket.json"
+DEFAULT_K8S_CONTROL_IP = "host.docker.internal"
 VALID_PULL_POLICIES = ("always", "missing", "never")
 RUNS_ROOT_CONTAINER = "/runs/emulation/logs"
 COINJOIN_ANALYSIS_SELECTED_ROOT_CONTAINER = "/runs/emulation/selected"

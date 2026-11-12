@@ -2,6 +2,8 @@ emulation_logs
 coinjoin-runs/
 .btc-rpc-explorer.env
 
+src/coinjoin_pipeline/btc-data/
+
 __pycache__/
 build/
 *.egg-info/

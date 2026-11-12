@@ -74,7 +74,7 @@ def cleanup_peer_containers() -> None:
     _CLEANUP_DONE = True
     runtime = os.environ.get(CONTAINER_RUNTIME_ENV, DEFAULT_CONTAINER_RUNTIME)
     if shutil.which(runtime):
-        project = os.environ.get(settings.COMPOSE_PROJECT_ENV) or compose_project_name(settings.ROOT_DIR)
+        project = os.environ.get(settings.COMPOSE_PROJECT_ENV) or compose_project_name(default_host_root_dir())
         running = compose_project_containers(runtime, project)
         if running:
             subprocess.run(
@@ -132,6 +132,10 @@ def run_command(command: list[str], *, cwd: Path | None = None, env: Mapping[str
         return_code = process.wait()
     if return_code:
         raise subprocess.CalledProcessError(return_code, command)
+
+
+def default_host_root_dir() -> Path:
+    return settings.ROOT_DIR
 
 
 def compose_project_name(host_root_dir: Path) -> str:

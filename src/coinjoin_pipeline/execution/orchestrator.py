@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.locks import acquire_lock, command_lock_path
 from coinjoin_pipeline.execution.pipeline_logging import exit_with_error
@@ -16,8 +18,13 @@ def _print_dry_run(args: PipelineConfiguration) -> bool:
     print(f"[dry-run] action: {args.action}")
     print(f"[dry-run] runtime: {args.runtime}")
     print(f"[dry-run] engine: {args.engine}")
-    print("[dry-run] No containers, files or reports will be created.")
+    print("[dry-run] No containers, files, reports, or Kubernetes resources will be created.")
     return False
+
+
+def truthy_env(name: str) -> bool:
+    """Interpret the conventional false-like environment values as false."""
+    return os.environ.get(name, "").lower() not in ("", "0", "false", "no")
 
 
 def run_configuration(args: PipelineConfiguration) -> None:
@@ -29,5 +36,10 @@ def run_configuration(args: PipelineConfiguration) -> None:
             acquire_lock(command_lock_path(args, logs_root))
         except RuntimeError as error:
             exit_with_error(error)
+    local_build = args.kubernetes.infrastructure_local_build or truthy_env(
+        "COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD"
+    )
+    if local_build:
+        os.environ["COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD"] = "1"
 
-    local.run_configuration(args, logs_root)
+    local.run_configuration(args, logs_root, local_build)
