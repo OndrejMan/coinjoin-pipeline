@@ -42,6 +42,11 @@ class CommandSettings(TypedDict):
     command: str
 
 
+class UnifiedReportSettings(CommandSettings):
+    # Run directories the report reads.
+    downloads: list[str]
+
+
 class BlocksciSettings(CommandSettings):
     """The combined parse and analysis of an emulation."""
 

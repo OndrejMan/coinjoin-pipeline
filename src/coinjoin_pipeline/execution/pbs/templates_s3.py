@@ -11,6 +11,13 @@ from __future__ import annotations
 import json
 from typing import Union
 
+from exporters.artifact_paths import (
+    BLOCKSCI_ANALYSIS_DIR,
+    COINJOIN_ANALYSIS_DIR,
+    EMULATOR_DIR,
+    STAGED_EXPORTERS_DIR,
+)
+
 from coinjoin_pipeline.storage.s3 import (
     S3Target,
     validate_artifact_uri,
@@ -32,6 +39,7 @@ from .stage_settings import (
     BlocksciSettings,
     CommandSettings,
     StageSettings,
+    UnifiedReportSettings,
 )
 from .validation import (
     require_safe_image,
@@ -42,6 +50,7 @@ BLOCKSCI = DEFAULT_RESOURCES["blocksci"]
 # The fields one job adds to the common StageSettings; its job function reads them.
 JobSettings = Union[
     CommandSettings,
+    UnifiedReportSettings,
     BlocksciSettings,
 ]
 
@@ -121,3 +130,19 @@ def render_python_stage(
             "",
         )
     )
+
+
+def render_unified_report_s3_pbs(
+    target: S3Target,
+    image: str,
+    command: str,
+    resources: PBSResources = DEFAULT_RESOURCES["unified_report"],
+) -> str:
+    """Render the S3 report-only job that joins both analyzer outputs."""
+    downloads = [
+        STAGED_EXPORTERS_DIR,
+        EMULATOR_DIR,
+        COINJOIN_ANALYSIS_DIR,
+        BLOCKSCI_ANALYSIS_DIR,
+    ]
+    return render_python_stage("unified-report", target, resources, image, {"command": command, "downloads": downloads})

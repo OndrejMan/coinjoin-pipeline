@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from exporters.artifact_paths import BASELINE_FILE
+
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution.locks import acquire_lock, ensure_no_active_s3_pbs_submission, pbs_submit_lock_path
 from coinjoin_pipeline.execution.pbs.commands import (
+    blocksci_export_pbs_command,
     blocksci_pbs_command,
     coinjoin_analysis_pbs_command,
 )
@@ -14,17 +17,26 @@ from coinjoin_pipeline.execution.pbs.submission import PBSJobSpec, persist_pbs_j
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_blocksci_s3_pbs,
     render_coinjoin_analysis_s3_pbs,
+    render_unified_report_s3_pbs,
 )
+from coinjoin_pipeline.execution.pbs.validation import PBSError
 from coinjoin_pipeline.execution.pbs_settings import (
     pbs_image,
+    resolve_unified_report_image,
+    resolve_uploader_image,
     stage_pbs_resources,
+    with_singularity_scheme,
 )
 from coinjoin_pipeline.execution.s3_markers import rollback_s3_pbs_submissions
 from coinjoin_pipeline.execution.s3_staging import ensure_staged_exporters, pbs_stages_need_exporters
 from coinjoin_pipeline.execution.stages import StageGraph, StageKind, StagePlan, s3_full_run_plan
 from coinjoin_pipeline.storage.s3 import (
+    ArtifactTransportError,
     S3Target,
     clear_s3_stage_markers,
+    run_prefix_uri,
+    s3_access_preflight,
+    s3_object_exists,
 )
 
 
@@ -57,16 +69,18 @@ class S3StageRunner:
         handlers = {
             StageKind.BASELINE: self._analysis,
             StageKind.BLOCKSCI_WORK: self._blocksci_work,
+            StageKind.REPORT: self._report,
         }
         for stage in self.plan.scheduled():
             handlers[stage.kind](stage)
 
-    def _submit(self, stage: StagePlan, script: str) -> None:
+    def _submit(self, stage: StagePlan, script: str, *, depends: bool = False) -> None:
+        dependencies = self.plan.dependency_ids(stage.name, self.jobs) if depends else ()
         if self.args.dry_run:
             print(f"[dry-run] Would clear stale .pbs/{stage.name}.done|failed markers")
         else:
             clear_s3_stage_markers(self.target.access, self.target.run_prefix, stage.name)
-        job_id = submit_pbs_job(PBSJobSpec(stage.name, script), self.args.dry_run)
+        job_id = submit_pbs_job(PBSJobSpec(stage.name, script, dependencies), self.args.dry_run)
         if job_id:
             self.submitted_jobs.append((stage.name, job_id))
             self.jobs[stage.name] = job_id
@@ -100,6 +114,23 @@ class S3StageRunner:
         )
         self._submit(stage, script)
 
+    def _report(self, stage: StagePlan) -> None:
+        if not self.args.dry_run and len(self.plan.dependency_ids(stage.name, self.jobs)) != len(stage.dependencies):
+            raise PBSError("Could not obtain analyzer job IDs for the unified report dependency")
+        report_image = resolve_unified_report_image(self.args)
+        script = render_unified_report_s3_pbs(
+            target=self.target,
+            image=with_singularity_scheme(report_image),
+            command=blocksci_export_pbs_command(
+                self.target.run_id,
+                self.args,
+                uploader_image=resolve_uploader_image(self.args),
+                unified_report_image=report_image,
+            ),
+            resources=stage_pbs_resources(self.args, "unified_report"),
+        )
+        self._submit(stage, script, depends=True)
+
 
 def submit_s3_pbs_graph(args: PipelineConfiguration) -> dict[str, str]:
     """Serialise one S3 PBS submission and roll it back on submit failure; return job IDs by stage."""
@@ -119,7 +150,18 @@ def submit_s3_pbs_graph(args: PipelineConfiguration) -> dict[str, str]:
 def _submit_s3_pbs_stages(args: PipelineConfiguration, submitted_jobs: list[tuple[str, str]]) -> dict[str, str]:
     """Submit the concrete S3 PBS DAG while preserving marker semantics."""
     target = S3Target.from_args(args)
+    access = target.access
     plan = s3_full_run_plan_from_args(args)
+    reads_baseline = any(stage.kind == StageKind.REPORT for stage in plan.stages)
+    if not args.dry_run and not args.stages.analysis and reads_baseline:
+        s3_access_preflight(access, target.artifact_uri)
+        if not s3_object_exists(
+            access,
+            f"{run_prefix_uri(target.artifact_uri, target.run_id)}/{BASELINE_FILE}",
+        ):
+            raise ArtifactTransportError(
+                f"resuming without --analysis-pbs requires an existing {BASELINE_FILE} for run {target.run_id}"
+            )
     if not args.dry_run and (args.stage_exporters or pbs_stages_need_exporters(args)):
         ensure_staged_exporters(args)
     runner = S3StageRunner(args, target, plan, submitted_jobs)

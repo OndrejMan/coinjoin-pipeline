@@ -6,7 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,8 +42,8 @@ def _parse_qsub_job_id(stdout: str) -> str:
     """Validate the job ID qsub printed on a zero exit.
 
     A zero exit with unusable stdout is worse than a failure: the scheduler may
-    well have accepted the job, but an unrecorded job ID cannot be persisted or
-    cancelled during rollback. Fail loudly instead.
+    well have accepted the job, but an unrecorded job ID cannot be persisted,
+    depended on, or cancelled during rollback. Fail loudly instead.
     """
     job_id = (stdout or "").strip()
     if not job_id or "\n" in job_id:
@@ -54,13 +54,20 @@ def _parse_qsub_job_id(stdout: str) -> str:
     return job_id
 
 
-def submit_pbs(script: str) -> str:
+def qsub_command(dependencies: Sequence[str] = ()) -> list[str]:
+    """Build qsub's common dependency prefix for file and stdin submissions."""
+    if any(not job_id for job_id in dependencies):
+        raise PBSError("PBS dependency job IDs must not be empty")
+    return ["qsub", "-W", f"depend=afterok:{':'.join(dependencies)}"] if dependencies else ["qsub"]
+
+
+def submit_pbs(script: str, dependencies: Sequence[str] = ()) -> str:
     """Submit script text through stdin and return the job ID.
 
     Stdin submission avoids needing a script path visible to the PBS server,
     which the S3-compatible stages lack (no shared run directory).
     """
-    command = ["qsub"]
+    command = qsub_command(dependencies)
     result = subprocess.run(
         command,
         check=False,
@@ -178,6 +185,7 @@ def pbs_job_probe(job_id: str) -> Callable[[], str]:
 class PBSJobSpec:
     stage: str
     script: str
+    dependencies: tuple[str, ...] = ()
 
 
 def submit_pbs_job(job: PBSJobSpec, dry_run: bool = False) -> str | None:
@@ -185,6 +193,6 @@ def submit_pbs_job(job: PBSJobSpec, dry_run: bool = False) -> str | None:
         print(f"[dry-run] PBS script for {job.stage}:\n{job.script}")
         return None
     require_qsub()
-    job_id = submit_pbs(job.script)
+    job_id = submit_pbs(job.script, job.dependencies)
     print(f"[pbs] Submitted {job.stage} PBS job: {job_id}")
     return job_id

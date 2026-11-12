@@ -96,9 +96,16 @@ def resolve_run_images(config: PipelineConfiguration) -> tuple[PipelineConfigura
         ),
     )
     if config.artifacts.backend == "s3":
-        from .execution.pbs_settings import resolve_uploader_image
+        from .execution.pbs_settings import resolve_unified_report_image, resolve_uploader_image
 
-        config = replace(config, images=replace(config.images, uploader=resolve_uploader_image(config)))
+        config = replace(
+            config,
+            images=replace(
+                config.images,
+                uploader=resolve_uploader_image(config),
+                unified_report=resolve_unified_report_image(config),
+            ),
+        )
     return config, images
 
 

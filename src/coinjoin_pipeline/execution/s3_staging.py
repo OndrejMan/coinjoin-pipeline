@@ -25,7 +25,7 @@ from coinjoin_pipeline.storage.s3 import (
 
 
 def staged_exporters_uri(run_prefix: str) -> str:
-    """The run's ``.pipeline/exporters/`` prefix that every BlockSci job downloads."""
+    """The run's ``.pipeline/exporters/`` prefix that every BlockSci and report job downloads."""
     return f"{run_prefix}/{STAGED_EXPORTERS_DIR}/"
 
 
@@ -97,8 +97,8 @@ def pbs_stages_need_exporters(args: PipelineConfiguration) -> bool:
 def ensure_staged_exporters(args: PipelineConfiguration) -> None:
     """Stage the checkout's exporters into a run prefix that has none.
 
-    The BlockSci job downloads ``.pipeline/exporters/`` from its own run
-    prefix. An S3 emulation stages it
+    The BlockSci detect and unified-report jobs download
+    ``.pipeline/exporters/`` from their own run prefix. An S3 emulation stages it
     before it starts, but a ``pbs-from-s3`` — a resumed detect, above all — can
     start from a prefix that has none. Only the missing case uploads:
     a prefix that already carries exporters keeps the ones its earlier stages

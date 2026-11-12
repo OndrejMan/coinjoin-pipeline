@@ -150,6 +150,16 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
         errors.extend(f"pbs-from-s3 requires {flag}" for flag in _missing_s3_options(config, with_secret=False))
         if not any((stages.analysis, stages.blocksci)):
             errors.append("pbs-from-s3 requires --analysis-pbs or --blocksci-pbs")
+    if (
+        s3_backend
+        and action == "pbs-from-s3"
+        and _resources_supplied(config, "unified_report", config.pbs.unified_report)
+        and not stages.blocksci
+    ):
+        errors.append(
+            "unified-report PBS resource overrides require a unified-report job: "
+            "BlockSci detection with a coinjoin-analysis baseline"
+        )
     if s3_backend and action == "emulate":
         errors.extend(
             f"Kubernetes S3-compatible mode requires {flag}" for flag in _missing_s3_options(config, with_secret=True)

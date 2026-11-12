@@ -49,13 +49,15 @@ def test_scratch_type_defaults_to_ssd_with_stage_override_before_shared():
     args = configuration(pbs_scratch_type="local", pbs_analysis_scratch_type="ssd")
     assert stage_pbs_resources(args, "blocksci").scratch_type == "local"
     assert stage_pbs_resources(args, "analysis").scratch_type == "ssd"
+    assert stage_pbs_resources(args, "unified_report").scratch_type == "local"
 
 
 def test_stage_resources_fall_back_from_stage_to_shared_to_default():
-    args = configuration(pbs_ncpus=6, pbs_blocksci_ncpus=12, pbs_analysis_walltime="03:00:00")
+    args = configuration(pbs_ncpus=6, pbs_blocksci_ncpus=12, pbs_unified_report_walltime="03:00:00")
     assert stage_pbs_resources(args, "blocksci").ncpus == 12
-    analysis = stage_pbs_resources(args, "analysis")
-    assert (analysis.ncpus, analysis.mem, analysis.walltime) == (6, "16gb", "03:00:00")
+    assert stage_pbs_resources(args, "analysis").ncpus == 6
+    report = stage_pbs_resources(args, "unified_report")
+    assert (report.ncpus, report.mem, report.walltime) == (6, "8gb", "03:00:00")
 
 
 def test_scratch_type_is_a_cli_and_yaml_choice(tmp_path):

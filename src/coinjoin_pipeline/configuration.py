@@ -146,6 +146,7 @@ class PBSConfiguration(ConfigurationModel):
     coinjoin_analysis_image: str | None = option(None, name="pbs_coinjoin_analysis_image")
     analysis: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     blocksci: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
+    unified_report: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
 
 
 @dataclass(frozen=True, slots=True)

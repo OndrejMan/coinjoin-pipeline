@@ -1,13 +1,13 @@
 """Declarative stage plans for the CoinJoin analysis pipeline.
 
 No Docker, Kubernetes, PBS or subprocess code lives here: this is the dependency
-graph, defined once. Submission derives an invocation's PBS jobs from it and
-``--dry-run`` prints them.
+graph, defined once. Submission derives its scheduler dependencies from it and
+``--dry-run`` prints it.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
@@ -34,7 +34,7 @@ class StagePlan:
     """One logical stage and the runner selected for it.
 
     ``dependencies`` refer to logical stage names, rather than job IDs.  The
-    runner translates them into local ordering.
+    runner translates them into local ordering or scheduler dependencies.
     """
 
     name: str
@@ -95,6 +95,13 @@ class StageGraph:
         """Return the stages submitted to the batch scheduler, in wait order."""
         return tuple(stage for stage in self.ordered() if stage.runner == "pbs")
 
+    def dependency_ids(self, name: str, jobs: Mapping[str, str]) -> tuple[str, ...]:
+        """Return the submitted job IDs a stage must wait for, in graph order."""
+        stage = self.get(name)
+        if stage is None:
+            return ()
+        return tuple(jobs[dependency] for dependency in stage.dependencies if dependency in jobs)
+
 
 def _report_stage(runner: RunnerName, *analyzers: StagePlan | None) -> StagePlan:
     """The unified report waits for every analyzer present in the graph."""
@@ -125,7 +132,9 @@ def s3_full_run_plan(
     """Build the canonical Kubernetes → S3 → PBS graph for one invocation.
 
     The two PBS analyzers are intentionally independent.  They publish their
-    own artifacts.
+    own artifacts, and only ``unified-report`` depends on both of them.  The
+    report is a separate stage, including resumes that consume a previously
+    stored baseline.
     """
     emulation = StagePlan(
         name="kubernetes-emulation",
@@ -157,4 +166,6 @@ def s3_full_run_plan(
     )
     # Completion order: the analyzers publish independently.
     stages = [stage for stage in (emulation, baseline, work) if stage is not None]
+    if blocksci_pbs:
+        stages.append(_report_stage("pbs", baseline, work))
     return StageGraph(tuple(stages))

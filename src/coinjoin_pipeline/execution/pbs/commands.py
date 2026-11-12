@@ -19,6 +19,23 @@ def blocksci_pbs_command(run_id: str, config: PipelineConfiguration, include_rep
     return command
 
 
+def blocksci_export_pbs_command(
+    run_id: str,
+    config: PipelineConfiguration,
+    uploader_image: str | None = None,
+    unified_report_image: str | None = None,
+) -> str:
+    command = worker_command("report", run_id, config)
+    for flag, image in (
+        ("--uploader-image", uploader_image),
+        ("--unified-report-image", unified_report_image),
+    ):
+        if image:
+            require_safe_image(image, f"{flag} value")
+            command += f" {flag} {shlex.quote(image)}"
+    return command
+
+
 def coinjoin_analysis_pbs_command(action: str = "collect_docker") -> str:
     """Build the in-container command for the coinjoin-analysis PBS stage."""
     return f"python -m cj_process.parse_cj_logs --action {action} --target-path /runs/emulation/selected"
@@ -59,7 +76,7 @@ def analysis_image_arguments(config: PipelineConfiguration) -> list[str]:
 
 
 def worker_command(
-    phase: Literal["run"],
+    phase: Literal["run", "report"],
     run_id: str,
     config: PipelineConfiguration,
 ) -> str:
@@ -70,5 +87,7 @@ def worker_command(
         f"/runs/emulation/logs/{run_id}",
         *detector_arguments(config),
     ]
-    arguments.extend(analysis_image_arguments(config))
-    return BLOCKSCI_IMAGE_PYTHON_COMMAND + " " + shlex.join(arguments)
+    if phase != "report":
+        arguments.extend(analysis_image_arguments(config))
+    python = "python3" if phase == "report" else BLOCKSCI_IMAGE_PYTHON_COMMAND
+    return python + " " + shlex.join(arguments)
