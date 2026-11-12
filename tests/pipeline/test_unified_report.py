@@ -29,7 +29,7 @@ from exporters.blocksci_export.detector import export_blocksci_records
 from exporters.cli import parse_args
 from exporters.common import SCHEMA_VERSION, save_json, sha256_json
 from exporters.emulator_data import build_emulator_data, load_wasabi_round_labels
-from exporters.manifest import build_run_manifest
+from exporters.manifest import build_run_manifest, compare_run_manifests
 from exporters.markdown_report import render_report
 from exporters.parameters import Detector, ReportImages  # noqa: E402
 from exporters.normalization import (
@@ -269,6 +269,80 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(args.unified_report_image, "python:3.12-slim-bookworm")
         self.assertEqual(args.emulator_git_commit, "abc123")
 
+    def test_run_manifest_comparison_reports_changed_provenance(self):
+        previous = build_run_manifest(
+            Path("/tmp/run"),
+            {"name": "scenario-a", "sha256": "old-hash"},
+            Detector(
+                "joinmarket",
+                min_input_count=1,
+                first_wasabi2_block=0,
+            ),
+            "joinmarket",
+            emulator_git_commit="old-commit",
+            images=ReportImages(
+                references={
+                    "blocksci": "blocksci:old",
+                    "coinjoin_analysis": "coinjoin-analysis:old",
+                    "coinjoin_emulator": "coinjoin-emulator:old",
+                }
+            ),
+        )
+        current = build_run_manifest(
+            Path("/tmp/run"),
+            {"name": "scenario-a", "sha256": "new-hash"},
+            Detector(
+                "joinmarket",
+                min_input_count=2,
+                first_wasabi2_block=0,
+            ),
+            "joinmarket",
+            emulator_git_commit="old-commit",
+            images=ReportImages(
+                references={
+                    "blocksci": "blocksci:new",
+                    "coinjoin_analysis": "coinjoin-analysis:old",
+                    "coinjoin_emulator": "coinjoin-emulator:old",
+                }
+            ),
+        )
+
+        comparison = compare_run_manifests(previous, current)
+
+        self.assertTrue(comparison["available"])
+        self.assertFalse(comparison["matches"])
+        changed_fields = {item["field"] for item in comparison["differences"]}
+        self.assertEqual(changed_fields, {"scenario.sha256", "detector", "images.blocksci"})
+
+    def test_build_report_compares_previous_run_manifest(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            run_dir.mkdir()
+            coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_fixture())
+            previous_manifest = build_run_manifest(
+                run_dir,
+                {"name": "default", "sha256": "old-hash"},
+                Detector(
+                    "wasabi2",
+                    min_input_count=1,
+                    first_wasabi2_block=0,
+                ),
+                "wasabi",
+            )
+            report = build_report(
+                run_dir,
+                coinjoin_analysis,
+                blocksci_fixture(),
+                Detector("wasabi2", min_input_count=1),
+                {"name": "default", "sha256": "new-hash"},
+                previous_run_manifest=previous_manifest,
+            )
+
+        comparison = report["run_manifest_comparison"]
+        self.assertTrue(comparison["available"])
+        self.assertFalse(comparison["matches"])
+        self.assertEqual(comparison["differences"][0]["field"], "scenario.sha256")
+
     def test_build_report_exact_match(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir) / "2026-05-24_15-42_default"
@@ -300,6 +374,7 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(report["run_manifest"]["execution"]["engine"], "wasabi")
         self.assertEqual(report["run_manifest"]["execution"]["coinjoin_type"], "wasabi2")
         self.assertEqual(report["run_manifest"]["detector"]["blocksci_min_input_count"], None)
+        self.assertFalse(report["run_manifest_comparison"]["available"])
         self.assertEqual(report["scenario"]["wallet_count"], 2)
         self.assertEqual(report["scenario"]["total_initial_funds_sats"], 3250000)
         self.assertEqual(report["summary"]["coinjoin_analysis_coinjoins"], 1)

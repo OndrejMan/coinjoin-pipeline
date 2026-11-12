@@ -3,8 +3,8 @@
 ``JsonObject`` stays the type of free-form JSON (scenario files, emulator
 evidence, the rendered report).  The shapes here are the ones the report
 *computes on*: both analyzers are normalized into :class:`TransactionRecord`
-before they are compared, and :class:`RunManifest` is the provenance a report
-keeps.  Declaring them lets the type checker catch a renamed field on
+before they are compared, and :class:`RunManifest` is the provenance two runs
+are diffed by.  Declaring them lets the type checker catch a renamed field on
 one side of the comparison, which a plain ``dict`` never could.
 
 The exporters also run inside the BlockSci image (Python 3.8), so every
@@ -144,7 +144,7 @@ class SourceTrees(TypedDict):
 
 
 class RunManifest(TypedDict):
-    """Provenance of one report."""
+    """Provenance of one report; ``manifest.MANIFEST_COMPARE_FIELDS`` diffs it."""
 
     run_id: str
     scenario: ScenarioIdentity

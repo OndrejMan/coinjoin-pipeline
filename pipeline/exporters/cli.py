@@ -15,6 +15,7 @@ from exporters.artifact_paths import (
     report_dir,
 )
 from exporters.common import (
+    JsonObject,
     load_json,
     save_json,
 )
@@ -61,6 +62,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def load_previous_run_manifest(output_path: Path) -> JsonObject | None:
+    """The manifest of the report about to be replaced, for the reproducibility diff."""
+    if not output_path.exists():
+        return None
+    try:
+        return load_json(output_path).get("run_manifest")
+    except (OSError, ValueError):
+        return None
+
+
 def load_run_analysis(args: argparse.Namespace, run_dir: Path) -> BlockSciAnalysisArtifact:
     analysis_path = args.blocksci_analysis or (blocksci_analysis_dir(run_dir) / ARTIFACT_NAME)
     if not analysis_path.is_absolute():
@@ -99,6 +110,7 @@ def assemble_report(args: argparse.Namespace) -> int:
         engine=args.engine,
         images=ReportImages.from_args(args),
         emulator_git_commit=args.emulator_git_commit,
+        previous_run_manifest=load_previous_run_manifest(output_path),
         image_provenance=analysis.get("image_provenance"),
     )
     save_json(output_path, report)

@@ -1,8 +1,9 @@
-"""Run manifest construction."""
+"""Run manifest construction and reproducibility comparisons."""
 
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
@@ -13,11 +14,28 @@ from exporters.common import (
     first_present,
     git_commit_for_path,
     git_tree_is_dirty,
+    nested_get,
     to_json_text,
     tree_sha256,
 )
 from exporters.parameters import Detector, ReportImages
 from exporters.report_types import ImageFields, RunManifest
+
+MANIFEST_COMPARE_FIELDS = (
+    ("scenario.sha256", ("scenario", "sha256")),
+    ("execution.engine", ("execution", "engine")),
+    ("execution.coinjoin_type", ("execution", "coinjoin_type")),
+    ("detector", ("detector",)),
+    ("images.blocksci", ("images", "blocksci")),
+    ("images.coinjoin_analysis", ("images", "coinjoin_analysis")),
+    ("images.coinjoin_emulator", ("images", "coinjoin_emulator")),
+    ("images.unified_report", ("images", "unified_report")),
+    ("image_digests.blocksci", ("image_digests", "blocksci")),
+    ("image_digests.coinjoin_analysis", ("image_digests", "coinjoin_analysis")),
+    ("image_digests.coinjoin_emulator", ("image_digests", "coinjoin_emulator")),
+    ("image_digests.unified_report", ("image_digests", "unified_report")),
+    ("source_commits.coinjoin_emulator", ("source_commits", "coinjoin_emulator")),
+)
 
 
 def resolve_manifest_images(
@@ -99,4 +117,36 @@ def build_run_manifest(
             "exporters_sha256": tree_sha256(exporters_root),
             "exporters_git_dirty": git_tree_is_dirty(exporters_root),
         },
+    }
+
+
+def compare_run_manifests(
+    previous_manifest: Mapping[str, object] | None,
+    current_manifest: RunManifest,
+) -> JsonObject:
+    if not previous_manifest:
+        return {
+            "available": False,
+            "reason": "No previous run manifest was available for comparison.",
+            "matches": None,
+            "differences": [],
+        }
+
+    differences = []
+    for label, path in MANIFEST_COMPARE_FIELDS:
+        previous_value = nested_get(previous_manifest, path)
+        current_value = nested_get(current_manifest, path)
+        if previous_value != current_value:
+            differences.append(
+                {
+                    "field": label,
+                    "previous": previous_value,
+                    "current": current_value,
+                }
+            )
+
+    return {
+        "available": True,
+        "matches": not differences,
+        "differences": differences,
     }

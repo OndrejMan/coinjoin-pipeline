@@ -384,6 +384,7 @@ def render_run_manifest(report: JsonObject) -> list[str]:
     image_digests = manifest.get("image_digests") or {}
     commits = manifest.get("source_commits") or {}
     trees = manifest.get("source_trees") or {}
+    comparison = report.get("run_manifest_comparison") or {}
 
     image_rows = [
         row
@@ -406,6 +407,26 @@ def render_run_manifest(report: JsonObject) -> list[str]:
             key="field",
         ),
     )
+
+    if comparison.get("available"):
+        differences = comparison.get("differences") or []
+        lines.extend(section("Run Manifest Comparison"))
+        if not differences:
+            lines.append("No tracked manifest fields changed since the previous report.")
+        else:
+            lines.extend(
+                table(
+                    ["field", "previous", "current"],
+                    [
+                        [
+                            item.get("field"),
+                            json.dumps(item.get("previous"), sort_keys=True),
+                            json.dumps(item.get("current"), sort_keys=True),
+                        ]
+                        for item in differences
+                    ],
+                )
+            )
 
     return lines
 
