@@ -1,6 +1,7 @@
 """The S3 PBS job that reads a BlockSci index: detection, a user script or a notebook.
 
-The index comes from this run's cache or read-only from another run's.
+The index comes from this run's cache, read-only from another run's, or in place from a
+persistent directory (``blocksci_index``).
 """
 
 from __future__ import annotations
@@ -21,13 +22,32 @@ from typing import cast
 from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, BLOCKSCI_DIR, BLOCKSCI_PARSE_DIR, STAGED_EXPORTERS_DIR
 
 from coinjoin_pipeline.execution.pbs.blocksci_index import (
+    canonicalize_index,
+    check_manifest,
     container_run,
+    open_index,
     require_tools,
     restore_index,
 )
+from coinjoin_pipeline.execution.pbs.index_store import IndexStore
 from coinjoin_pipeline.execution.pbs.stage import CONTAINER_RUNS_ROOT, Stage, StageFailure
-from coinjoin_pipeline.execution.pbs.stage_settings import BlocksciAnalysisSettings, OutputSettings
+from coinjoin_pipeline.execution.pbs.stage_settings import BlocksciAnalysisSettings, OutputSettings, PersistentSettings
 from coinjoin_pipeline.storage.s5client import S5Error
+
+
+def read_index(stage: Stage, settings: PersistentSettings) -> IndexStore:
+    """Read-only access for an analysis: shared lock, complete copy, run-local config."""
+    index = open_index(stage, settings, writer=False)
+    if not index.complete():
+        raise StageFailure(
+            f"[index] working copy {index.path} is incomplete; a persistent update restores it from the S3 backup"
+        )
+    check_manifest(index.manifest(), "Persistent BlockSci index", stage.settings["image_name"])
+    index.link_into_run(stage.work)
+    shutil.copyfile(index.path / "config.json", stage.work / BLOCKSCI_CONFIG_FILE)
+    canonicalize_index(stage)
+    stage.log(f"[index] reading {index.path} at height {index.height()}")
+    return index
 
 
 def submission_home() -> Path:
@@ -126,8 +146,8 @@ def notebook_connection(stage: Stage, control: Path) -> Iterator[None]:
 def blocksci_analysis(stage: Stage) -> None:
     """Detection, a user script or a notebook over an existing index.
 
-    Outputs are published even when the work fails. The index comes from this run's cache
-    or read-only from another run's.
+    Outputs are published even when the work fails. The index comes from this run's cache,
+    read-only from another run's, or in place from a persistent directory.
     """
     settings = cast(BlocksciAnalysisSettings, stage.settings)
     mode = stage.name
@@ -148,18 +168,24 @@ def blocksci_analysis(stage: Stage) -> None:
     if settings["output"].get("notebooks_dir") and not output.is_dir():
         raise StageFailure(f"BlockSci notebooks directory does not exist on the compute node: {output}")
     output.mkdir(parents=True, exist_ok=True)
-    cache_run = settings.get("source_run_id") or stage.run_id
-    prefix = f"{settings['artifact_uri']}/{cache_run}/{BLOCKSCI_PARSE_DIR}"
-    cache = stage.work / BLOCKSCI_PARSE_DIR
-    restore_index(stage, cache, prefix, cache_run, "BlockSci index")
-    if settings.get("source_run_id"):
-        # Record which published index the outputs were computed from.
-        shutil.copyfile(cache / "manifest.json", output / "blocksci-cache-manifest.json")
-        (output / "blocksci-source.json").write_text(
-            json.dumps({"source_run_id": cache_run}, separators=(",", ":")) + "\n"
-        )
-        parsed = f"{BLOCKSCI_DIR}/parsed"
-        binds.append(f"{stage.work / parsed}:{container_run(stage)}/{parsed}:ro")
+    persistent = settings["persistent"]
+    if persistent:
+        index = read_index(stage, persistent)
+        binds += index.binds("ro")
+        shutil.copyfile(index.path / "manifest.json", output / "blocksci-index-manifest.json")
+    else:
+        cache_run = settings.get("source_run_id") or stage.run_id
+        prefix = f"{settings['artifact_uri']}/{cache_run}/{BLOCKSCI_PARSE_DIR}"
+        cache = stage.work / BLOCKSCI_PARSE_DIR
+        restore_index(stage, cache, prefix, cache_run, "BlockSci index")
+        if settings.get("source_run_id"):
+            # Record which published index the outputs were computed from.
+            shutil.copyfile(cache / "manifest.json", output / "blocksci-cache-manifest.json")
+            (output / "blocksci-source.json").write_text(
+                json.dumps({"source_run_id": cache_run}, separators=(",", ":")) + "\n"
+            )
+            parsed = f"{BLOCKSCI_DIR}/parsed"
+            binds.append(f"{stage.work / parsed}:{container_run(stage)}/{parsed}:ro")
     if settings.get("user_script"):
         script = Path(str(settings["user_script"]))
         shutil.copyfile(script, output / "script.py")

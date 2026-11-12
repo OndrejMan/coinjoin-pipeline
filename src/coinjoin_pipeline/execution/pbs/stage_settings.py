@@ -30,6 +30,23 @@ class SourceSettings(_SourceKind, total=False):
     blocksci_dir: str
 
 
+class PersistentSettings(TypedDict):
+    """A BlockSci index kept in a directory shared by jobs instead of the S3 cache."""
+
+    index_dir: str
+    # How long the job's lock entry lives, and how long the job waits for the lock.
+    lock_seconds: int
+    wait_seconds: int
+    poll_seconds: int
+
+
+class PbsResourceSettings(TypedDict):
+    """The job's CPU and memory, recorded in the index manifest."""
+
+    ncpus: int
+    mem: str
+
+
 class _OutputDirectory(TypedDict):
     # Run-relative directory uploaded after the job.
     relative: str
@@ -118,19 +135,27 @@ class BlocksciSettings(CommandSettings):
     export_analysis: bool
 
 
-class BlocksciParseSettings(CommandSettings):
+class PersistentJobSettings(TypedDict):
+    """A job over an index: None when it uses the S3 cache instead of a persistent index."""
+
+    persistent: PersistentSettings | None
+
+
+class BlocksciParseSettings(CommandSettings, PersistentJobSettings):
     source: SourceSettings
+    # Recorded in the index manifest.
+    pbs_resources: PbsResourceSettings
     # How the BlockSci image runs verify_chain.py.
     python_command: str
 
 
 class BlocksciUpdateSettings(BlocksciParseSettings):
-    # The run whose S3 cache is extended.
+    # The run whose S3 cache is extended; a persistent index names its own.
     source_run_id: str | None
     artifact_uri: str
 
 
-class BlocksciAnalysisSettings(CommandSettings, AnalysisModeSettings):
+class BlocksciAnalysisSettings(CommandSettings, AnalysisModeSettings, PersistentJobSettings):
     # The run whose S3 cache is read, by default this one.
     source_run_id: str | None
     artifact_uri: str

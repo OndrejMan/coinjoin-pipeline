@@ -95,9 +95,9 @@ def launcher(module: str) -> str:
     return f"import sys\n\nfrom {module} import main\n\nraise SystemExit(main(sys.argv[1:]))\n"
 
 
-def directives(job_name: str, resources: PBSResources) -> str:
+def directives(job_name: str, resources: PBSResources, multijob: str | None = None) -> str:
     """The ``#PBS`` header: one chunk with the requested resources, output joined to the job log."""
-    require_safe_pbs_resources(resources)
+    require_safe_pbs_resources(resources, multijob)
     select = (
         f"select=1:ncpus={resources.ncpus}:mem={resources.mem}:scratch_{resources.scratch_type}={resources.scratch}"
     )
@@ -105,7 +105,7 @@ def directives(job_name: str, resources: PBSResources) -> str:
         (
             "#!/bin/bash",
             f"#PBS -N {job_name}",
-            f"#PBS -l {select}",
+            f"#PBS -l {select}{f':multijob={multijob}' if multijob else ''}",
             f"#PBS -l walltime={resources.walltime}",
             "#PBS -j oe",
         )

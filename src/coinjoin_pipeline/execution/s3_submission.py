@@ -110,8 +110,9 @@ class S3StageRunner:
             persist_pbs_job_id(self.args.runs_path / self.target.run_id, stage.name, job_id)
 
     def _index(self) -> dict:
-        """Renderer arguments of a job over a BlockSci index: its settings."""
-        return {"blocksci": self.args.blocksci}
+        """Renderer arguments of a job over a BlockSci index: its settings and the multijob scratch it is on."""
+        blocksci = self.args.blocksci
+        return {"blocksci": blocksci, "multijob": self.args.pbs.blocksci.multijob if blocksci.index_dir else None}
 
     def _analysis(self, stage: StagePlan) -> None:
         common: dict = {

@@ -1,4 +1,4 @@
-"""The S3 PBS jobs that write a BlockSci index: the combined run, parse and update.
+"""The S3 PBS jobs that write a BlockSci index: the combined run, parse, update and backup.
 
 The job that reads an index is ``blocksci_analysis_jobs``; ``blocksci_index`` holds
 what both share.
@@ -12,6 +12,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
@@ -39,16 +40,20 @@ from coinjoin_pipeline.execution.pbs.blocksci_index import (
     INDEX_ARCHIVE,
     INDEX_FILES,
     canonicalize_index,
+    check_manifest,
     container_run,
+    open_index,
     require_tools,
     restore_index,
 )
-from coinjoin_pipeline.execution.pbs.index_store import index_manifest
+from coinjoin_pipeline.execution.pbs.index_store import IndexStore, index_manifest
 from coinjoin_pipeline.execution.pbs.stage import CONTAINER_RUNS_ROOT, Stage, StageFailure
 from coinjoin_pipeline.execution.pbs.stage_settings import (
     BlocksciParseSettings,
     BlocksciSettings,
     BlocksciUpdateSettings,
+    PersistentJobSettings,
+    PersistentSettings,
     SourceSettings,
 )
 
@@ -171,7 +176,39 @@ def check_source(manifest: dict, source_kind: str, network: str) -> None:
         raise StageFailure(f"Source cache network does not match {network}")
 
 
-def run_parser(stage: Stage, command: str, datadir: Path, max_block: int, message: str) -> None:
+def require_persistent(settings: PersistentJobSettings) -> PersistentSettings:
+    persistent = settings["persistent"]
+    if not persistent:
+        raise StageFailure("This job has no persistent index")
+    return persistent
+
+
+def publish_persistent(
+    stage: Stage,
+    settings: BlocksciParseSettings,
+    index: IndexStore,
+    max_block: int,
+    extra: dict[str, object],
+) -> None:
+    """Record the parsed index in place, publish its height to the run and unlock."""
+    stage.log(f"recording persistent index at height {max_block}")
+    manifest = index_manifest(
+        stage.run_id,
+        stage.settings["image_name"],
+        settings["source"]["kind"],
+        settings["source"]["network"],
+        max_block,
+        {**extra, "pbs_resources": settings["pbs_resources"]},
+    )
+    index.publish(stage.work / BLOCKSCI_CONFIG_FILE, manifest)
+    # The lab cannot see the multijob scratch; it reads the index height from here.
+    stage.storage.copy(index.path / "manifest.json", f"{stage.run_prefix}/blocksci-index-manifest.json")
+    index.unlock()
+
+
+def run_parser(
+    stage: Stage, command: str, datadir: Path, max_block: int, message: str, index_binds: Sequence[str] = ()
+) -> None:
     """Run the job's parse command over datadir inside the BlockSci image."""
     stage.log(message)
     stage.singularity(
@@ -180,12 +217,15 @@ def run_parser(stage: Stage, command: str, datadir: Path, max_block: int, messag
             f"{stage.runs_root}:{CONTAINER_RUNS_ROOT}:rw",
             f"{stage.work / STAGED_EXPORTERS_DIR}:/mnt/exporters:ro",
             f"{datadir}:/mnt/data:ro",
+            *index_binds,
         ),
         environment=(f"PBS_RUN_ID={stage.run_id}", f"PBS_EXPORTED_MAX_BLOCK={max_block}"),
     )
 
 
-def verify_chain(stage: Stage, settings: BlocksciParseSettings, max_block: int, *, update: bool) -> tuple[int, str]:
+def verify_chain(
+    stage: Stage, settings: BlocksciParseSettings, max_block: int, *, update: bool, index_binds: Sequence[str]
+) -> tuple[int, str]:
     """Check the parsed chain against the block archive before anything publishes it."""
     source = settings["source"]
     stage.log("[block-archive] verifying the parsed chain before cache publication")
@@ -210,6 +250,7 @@ def verify_chain(stage: Stage, settings: BlocksciParseSettings, max_block: int, 
         binds=(
             f"{stage.runs_root}:{CONTAINER_RUNS_ROOT}:rw",
             f"{stage.work / STAGED_EXPORTERS_DIR}:/mnt/exporters:ro",
+            *index_binds,
         ),
     )
     subprocess.run(command, check=True)
@@ -301,12 +342,24 @@ def parse_source(stage: Stage, source: SourceSettings) -> tuple[Path | None, int
 
 
 def blocksci_parse(stage: Stage) -> None:
-    """Parse once and publish a checksummed reusable index."""
+    """Parse once and publish a checksummed reusable index, or record it in a persistent directory."""
     settings = cast(BlocksciParseSettings, stage.settings)
     require_tools("zstd")
     stage.download(STAGED_EXPORTERS_DIR)
     source = settings["source"]
     datadir, max_block, extra = parse_source(stage, source)
+    index_binds: list[str] = []
+    index = None
+    if settings["persistent"]:
+        # The lock is taken after the block download, which has no index to protect yet.
+        index = open_index(stage, settings["persistent"], writer=True)
+        if (index.path / "manifest.json").exists():
+            raise StageFailure(f"[index] an index already exists for {index.path}; use --blocksci-task update")
+        # What a failed parse left; a recorded index was refused above.
+        index.discard()
+        index.begin_write()
+        index.link_into_run(stage.work)
+        index_binds = index.binds("rw")
     if datadir is not None:
         run_parser(
             stage,
@@ -314,13 +367,17 @@ def blocksci_parse(stage: Stage) -> None:
             datadir,
             max_block,
             f"parsing {source['description']} through block {max_block}",
+            index_binds,
         )
     for relative in INDEX_FILES:
         stage.require_file(relative, f"BlockSci parser did not produce {relative}")
     if source["kind"] == "bitcoin-blocks-s3":
-        max_block, block_hash = verify_chain(stage, settings, max_block, update=False)
+        max_block, block_hash = verify_chain(stage, settings, max_block, update=False, index_binds=index_binds)
         extra["exported_block_hash"] = block_hash
-    publish_index(stage, source["kind"], source["network"], max_block, extra)
+    if index is not None:
+        publish_persistent(stage, settings, index, max_block, extra)
+    else:
+        publish_index(stage, source["kind"], source["network"], max_block, extra)
     stage.log("reusable cache upload complete")
 
 
@@ -337,16 +394,32 @@ def blocksci_update(stage: Stage) -> None:
     stage.download(STAGED_EXPORTERS_DIR)
     source_cache = stage.work / SOURCE_CACHE_DIR
     source_cache.mkdir(parents=True, exist_ok=True)
-    source_run_id = str(settings["source_run_id"])
-    stage.log(f"restoring verified cache from run {source_run_id}")
-    manifest = restore_index(
-        stage,
-        source_cache,
-        f"{settings['artifact_uri']}/{source_run_id}/{BLOCKSCI_PARSE_DIR}",
-        source_run_id,
-        "Source cache",
-        lambda value: check_source(value, kind, network),
-    )
+    index_binds: list[str] = []
+    index = None
+    if settings["persistent"]:
+        index = open_index(stage, settings["persistent"], writer=True)
+        index.reconcile()
+        manifest = index.manifest()
+        check_manifest(manifest, "Persistent BlockSci index", stage.settings["image_name"])
+        check_source(manifest, kind, network)
+        shutil.copyfile(index.path / "manifest.json", source_cache / "manifest.json")
+        source_run_id = str(manifest.get("run_id"))
+        index.begin_write()
+        index.link_into_run(stage.work)
+        shutil.copyfile(index.path / "config.json", stage.work / BLOCKSCI_CONFIG_FILE)
+        index_binds = index.binds("rw")
+        stage.log(f"[index] updating {index.path} from height {index.height()}")
+    else:
+        source_run_id = str(settings["source_run_id"])
+        stage.log(f"restoring verified cache from run {source_run_id}")
+        manifest = restore_index(
+            stage,
+            source_cache,
+            f"{settings['artifact_uri']}/{source_run_id}/{BLOCKSCI_PARSE_DIR}",
+            source_run_id,
+            "Source cache",
+            lambda value: check_source(value, kind, network),
+        )
     source_max_block = manifest.get("exported_max_block")
     if not isinstance(source_max_block, int) or isinstance(source_max_block, bool):
         raise StageFailure("Source cache manifest has no exported_max_block")
@@ -370,14 +443,18 @@ def blocksci_update(stage: Stage) -> None:
         datadir,
         max_block,
         f"parsing blocks {source_max_block + 1} through {max_block}",
+        index_binds,
     )
     if kind == "bitcoin-blocks-s3":
-        max_block, block_hash = verify_chain(stage, settings, max_block, update=True)
+        max_block, block_hash = verify_chain(stage, settings, max_block, update=True, index_binds=index_binds)
         extra["exported_block_hash"] = block_hash
     extra.update(
         cache_operation="incremental-update",
         source_run_id=source_run_id,
         source_exported_max_block=source_max_block,
     )
-    publish_index(stage, kind, network, max_block, extra)
+    if index is not None:
+        publish_persistent(stage, settings, index, max_block, extra)
+    else:
+        publish_index(stage, kind, network, max_block, extra)
     stage.log(f"updated cache upload complete: {source_run_id} -> {stage.run_id}")

@@ -146,6 +146,9 @@ HELP = {
     "blocksci.pin_height": "script task: the last height the analysis may see",
     "blocksci.scan_start_height": "script task: first scanned height (inclusive)",
     "blocksci.scan_end_height": "script task: end of the scanned range (exclusive)",
+    "blocksci.index_dir": (
+        "persistent BlockSci index under /storage/ or /scratch/multijob-<location>/ instead of the S3 cache"
+    ),
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
     **{
         f"images.{component}": f"{component.replace('_', '-')} image (also ${variable})"
@@ -168,7 +171,10 @@ def option_help(path: str, item: Field) -> str:
     if parts[0] == "pbs" and len(parts) == 3:
         stage, name = parts[1], parts[2]
         text = f"{stage.replace('_', '-')} PBS job {name.replace('_', '-')}"
-        text += f"; falls back to --pbs-{name.replace('_', '-')}"
+        if name == "multijob":
+            text += " scratch location"
+        else:
+            text += f"; falls back to --pbs-{name.replace('_', '-')}"
     else:
         text = HELP.get(path, "")
     details = [f"YAML: {path}"]

@@ -1,8 +1,9 @@
-"""What the BlockSci jobs share: the run's working index.
+"""What the BlockSci jobs share: the run's working index and the persistent one.
 
 A run-local index lives in <run>/blocksci_data; the container sees the run under
 CONTAINER_RUNS_ROOT. A reusable index is published to <run prefix>/blocksci-parse_data
-as an archive, its checksum and, last, its manifest.
+as an archive, its checksum and, last, its manifest. A persistent index stays in a
+shared directory (index_store.py) and only its manifest is copied to the run.
 """
 
 from __future__ import annotations
@@ -15,8 +16,9 @@ from pathlib import Path
 
 from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, BLOCKSCI_DIR
 
-from coinjoin_pipeline.execution.pbs.index_store import MANIFEST_SCHEMA
+from coinjoin_pipeline.execution.pbs.index_store import MANIFEST_SCHEMA, IndexStore
 from coinjoin_pipeline.execution.pbs.stage import CONTAINER_RUNS_ROOT, Stage, StageFailure
+from coinjoin_pipeline.execution.pbs.stage_settings import PersistentSettings
 
 
 # The archive of a reusable index in <run prefix>/blocksci-parse_data.
@@ -88,3 +90,21 @@ def restore_index(
     canonicalize_index(stage)
     writing.unlink()
     return manifest
+
+
+def open_index(stage: Stage, settings: PersistentSettings, *, writer: bool) -> IndexStore:
+    """Lock the persistent index for reading or writing; finalization releases the lock."""
+    require_tools("zstd")
+    index = IndexStore(
+        str(settings["index_dir"]),
+        lock_seconds=int(settings["lock_seconds"]),
+        wait_seconds=float(settings["wait_seconds"]),
+        poll_seconds=float(settings["poll_seconds"]),
+    )
+    index.path.mkdir(parents=True, exist_ok=True)
+    stage.finalizers.append(index.unlock)
+    if writer:
+        index.lock_exclusive()
+    else:
+        index.lock_shared()
+    return index

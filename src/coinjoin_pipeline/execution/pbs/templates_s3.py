@@ -54,6 +54,9 @@ from .stage_settings import (
     BlocksciUpdateSettings,
     CommandSettings,
     MappingsSettings,
+    PbsResourceSettings,
+    PersistentJobSettings,
+    PersistentSettings,
     SourceSettings,
     StageSettings,
     UnifiedReportSettings,
@@ -64,6 +67,7 @@ from .validation import (
     require_safe_image,
     require_safe_pbs_token,
     require_storage_path,
+    walltime_to_seconds,
 )
 
 EXECUTION_DIR = Path(__file__).parent.parent
@@ -80,6 +84,7 @@ JobSettings = Union[
     BlocksciParseSettings,
     BlocksciUpdateSettings,
     BlocksciAnalysisSettings,
+    PersistentJobSettings,
 ]
 
 
@@ -181,13 +186,34 @@ def _block_source(blocksci: BlockSciConfiguration) -> SourceSettings:
     }
 
 
+def _persistent_settings(blocksci: BlockSciConfiguration, walltime: str) -> PersistentSettings | None:
+    """A BlockSci index kept in a directory shared by jobs; None when the job uses the S3 cache.
+
+    ``index_dir`` is the working copy jobs read and update in place.
+    """
+    if not blocksci.index_dir:
+        return None
+    seconds = walltime_to_seconds(walltime)
+    return {
+        "index_dir": blocksci.index_dir,
+        # Past the walltime the job is gone, so its lock entry may be cleared.
+        "lock_seconds": seconds + 600,
+        "wait_seconds": max(60, seconds // 2),
+        "poll_seconds": 60,
+    }
+
+
 class _IndexJobSettings(TypedDict):
+    pbs_resources: PbsResourceSettings
     python_command: str
 
 
-def _index_job_settings() -> _IndexJobSettings:
-    """What parse and update jobs need to verify a chain."""
-    return {"python_command": BLOCKSCI_IMAGE_PYTHON_COMMAND}
+def _index_job_settings(resources: PBSResources) -> _IndexJobSettings:
+    """What parse and update jobs record in an index manifest and need to verify a chain."""
+    return {
+        "pbs_resources": {"ncpus": resources.ncpus, "mem": resources.mem},
+        "python_command": BLOCKSCI_IMAGE_PYTHON_COMMAND,
+    }
 
 
 def render_blocksci_parse_s3_pbs(
@@ -197,8 +223,13 @@ def render_blocksci_parse_s3_pbs(
     resources: PBSResources = BLOCKSCI,
     *,
     blocksci: BlockSciConfiguration = BlockSciConfiguration(),
+    multijob: str | None = None,
 ) -> str:
-    """Render a parser-only job that publishes a checksummed reusable index."""
+    """Render a parser-only job that publishes a checksummed reusable index.
+
+    With ``blocksci.index_dir`` the index is parsed straight into that directory and
+    recorded there instead of being archived to S3.
+    """
     return render_python_stage(
         "blocksci-parse",
         target,
@@ -207,8 +238,10 @@ def render_blocksci_parse_s3_pbs(
         {
             "command": command,
             "source": _block_source(blocksci),
-            **_index_job_settings(),
+            "persistent": _persistent_settings(blocksci, resources.walltime),
+            **_index_job_settings(resources),
         },
+        multijob=multijob,
         extra_files=(BLOCK_ARCHIVE,) if blocksci.bitcoin_blocks_uri else (),
     )
 
@@ -220,12 +253,15 @@ def render_blocksci_update_s3_pbs(
     resources: PBSResources = BLOCKSCI,
     *,
     blocksci: BlockSciConfiguration,
+    multijob: str | None = None,
 ) -> str:
     """Render a job that incrementally updates one S3 cache into a fresh run.
 
     The cache must come from the same source: BlockSci remembers each block by
     its file number and offset, which only that Bitcoin datadir or block
-    archive can resolve.
+    archive can resolve. With ``blocksci.index_dir`` the job instead updates that
+    index in place under the writer lock, first restoring it from the S3 backup
+    when the working copy is incomplete.
     """
     return render_python_stage(
         "blocksci-update",
@@ -237,8 +273,10 @@ def render_blocksci_update_s3_pbs(
             "source": _block_source(blocksci),
             "source_run_id": blocksci.cache_source_run_id,
             "artifact_uri": validate_artifact_uri(target.artifact_uri),
-            **_index_job_settings(),
+            "persistent": _persistent_settings(blocksci, resources.walltime),
+            **_index_job_settings(resources),
         },
+        multijob=multijob,
         extra_files=(BLOCK_ARCHIVE,) if blocksci.bitcoin_blocks_uri else (),
     )
 
@@ -251,12 +289,14 @@ def render_blocksci_analyze_s3_pbs(
     *,
     mode: str = "blocksci-analyze",
     blocksci: BlockSciConfiguration = BlockSciConfiguration(),
+    multijob: str | None = None,
 ) -> str:
     """Render analysis, custom-script, or notebook work over a cached index.
 
     With ``blocksci.cache_source_run_id`` the index comes read-only from that run's cache
     while outputs, markers, and logs stay under the target run, so several analyses
-    can share one published index without touching it.
+    can share one published index without touching it. With ``blocksci.index_dir`` the
+    index is read in place under the shared lock instead of being downloaded.
     """
     if mode not in MODE_OUTPUTS:
         raise PBSError(f"Unsupported reusable BlockSci mode: {mode}")
@@ -270,8 +310,10 @@ def render_blocksci_analyze_s3_pbs(
             "command": command,
             "source_run_id": blocksci.cache_source_run_id,
             "artifact_uri": validate_artifact_uri(target.artifact_uri),
+            "persistent": _persistent_settings(blocksci, resources.walltime),
         },
         job="blocksci-analysis",
+        multijob=multijob,
         extra_files=(NOTEBOOK_SERVER,) if mode == "blocksci-notebook" else (),
     )
 
@@ -284,6 +326,7 @@ def render_python_stage(
     settings: JobSettings,
     *,
     job: str | None = None,
+    multijob: str | None = None,
     extra_files: tuple[Path, ...] = (),
 ) -> str:
     """The job script: write the worker's modules and settings.json to scratch and run ``stage_runtime``.
@@ -319,7 +362,7 @@ def render_python_stage(
     }
     return "\n".join(
         (
-            directives(stage.replace("-", "_") + "_s3", resources),
+            directives(stage.replace("-", "_") + "_s3", resources, multijob),
             "set -euo pipefail",
             'test -n "${SCRATCHDIR:-}" || { echo "SCRATCHDIR is not set" >&2; exit 1; }',
             'JOB="$SCRATCHDIR/.stage-runtime"',

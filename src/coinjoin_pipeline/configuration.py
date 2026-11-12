@@ -49,6 +49,7 @@ JoinMarketDetector = Literal["possible", "definite"]
 MappingMode = Literal["numeric", "all"]
 AnalysisAction = Literal["collect_docker", "analyze_only"]
 PBSScratchType = Literal["ssd", "local"]
+PBSMultijob = Literal["brno", "plzen", "global"]
 ImagePullPolicy = Literal["Always", "IfNotPresent", "Never"]
 
 
@@ -133,6 +134,8 @@ class BlockSciConfiguration(ConfigurationModel):
     pin_height: int | None = option(None, name="blocksci_pin_height", minimum=0)
     scan_start_height: int | None = option(None, name="blocksci_scan_start_height", minimum=0)
     scan_end_height: int | None = option(None, name="blocksci_scan_end_height", minimum=1)
+    # A persistent index in place of the S3 cache: the working copy jobs read and update in place.
+    index_dir: str | None = option(None, name="blocksci_index_dir")
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +171,8 @@ class PBSResourceConfiguration(ConfigurationModel):
     scratch: str | None = option(None, name="scratch")
     scratch_type: PBSScratchType | None = option(None, name="scratch_type")
     walltime: str | None = option(None, name="walltime")
+    # MetaCentrum multijob scratch that outlives one job; only the BlockSci stage uses it.
+    multijob: PBSMultijob | None = option(None, name="multijob")
 
     @property
     def configured(self) -> bool:

@@ -188,5 +188,5 @@ def with_job_log(stage: Stage, name: str) -> None:
         copier.join(timeout=10)
         stage.storage.copy(log, f"{stage.settings['log_prefix']}/{name}")
 
-    # Before every later finalizer.
+    # Before every later finalizer, the index lock release included.
     stage.finalizers.insert(0, restore_and_upload)
