@@ -22,8 +22,9 @@ shared graph nodes, in-cluster scripts as `.sh` files). These were left on purpo
 - `RunContext.activate()` still hands settings to Compose, the shell scripts and the
   emulator subprocess through the process environment, because that is how those
   children read them; passing a dict around would only move where it is built.
-- The S3 parse/analyze renderers keep their mode-specific shell fragments in Python;
-  the templates themselves are `.sh` files.
+- Every S3 PBS job runs one Python stage worker (`execution/pbs/stage_runtime.py`); only
+  the mappings tools, the `coinjoin_statistics` workflow and the shared-storage jobs keep
+  `.sh` templates.
 - `exporters` stays the installed top-level package name: renaming it changes the
   staged S3 layout (`.pipeline/exporters/`) and every container mount.
 
