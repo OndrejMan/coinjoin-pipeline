@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from coinjoin_pipeline.execution.pbs.blocksci_index import restore_index
-from coinjoin_pipeline.execution.pbs.blocksci_jobs import publish_index
+from coinjoin_pipeline.execution.pbs.blocksci_jobs import WrittenIndex
 from coinjoin_pipeline.execution.pbs.stage import Stage
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_blocksci_analyze_s3_pbs,
@@ -67,7 +67,7 @@ def publish(tmp_path, **settings):
         (index / "parsed/chain/block.dat").write_text("existing parsed blocks")
         (index / "config.json").write_text('{"chainConfig":{"dataDirectory":"/old/source"}}')
         job.storage = S5Client("https://s3.test", "/dev/null", "test")
-        publish_index(job, "emulator", "bitcoin_regtest", 42, {})
+        WrittenIndex(job, None).publish("emulator", "bitcoin_regtest", 42, {})
 
     return attempt(tmp_path, settings, run)
 

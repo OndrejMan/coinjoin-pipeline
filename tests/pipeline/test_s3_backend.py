@@ -35,7 +35,7 @@ from coinjoin_pipeline.execution.pbs.commands import (
     blocksci_update_pbs_command,
 )
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore
-from coinjoin_pipeline.execution.pbs.blocksci_jobs import publish_persistent
+from coinjoin_pipeline.execution.pbs.blocksci_jobs import WrittenIndex
 from coinjoin_pipeline.execution.pbs.stage import Stage
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_blocksci_analyze_s3_pbs,
@@ -1153,9 +1153,11 @@ def test_persistent_manifest_records_requested_cpu_and_memory(tmp_path) -> None:
     stage.storage = mock.Mock()
     (stage.work / "blocksci_data").mkdir(parents=True)
     (stage.work / "blocksci_data/config.json").write_text("{}")
-    index = IndexStore(str(index_dir), None)
+    written = WrittenIndex(stage, {"index_dir": str(index_dir)})
+    # The job takes the write lock in start_parse; this test records an index it holds already.
+    written.store = IndexStore(str(index_dir), None)
 
-    publish_persistent(stage, stage.settings, index, 42, {})
+    written.publish("bitcoin-blocks-s3", "bitcoin", 42, {})
 
     manifest = json.loads((index_dir / "manifest.json").read_text())
     assert manifest["index_dir"] == str(index_dir)
