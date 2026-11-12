@@ -19,7 +19,7 @@ from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_blocksci_s3_pbs,
 )
 from coinjoin_pipeline.configuration import BlockSciConfiguration
-from coinjoin_pipeline.execution.pbs.scripts import embedded_file
+from job_scripts import embedded_file
 from coinjoin_pipeline.storage.s5client import S5Client
 from coinjoin_pipeline.storage.s3 import S3Access, S3Target
 

@@ -15,7 +15,7 @@ from coinjoin_pipeline.configuration import ConfigurationError, PipelineConfigur
 from coinjoin_pipeline.context import resolve_configuration
 from coinjoin_pipeline.execution import mainnet_jobs, mainnet_runtime, mainnet_sync, mainnet_worker, s3_markers
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore
-from coinjoin_pipeline.execution.pbs.scripts import embedded_file
+from job_scripts import embedded_file
 from coinjoin_pipeline.execution.pbs.blocksci_index import check_manifest
 from coinjoin_pipeline.execution.pbs.blocksci_jobs import check_source
 from coinjoin_pipeline.storage.s5client import S5Error

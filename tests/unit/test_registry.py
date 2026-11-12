@@ -9,7 +9,7 @@ from coinjoin_pipeline import registry
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.pbs.commands import analysis_image_arguments
 from coinjoin_pipeline.execution.pbs.defaults import DEFAULT_RESOURCES
-from coinjoin_pipeline.execution.pbs.scripts import embedded_file
+from job_scripts import embedded_file
 from coinjoin_pipeline.execution.pbs.templates_s3 import render_blocksci_parse_s3_pbs
 from coinjoin_pipeline.execution.s3_emulation import pin_emulation_images
 from coinjoin_pipeline.storage.s3 import S3Access, S3Target

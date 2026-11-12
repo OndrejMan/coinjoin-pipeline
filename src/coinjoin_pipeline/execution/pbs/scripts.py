@@ -42,7 +42,8 @@ def template(name: str) -> str:
     return (TEMPLATES / name).read_text(encoding="utf-8")
 
 
-def _delimiter(name: str) -> str:
+def heredoc_delimiter(name: str) -> str:
+    """The here-document delimiter write_files gives name; tests read embedded files back by it."""
     return "COINJOIN_FILE_" + name.upper().replace(".", "_").replace("-", "_").replace("/", "_")
 
 
@@ -51,17 +52,11 @@ def write_files(directory: str, files: dict[str, str]) -> str:
     parents = sorted({str(PurePosixPath(name).parent) for name in files} - {"."})
     lines = [" ".join(("mkdir -p", *(f'"{directory}/{parent}"' for parent in parents)))] if parents else []
     for name, content in files.items():
-        delimiter = _delimiter(name)
+        delimiter = heredoc_delimiter(name)
         if f"\n{delimiter}\n" in f"\n{content}\n":
             raise PBSError(f"{name} contains its own here-document delimiter")
         lines.append(f"cat >\"{directory}/{name}\" <<'{delimiter}'\n{content.rstrip(chr(10))}\n{delimiter}")
     return "\n".join(lines)
-
-
-def embedded_file(script: str, name: str) -> str:
-    """The content write_files embedded for name, read back from a rendered script."""
-    delimiter = _delimiter(name)
-    return script.split(f"<<'{delimiter}'\n", 1)[1].split(f"\n{delimiter}\n", 1)[0]
 
 
 def runtime_source(path: Path) -> str:

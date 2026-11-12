@@ -48,7 +48,7 @@ from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_coinjoin_analysis_s3_pbs,
     render_unified_report_s3_pbs,
 )
-from coinjoin_pipeline.execution.pbs.scripts import embedded_file
+from job_scripts import embedded_file
 from coinjoin_pipeline.execution.pbs.defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND, DEFAULT_RESOURCES
 from coinjoin_pipeline.execution.pbs.validation import PBSError
 from coinjoin_pipeline.execution.s3_emulation import run_s3_kubernetes_emulation

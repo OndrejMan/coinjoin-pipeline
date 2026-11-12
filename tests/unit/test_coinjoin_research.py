@@ -19,7 +19,7 @@ from coinjoin_pipeline.arguments import load_configuration
 from coinjoin_pipeline.configuration import PipelineConfiguration, ConfigurationError
 from coinjoin_pipeline.execution.coinjoin_tools import command_argv
 from coinjoin_pipeline.execution.coinjoin_tools import run_local
-from coinjoin_pipeline.execution.pbs.scripts import embedded_file
+from job_scripts import embedded_file
 from coinjoin_pipeline.execution.pbs.templates_s3 import render_coinjoin_tools_s3_pbs
 from coinjoin_pipeline.storage.s3 import S3Target
 

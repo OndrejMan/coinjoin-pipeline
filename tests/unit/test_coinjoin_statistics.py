@@ -10,7 +10,7 @@ import pytest
 from coinjoin_pipeline.context import resolve_run_images
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution import coinjoin_tools
-from coinjoin_pipeline.execution.pbs.scripts import embedded_file
+from job_scripts import embedded_file
 from coinjoin_pipeline.execution.pbs.templates_s3 import render_coinjoin_tools_s3_pbs
 from coinjoin_pipeline.storage.s3 import S3Target
 

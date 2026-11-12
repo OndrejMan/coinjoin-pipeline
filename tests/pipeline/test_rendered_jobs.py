@@ -24,7 +24,7 @@ from coinjoin_pipeline.arguments import load_configuration
 from coinjoin_pipeline.context import RunContext
 from coinjoin_pipeline.execution import s3_submission
 from coinjoin_pipeline.execution.pbs import analysis_modes, templates_s3
-from coinjoin_pipeline.execution.pbs.scripts import embedded_file
+from job_scripts import embedded_file
 from coinjoin_pipeline.images import IMAGE_ENVIRONMENT, REGISTRY_ENVIRONMENT
 
 REPO = Path(__file__).resolve().parents[2]

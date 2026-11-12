@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from coinjoin_pipeline.execution.pbs.scripts import embedded_file
+from job_scripts import embedded_file
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_blocksci_s3_pbs,
     render_coinjoin_analysis_dumplings_s3_pbs,
