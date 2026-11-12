@@ -82,8 +82,8 @@ def restore_index(
 ) -> dict:
     """Check a published index's manifest, then restore it into the run's working index.
 
-    The archive is hashed while it is extracted, only its declared members are accepted,
-    and the restored files must match files.txt.
+    The restore is the persistent index's: the archive is hashed while it is extracted,
+    only its declared members are accepted, and the restored files must match files.txt.
     The .writing marker stays on any failure, so nothing reads a partly restored index.
     The manifest is kept in cache_dir, where the job reads it.
     """
@@ -108,7 +108,8 @@ def open_index(stage: Stage, settings: PersistentSettings, *, writer: bool) -> I
     """
     index = IndexStore(
         str(settings["index_dir"]),
-        None,
+        settings.get("backup_uri"),
+        storage=stage.storage,
         lock_seconds=int(settings["lock_seconds"]),
         wait_seconds=float(settings["wait_seconds"]),
         poll_seconds=float(settings["poll_seconds"]),

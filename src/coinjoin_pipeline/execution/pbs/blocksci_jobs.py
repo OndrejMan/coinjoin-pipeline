@@ -1,4 +1,4 @@
-"""The S3 PBS jobs that write a BlockSci index: the combined run, parse and update.
+"""The S3 PBS jobs that write a BlockSci index: the combined run, parse, update and backup.
 
 The job that reads an index is ``blocksci_analysis_jobs``; ``blocksci_index`` holds
 what both share.
@@ -27,6 +27,7 @@ from exporters.artifact_paths import (
     EMULATOR_DIR,
     EXPORTED_BLOCK_GLOB,
     EXPORTED_BLOCKS_DIR,
+    INDEX_BACKUP_MANIFEST_COPY,
     INDEX_MANIFEST_COPY,
     LOGS_DIR,
     MAPPINGS_DIR,
@@ -128,7 +129,7 @@ class WrittenIndex:
         """Before a parse from scratch; called after the block download, which has no index to protect."""
         self._lock()
         if self.persistent is not None:
-            if (self.store.path / "manifest.json").exists():
+            if (self.store.path / "manifest.json").exists() or self.store.backup_available():
                 raise StageFailure(f"[index] an index already exists for {self.store.path}; use --blocksci-task update")
             # What a failed parse left; a recorded index was refused above.
             self.store.discard()
@@ -466,3 +467,15 @@ def blocksci_update(stage: Stage) -> None:
     )
     index.publish(kind, network, max_block, extra)
     stage.log(f"updated index published: {source_run_id} -> {stage.run_id}")
+
+
+def blocksci_backup(stage: Stage) -> None:
+    """Replace the S3 backup of the persistent index; analyses keep reading meanwhile."""
+    index = open_index(stage, require_persistent(cast(PersistentJobSettings, stage.settings)), writer=False)
+    if not index.complete():
+        raise StageFailure(f"[index] working copy {index.path} is incomplete; nothing to back up")
+    index.backup(threads=stage.settings["ncpus"])
+    index.unlock()
+    # The lab learns which height the backup holds from the run.
+    stage.storage.copy(index.path / "manifest.json", f"{stage.run_prefix}/{INDEX_BACKUP_MANIFEST_COPY}")
+    stage.log(f"index at height {index.height()} backed up to {index.backup_uri}")

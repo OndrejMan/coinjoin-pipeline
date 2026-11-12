@@ -62,6 +62,7 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
         ("artifacts.endpoint_url", validate_s3_endpoint_url),
         ("artifacts.credentials_file", validate_credentials_file),
         ("artifacts.profile", validate_s3_profile),
+        ("blocksci.index_backup_uri", validate_artifact_uri),
     ):
         value = config_value(config, path)
         if value is not None:

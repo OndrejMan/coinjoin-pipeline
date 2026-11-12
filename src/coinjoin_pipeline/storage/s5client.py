@@ -3,9 +3,9 @@
 Standard library only and Python 3.8 syntax: a PBS job copies this file next to its
 worker script and runs it with the node's ``python3``.
 
-It also owns the format of a single backup (a run's index): one archive, its ``.sha256``
-and ``manifest.json`` under a prefix. ``replace_backup`` writes it and ``restore_backup``
-reads it, so the two cannot drift apart.
+It also owns the format of a single backup (a run's index, the persistent index):
+one archive, its ``.sha256`` and ``manifest.json`` under a prefix. ``replace_backup``
+writes it and ``restore_backup`` reads it, so the two cannot drift apart.
 """
 
 from __future__ import annotations

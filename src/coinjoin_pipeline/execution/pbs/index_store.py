@@ -6,11 +6,12 @@ The working copy (multijob scratch or /storage) holds parsed/, config.json,
 manifest.json and files.txt (every other file with its size). It is complete when it
 has no .writing marker and its files match files.txt.
 
-A run's own index in <run prefix>/blocksci-parse_data is one backup in the format of
-s5client.py (replace_backup, restore_backup), of an index that lived in the job's
-scratch: blocksci_index.tar.zst, its .sha256 and manifest.json, written last. A new
-backup deletes the old one first, so S3 never holds two copies; until its manifest
-exists there is no valid backup.
+The backup prefix holds one backup in the format of s5client.py (replace_backup,
+restore_backup): blocksci_index.tar.zst, its .sha256 and manifest.json, written last.
+A new backup deletes the old one first, so S3 never holds two copies; until its
+manifest exists there is no valid backup. A run's own index in
+<run prefix>/blocksci-parse_data is a backup of this format too, of an index that
+lived in the job's scratch.
 
 Lock: one writer or many readers, as directories under <index>/.lock. Entries are built
 aside and renamed into place, which is atomic on NFS and BeeGFS without flock. Each
@@ -269,6 +270,13 @@ class IndexStore:
             raise IndexStoreError("[index] this job has no S3 backup of the index")
         return self.storage
 
+    def backup_available(self) -> bool:
+        return (
+            bool(self.backup_uri)
+            and self.storage is not None
+            and self.storage.exists(f"{self.backup_uri}/manifest.json")
+        )
+
     def backup(self, threads: int) -> None:
         """Replace the S3 backup with the working copy; run under at least the shared lock."""
         storage = self._storage()
@@ -312,6 +320,11 @@ class IndexStore:
             raise IndexStoreError("[index] the restored copy does not match its file list")
 
     def reconcile(self) -> None:
-        """Under the writer lock: refuse a working copy that is not complete."""
-        if not self.complete():
-            raise IndexStoreError(f"[index] working copy {self.path} is incomplete; parse again")
+        """Under the writer lock: leave the working copy complete, from the S3 backup if needed."""
+        if self.complete():
+            return
+        if not self.backup_available():
+            raise IndexStoreError(
+                f"[index] working copy {self.path} is incomplete and there is no S3 backup; parse again"
+            )
+        self.restore()

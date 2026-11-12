@@ -32,6 +32,7 @@ JOBS: dict[str, Callable[[Stage], None]] = {
     "blocksci-parse": blocksci_jobs.blocksci_parse,
     "blocksci-update": blocksci_jobs.blocksci_update,
     "blocksci-analysis": blocksci_analysis_jobs.blocksci_analysis,
+    "blocksci-backup": blocksci_jobs.blocksci_backup,
     "blocksci": blocksci_jobs.blocksci,
     "coinjoin-mappings": analyzer_jobs.coinjoin_mappings,
     "unified-report": analyzer_jobs.unified_report,
