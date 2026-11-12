@@ -17,8 +17,15 @@ from .stage import CONTAINER_RUNS_ROOT, CONTAINER_SELECTED_ROOT
 from .validation import require_notebook_port, require_safe_image
 
 
-def blocksci_pbs_command(run_id: str, config: PipelineConfiguration, include_report: bool = True) -> str:
+def blocksci_pbs_command(
+    run_id: str,
+    config: PipelineConfiguration,
+    include_report: bool = True,
+    blocksci_script: str | None = None,
+) -> str:
     command = worker_command("run", run_id, config)
+    if blocksci_script:
+        command += " --script " + shlex.quote(blocksci_script)
     if include_report:
         command += " --report"
     return command

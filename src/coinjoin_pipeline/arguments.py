@@ -168,6 +168,7 @@ HELP = {
     "blocksci.dumplings_dir": "notebook task over an index read in place: Scanner/ read in place, seen at /mnt/dumplings",
     "blocksci.storage_report_uri": "with --blocksci-restore-index: S3 object receiving the kept copy's size",
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
+    "pbs.bitcoin_datadir": "Bitcoin datadir the PBS BlockSci stage reads",
     "joinmarket.detector": "deprecated subset-matching JoinMarket scan of the report; definite matches more strictly",
     "joinmarket.min_base_fee": (
         "deprecated subset-matching scan: smallest fee allowance of one participant, in satoshis"

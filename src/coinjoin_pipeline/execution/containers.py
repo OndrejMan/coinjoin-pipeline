@@ -22,12 +22,14 @@ from exporters.artifact_paths import (
     COINJOIN_ANALYSIS_DIR,
     EMULATOR_DIR,
 )
+from exporters.common import tree_sha256
 from exporters.image_provenance import inspect_image
 
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution.locks import (
     close_locks as close_pipeline_locks,
 )
+from coinjoin_pipeline.execution.pbs.validation import PBSError
 from coinjoin_pipeline.images import resolve_unified_report_image
 from coinjoin_pipeline.execution.pipeline_logging import (
     captured_pipeline_stage,
@@ -40,8 +42,10 @@ from coinjoin_pipeline.execution.runtime import (
     compose_command,
     container_runtime,
 )
+from coinjoin_pipeline.execution.s3_staging import ensure_local_exporters
 from coinjoin_pipeline.images import default_image, validate_image
 from coinjoin_pipeline.paths import default_runs_root, scenarios_dir
+from coinjoin_pipeline.storage.s3 import ArtifactTransportError
 
 from . import settings
 
@@ -435,6 +439,27 @@ def stage_blocksci_script(script: str | None, run_dir: Path) -> str | None:
     staged.parent.mkdir(parents=True, exist_ok=True)
     staged.write_bytes(source.read_bytes())
     return f"{settings.RUNS_ROOT_CONTAINER}/{run_dir.name}/.pipeline/blocksci-script.py"
+
+
+def stage_pbs_exporters(run_dir: Path, exporters_dir: Path) -> Path:
+    """Snapshot exporters into the shared run directory for PBS compute nodes.
+
+    The CLI runs from a checkout that need not be visible on the compute node. Keep the first complete snapshot so retries use the same code
+    as the original submission, matching the S3 staged-exporters contract.
+    """
+    staged = run_dir / ".pipeline" / "exporters"
+    try:
+        ensure_local_exporters(exporters_dir)
+        if staged.exists():
+            ensure_local_exporters(staged)
+            return staged
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(exporters_dir, staged, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        ensure_local_exporters(staged)
+    except (ArtifactTransportError, OSError) as error:
+        raise PBSError(f"Failed to stage PBS exporters in {staged}: {error}") from error
+    print(f"[stage] PBS exporters staged at {staged} (sha256={tree_sha256(staged)})")
+    return staged
 
 
 def export_preflight_error(coinjoin_ready: bool, blocksci_ready: bool, run_dir: Path) -> str | None:
