@@ -327,7 +327,7 @@ def export_subset_matching_records(
     """The deprecated input-subset-matching JoinMarket detector over the scan window.
 
     Kept only as a comparison with the protocol heuristic: its backtracking is
-    exponential in the input count.
+    exponential in the input count, so it never runs on an external chain.
     """
     if blocksci is None:
         raise RuntimeError("BlockSci Python module is required to export BlockSci records.")

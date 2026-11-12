@@ -671,8 +671,9 @@ def render_integration_diagnostics(report: JsonObject) -> list[str]:
 
 
 def render_header(report: JsonObject) -> list[str]:
+    external = (report.get("run") or {}).get("mode") == "external"
     lines = [
-        "# BlockSci vs Emulator CoinJoin Report",
+        "# BlockSci CoinJoin Comparison Report" if external else "# BlockSci vs Emulator CoinJoin Report",
         "",
         "> `_N` means the block height was inferred from exported `block_*.json` files, not present in original "
         "`coinjoin_tx_info.json`.",
@@ -694,6 +695,8 @@ def render_run(report: JsonObject) -> list[str]:
         *key_values(
             [
                 ["run id", run.get("id")],
+                ["mode", run.get("mode")],
+                ["network", run.get("network")],
                 ["evaluation scope", report.get("evaluation_scope")],
                 ["run time", run.get("started_at")],
                 ["scenario", run.get("scenario_name")],
@@ -752,6 +755,12 @@ def render_detection_summary(report: JsonObject) -> list[str]:
 def render_scope_note(report: JsonObject) -> list[str]:
     """Why precision, recall and F1 are missing, when they are."""
     scope = report.get("evaluation_scope")
+    if scope == "baseline_agreement_only":
+        return [
+            "",
+            "> This report compares BlockSci with `coinjoin-analysis`. It has no emulator ground truth; "
+            "precision, recall, and F1 are intentionally unavailable.",
+        ]
     if scope != "emulator_labels_unavailable":
         return []
     lines = [
@@ -796,8 +805,8 @@ def render_analyzer_diagnostic(report: JsonObject, explorer_base_url: str) -> li
     divergences = report["divergences"]
     lines = section(
         "CoinJoin-Analysis vs BlockSci Diagnostic",
-        "This section preserves the analyzer comparison. Reports use `emulator_data` as the "
-        "canonical source for chain-wide detection metrics.",
+        "This section preserves the analyzer comparison. Emulator reports use `emulator_data` as the "
+        "canonical source for chain-wide detection metrics; external reports measure baseline agreement only.",
     )
     lines.extend(render_notable_divergences(divergences))
     lines.extend(section("Divergence Overview"))

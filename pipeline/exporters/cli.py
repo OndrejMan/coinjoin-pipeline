@@ -49,6 +49,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--runs-root", type=Path, default=Path("/runs/emulation/logs"))
     parser.add_argument("--run-dir", required=True, help="Run folder path or name under --runs-root.")
     parser.add_argument("--engine", default=os.environ.get("COINJOIN_ENGINE"))
+    parser.add_argument(
+        "--mode",
+        choices=("emulator", "external"),
+        default="emulator",
+        help="Report mode. External mode compares analyzer agreement without emulator ground truth.",
+    )
+    parser.add_argument("--network", default=None, help="Network name recorded for external-chain reports.")
     parser.add_argument("--output-name", default=REPORT_JSON)
     parser.add_argument("--emulator-git-commit", default=os.environ.get("COINJOIN_EMULATOR_GIT_COMMIT"))
     parser.add_argument(
@@ -94,6 +101,7 @@ def load_run_analysis(args: argparse.Namespace, run_dir: Path) -> BlockSciAnalys
         analysis_path,
         run_id=run_dir.name,
         expected_parameters=Detector.from_args(args).artifact_parameters(),
+        mode=args.mode,
     )
 
 
@@ -111,9 +119,12 @@ def assemble_report(args: argparse.Namespace) -> int:
     )
     coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_data)
     fill_missing_block_heights(coinjoin_analysis, load_exported_block_tx_index(run_dir))
-    emulator_data = build_emulator_data(run_dir, coinjoin_analysis_data, args.coinjoin_type)
+    emulator_data = None
+    if args.mode == "emulator":
+        emulator_data = build_emulator_data(run_dir, coinjoin_analysis_data, args.coinjoin_type)
     output_dir.mkdir(parents=True, exist_ok=True)
-    save_json(output_dir / "emulator_data.json", emulator_data)
+    if emulator_data is not None:
+        save_json(output_dir / "emulator_data.json", emulator_data)
 
     analysis = load_run_analysis(args, run_dir)
     predicted_address_clusters = analysis.get("predicted_address_clusters")
@@ -138,6 +149,8 @@ def assemble_report(args: argparse.Namespace) -> int:
         emulator_git_commit=args.emulator_git_commit,
         previous_run_manifest=load_previous_run_manifest(output_path),
         integration_diagnostics=analysis["integration_diagnostics"],
+        mode=args.mode,
+        network=args.network,
         image_provenance=analysis.get("image_provenance"),
         baseline_filter=baseline_filter_summary(false_positive_sources, false_positive_txids, filtered_txids),
     )

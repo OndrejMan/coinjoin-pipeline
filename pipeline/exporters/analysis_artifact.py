@@ -18,6 +18,7 @@ def load_analysis(
     *,
     run_id: str,
     expected_parameters: DetectorParameters,
+    mode: str = "emulator",
 ) -> BlockSciAnalysisArtifact:
     """Load an artifact and check every field report assembly relies on."""
     artifact = load_json(path)
@@ -37,7 +38,9 @@ def load_analysis(
         and isinstance(subset_matching.get("skipped_txids"), list)
     ):
         raise ValueError("BlockSci analysis artifact has invalid subset_matching")
-    if not isinstance(artifact.get("integration_diagnostics"), dict):
+    if artifact.get("mode") != mode:
+        raise ValueError("BlockSci analysis mode does not match the requested report mode")
+    if mode == "emulator" and not isinstance(artifact.get("integration_diagnostics"), dict):
         raise ValueError("BlockSci analysis artifact has invalid integration_diagnostics")
     for field in ("predicted_address_clusters",):
         if artifact.get(field) is not None and not isinstance(artifact[field], dict):

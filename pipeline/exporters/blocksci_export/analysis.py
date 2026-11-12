@@ -63,12 +63,16 @@ def write_analysis(args: argparse.Namespace) -> Path:
     detector = Detector.from_args(args, load_first_wasabi2_block(config_path))
     records = export_blocksci_records(config_path, detector)
     subset_matching: SubsetMatchingAnalysis | None = None
-    if detector.coinjoin_type == "joinmarket":
+    if detector.coinjoin_type == "joinmarket" and getattr(args, "mode", "emulator") == "emulator":
         subset_records, skipped_txids = export_subset_matching_records(config_path, detector)
         subset_matching = SubsetMatchingAnalysis(records=subset_records, skipped_txids=skipped_txids)
     images = ReportImages.from_args(args)
     image_ids = {name: getattr(args, name + "_image_id", None) for name in PROVENANCE_IMAGE_NAMES}
-    diagnostics = build_integration_diagnostics(run_dir, config_path, blocksci, records, images, image_ids=image_ids)
+    diagnostics = (
+        build_integration_diagnostics(run_dir, config_path, blocksci, records, images, image_ids=image_ids)
+        if getattr(args, "mode", "emulator") == "emulator"
+        else None
+    )
     cluster_dir = config_path.parent / "clustering" / f"{args.coinjoin_type}_emulator_report"
     clusters, cluster_error = (
         export_blocksci_cluster_assignments_for_addresses(
@@ -82,6 +86,7 @@ def write_analysis(args: argparse.Namespace) -> Path:
     )
     artifact: BlockSciAnalysisArtifact = {
         "schema_version": SCHEMA_VERSION,
+        "mode": getattr(args, "mode", "emulator"),
         "run_id": run_dir.name,
         "parameters": detector.artifact_parameters(),
         "first_wasabi2_block": detector.first_wasabi2_block,
@@ -90,7 +95,7 @@ def write_analysis(args: argparse.Namespace) -> Path:
                 "reference": images.references[name],
                 "image_id": getattr(args, name + "_image_id", None),
                 "repo_digest": images.digests[name],
-                **(diagnostics.get("images", {}).get(name) or {}),
+                **((diagnostics or {}).get("images", {}).get(name) or {}),
             }
             for name in PROVENANCE_IMAGE_NAMES
         },
@@ -112,6 +117,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--run-dir", type=Path, required=True)
+    parser.add_argument("--mode", choices=("emulator", "external"), default="emulator")
     parser.add_argument("--skip-clustering", action="store_true")
     parser.add_argument("--cluster-output-dir", type=Path)
     add_detector_arguments(parser)

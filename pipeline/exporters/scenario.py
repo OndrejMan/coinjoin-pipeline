@@ -52,7 +52,7 @@ def normalize_scenario(scenario: JsonObject, source_path: Path) -> JsonObject:
 
 
 def load_scenario(run_dir: Path) -> JsonObject | None:
-    """The scenario the emulator stored with the run, if any."""
+    """The scenario the emulator stored with the run; external runs have none."""
     run_scenario_path = run_dir / SCENARIO_FILE
     if not run_scenario_path.exists():
         return None

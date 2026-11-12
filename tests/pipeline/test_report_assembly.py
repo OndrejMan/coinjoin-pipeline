@@ -18,30 +18,31 @@ def write(path: Path, data: object) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
-def stored_run(tmp_path: Path) -> Path:
-    run = tmp_path / "run-a"
+def external_run(tmp_path: Path) -> Path:
+    run = tmp_path / "mainnet-compare"
     write(run / "coinjoin-analysis_data/coinjoin_tx_info.json", {"coinjoins": {TXID: {"txid": TXID}, "b" * 64: {}}})
-    args = report_cli.parse_args(["--run-dir", str(run)])
+    args = report_cli.parse_args(["--run-dir", str(run), "--mode", "external"])
     write(
         run / "blocksci-analysis_data/blocksci_analysis.json",
         {
             "schema_version": SCHEMA_VERSION,
+            "mode": "external",
             "run_id": run.name,
             "parameters": Detector.from_args(args).artifact_parameters(),
             "first_wasabi2_block": 0,
             "records": {},
             "skipped_txids": [],
-            "integration_diagnostics": {},
+            "integration_diagnostics": None,
         },
     )
     return run
 
 
 def test_report_replaces_a_previous_report_that_is_not_an_object(tmp_path):
-    run = stored_run(tmp_path)
+    run = external_run(tmp_path)
     write(run / "coinjoinPipeline_data/unified_report.json", ["not", "a", "report"])
 
-    assert report_cli.main(["--run-dir", str(run)]) == 0
+    assert report_cli.main(["--run-dir", str(run), "--mode", "external"]) == 0
 
     report = json.loads((run / "coinjoinPipeline_data/unified_report.json").read_text())
     assert report["run_manifest_comparison"]["available"] is False

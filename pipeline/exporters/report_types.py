@@ -153,9 +153,7 @@ class SourceTrees(TypedDict):
     exporters_git_dirty: bool | None
 
 
-class RunManifest(TypedDict):
-    """Provenance of one report; ``manifest.MANIFEST_COMPARE_FIELDS`` diffs it."""
-
+class _RunManifestFields(TypedDict):
     run_id: str
     scenario: ScenarioIdentity
     execution: ExecutionManifest
@@ -164,6 +162,13 @@ class RunManifest(TypedDict):
     image_digests: ImageFields
     source_commits: SourceCommits
     source_trees: SourceTrees
+
+
+class RunManifest(_RunManifestFields, total=False):
+    """Provenance of one report; ``manifest.MANIFEST_COMPARE_FIELDS`` diffs it."""
+
+    mode: str
+    network: str | None
 
 
 class DetectorParameters(TypedDict):
@@ -195,6 +200,7 @@ class BlockSciAnalysisArtifact(TypedDict):
     # JoinMarket emulator runs only; None otherwise.
     subset_matching: SubsetMatchingAnalysis | None
     integration_diagnostics: JsonObject | None
+    mode: str
     image_provenance: JsonObject
     predicted_address_clusters: dict[str, str] | None
     cluster_export_error: str | None

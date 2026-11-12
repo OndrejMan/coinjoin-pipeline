@@ -57,6 +57,7 @@ def compare_transactions(
 
 
 def build_warnings(
+    mode: str,
     coinjoin_type: str,
     min_input_count: int | None,
     blocksci_records: dict[str, TransactionRecord],
@@ -69,7 +70,8 @@ def build_warnings(
         if record.get("block_height") is not None
     ]
     if (
-        coinjoin_type == "wasabi2"
+        mode == "emulator"
+        and coinjoin_type == "wasabi2"
         and min_input_count is None
         and not blocksci_records
         and emulator_block_heights
@@ -88,7 +90,9 @@ def build_warnings(
     return warnings
 
 
-def evaluation_scope(independent_emulator_labels: bool) -> str:
+def evaluation_scope(mode: str, independent_emulator_labels: bool) -> str:
+    if mode == "external":
+        return "baseline_agreement_only"
     return "emulator_ground_truth" if independent_emulator_labels else "emulator_labels_unavailable"
 
 
@@ -185,6 +189,8 @@ def build_report(
     emulator_git_commit: str | None = None,
     previous_run_manifest: JsonObject | None = None,
     integration_diagnostics: JsonObject | None = None,
+    mode: str = "emulator",
+    network: str | None = None,
     image_provenance: JsonObject | None = None,
     baseline_filter: JsonObject | None = None,
 ) -> JsonObject:
@@ -231,6 +237,8 @@ def build_report(
         emulator_git_commit=emulator_git_commit,
         image_provenance=image_provenance,
     )
+    run_manifest["mode"] = mode
+    run_manifest["network"] = network
     return {
         "schema_version": SCHEMA_VERSION,
         "run": {
@@ -240,10 +248,12 @@ def build_report(
             "coinjoin_type": coinjoin_type,
             "blocksci_min_input_count": min_input_count,
             "scenario_sha256": scenario.get("sha256") if scenario else None,
+            "mode": mode,
+            "network": network,
         },
         "run_manifest": run_manifest,
         "run_manifest_comparison": compare_run_manifests(previous_run_manifest, run_manifest),
-        "warnings": build_warnings(coinjoin_type, min_input_count, blocksci_records, emulator_data),
+        "warnings": build_warnings(mode, coinjoin_type, min_input_count, blocksci_records, emulator_data),
         "integration_diagnostics": integration_diagnostics,
         "scenario": scenario,
         "emulator_data": {
@@ -254,7 +264,7 @@ def build_report(
         if emulator_data
         else None,
         "detector_evaluations": detector_evaluations,
-        "evaluation_scope": evaluation_scope(independent_emulator_labels),
+        "evaluation_scope": evaluation_scope(mode, independent_emulator_labels),
         "clustering_evaluation": evaluate_cluster_assignments(
             emulator_data,
             predicted_address_clusters,

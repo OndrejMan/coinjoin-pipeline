@@ -66,6 +66,7 @@ def test_load_analysis_rejects_parameter_mismatch(tmp_path: Path) -> None:
         json.dumps(
             {
                 "schema_version": SCHEMA_VERSION,
+                "mode": "emulator",
                 "run_id": "run-1",
                 "parameters": parameters(),
                 "first_wasabi2_block": 0,
@@ -198,6 +199,7 @@ def test_report_cli_consumes_artifact_without_blocksci(tmp_path: Path) -> None:
         json.dumps(
             {
                 "schema_version": SCHEMA_VERSION,
+                "mode": "emulator",
                 "run_id": "run-1",
                 "parameters": parameters(),
                 "first_wasabi2_block": 0,
