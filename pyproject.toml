@@ -35,7 +35,7 @@ package-dir = {coinjoin_pipeline = "src/coinjoin_pipeline", exporters = "pipelin
 
 [tool.setuptools.package-data]
 "coinjoin_pipeline.execution" = ["*.sh"]
-"coinjoin_pipeline.execution.pbs" = ["templates/*.sh", "templates/blocksci_notebook.py"]
+"coinjoin_pipeline.execution.pbs" = ["templates/*.sh", "templates/blocksci_notebook.py", "templates/wabisator_source.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/pipeline"]

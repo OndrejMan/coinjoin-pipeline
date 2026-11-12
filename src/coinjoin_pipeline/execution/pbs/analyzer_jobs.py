@@ -102,7 +102,7 @@ def coinjoin_tools(stage: Stage) -> None:
     if settings.get("input_uri"):
         source = str(settings["input_uri"]).rstrip("/")
         stage.storage.run("sync", f"{source}/*", f"{output / 'input'}/", check=True, timeout=None)
-    else:
+    elif settings["run_input"]:
         experiment = output / "input" / stage.run_id
         experiment.mkdir(parents=True)
         stage.download_optional(COINJOIN_ANALYSIS_DIR, experiment)
@@ -110,6 +110,8 @@ def coinjoin_tools(stage: Stage) -> None:
         if not any(path.is_file() for path in experiment.rglob("*")):
             raise StageFailure("The run has no baseline or emulator data; provide analysis_input_uri")
     (output / "invocation.json").write_text(json.dumps(settings["invocation"], indent=2) + "\n")
+    for name, content in settings["files"].items():
+        (output / name).write_text(content)
     stage.singularity(
         settings["command"],
         binds=(f"{output}:/work:rw",),

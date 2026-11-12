@@ -194,6 +194,8 @@ HELP = {
     "coinjoin_analysis.target_paths": "program target path (repeatable)",
     "coinjoin_analysis.input_uri": "S3 input of the program (pbs-from-s3)",
     "coinjoin_analysis.input_dir": "local input directory of the program (coinjoin-analysis)",
+    "coinjoin_analysis.research.input_indices": "input index (repeatable)",
+    "coinjoin_analysis.research.output_indices": "output index (repeatable)",
     "external.bitcoin_datadir": "Bitcoin datadir to analyze",
     "external.baseline": "baseline to compare the detections against",
     "external.false_cjtxs": "false_cjtxs.json applied to the baseline (repeatable)",
@@ -225,6 +227,21 @@ HELP = {
     "coinjoin_analysis.env_vars": "the program's --env_vars: KEY=VALUE pairs separated by ';' that set its switches",
     "coinjoin_analysis.filename": "scan_results_plot: the Scanner file to plot, without .json",
     "coinjoin_analysis.data_mode": "whether the input is labelled emulation data or unlabelled mainnet data",
+    "coinjoin_analysis.research.txid": "analyze_tx_size: transaction to analyze",
+    "coinjoin_analysis.research.tx_hex": "analyze_tx_size: raw transaction hex, instead of looking it up",
+    "coinjoin_analysis.research.transaction_file": "analyze_tx_size: input file holding the raw transaction",
+    "coinjoin_analysis.research.allow_network": (
+        "mainnet only: let analyze_tx_size fetch the transaction and update_txids_with_wabisator the coordinators"
+    ),
+    "coinjoin_analysis.research.min_wallets": "generate_llm_inputs: fewest wallets a coinjoin needs to be included",
+    "coinjoin_analysis.research.depth": "generate_llm_inputs: how many coinjoins deep the inputs are traced",
+    "coinjoin_analysis.research.permute_inputs": "generate_llm_inputs: shuffle the inputs of each sample",
+    "coinjoin_analysis.research.permute_outputs": "generate_llm_inputs: shuffle the outputs of each sample",
+    "coinjoin_analysis.research.force_limit_anon_score": "generate_llm_inputs: cap on the anonymity score of a coin",
+    "coinjoin_analysis.research.plot": "generate_llm_inputs: also plot where the wallets leave the coinjoins",
+    "coinjoin_analysis.research.coordinator_file": (
+        "update_txids_with_wabisator: coordinator mapping to update (default: the image's txid_coord.json)"
+    ),
     **{
         f"images.{component}": f"{component.replace('_', '-')} image (also ${variable})"
         for component, variable in IMAGE_ENVIRONMENT.items()
