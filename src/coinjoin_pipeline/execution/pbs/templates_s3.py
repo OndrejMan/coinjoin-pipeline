@@ -24,6 +24,7 @@ from exporters.artifact_paths import (
 from coinjoin_pipeline.configuration import (
     BlockSciConfiguration,
     MappingsConfiguration,
+    required,
 )
 from coinjoin_pipeline.registry import pinned_reference
 from coinjoin_pipeline.run_ids import validate_run_id
@@ -47,18 +48,21 @@ from .scripts import (
 )
 from .stage_settings import (
     BlocksciAnalysisSettings,
+    BlocksciParseSettings,
     BlocksciSettings,
     CommandSettings,
-    IndexWriterSettings,
     MappingsSettings,
     PbsResourceSettings,
+    SourceSettings,
     StageSettings,
     UnifiedReportSettings,
 )
 from .validation import (
     PBSError,
+    require_existing_path,
     require_safe_image,
     require_safe_pbs_token,
+    require_storage_path,
 )
 
 # Standalone helpers some jobs ship besides the worker.
@@ -69,8 +73,8 @@ JobSettings = Union[
     CommandSettings,
     UnifiedReportSettings,
     MappingsSettings,
-    IndexWriterSettings,
     BlocksciSettings,
+    BlocksciParseSettings,
     BlocksciAnalysisSettings,
 ]
 
@@ -130,6 +134,36 @@ def render_blocksci_s3_pbs(
     )
 
 
+def _bitcoin_datadir(path: Path) -> str:
+    """A shared Bitcoin Core coin directory the job reads blocks from."""
+    bitcoin_path = path.expanduser().resolve()
+    require_storage_path(bitcoin_path)
+    require_existing_path(bitcoin_path, "external Bitcoin coin directory")
+    if not (bitcoin_path / "blocks").is_dir():
+        raise PBSError(f"External Bitcoin coin directory must contain blocks/: {bitcoin_path}")
+    return str(bitcoin_path)
+
+
+def _block_source(blocksci: BlockSciConfiguration) -> SourceSettings:
+    """The single block source of a parse; kind becomes the cache manifest's source_kind.
+
+    The configuration rules allow one source and require its network and last height.
+    """
+    if blocksci.external_bitcoin_datadir:
+        return {
+            "kind": "external-bitcoin",
+            "network": required(blocksci.network, "--blocksci-network"),
+            "description": "external Bitcoin Core block directory",
+            "datadir": _bitcoin_datadir(Path(blocksci.external_bitcoin_datadir)),
+            "max_block": required(blocksci.max_block, "--blocksci-max-block"),
+        }
+    return {
+        "kind": "emulator",
+        "network": "bitcoin_regtest",
+        "description": "emulator Bitcoin and exported-block inputs",
+    }
+
+
 def _pbs_resources(resources: PBSResources) -> PbsResourceSettings:
     """The resources of a job that writes an index, recorded in the index manifest."""
     return {"ncpus": resources.ncpus, "mem": resources.mem}
@@ -140,10 +174,20 @@ def render_blocksci_parse_s3_pbs(
     image: str,
     command: str,
     resources: PBSResources = BLOCKSCI,
+    *,
+    blocksci: BlockSciConfiguration = BlockSciConfiguration(),
 ) -> str:
     """Render a parser-only job that publishes a checksummed reusable index."""
     return render_python_stage(
-        "blocksci-parse", target, resources, image, {"command": command, "pbs_resources": _pbs_resources(resources)}
+        "blocksci-parse",
+        target,
+        resources,
+        image,
+        {
+            "command": command,
+            "source": _block_source(blocksci),
+            "pbs_resources": _pbs_resources(resources),
+        },
     )
 
 
