@@ -45,6 +45,7 @@ ContainerRuntime = Literal["docker", "podman"]
 JoinMarketDetector = Literal["possible", "definite"]
 AnalysisAction = Literal["collect_docker", "analyze_only"]
 PBSScratchType = Literal["ssd", "local"]
+ImagePullPolicy = Literal["Always", "IfNotPresent", "Never"]
 
 
 def option(default=None, *, name=None, minimum=None, actions=None):
@@ -78,6 +79,11 @@ class KubernetesConfiguration(ConfigurationModel):
     btc_datadir: str | None = option(None, name="kubernetes_btc_datadir")
     copy_to_host: bool = option(False, name="copy_to_host")
     infrastructure_local_build: bool = option(False, name="coinjoin_infrastructure_local_build")
+    # Overrides the S3 emulation Job forwards to its controller; the emulator's defaults apply when unset.
+    distributor_startup_timeout: int | None = option(None, name="distributor_startup_timeout", minimum=1)
+    btc_node_image: str | None = option(None, name="btc_node_image")
+    btc_node_initial_block_count: int | None = option(None, name="btc_node_initial_block_count", minimum=0)
+    image_pull_policy: ImagePullPolicy | None = option(None, name="kubernetes_image_pull_policy")
 
 
 @dataclass(frozen=True, slots=True)

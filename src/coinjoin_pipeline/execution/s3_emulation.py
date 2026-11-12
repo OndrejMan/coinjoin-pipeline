@@ -31,6 +31,10 @@ def pin_emulation_images(args: PipelineConfiguration) -> PipelineConfiguration:
     return replace(args, images=images)
 
 
+def _text(value: int | None) -> str | None:
+    return None if value is None else str(value)
+
+
 def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
     """Render and submit a Kubernetes job that uploads its artifacts to S3."""
     scenario_path = scenario_source_path(args.scenario, SCENARIOS_ROOT, args.engine)
@@ -53,6 +57,10 @@ def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
         secret_name=required(args.artifacts.secret_name, "--s3-secret-name"),
         emulation_timeout_seconds=args.emulation_timeout,
         reuse_namespace=args.kubernetes.reuse_namespace,
+        distributor_startup_timeout=_text(kubernetes.distributor_startup_timeout),
+        btc_node_image=kubernetes.btc_node_image,
+        kubernetes_image_pull_policy=kubernetes.image_pull_policy,
+        btc_node_initial_block_count=_text(kubernetes.btc_node_initial_block_count),
     )
     if args.dry_run:
         print(f"[dry-run] Kubernetes S3-compatible resources:\n{manifest}")

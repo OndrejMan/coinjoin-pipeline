@@ -365,10 +365,15 @@ def render_s3_emulation_resources(
     emulation_timeout_seconds: int = 21600,
     scheduling_timeout_seconds: int = S3_JOB_START_TIMEOUT_SECONDS,
     reuse_namespace: bool = False,
+    distributor_startup_timeout: str | None = None,
+    btc_node_image: str | None = None,
+    kubernetes_image_pull_policy: str | None = None,
+    btc_node_initial_block_count: str | None = None,
 ) -> str:
     """Render a kubectl-compatible JSON resource list for in-cluster emulation."""
     name = s3_emulation_job_name(run_id)
     labels = {"app.kubernetes.io/name": S3_EMULATION_APP_LABEL, RUN_ID_LABEL: run_id}
+    btc_node_image_arg = ' --btc-node-image "$BTC_NODE_IMAGE"' if btc_node_image else ""
     controller = (
         'python manager.py --driver kubernetes --in-cluster --engine "$ENGINE" run '
         '--scenario /config/scenario.json --namespace "$NAMESPACE" --reuse-namespace '
@@ -376,6 +381,7 @@ def render_s3_emulation_resources(
         '--btc-node-arg=-blocksxor=0 --download-btc-data "/app/logs/$RUN_ID/bitcoin_data" '
         "--controller-done-marker /app/logs/.controller.done "
         "--controller-failed-marker /app/logs/.controller.failed"
+        f"{btc_node_image_arg}"
     )
     prefix_preflight = _execution_script("k8s_s3_access.sh", "k8s_s3_prefix_preflight.sh").replace(
         "@REQUIRED_EXPORTERS@", " ".join(REQUIRED_EXPORTERS)
@@ -394,6 +400,16 @@ def render_s3_emulation_resources(
         _field_env("COINJOIN_OWNER_POD_UID", "metadata.uid"),
         _field_env("COINJOIN_OWNER_POD_NAMESPACE", "metadata.namespace"),
     ]
+    # The controller runs in a separate container, so overrides set on the
+    # frontend reach it only explicitly; the emulator validates each one.
+    for variable, value in (
+        ("COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT", distributor_startup_timeout),
+        ("BTC_NODE_IMAGE", btc_node_image),
+        ("KUBERNETES_IMAGE_PULL_POLICY", kubernetes_image_pull_policy),
+        ("COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT", btc_node_initial_block_count),
+    ):
+        if value:
+            env.append(_env(variable, value))
     artifact_env: list[dict] = [
         _env("RUN_ID", run_id),
         _env("ARTIFACT_URI", artifact_uri),

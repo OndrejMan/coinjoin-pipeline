@@ -106,6 +106,13 @@ HELP = {
     "kubernetes.btc_datadir": "shared Bitcoin datadir of the Kubernetes emulation (shared-storage backend only)",
     "kubernetes.copy_to_host": "copy the emulation's Bitcoin data to the host (shared-storage backend only)",
     "kubernetes.infrastructure_local_build": "let the emulator build its infrastructure images locally",
+    "kubernetes.distributor_startup_timeout": (
+        "seconds the Wasabi distributor may take to start in the S3 emulation Job "
+        "(fallback: $COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT)"
+    ),
+    "kubernetes.btc_node_image": "Bitcoin node image of the S3 emulation",
+    "kubernetes.btc_node_initial_block_count": ("blocks the S3 emulation's Bitcoin node mines before the run"),
+    "kubernetes.image_pull_policy": ("imagePullPolicy of the S3 emulation's pods"),
     "artifacts.backend": "where run artifacts are kept between stages",
     "artifacts.uri": "S3 run root, for example s3://bucket/runs",
     "artifacts.endpoint_url": "S3-compatible HTTP(S) endpoint URL",
