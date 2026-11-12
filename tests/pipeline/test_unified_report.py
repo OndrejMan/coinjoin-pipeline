@@ -47,7 +47,9 @@ from exporters.markdown_report import render_report
 from exporters.parameters import Detector, ReportImages  # noqa: E402
 from exporters.normalization import (
     fill_missing_block_heights,
+    filter_coinjoin_analysis_false_positives,
     load_exported_block_tx_index,
+    load_false_positive_txids,
     normalize_coinjoin_analysis,
 )
 from exporters.parameters import parse_min_input_count
@@ -1591,6 +1593,7 @@ class UnifiedReportTest(unittest.TestCase):
         markdown = render_report(report)
         self.assertIn("| BlockSci | 0 | 1 | 1 | 1 |", markdown)
         self.assertIn("| coinjoin-analysis | 1 | 1 | 1 | 0 |", markdown)
+        self.assertIn("coinjoin-analysis` metrics use the normalized baseline", markdown)
 
     def test_detector_evaluation_reports_detections_outside_emulator_universe(self):
         report = build_report(
@@ -2581,6 +2584,36 @@ class UnifiedReportTest(unittest.TestCase):
         assert scenario is not None
         self.assertEqual(scenario["source"], str(scenario_path))
         self.assertEqual(scenario["sha256"], sha256_json(scenario_fixture()))
+
+    def test_false_positive_sidecars_are_merged_and_filter_only_baseline_matches(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            analysis_dir = Path(tmpdir)
+            (analysis_dir / "false_cjtxs.json").write_text(
+                json.dumps({"manual": ["txA", "not-in-baseline"]}), encoding="utf-8"
+            )
+            (analysis_dir / "false_cjtxs.json.reviewed").write_text(json.dumps({"reuse": ["txA"]}), encoding="utf-8")
+
+            txids, sources = load_false_positive_txids(analysis_dir)
+            filtered, removed = filter_coinjoin_analysis_false_positives(coinjoin_analysis_fixture(), txids)
+            report = build_report(
+                Path(tmpdir) / "run",
+                normalize_coinjoin_analysis(filtered),
+                blocksci_fixture(),
+                Detector("wasabi2"),
+                emulator_data=emulator_data_fixture(),
+            )
+
+        self.assertEqual(txids, {"txA", "not-in-baseline"})
+        self.assertEqual(
+            [source["file"] for source in sources],
+            ["false_cjtxs.json", "false_cjtxs.json.reviewed"],
+        )
+        self.assertEqual(removed, ["txA"])
+        self.assertNotIn("txA", filtered["coinjoins"])
+        baseline_matrix = report["detector_evaluations"]["coinjoin_analysis"]
+        self.assertEqual(baseline_matrix["true_positives"], 0)
+        self.assertEqual(baseline_matrix["false_negatives"], 1)
+        self.assertEqual(baseline_matrix["false_negative_txids"], ["txA"])
 
 
 class ScenarioFundsCheckTest(unittest.TestCase):

@@ -12,6 +12,7 @@ from exporters.artifact_paths import (
     BASELINE_FILE,
     REPORT_JSON,
     blocksci_analysis_dir,
+    coinjoin_analysis_dir,
     report_dir,
 )
 from exporters.common import (
@@ -22,8 +23,11 @@ from exporters.common import (
 from exporters.emulator_data import build_emulator_data
 from exporters.markdown_report import render_report, save_text
 from exporters.normalization import (
+    baseline_filter_summary,
     fill_missing_block_heights,
+    filter_coinjoin_analysis_false_positives,
     load_exported_block_tx_index,
+    load_false_positive_txids,
     normalize_coinjoin_analysis,
 )
 from exporters.parameters import Detector, ReportImages, add_detector_arguments, add_image_arguments
@@ -100,7 +104,11 @@ def assemble_report(args: argparse.Namespace) -> int:
     if not baseline_path.exists():
         raise FileNotFoundError(f"Baseline coinjoin-analysis file not found: {baseline_path}")
 
-    coinjoin_analysis_data = load_json(baseline_path)
+    false_positive_txids, false_positive_sources = load_false_positive_txids(coinjoin_analysis_dir(run_dir))
+    coinjoin_analysis_data, filtered_txids = filter_coinjoin_analysis_false_positives(
+        load_json(baseline_path),
+        false_positive_txids,
+    )
     coinjoin_analysis = normalize_coinjoin_analysis(coinjoin_analysis_data)
     fill_missing_block_heights(coinjoin_analysis, load_exported_block_tx_index(run_dir))
     emulator_data = build_emulator_data(run_dir, coinjoin_analysis_data, args.coinjoin_type)
@@ -131,6 +139,7 @@ def assemble_report(args: argparse.Namespace) -> int:
         previous_run_manifest=load_previous_run_manifest(output_path),
         integration_diagnostics=analysis["integration_diagnostics"],
         image_provenance=analysis.get("image_provenance"),
+        baseline_filter=baseline_filter_summary(false_positive_sources, false_positive_txids, filtered_txids),
     )
     save_json(output_path, report)
     print(f"Unified report saved to {output_path}")

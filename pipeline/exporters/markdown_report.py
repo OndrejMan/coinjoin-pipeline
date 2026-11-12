@@ -226,6 +226,15 @@ def render_emulator_detection(report: JsonObject, explorer_base_url: str) -> lis
         ),
     ]
 
+    if "coinjoin_analysis" in detector_evaluations:
+        lines.extend(
+            [
+                "",
+                "> `coinjoin-analysis` metrics use the normalized baseline after applying the "
+                "false-positive sidecar files recorded in this report.",
+            ]
+        )
+
     divergence_lines = []
     for detector, matrix in detector_evaluations.items():
         if not matrix:
@@ -757,6 +766,24 @@ def render_scope_note(report: JsonObject) -> list[str]:
     return lines
 
 
+def render_baseline_filter(report: JsonObject) -> list[str]:
+    baseline_filter = report.get("baseline_filter") or {}
+    if not baseline_filter.get("enabled"):
+        return []
+    source_names = ", ".join(str(source.get("file")) for source in baseline_filter.get("sources", []))
+    return section(
+        "Baseline False-Positive Filter",
+        *key_values(
+            [
+                ["source files", source_names],
+                ["listed unique TXIDs", baseline_filter.get("listed_txids")],
+                ["filtered baseline TXIDs", baseline_filter.get("filtered_count")],
+            ],
+            key="field",
+        ),
+    )
+
+
 DIVERGENCE_KINDS = (
     ("missed_by_blocksci", "missed_by_blocksci"),
     ("blocksci_only", "blocksci_only"),
@@ -817,6 +844,7 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
         *render_run(report),
         *render_detection_summary(report),
         *render_scope_note(report),
+        *render_baseline_filter(report),
         *render_run_manifest(report),
         *render_emulator_detection(report, explorer_base_url),
         *render_subset_matching(report, explorer_base_url),

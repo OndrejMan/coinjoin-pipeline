@@ -18,6 +18,8 @@ SCENARIO_FILE = EMULATOR_DIR + "/scenario.json"
 #: The wallet and coordinator logs coinjoin-analysis reads, and the emulator's labels.
 EMULATOR_DATA_DIR = EMULATOR_DIR + "/data"
 BASELINE_FILE = COINJOIN_ANALYSIS_DIR + "/coinjoin_tx_info.json"
+# Every false-positive sidecar, including the numbered copies of extra inputs.
+FALSE_CJTXS_GLOB = "false_cjtxs.json*"
 BLOCKSCI_CONFIG_FILE = BLOCKSCI_DIR + "/config.json"
 ANALYSIS_ARTIFACT_NAME = "blocksci_analysis.json"
 REPORT_JSON = "unified_report.json"
