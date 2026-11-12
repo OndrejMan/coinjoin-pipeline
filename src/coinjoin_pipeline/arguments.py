@@ -63,6 +63,7 @@ SECTIONS = {
         "else the release tag --version.",
     ),
     "blocksci": ("BlockSci", None),
+    "joinmarket": ("JoinMarket detector", None),
 }
 
 # Help text by model path. The YAML key and the default are appended automatically.
@@ -92,6 +93,14 @@ HELP = {
     "images.local_build": "use locally built images (*:local)",
     "images.unified_report": ("unified-report job image (default: container/unified-report.image)"),
     "blocksci.script": "Python script run over the parsed BlockSci index",
+    "joinmarket.detector": "deprecated subset-matching JoinMarket scan of the report; definite matches more strictly",
+    "joinmarket.min_base_fee": (
+        "deprecated subset-matching scan: smallest fee allowance of one participant, in satoshis"
+    ),
+    "joinmarket.percentage_fee": (
+        "deprecated subset-matching scan: fee allowance as a fraction of the participant's amount, if larger"
+    ),
+    "joinmarket.max_depth": "deprecated subset-matching scan: backtracking steps per transaction before it gives up",
     **{
         f"images.{component}": f"{component.replace('_', '-')} image (also ${variable})"
         for component, variable in IMAGE_ENVIRONMENT.items()

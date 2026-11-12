@@ -439,6 +439,10 @@ class UnifiedReportTest(unittest.TestCase):
                     "joinmarket",
                     min_input_count=1,
                     first_wasabi2_block=0,
+                    joinmarket_detector="definite",
+                    joinmarket_min_base_fee=5000,
+                    joinmarket_percentage_fee=0.00004,
+                    joinmarket_max_depth=200000,
                 ),
                 "joinmarket",
             )
@@ -462,6 +466,32 @@ class UnifiedReportTest(unittest.TestCase):
         for value in ("0", "-1", "not-a-number"):
             with self.subTest(value=value), self.assertRaises(SystemExit):
                 parse_args(["--run-dir", "run", "--min-input-count", value])
+
+    def test_parse_args_accepts_joinmarket_detector_settings(self):
+        args = parse_args(
+            [
+                "--run-dir",
+                "run",
+                "--engine",
+                "joinmarket",
+                "--coinjoin-type",
+                "joinmarket",
+                "--joinmarket-detector",
+                "possible",
+                "--joinmarket-min-base-fee",
+                "7000",
+                "--joinmarket-percentage-fee",
+                "0.001",
+                "--joinmarket-max-depth",
+                "100",
+            ]
+        )
+
+        self.assertEqual(args.engine, "joinmarket")
+        self.assertEqual(args.joinmarket_detector, "possible")
+        self.assertEqual(args.joinmarket_min_base_fee, 7000)
+        self.assertEqual(args.joinmarket_percentage_fee, 0.001)
+        self.assertEqual(args.joinmarket_max_depth, 100)
 
     def test_parse_args_accepts_manifest_provenance(self):
         args = parse_args(
@@ -495,6 +525,10 @@ class UnifiedReportTest(unittest.TestCase):
                 "joinmarket",
                 min_input_count=1,
                 first_wasabi2_block=0,
+                joinmarket_detector="definite",
+                joinmarket_min_base_fee=5000,
+                joinmarket_percentage_fee=0.00004,
+                joinmarket_max_depth=200000,
             ),
             "joinmarket",
             emulator_git_commit="old-commit",
@@ -511,8 +545,12 @@ class UnifiedReportTest(unittest.TestCase):
             {"name": "scenario-a", "sha256": "new-hash"},
             Detector(
                 "joinmarket",
-                min_input_count=2,
+                min_input_count=1,
                 first_wasabi2_block=0,
+                joinmarket_detector="possible",
+                joinmarket_min_base_fee=5000,
+                joinmarket_percentage_fee=0.00004,
+                joinmarket_max_depth=200000,
             ),
             "joinmarket",
             emulator_git_commit="old-commit",
@@ -544,6 +582,10 @@ class UnifiedReportTest(unittest.TestCase):
                     "wasabi2",
                     min_input_count=1,
                     first_wasabi2_block=0,
+                    joinmarket_detector="definite",
+                    joinmarket_min_base_fee=5000,
+                    joinmarket_percentage_fee=0.00004,
+                    joinmarket_max_depth=200000,
                 ),
                 "wasabi",
             )
@@ -2123,6 +2165,44 @@ class UnifiedReportTest(unittest.TestCase):
             "Python mirror passes; likely difference is runtime BlockSci image/cache mismatch",
             markdown,
         )
+
+    def test_report_compares_the_deprecated_subset_matching_scan(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            run_dir.mkdir()
+
+            report = build_report(
+                run_dir,
+                normalize_coinjoin_analysis(joinmarket_passing_coinjoin_fixture()),
+                blocksci_fixture("txB"),
+                Detector("joinmarket"),
+                subset_matching={"records": blocksci_fixture("txA"), "skipped_txids": ["skipped-tx"]},
+                images=ReportImages(digests={"blocksci": "sha256:blocksci"}),
+            )
+
+        comparison = report["blocksci_subset_matching"]
+        self.assertTrue(comparison["deprecated"])
+        self.assertEqual(comparison["parameters"]["detector"], "definite")
+        self.assertEqual(comparison["summary"]["matched_by_both"], 1)
+        self.assertEqual(comparison["summary"]["missed_by_blocksci"], 0)
+        self.assertEqual(comparison["summary"]["skipped"], 1)
+        self.assertEqual(comparison["summary"]["subset_matching_only"], 1)
+        self.assertEqual(comparison["summary"]["blocksci_heuristic_only"], 1)
+        self.assertEqual(report["summary"]["matched_by_both"], 0)
+        markdown = render_report(report)
+        self.assertIn("## BlockSci Subset Matching (deprecated)", markdown)
+        self.assertIn("[skipped-tx](http://localhost:3002/tx/skipped-tx)", markdown)
+        self.assertIn("| BlockSci image digest | sha256:blocksci |", markdown)
+
+    def test_report_without_subset_matching_scan_has_no_comparison(self):
+        report = build_report(
+            Path("/tmp/run"),
+            normalize_coinjoin_analysis(coinjoin_analysis_fixture()),
+            blocksci_fixture(),
+            Detector("wasabi2"),
+        )
+
+        self.assertIsNone(report["blocksci_subset_matching"])
 
     def test_render_io_details_links_prev_txids(self):
         with tempfile.TemporaryDirectory() as tmpdir:

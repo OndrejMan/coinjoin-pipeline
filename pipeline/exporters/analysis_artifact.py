@@ -9,6 +9,8 @@ from exporters.common import load_json
 from exporters.report_types import BlockSciAnalysisArtifact, DetectorParameters
 
 SCHEMA_VERSION = "1.3"
+# The detector parameters a Wasabi 2 analysis depends on; JoinMarket's depend on all of them.
+WASABI_PARAMETER_KEYS = ("coinjoin_type", "min_input_count")
 
 
 def load_analysis(
@@ -23,11 +25,22 @@ def load_analysis(
         raise ValueError(f"Unsupported BlockSci analysis schema in {path}: {artifact.get('schema_version')!r}")
     if artifact.get("run_id") != run_id:
         raise ValueError(f"BlockSci analysis run mismatch: expected {run_id!r}, got {artifact.get('run_id')!r}")
-    if artifact.get("parameters") != expected_parameters:
+    recorded = artifact.get("parameters")
+    # Only the options the selected type's detector reads must agree: changing a
+    # JoinMarket-only option leaves a Wasabi analysis valid.
+    keys = expected_parameters if expected_parameters["coinjoin_type"] == "joinmarket" else WASABI_PARAMETER_KEYS
+    if not isinstance(recorded, dict) or any(recorded.get(key) != expected_parameters.get(key) for key in keys):
         raise ValueError("BlockSci analysis detector parameters do not match the requested report parameters")
     for field, kind in (("records", dict), ("first_wasabi2_block", int)):
         if not isinstance(artifact.get(field), kind):
             raise ValueError(f"BlockSci analysis artifact has invalid {field}")
+    subset_matching = artifact.get("subset_matching")
+    if subset_matching is not None and not (
+        isinstance(subset_matching, dict)
+        and isinstance(subset_matching.get("records"), dict)
+        and isinstance(subset_matching.get("skipped_txids"), list)
+    ):
+        raise ValueError("BlockSci analysis artifact has invalid subset_matching")
     if not isinstance(artifact.get("integration_diagnostics"), dict):
         raise ValueError("BlockSci analysis artifact has invalid integration_diagnostics")
     provenance = artifact.get("image_provenance")

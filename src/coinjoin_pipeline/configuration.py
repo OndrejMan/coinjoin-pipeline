@@ -39,6 +39,7 @@ PipelineAction = Literal[
 Engine = Literal["wasabi", "joinmarket"]
 CoinjoinType = Literal["wasabi2", "joinmarket"]
 ContainerRuntime = Literal["docker", "podman"]
+JoinMarketDetector = Literal["possible", "definite"]
 AnalysisAction = Literal["collect_docker", "analyze_only"]
 
 
@@ -73,6 +74,14 @@ class BlockSciConfiguration(ConfigurationModel):
 
 
 @dataclass(frozen=True, slots=True)
+class JoinMarketConfiguration(ConfigurationModel):
+    detector: JoinMarketDetector = option("definite", name="joinmarket_detector")
+    min_base_fee: int = option(5000, name="joinmarket_min_base_fee", minimum=0)
+    percentage_fee: float = option(4e-05, name="joinmarket_percentage_fee", minimum=0)
+    max_depth: int = option(200000, name="joinmarket_max_depth", minimum=1)
+
+
+@dataclass(frozen=True, slots=True)
 class PipelineConfiguration(ConfigurationModel):
     action: PipelineAction = option("full-run")
     runtime: ContainerRuntime = option("docker", name="runtime")
@@ -91,6 +100,7 @@ class PipelineConfiguration(ConfigurationModel):
     analysis_action: AnalysisAction = option("collect_docker", name="analysis_action", actions=("coinjoin-analysis",))
     images: ImageConfiguration = field(default_factory=ImageConfiguration)
     blocksci: BlockSciConfiguration = field(default_factory=BlockSciConfiguration)
+    joinmarket: JoinMarketConfiguration = field(default_factory=JoinMarketConfiguration)
     _provided: frozenset[str] = field(default_factory=frozenset, repr=False, compare=False)
 
     @property

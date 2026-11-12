@@ -36,5 +36,7 @@ def test_report_phase_does_not_parse_or_analyze(tmp_path):
 
 def test_shared_detector_defaults_honor_the_container_environment(monkeypatch):
     monkeypatch.setenv("BLOCKSCI_MIN_INPUT_COUNT", "15")
+    monkeypatch.setenv("BLOCKSCI_JOINMARKET_MAX_DEPTH", "123")
     args = worker.parse_args(["analyze", "--run-dir", "/runs/run-a"])
     assert args.min_input_count == 15
+    assert args.joinmarket_max_depth == 123

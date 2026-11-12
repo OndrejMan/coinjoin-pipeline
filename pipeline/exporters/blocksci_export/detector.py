@@ -26,9 +26,19 @@ BLOCKSCI_REQUIRED_ATTRIBUTES = ("Blockchain", "heuristics")
 class BlocksciChain(Blockchain, Protocol):
     """``blocksci.Blockchain`` methods the detector calls.
 
-    The scan binding exists only in the fork's builds; ``_require_binding``
-    checks for it before use, so an older image fails with a rebuild hint.
+    The two scan bindings exist only in the fork's builds; ``_require_binding``
+    checks for them before use, so an older image fails with a rebuild hint.
     """
+
+    def scan_coinjoins_by_subset_matching(
+        self,
+        start: int,
+        stop: int,
+        detector: str,
+        min_base_fee: int,
+        percentage_fee: float,
+        max_depth: int,
+    ) -> tuple[Iterable[object], Iterable[object]]: ...
 
     def filter_coinjoin_txes_raw(self, start: int, stop: int, *args: object) -> Iterable[object]: ...
 
@@ -205,6 +215,21 @@ def _require_binding(chain: object, method: str, hint: str) -> None:
         )
 
 
+def _scan_coinjoins_by_subset_matching(
+    chain: BlocksciChain, detector: Detector, window: tuple[int, int]
+) -> tuple[Iterable[object], list[str]]:
+    _require_binding(chain, "scan_coinjoins_by_subset_matching", "subset-matching scan binding")
+    txes, skipped = chain.scan_coinjoins_by_subset_matching(
+        *window,
+        detector.joinmarket_detector,
+        detector.joinmarket_min_base_fee,
+        detector.joinmarket_percentage_fee,
+        detector.joinmarket_max_depth,
+    )
+    skipped_txids = sorted(txid for txid in (to_json_text(safe_attr(tx, "hash")) for tx in skipped) if txid)
+    return txes, skipped_txids
+
+
 def _filter_raw_coinjoin_txes(chain: BlocksciChain, detector: Detector, window: tuple[int, int]) -> Iterable[object]:
     _require_binding(chain, "filter_coinjoin_txes_raw", "raw CoinJoin report binding")
     if detector.min_input_count is None:
@@ -248,3 +273,24 @@ def export_blocksci_records(
         raise RuntimeError("BlockSci Python module is required to export BlockSci records.")
     chain = open_chain(config_path, max_block)
     return _records_by_txid(_filter_raw_coinjoin_txes(chain, detector, scan_window(chain, start_height, end_height)))
+
+
+def export_subset_matching_records(
+    config_path: Path,
+    detector: Detector,
+    *,
+    max_block: int | None = None,
+    start_height: int | None = None,
+    end_height: int | None = None,
+) -> tuple[dict[str, TransactionRecord], list[str]]:
+    """The deprecated input-subset-matching JoinMarket detector over the scan window.
+
+    Kept only as a comparison with the protocol heuristic: its backtracking is
+    exponential in the input count.
+    """
+    if blocksci is None:
+        raise RuntimeError("BlockSci Python module is required to export BlockSci records.")
+    chain = open_chain(config_path, max_block)
+    window = scan_window(chain, start_height, end_height)
+    txes, skipped_txids = _scan_coinjoins_by_subset_matching(chain, detector, window)
+    return _records_by_txid(txes), skipped_txids
