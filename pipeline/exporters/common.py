@@ -28,6 +28,14 @@ EMULATOR_DATA_SCHEMA_VERSION = "1.0"
 SATS_IN_BTC = 100_000_000
 DEFAULT_FIRST_WASABI2_BLOCK = 0
 WASABI2_THRESHOLD_CHANGE_BLOCK = 850_237
+WASABI2_MAX_SATOSHIS = 134_375_000_000
+WASABI2_MIN_SATOSHIS = 5_000
+WASABI2_ALLOWED_ADDRESS_TYPES = {
+    "WITNESS_PUBKEYHASH",
+    "WITNESS_UNKNOWN",
+    "witness_pubkeyhash",
+    "witness_unknown",
+}
 
 
 def load_json(path: Path) -> JsonObject:
@@ -224,6 +232,21 @@ def transaction_metrics(inputs: list[IORecord], outputs: list[IORecord]) -> Tran
         "total_output_sats": sum(item["value"] or 0 for item in outputs),
         "repeated_output_denominations": repeated_denominations(outputs),
     }
+
+
+def rule_result(name: str, passed: bool | None, observed: JsonValue, expected: JsonValue) -> JsonObject:
+    return {
+        "name": name,
+        "passed": passed,
+        "observed": observed,
+        "expected": expected,
+    }
+
+
+def coerce_int(value: JsonValue) -> int | None:
+    if value is None:
+        return None
+    return int(str(value))
 
 
 def safe_attr(obj: object, name: str, default: object = None) -> object:

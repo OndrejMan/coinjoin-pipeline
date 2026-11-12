@@ -17,6 +17,7 @@ from exporters.comparison import (
     build_divergences,
     compare_records,
 )
+from exporters.heuristics import add_blocksci_heuristic_explanations
 from exporters.manifest import build_run_manifest, compare_run_manifests
 from exporters.parameters import Detector, ReportImages
 from exporters.report_types import TransactionRecord
@@ -142,6 +143,7 @@ def build_report(
     script_index = load_exported_block_script_metadata(run_dir)
     enrich_records_with_script_metadata(coinjoin_analysis, run_dir, script_index)
     enrich_records_with_script_metadata(blocksci_records, run_dir, script_index)
+    add_blocksci_heuristic_explanations(coinjoin_analysis, detector)
     transactions = compare_transactions(coinjoin_analysis, blocksci_records)
 
     independent_emulator_labels = bool(

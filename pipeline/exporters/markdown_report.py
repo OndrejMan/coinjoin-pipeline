@@ -11,7 +11,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from exporters.common import JsonObject, JsonValue, load_json, wallet_names
+from exporters.common import JsonObject, JsonValue, io_items, load_json, wallet_names
 
 
 def save_text(path: Path, text: str) -> None:
@@ -106,6 +106,20 @@ def section(title: str, *body: str, level: int = 2) -> list[str]:
 
 def key_values(rows: list[list[object]], key: str = "metric") -> list[str]:
     return table([key, "value"], rows)
+
+
+def rule_passed_text(value: bool | None) -> str:
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    return "unknown"
+
+
+def rule_cell(value: JsonValue) -> JsonValue:
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True)
+    return value
 
 
 def transaction_record(
@@ -327,11 +341,75 @@ def render_transaction_details(
                 "",
             ]
         )
+        lines.extend(render_heuristic_explanation(source, source_name == "coinjoin_analysis" and "Missed" in title))
         lines.extend(render_io_details("Inputs", source.get("inputs", []), explorer_base_url))
         lines.extend(render_io_details("Outputs", source.get("outputs", []), explorer_base_url))
         lines.append("")
 
     return lines
+
+
+def render_heuristic_explanation(source: JsonObject, missed_by_blocksci: bool) -> list[str]:
+    explanation = source.get("blocksci_heuristic_explanation") or {}
+    if not explanation:
+        return []
+
+    failed_rules = explanation.get("failed_rules") or []
+    mirror_result = "pass" if explanation.get("would_pass_python_rules") else "fail"
+    failed_text = ", ".join(failed_rules) if failed_rules else "-"
+    rows = [
+        [
+            rule.get("name"),
+            rule_passed_text(rule.get("passed")),
+            rule_cell(rule.get("observed")),
+            rule_cell(rule.get("expected")),
+        ]
+        for rule in explanation.get("rules", [])
+    ]
+    lines = [
+        "#### BlockSci Heuristic Explanation",
+        "",
+        f"- Python mirror result: {mirror_result}",
+        f"- Failed rules: {failed_text}",
+        "",
+        *table(["rule", "passed", "observed", "expected"], rows),
+        "",
+    ]
+    if record_has_taproot_witness_unknown(source):
+        lines.extend(
+            [
+                "Note: BlockSci classifies taproot / witness v1 outputs as WITNESS_UNKNOWN in this build. "
+                "This is expected and is allowed by the Wasabi2 heuristic.",
+                "",
+            ]
+        )
+    if missed_by_blocksci and explanation.get("would_pass_python_rules"):
+        heuristic = explanation.get("heuristic")
+        if heuristic == "joinmarket":
+            lines.extend(
+                [
+                    "Python mirror passes; likely difference is runtime BlockSci image/cache mismatch or "
+                    "unavailable raw BlockSci transaction state. Re-run with a pinned local BlockSci image to "
+                    "confirm.",
+                    "",
+                ]
+            )
+            return lines
+        lines.extend(
+            [
+                "Python mirror passes; likely difference is unavailable address-type data, denomination set "
+                "mismatch, or BlockSci configuration/threshold behavior.",
+                "",
+            ]
+        )
+    return lines
+
+
+def record_has_taproot_witness_unknown(source: JsonObject) -> bool:
+    return any(
+        item.get("script_type") == "witness_v1_taproot" and item.get("address_type") == "WITNESS_UNKNOWN"
+        for item in io_items(source)
+    )
 
 
 def render_io_details(title: str, records: list[JsonObject], explorer_base_url: str) -> list[str]:
