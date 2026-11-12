@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 import shlex
 import subprocess
@@ -14,6 +15,7 @@ from exporters.artifact_paths import RUN_MANIFEST
 from . import MANIFEST_SCHEMA_VERSION, __version__
 from .arguments import (
     CONFIGURATION_FLAGS,
+    DELEGATING_UTILITIES,
     UTILITIES,
     UTILITY_SUMMARIES,
     action_word,
@@ -79,7 +81,7 @@ def _utility(argv: list[str]) -> int | None:
     supplied.pop("from_configuration", None)
     if action not in UTILITIES:
         return None
-    if remaining[:1] in (["-h"], ["--help"]):
+    if action not in DELEGATING_UTILITIES and remaining[:1] in (["-h"], ["--help"]):
         print(utility_usage(action))
         return EXIT_OK
     if action == "version":
@@ -87,6 +89,9 @@ def _utility(argv: list[str]) -> int | None:
         return EXIT_OK
     context = RunContext.prepare(PipelineConfiguration.from_flat(supplied), shlex.join(["cjp", *argv]))
     root = context.config.runs_path
+    if action in {"download-report"}:
+        module = importlib.import_module(f"coinjoin_pipeline.{action.replace('-', '_')}")
+        return module.main(remaining, runs_root=root)
     if remaining:
         return fail(f"unexpected arguments for {action}: {' '.join(remaining)}; see cjp {action} --help")
     if action == "pull":

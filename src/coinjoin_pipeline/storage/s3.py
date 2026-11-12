@@ -6,6 +6,8 @@ Marker waiting lives in ``execution/s3_markers.py`` and exporter staging in
 
 from __future__ import annotations
 
+import argparse
+import os
 import re
 import shlex
 import shutil
@@ -146,6 +148,56 @@ def validate_s3_profile(profile: str) -> str:
     if not PROFILE_RE.fullmatch(profile):
         raise ValueError("S3 profile must match [A-Za-z0-9][A-Za-z0-9._-]*")
     return profile
+
+
+def access_from_values(
+    endpoint_url: str | None,
+    credentials_file: str | None,
+    profile: str | None,
+    *,
+    check_file: bool = False,
+) -> S3Access:
+    """Normalize frontend credentials once, optionally requiring a local file."""
+    if not endpoint_url:
+        raise ValueError("--s3-endpoint-url is required")
+    if not credentials_file:
+        raise ValueError("--s3-credentials-file is required")
+    if not profile:
+        raise ValueError("--s3-profile is required")
+    credentials = Path(credentials_file).expanduser()
+    validate_credentials_file(str(credentials))
+    if check_file and not credentials.is_file():
+        raise ValueError(f"S3 credentials file not found: {credentials}")
+    return S3Access(
+        validate_s3_endpoint_url(endpoint_url),
+        str(credentials),
+        validate_s3_profile(profile),
+    )
+
+
+def add_s3_arguments(parser: argparse.ArgumentParser, uri_help: str) -> None:
+    """The S3 options of the frontend utilities, defaulting to the environment."""
+    parser.add_argument("--artifact-uri", default=os.environ.get("ARTIFACT_URI"), help=uri_help)
+    parser.add_argument(
+        "--s3-endpoint-url", default=os.environ.get("S3_ENDPOINT_URL"), help="S3-compatible HTTP(S) endpoint URL."
+    )
+    parser.add_argument(
+        "--s3-credentials-file",
+        default=os.environ.get("S3_CREDENTIALS_FILE"),
+        help="Absolute s5cmd credentials-file path.",
+    )
+    parser.add_argument(
+        "--s3-profile", default=os.environ.get("S3_PROFILE"), help="Named profile in the s5cmd credentials file."
+    )
+
+
+def s3_arguments_access(args: argparse.Namespace) -> tuple[str, S3Access]:
+    """Validated artifact URI and access of ``add_s3_arguments``; ValueError when unusable."""
+    artifact_uri = validate_artifact_uri(args.artifact_uri)
+    access = access_from_values(args.s3_endpoint_url, args.s3_credentials_file, args.s3_profile, check_file=True)
+    if shutil.which("s5cmd") is None:
+        raise ValueError("s5cmd is required on the frontend PATH")
+    return artifact_uri, access
 
 
 def shell_assignment(name: str, value: str) -> str:

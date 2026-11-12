@@ -35,16 +35,19 @@ def field_type(path: str):
 
 
 CONFIGURATION_FLAGS = ("--from-configuration",)
-# Host commands that need no experiment.
+# Host commands that need no experiment; DELEGATING_UTILITIES parse their own arguments.
 UTILITIES = (
     "version",
     "doctor",
     "pull",
+    "download-report",
 )
+DELEGATING_UTILITIES = frozenset({"download-report"})
 UTILITY_SUMMARIES = {
     "version": "print the CLI version and the default component images",
     "doctor": "check the container runtime, the runs root and the default images",
     "pull": "pull every component image with the container runtime",
+    "download-report": "download the finished unified report of an S3 run",
 }
 ACTION_SUMMARIES = {
     "full-run": "emulate a new run, then analyze it and export its report",
@@ -233,7 +236,7 @@ def _epilog() -> str:
     width = max(map(len, (*ACTION_SUMMARIES, *UTILITY_SUMMARIES)))
     lines = ["actions:"]
     lines += [f"  {name:<{width}}  {summary}" for name, summary in ACTION_SUMMARIES.items()]
-    lines += ["", "utilities:"]
+    lines += ["", "utilities (download-report accepts its own --help):"]
     lines += [f"  {name:<{width}}  {summary}" for name, summary in UTILITY_SUMMARIES.items()]
     lines += [
         "",
