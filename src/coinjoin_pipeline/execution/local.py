@@ -49,8 +49,11 @@ def run_configuration(args: PipelineConfiguration, logs_root: Path) -> None:
             exit_with_error(error)
     elif action == "analyze":
         run_dir = _selected_run_dir(args, logs_root)
+        staged_script = containers.stage_blocksci_script(args.blocksci.script, run_dir)
         with captured_pipeline_stage(logs_root, "BlockSci analysis", run_dir):
-            containers.run_script(settings.ANALYSIS_SCRIPT, config=args, active_run_id=run_dir.name)
+            containers.run_script(
+                settings.ANALYSIS_SCRIPT, config=args, active_run_id=run_dir.name, blocksci_script=staged_script
+            )
     elif action == "export":
         run_dir = _selected_run_dir(args, logs_root)
         with captured_pipeline_stage(logs_root, "Unified report export", run_dir):

@@ -64,6 +64,7 @@ SECTIONS = {
         "Each image is the explicit option, else its environment variable, else the --local-build tag, "
         "else the release tag --version.",
     ),
+    "blocksci": ("BlockSci", None),
 }
 
 # Help text by model path. The YAML key and the default are appended automatically.
@@ -92,6 +93,7 @@ HELP = {
     ),
     "images.local_build": "use locally built images (*:local)",
     "images.unified_report": ("unified-report job image (default: container/unified-report.image)"),
+    "blocksci.script": "Python script run over the parsed BlockSci index",
     **{
         f"images.{component}": f"{component.replace('_', '-')} image (also ${variable})"
         for component, variable in IMAGE_ENVIRONMENT.items()

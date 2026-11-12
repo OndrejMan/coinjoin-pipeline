@@ -41,6 +41,12 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
         value = config_value(config, path)
         if value is not None:
             config = replace_path(config, path, validator(value))
+    if config.blocksci.script:
+        config = replace_path(
+            config,
+            "blocksci.script",
+            str(Path(config.blocksci.script).expanduser().resolve()),
+        )
     if config.scenario and Path(config.scenario).expanduser().is_file():
         config = replace(config, scenario=str(Path(config.scenario).expanduser().resolve()))
     config.validate()

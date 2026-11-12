@@ -216,11 +216,14 @@ def run_script(
     config: PipelineConfiguration = DEFAULT_CONFIGURATION,
     active_run_id: str | None = None,
     include_scenario: bool = True,
+    blocksci_script: str | None = None,
 ) -> None:
     if not script.exists():
         print(f"[ERROR] Script not found: {script}", file=sys.stderr)
         sys.exit(1)
     env = compose_env(config, active_run_id, include_scenario=include_scenario, create_directories=True)
+    if blocksci_script:
+        env["BLOCKSCI_SCRIPT"] = blocksci_script
     if script == settings.EMULATE_SCRIPT:
         relative_scenario = env["SCENARIO_CONTAINER_PATH"].removeprefix(settings.CONTAINER_SCENARIOS_DIR + "/")
         args = ("--scenario", "/app/scenarios/" + relative_scenario)
@@ -313,7 +316,9 @@ def run_coinjoin_analysis_docker_stage(active_run_id: str, analysis_action: str 
 
 def run_blocksci_docker_stage(args: PipelineConfiguration, run_dir: Path, *, include_report: bool) -> None:
     """Run only BlockSci through Compose, optionally deferring the unified report."""
+    staged_script = stage_blocksci_script(args.blocksci.script, run_dir)
     env = compose_env(args, run_dir.name)
+    env["BLOCKSCI_SCRIPT"] = staged_script or ""
     env["BLOCKSCI_EXPORT_REPORT"] = "true" if include_report else "false"
     compose_cmd = compose_base_command(env)
     run_command(
@@ -356,6 +361,19 @@ def exists_or_unreadable(path: Path) -> bool:
             continue
         return not os.access(parent, os.R_OK | os.X_OK)
     return False
+
+
+def stage_blocksci_script(script: str | None, run_dir: Path) -> str | None:
+    """Copy a user analysis script into the run, where the BlockSci container sees it."""
+    if not script:
+        return None
+    source = Path(script).expanduser().resolve()
+    if not source.is_file():
+        raise ValueError(f"BlockSci script does not exist or is not a file: {source}")
+    staged = run_dir / ".pipeline" / "blocksci-script.py"
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    staged.write_bytes(source.read_bytes())
+    return f"{settings.RUNS_ROOT_CONTAINER}/{run_dir.name}/.pipeline/blocksci-script.py"
 
 
 def export_preflight_error(coinjoin_ready: bool, blocksci_ready: bool, run_dir: Path) -> str | None:

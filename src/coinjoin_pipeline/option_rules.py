@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .configuration import cli_flag, config_value, option_specs
@@ -35,7 +36,10 @@ def _general_errors(config: PipelineConfiguration) -> list[str]:
 
 def _action_errors(config: PipelineConfiguration) -> list[str]:
     """Rules of the emulation and analysis actions."""
-    return _run_selection_errors(config)
+    return [
+        *_run_selection_errors(config),
+        *_remaining_errors(config),
+    ]
 
 
 def _run_selection_errors(config: PipelineConfiguration) -> list[str]:
@@ -54,4 +58,12 @@ def _run_selection_errors(config: PipelineConfiguration) -> list[str]:
         errors.append("clean is destructive; pass --yes or --dry-run")
     if config.run_id is not None and not is_valid_run_id(config.run_id):
         errors.append(f"--run-id {RUN_ID_RULE}")
+    return errors
+
+
+def _remaining_errors(config: PipelineConfiguration) -> list[str]:
+    errors: list[str] = []
+    blocksci = config.blocksci
+    if blocksci.script and not Path(blocksci.script).expanduser().is_file():
+        errors.append(f"BlockSci script not found: {blocksci.script}")
     return errors
