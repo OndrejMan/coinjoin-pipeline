@@ -109,6 +109,44 @@ def kubernetes_auth_preflight(kubeconfig_path: Path, namespace: str, reuse_names
     print(f"[kubernetes] Auth preflight OK for namespace={namespace}, reuse_namespace={reuse_namespace}")
 
 
+def kubernetes_s3_auth_preflight(
+    kubeconfig_path: Path,
+    namespace: str,
+    reuse_namespace: bool,
+    secret_name: str,
+) -> None:
+    """Validate permissions and prerequisites for the S3-compatible emulation Job."""
+    if not reuse_namespace:
+        raise RuntimeError(
+            "Kubernetes S3-compatible mode requires an existing namespace and Secret; pass --reuse-namespace"
+        )
+    print(f"[kubernetes] S3-compatible auth preflight using kubeconfig: {kubeconfig_path}")
+    _preflight(kubeconfig_path, "get", "--raw=/version")
+    owned = (
+        "serviceaccounts",
+        "configmaps",
+        "roles.rbac.authorization.k8s.io",
+        "rolebindings.rbac.authorization.k8s.io",
+    )
+    _require_permissions(
+        kubeconfig_path,
+        (
+            ("create", "jobs.batch"),
+            *(("create", resource) for resource in owned),
+            *(("patch", resource) for resource in owned),
+            *(("delete", resource) for resource in owned),
+            ("get", "jobs.batch"),
+            ("delete", "jobs.batch"),
+        ),
+        namespace,
+    )
+    _preflight(kubeconfig_path, "get", "namespace", namespace)
+    # A missing Secret would leave the Job pod in CreateContainerConfigError
+    # until the emulation timeout, so check it up front.
+    _preflight(kubeconfig_path, "get", "secret", secret_name, namespace=namespace)
+    print(f"[kubernetes] S3-compatible auth preflight OK for namespace={namespace}")
+
+
 def s3_emulation_job_name(run_id: str) -> str:
     """Derive a DNS-safe Job name that stays unique per run id.
 

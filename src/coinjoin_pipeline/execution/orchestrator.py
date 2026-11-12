@@ -13,6 +13,8 @@ from coinjoin_pipeline.execution.locks import acquire_lock, command_lock_path
 from coinjoin_pipeline.execution.pbs_settings import truthy_env
 from coinjoin_pipeline.execution.pipeline_logging import exit_with_error
 from coinjoin_pipeline.execution.s3_emulation import run_s3_kubernetes_emulation
+from coinjoin_pipeline.execution.s3_staging import stage_kubernetes_s3_run
+from coinjoin_pipeline.storage.s3 import ArtifactTransportError
 
 from . import local
 
@@ -49,8 +51,10 @@ def run_configuration(args: PipelineConfiguration) -> None:
 
     if args.action == "emulate" and args.driver == "kubernetes" and args.artifacts.backend == "s3":
         try:
+            if not args.dry_run:
+                stage_kubernetes_s3_run(args)
             run_s3_kubernetes_emulation(args)
-        except RuntimeError as error:
+        except (ArtifactTransportError, RuntimeError) as error:
             exit_with_error(error)
     else:
         local.run_configuration(args, logs_root, local_build)

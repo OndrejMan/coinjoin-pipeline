@@ -22,8 +22,10 @@ from .paths import EXPORTERS_ROOT, SCENARIOS_ROOT, default_runs_root
 from .runs import run_id_for
 from .storage.s3 import (
     validate_artifact_uri,
+    validate_credentials_file,
     validate_run_id,
     validate_s3_endpoint_url,
+    validate_s3_profile,
 )
 
 
@@ -44,6 +46,8 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
     for path, validator in (
         ("artifacts.uri", validate_artifact_uri),
         ("artifacts.endpoint_url", validate_s3_endpoint_url),
+        ("artifacts.credentials_file", validate_credentials_file),
+        ("artifacts.profile", validate_s3_profile),
         ("run_id", validate_run_id),
     ):
         value = config_value(config, path)

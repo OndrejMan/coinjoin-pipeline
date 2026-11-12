@@ -19,6 +19,7 @@ class Capability(Enum):
 
     CONTAINER_RUNTIME = auto()
     KUBECTL = auto()
+    S5CMD_FRONTEND = auto()
 
 
 def required_capabilities(config: PipelineConfiguration) -> set[Capability]:
@@ -27,6 +28,8 @@ def required_capabilities(config: PipelineConfiguration) -> set[Capability]:
     if not config.dry_run:
         if config.driver == "kubernetes":
             capabilities.add(Capability.KUBECTL)
+        if uses_s3:
+            capabilities.add(Capability.S5CMD_FRONTEND)
     if not uses_s3 and not config.dry_run:
         capabilities.add(Capability.CONTAINER_RUNTIME)
     return capabilities
@@ -119,7 +122,10 @@ def check(
                 errors.append(f"{runtime} daemon/API check timed out")
             elif status:
                 errors.append(f"{runtime} daemon/API is not reachable")
-    for capability, command, purpose in ((Capability.KUBECTL, "kubectl", "the Kubernetes driver"),):
+    for capability, command, purpose in (
+        (Capability.KUBECTL, "kubectl", "the Kubernetes driver"),
+        (Capability.S5CMD_FRONTEND, "s5cmd", "S3 artifact transport"),
+    ):
         if capabilities and capability in capabilities and shutil.which(command) is None:
             errors.append(f"{command} command not found for {purpose}")
     probe = runs_root if runs_root.exists() else runs_root.parent

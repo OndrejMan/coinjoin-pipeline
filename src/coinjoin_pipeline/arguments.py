@@ -102,6 +102,8 @@ HELP = {
     "artifacts.uri": "S3 run root, for example s3://bucket/runs",
     "artifacts.endpoint_url": "S3-compatible HTTP(S) endpoint URL",
     "artifacts.secret_name": "Kubernetes Secret with the S3 credentials of the emulation Job",
+    "artifacts.credentials_file": "absolute path of the s5cmd credentials file on the frontend",
+    "artifacts.profile": "profile name inside the credentials file",
     "images.version": "release tag of every component image; `cjp version` prints the CLI version",
     "images.registry": (
         "registry and owner of the project's images, e.g. ghcr.io/you (also $COINJOIN_IMAGE_REGISTRY; "
