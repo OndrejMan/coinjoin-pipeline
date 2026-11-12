@@ -48,6 +48,7 @@ def s3_full_run_plan_from_args(args: PipelineConfiguration) -> StageGraph:
         blocksci_pbs=args.stages.blocksci,
         mappings_pbs=args.stages.mappings,
         blocksci_workflow=args.blocksci.workflow,
+        blocksci_task=args.blocksci.task,
         action=args.action,
     )
 
@@ -131,7 +132,7 @@ class S3StageRunner:
 
     def _blocksci_work(self, stage: StagePlan) -> None:
         if stage.name == "blocksci":
-            # The combined job's report has its own stage.
+            # The combined workflow admits only the detect task, whose report has its own stage.
             script = render_blocksci_s3_pbs(
                 **self._blocksci(),
                 command=blocksci_pbs_command(self.target.run_id, self.args, include_report=False),

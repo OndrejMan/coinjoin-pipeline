@@ -26,7 +26,7 @@ class StageKind(Enum):
     """What kind of work a stage performs, independent of its stage name.
 
     Stage *names* are part of the marker and log protocol and vary with the
-    selected BlockSci workflow (``blocksci`` versus
+    selected BlockSci workflow and task (``blocksci`` versus
     ``blocksci-analyze``).  Runners and job
     bookkeeping dispatch on the kind instead, so renaming a marker cannot
     silently break a dispatch table.
@@ -162,14 +162,14 @@ def _report_stage(runner: RunnerName, *analyzers: StagePlan | None) -> StagePlan
     )
 
 
-def runs_unified_report(*, action: str, analysis_pbs: bool, blocksci_pbs: bool) -> bool:
+def runs_unified_report(*, action: str, analysis_pbs: bool, blocksci_pbs: bool, blocksci_task: str) -> bool:
     """Whether an S3 invocation has a unified-report stage.
 
     The report joins BlockSci detection with the coinjoin-analysis baseline. A
     pbs-from-s3 resume may join a baseline stored by an earlier invocation; a
     full-run has one only if it computes it.
     """
-    return blocksci_pbs and (analysis_pbs or action != "full-run")
+    return blocksci_pbs and blocksci_task == "detect" and (analysis_pbs or action != "full-run")
 
 
 def analysis_plan() -> StageGraph:
@@ -188,6 +188,7 @@ def _blocksci_stages(
     emulation: StagePlan,
     blocksci_pbs: bool,
     blocksci_workflow: BlockSciWorkflow,
+    blocksci_task: str,
 ) -> tuple[StagePlan | None, StagePlan | None]:
     """Return the ``(parse, work)`` BlockSci stages for one S3 invocation.
 
@@ -217,8 +218,10 @@ def _blocksci_stages(
         if blocksci_workflow == "reusable"
         else None
     )
+    if blocksci_task == "parse":
+        return parse, None
     work = StagePlan(
-        name="blocksci-analyze",
+        name=f"blocksci-{'analyze' if blocksci_task == 'detect' else blocksci_task}",
         kind=StageKind.BLOCKSCI_WORK,
         runner="pbs",
         dependencies=((parse or emulation).name,),
@@ -232,6 +235,7 @@ def s3_full_run_plan(
     blocksci_workflow: BlockSciWorkflow = "combined",
     analysis_pbs: bool = True,
     blocksci_pbs: bool = True,
+    blocksci_task: str = "detect",
     action: str = "pbs-from-s3",
 ) -> StageGraph:
     """Build the canonical Kubernetes → S3 → PBS graph for one invocation.
@@ -261,10 +265,13 @@ def s3_full_run_plan(
         emulation=emulation,
         blocksci_pbs=blocksci_pbs,
         blocksci_workflow=blocksci_workflow,
+        blocksci_task=blocksci_task,
     )
     # Completion order: the analyzers publish independently, and mappings is
     # waited for after BlockSci because it is the shorter of the two tails.
     stages = [stage for stage in (emulation, baseline, parse, work, mappings) if stage is not None]
-    if runs_unified_report(action=action, analysis_pbs=analysis_pbs, blocksci_pbs=blocksci_pbs):
+    if runs_unified_report(
+        action=action, analysis_pbs=analysis_pbs, blocksci_pbs=blocksci_pbs, blocksci_task=blocksci_task
+    ):
         stages.append(_report_stage("pbs", baseline, work, mappings))
     return StageGraph(tuple(stages))

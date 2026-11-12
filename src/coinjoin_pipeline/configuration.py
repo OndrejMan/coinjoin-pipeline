@@ -45,6 +45,7 @@ Driver = Literal["docker", "kubernetes"]
 CoinjoinType = Literal["wasabi2", "joinmarket"]
 ArtifactBackend = Literal["shared-storage", "s3"]
 ContainerRuntime = Literal["docker", "podman"]
+BlockSciTask = Literal["detect", "parse"]
 JoinMarketDetector = Literal["possible", "definite"]
 MappingMode = Literal["numeric", "all"]
 AnalysisAction = Literal["collect_docker", "analyze_only"]
@@ -116,6 +117,7 @@ class ImageConfiguration(ConfigurationModel):
 @dataclass(frozen=True, slots=True)
 class BlockSciConfiguration(ConfigurationModel):
     workflow: BlockSciWorkflow = option("combined", name="blocksci_workflow")
+    task: BlockSciTask = option("detect", name="blocksci_task")
     script: str | None = option(None, name="blocksci_script")
 
 
