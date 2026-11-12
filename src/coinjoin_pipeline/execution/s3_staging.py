@@ -61,7 +61,9 @@ def upload_exporters(access: S3Access, run_prefix: str, exporters_dir: Path) -> 
     """Stage the checkout's exporters into the run prefix before the Job starts.
 
     A checkout can hold the host's bytecode; a 3.14 ``__pycache__`` is useless to
-    BlockSci's Python 3.8, so the sync leaves it out.
+    BlockSci's Python 3.8, so the sync leaves it out. ``--delete`` drops files the
+    checkout no longer has, which a refreshed fixed state prefix would otherwise keep
+    next to the new tree.
     """
     ensure_local_exporters(exporters_dir)
     # Informational provenance for "what exactly was staged": the upload takes
@@ -73,6 +75,7 @@ def upload_exporters(access: S3Access, run_prefix: str, exporters_dir: Path) -> 
     result = run_s5cmd(
         access,
         "sync",
+        "--delete",
         "--exclude",
         "*__pycache__*",
         "--exclude",

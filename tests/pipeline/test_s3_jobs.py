@@ -426,6 +426,17 @@ def test_a_fixed_state_prefix_always_refreshes_its_exporters(backend, monkeypatc
     assert uploads == ["s3://bucket/bitcoin-mainnet/index", "s3://bucket/bitcoin-mainnet/index"]
 
 
+def test_staging_drops_exporters_the_checkout_no_longer_has(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(s3_staging, "ensure_local_exporters", lambda _root: None)
+    monkeypatch.setattr(s3_staging, "s3_object_exists", lambda *_: True)
+    monkeypatch.setattr(
+        s3_staging, "run_s5cmd", lambda _access, *args: calls.append(args) or SimpleNamespace(returncode=0, stderr="")
+    )
+    s3_staging.upload_exporters(SimpleNamespace(), "s3://bucket/runs/run-1", tmp_path)
+    assert calls[0][:2] == ("sync", "--delete")
+
+
 def test_a_dumplings_uri_turns_the_baseline_into_the_mainnet_one(backend):
     s3_submission.submit_s3_pbs_graph(
         backend.config(blocksci_pbs=False, coinjoin_type="joinmarket", dumplings_uri="s3://bucket/dumplings")
