@@ -192,10 +192,7 @@ def add_window_arguments(parser: argparse.ArgumentParser) -> None:
 def add_image_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--blocksci-image", default=os.environ.get("BLOCKSCI_IMAGE"))
     parser.add_argument("--coinjoin-analysis-image", default=os.environ.get("COINJOIN_ANALYSIS_IMAGE"))
-    parser.add_argument(
-        "--coinjoin-emulator-image",
-        default=os.environ.get("COINJOIN_EMULATOR_IMAGE") or os.environ.get("EMULATOR_IMAGE"),
-    )
+    parser.add_argument("--coinjoin-emulator-image", default=os.environ.get("COINJOIN_EMULATOR_IMAGE"))
     parser.add_argument("--uploader-image", default=os.environ.get("COINJOIN_UPLOADER_IMAGE"))
     parser.add_argument("--unified-report-image", default=os.environ.get("COINJOIN_UNIFIED_REPORT_IMAGE"))
     parser.add_argument("--blocksci-image-digest", default=os.environ.get("BLOCKSCI_IMAGE_DIGEST"))
@@ -205,11 +202,5 @@ def add_image_arguments(parser: argparse.ArgumentParser) -> None:
         default=os.environ.get("COINJOIN_ANALYSIS_IMAGE_DIGEST"),
     )
     parser.add_argument("--coinjoin-analysis-image-id", default=os.environ.get("COINJOIN_ANALYSIS_IMAGE_ID"))
-    parser.add_argument(
-        "--coinjoin-emulator-image-digest",
-        default=os.environ.get("COINJOIN_EMULATOR_IMAGE_DIGEST") or os.environ.get("EMULATOR_IMAGE_DIGEST"),
-    )
-    parser.add_argument(
-        "--coinjoin-emulator-image-id",
-        default=os.environ.get("COINJOIN_EMULATOR_IMAGE_ID") or os.environ.get("EMULATOR_IMAGE_ID"),
-    )
+    parser.add_argument("--coinjoin-emulator-image-digest", default=os.environ.get("COINJOIN_EMULATOR_IMAGE_DIGEST"))
+    parser.add_argument("--coinjoin-emulator-image-id", default=os.environ.get("COINJOIN_EMULATOR_IMAGE_ID"))
