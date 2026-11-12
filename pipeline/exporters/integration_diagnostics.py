@@ -23,7 +23,6 @@ from exporters.parameters import ReportImages
 # every run would report two spurious provenance problems. Their references and
 # digests still reach the manifest through build_run_manifest.
 IMAGE_COMPONENTS = ("blocksci", "coinjoin_analysis", "coinjoin_emulator")
-TARGET_DETAIL_LIMIT = 100
 
 
 class Blockchain(Protocol):
