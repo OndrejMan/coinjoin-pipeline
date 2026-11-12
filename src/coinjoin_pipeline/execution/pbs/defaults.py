@@ -7,8 +7,11 @@ from typing import Literal, get_args
 # MetaCentrum's scratch_local is a spinning disk on most nodes; the SSD scratch keeps
 # downloading, checksumming and unpacking from bounding every stage.
 PBSScratchType = Literal["ssd", "local"]
-# The configuration takes the literal from here, so this module never imports it back.
+# MetaCentrum multijob scratch locations (`-l select=...:multijob=<location>`).
+PBSMultijob = Literal["brno", "plzen", "global"]
+# The configuration takes both literals from here, so this module never imports it back.
 PBS_SCRATCH_TYPES: tuple[str, ...] = get_args(PBSScratchType)
+PBS_MULTIJOB_LOCATIONS: tuple[str, ...] = get_args(PBSMultijob)
 
 
 @dataclass(frozen=True)

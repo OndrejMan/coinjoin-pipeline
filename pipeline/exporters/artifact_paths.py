@@ -51,6 +51,9 @@ _EXPORTED_BLOCK_NAME = re.compile(r"block_(\d+)\.json")
 #: <stage>.jobid|done|failed of the PBS stages, upload.done|failed of the Kubernetes uploader.
 PBS_MARKER_DIR = ".pbs"
 KUBERNETES_MARKER_DIR = ".k8s"
+#: A copy of a persistent index's manifest in a run prefix (or a job's output), which
+#: scenario-lab reads because it cannot see the multijob scratch.
+INDEX_MANIFEST_COPY = "blocksci-index-manifest.json"
 
 # A run the emulator has finished. The host writes RUN_MANIFEST before the
 # emulator starts, so the manifest alone must not count here.

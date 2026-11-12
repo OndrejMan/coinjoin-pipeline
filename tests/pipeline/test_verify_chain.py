@@ -164,6 +164,6 @@ def test_pbs_publication_barrier_runs_real_verifier_with_fake_binding(
         patch.setenv("PYTHONPATH", str(fake))
         if not accepted:
             with pytest.raises(subprocess.CalledProcessError):
-                verify_stage_chain(stage, stage.settings, 3, update=True)
+                verify_stage_chain(stage, stage.settings, 3, update=True, index_binds=())
             return
-        assert verify_stage_chain(stage, stage.settings, 3, update=True) == (3, HASH)
+        assert verify_stage_chain(stage, stage.settings, 3, update=True, index_binds=()) == (3, HASH)

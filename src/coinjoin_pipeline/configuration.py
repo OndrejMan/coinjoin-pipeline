@@ -13,7 +13,7 @@ from pathlib import Path
 from types import NoneType, UnionType
 from typing import Literal, Mapping, TypeVar, Union, get_args, get_origin, get_type_hints
 
-from coinjoin_pipeline.execution.pbs.defaults import PBSScratchType
+from coinjoin_pipeline.execution.pbs.defaults import PBSMultijob, PBSScratchType
 from coinjoin_pipeline.execution.stages import BlockSciWorkflow
 
 T = TypeVar("T")
@@ -134,6 +134,8 @@ class BlockSciConfiguration(ConfigurationModel):
     pin_height: int | None = option(None, name="blocksci_pin_height", minimum=0)
     scan_start_height: int | None = option(None, name="blocksci_scan_start_height", minimum=0)
     scan_end_height: int | None = option(None, name="blocksci_scan_end_height", minimum=1)
+    # A persistent index in place of the S3 cache: the working copy jobs read and update in place.
+    index_dir: str | None = option(None, name="blocksci_index_dir")
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +172,8 @@ class PBSResourceConfiguration(ConfigurationModel):
     scratch: str | None = option(None)
     scratch_type: PBSScratchType | None = option(None)
     walltime: str | None = option(None)
+    # MetaCentrum multijob scratch that outlives one job; only the BlockSci stage uses it.
+    multijob: PBSMultijob | None = option(None)
 
     @property
     def configured(self) -> bool:
