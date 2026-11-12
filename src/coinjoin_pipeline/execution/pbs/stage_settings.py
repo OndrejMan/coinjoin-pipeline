@@ -34,6 +34,7 @@ class PersistentSettings(TypedDict):
     """A BlockSci index kept in a directory shared by jobs instead of the S3 cache."""
 
     index_dir: str
+    backup_uri: str | None
     # How long the job's lock entry lives, and how long the job waits for the lock.
     lock_seconds: int
     wait_seconds: int
@@ -102,7 +103,7 @@ class StageSettings(_CommonSettings, total=False):
     below; each job function reads the latter through ``cast``.
     """
 
-    # Every job but coinjoin-mappings runs one image.
+    # Every job but coinjoin-mappings and blocksci-backup runs one image.
     image: str
     # The configured image name; index manifests record it so a rebuilt tag still matches.
     image_name: str

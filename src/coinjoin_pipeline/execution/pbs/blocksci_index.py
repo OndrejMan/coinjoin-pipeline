@@ -97,6 +97,8 @@ def open_index(stage: Stage, settings: PersistentSettings, *, writer: bool) -> I
     require_tools("zstd")
     index = IndexStore(
         str(settings["index_dir"]),
+        settings.get("backup_uri"),
+        storage=stage.storage,
         lock_seconds=int(settings["lock_seconds"]),
         wait_seconds=float(settings["wait_seconds"]),
         poll_seconds=float(settings["poll_seconds"]),

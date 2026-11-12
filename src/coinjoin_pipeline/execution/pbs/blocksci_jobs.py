@@ -353,7 +353,7 @@ def blocksci_parse(stage: Stage) -> None:
     if settings["persistent"]:
         # The lock is taken after the block download, which has no index to protect yet.
         index = open_index(stage, settings["persistent"], writer=True)
-        if (index.path / "manifest.json").exists():
+        if (index.path / "manifest.json").exists() or index.backup_available():
             raise StageFailure(f"[index] an index already exists for {index.path}; use --blocksci-task update")
         # What a failed parse left; a recorded index was refused above.
         index.discard()
@@ -458,3 +458,15 @@ def blocksci_update(stage: Stage) -> None:
     else:
         publish_index(stage, kind, network, max_block, extra)
     stage.log(f"updated cache upload complete: {source_run_id} -> {stage.run_id}")
+
+
+def blocksci_backup(stage: Stage) -> None:
+    """Replace the S3 backup of the persistent index; analyses keep reading meanwhile."""
+    index = open_index(stage, require_persistent(cast(PersistentJobSettings, stage.settings)), writer=False)
+    if not index.complete():
+        raise StageFailure(f"[index] working copy {index.path} is incomplete; nothing to back up")
+    index.backup(threads=stage.settings["ncpus"])
+    index.unlock()
+    # The lab learns which height the backup holds from the run.
+    stage.storage.copy(index.path / "manifest.json", f"{stage.run_prefix}/blocksci-index-backup.json")
+    stage.log(f"index at height {index.height()} backed up to {index.backup_uri}")

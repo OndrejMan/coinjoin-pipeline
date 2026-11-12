@@ -189,13 +189,16 @@ def _block_source(blocksci: BlockSciConfiguration) -> SourceSettings:
 def _persistent_settings(blocksci: BlockSciConfiguration, walltime: str) -> PersistentSettings | None:
     """A BlockSci index kept in a directory shared by jobs; None when the job uses the S3 cache.
 
-    ``index_dir`` is the working copy jobs read and update in place.
+    ``index_dir`` is the working copy jobs read and update in place; ``backup_uri`` is the
+    S3 prefix of its single backup, written by the backup job and read to restore an
+    incomplete working copy.
     """
     if not blocksci.index_dir:
         return None
     seconds = walltime_to_seconds(walltime)
     return {
         "index_dir": blocksci.index_dir,
+        "backup_uri": blocksci.index_backup_uri,
         # Past the walltime the job is gone, so its lock entry may be cleared.
         "lock_seconds": seconds + 600,
         "wait_seconds": max(60, seconds // 2),
@@ -315,6 +318,29 @@ def render_blocksci_analyze_s3_pbs(
         job="blocksci-analysis",
         multijob=multijob,
         extra_files=(NOTEBOOK_SERVER,) if mode == "blocksci-notebook" else (),
+    )
+
+
+def render_blocksci_index_backup_s3_pbs(
+    target: S3Target,
+    *,
+    blocksci: BlockSciConfiguration,
+    multijob: str | None = None,
+    resources: PBSResources = BLOCKSCI,
+) -> str:
+    """Render a job that replaces the S3 backup of the working index.
+
+    It only reads the index, so it holds the shared lock: analyses go on and only an update
+    waits. The old backup is deleted first; the new one is valid once its S3 size matches the
+    uploaded stream and its ``manifest.json`` is written.
+    """
+    return render_python_stage(
+        "blocksci-backup",
+        target,
+        resources,
+        None,
+        {"persistent": _persistent_settings(blocksci, resources.walltime)},
+        multijob=multijob,
     )
 
 

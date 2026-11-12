@@ -43,7 +43,7 @@ CoinjoinType = Literal["wasabi2", "joinmarket"]
 ArtifactBackend = Literal["shared-storage", "s3"]
 ContainerRuntime = Literal["docker", "podman"]
 BlockSciWorkflow = Literal["combined", "reusable", "cached"]
-BlockSciTask = Literal["detect", "parse", "update", "script", "notebook"]
+BlockSciTask = Literal["detect", "parse", "update", "script", "notebook", "backup"]
 BlockSciNetwork = Literal["bitcoin", "bitcoin_testnet", "bitcoin_regtest"]
 JoinMarketDetector = Literal["possible", "definite"]
 MappingMode = Literal["numeric", "all"]
@@ -134,8 +134,10 @@ class BlockSciConfiguration(ConfigurationModel):
     pin_height: int | None = option(None, name="blocksci_pin_height", minimum=0)
     scan_start_height: int | None = option(None, name="blocksci_scan_start_height", minimum=0)
     scan_end_height: int | None = option(None, name="blocksci_scan_end_height", minimum=1)
-    # A persistent index in place of the S3 cache: the working copy jobs read and update in place.
+    # A persistent index in place of the S3 cache: the working copy and the S3 prefix of
+    # its single backup (written by backup, read to restore it).
     index_dir: str | None = option(None, name="blocksci_index_dir")
+    index_backup_uri: str | None = option(None, name="blocksci_index_backup_uri")
 
 
 @dataclass(frozen=True, slots=True)

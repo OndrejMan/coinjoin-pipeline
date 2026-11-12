@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 # Tasks that may read the index of another run (--blocksci-cache-source-run-id) without writing to it.
 READ_ONLY_CACHE_TASKS = frozenset({"script", "notebook"})
-PERSISTENT_INDEX_TASKS = frozenset({"parse", "update"}) | READ_ONLY_CACHE_TASKS
+PERSISTENT_INDEX_TASKS = frozenset({"parse", "update", "backup"}) | READ_ONLY_CACHE_TASKS
 
 
 def _supplied(config: PipelineConfiguration, path: str, value: object) -> bool:
@@ -36,7 +36,7 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
     """Rules for a BlockSci index kept in a directory shared by jobs instead of the S3 cache."""
     errors: list[str] = []
     blocksci = config.blocksci
-    index_dir = blocksci.index_dir
+    index_dir, backup_uri = blocksci.index_dir, blocksci.index_backup_uri
     multijob = config.pbs.blocksci.multijob
     for stage, resources in (
         ("analysis", config.pbs.analysis),
@@ -46,12 +46,22 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
         if _supplied(config, f"pbs.{stage.replace('-', '_')}.multijob", resources.multijob):
             errors.append(f"--pbs-{stage}-multijob is supported only for the BlockSci stage")
     if not index_dir:
+        # Without an index directory these would be dropped silently: the job uses the S3 cache.
+        errors.extend(
+            f"{flag} requires --blocksci-index-dir"
+            for flag, value in (
+                ("--blocksci-index-backup-uri", backup_uri),
+            )
+            if value
+        )
         if multijob:
             errors.append("--pbs-blocksci-multijob requires --blocksci-index-dir on that multijob scratch")
+        if blocksci.task == "backup":
+            errors.append("--blocksci-task backup requires --blocksci-index-dir")
         return errors
     if blocksci.task not in PERSISTENT_INDEX_TASKS:
         errors.append(
-            "--blocksci-index-dir requires --blocksci-task parse, update, script, or notebook"
+            "--blocksci-index-dir requires --blocksci-task parse, update, backup, script, or notebook"
         )
     if blocksci.cache_source_run_id:
         errors.append("choose one index source: --blocksci-index-dir or --blocksci-cache-source-run-id")
@@ -70,6 +80,8 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
         )
     if ".." in Path(index_dir).parts:
         errors.append("--blocksci-index-dir must not contain '..'")
+    if blocksci.task == "backup" and not backup_uri:
+        errors.append("--blocksci-task backup requires --blocksci-index-backup-uri")
     return errors
 
 

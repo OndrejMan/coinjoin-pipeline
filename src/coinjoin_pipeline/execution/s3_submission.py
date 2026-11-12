@@ -21,6 +21,7 @@ from coinjoin_pipeline.execution.pbs.commands import (
 from coinjoin_pipeline.execution.pbs.submission import PBSJobSpec, persist_pbs_job_id, submit_pbs_job
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_blocksci_analyze_s3_pbs,
+    render_blocksci_index_backup_s3_pbs,
     render_blocksci_parse_s3_pbs,
     render_blocksci_s3_pbs,
     render_blocksci_update_s3_pbs,
@@ -164,6 +165,13 @@ class S3StageRunner:
 
     def _blocksci_work(self, stage: StagePlan) -> None:
         blocksci, task = self.args.blocksci, self.args.blocksci.task
+        if task == "backup":
+            # The backup only archives the index; it runs no BlockSci image.
+            script = render_blocksci_index_backup_s3_pbs(
+                target=self.target, resources=stage_pbs_resources(self.args, "blocksci"), **self._index()
+            )
+            self._submit(stage, script)
+            return
         if stage.name == "blocksci":
             # A detect run keeps the report in its own stage; any other combined run reports in place.
             report_here = not (self.args.stages.blocksci and task == "detect")
