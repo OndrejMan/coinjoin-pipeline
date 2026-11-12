@@ -2,24 +2,9 @@
 # EXPERIMENTAL: local Docker path. Not part of the Kubernetes → S3 → PBS path that the thesis results come from.
 set -euo pipefail
 
-PROJECT_NAME="${COINJOIN_COMPOSE_PROJECT:-blocksci-emulator}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_FILE="${COMPOSE_FILE:-${SCRIPT_DIR}/compose.yaml}"
-if [[ ! -f "${COMPOSE_FILE}" && -f /compose.yaml ]]; then
-  COMPOSE_FILE="/compose.yaml"
-fi
-
-CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
-if [[ "${CONTAINER_RUNTIME}" != "docker" && "${CONTAINER_RUNTIME}" != "podman" ]]; then
-  echo "Unsupported CONTAINER_RUNTIME='${CONTAINER_RUNTIME}' (expected docker or podman)" >&2
-  exit 2
-fi
-
-if [[ -n "${CONTAINER_COMPOSE_COMMAND:-}" ]]; then
-  read -r -a COMPOSE_CMD <<< "${CONTAINER_COMPOSE_COMMAND}"
-else
-  COMPOSE_CMD=("${CONTAINER_RUNTIME}" "compose")
-fi
+# shellcheck source=pipeline/compose-runtime.sh
+source "${SCRIPT_DIR}/compose-runtime.sh"
 
 # Profiled services are otherwise omitted by some Compose versions, leaving a
 # stopped DinD container whose writable layer can retain stale runtime PID

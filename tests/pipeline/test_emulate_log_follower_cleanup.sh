@@ -51,7 +51,7 @@ START="${SECONDS}"
   PATH="${FAKE_BIN}:${PATH}" \
     CONTAINER_RUNTIME=podman \
     COMPOSE_FILE="${PROJECT_DIR}/compose.yaml" \
-    timeout 30 bash emulate.sh >"${TMP_DIR}/emulate.log" 2>&1
+    timeout 30 bash emulate.sh --scenario overactive-local.json >"${TMP_DIR}/emulate.log" 2>&1
 )
 RUN_EXIT_CODE=$?
 ELAPSED=$((SECONDS - START))

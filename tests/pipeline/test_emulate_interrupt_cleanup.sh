@@ -49,7 +49,7 @@ export DOCKER_LOG WAIT_STARTED
   cd "${PROJECT_DIR}"
   PATH="${FAKE_BIN}:${PATH}" \
   COMPOSE_FILE="${PROJECT_DIR}/compose.yaml" \
-  bash emulate.sh
+  bash emulate.sh --scenario overactive-local.json
 ) &
 RUN_PID=$!
 
@@ -89,7 +89,7 @@ set +e
   cd "${PROJECT_DIR}"
   FAIL_COMPOSE_UP=1 PATH="${FAKE_BIN}:${PATH}" \
     COMPOSE_FILE="${PROJECT_DIR}/compose.yaml" \
-    bash emulate.sh
+    bash emulate.sh --scenario overactive-local.json
 )
 UP_FAILURE_EXIT_CODE=$?
 set -e

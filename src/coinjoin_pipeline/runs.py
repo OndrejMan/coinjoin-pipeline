@@ -23,8 +23,8 @@ def slugify_run_component(value: str, *, max_length: int) -> str:
     return slug or "scenario"
 
 
-def scenario_file(value: str, engine: str) -> Path | None:
-    """The scenario file execution will read (a path, or a name in the scenario catalogue), else None."""
+def scenario_file(value: str | None, engine: str) -> Path | None:
+    """The scenario file execution will read (a path, a name in the catalogue, or the engine's default), else None."""
     from .execution.scenarios import scenario_source_path
     from .paths import scenarios_dir
 
@@ -35,15 +35,15 @@ def scenario_file(value: str, engine: str) -> Path | None:
 def run_id_for(config: PipelineConfiguration) -> str:
     if config.run_id:
         return config.run_id
-    # Without a scenario the emulator runs its engine's default one.
-    scenario_name = "default-joinmarket" if config.engine == "joinmarket" else "overactive-local"
-    if config.scenario:
-        candidate = scenario_file(config.scenario, config.engine) or Path(config.scenario).expanduser()
-        try:
-            data = json.loads(candidate.read_text(encoding="utf-8"))
-            scenario_name = str(data.get("name") or candidate.stem)
-        except (OSError, json.JSONDecodeError):
-            scenario_name = candidate.stem
+    # Without a scenario the emulator runs its engine's default one (execution/settings.py).
+    candidate = scenario_file(config.scenario, config.engine)
+    if candidate is None:
+        candidate = Path(config.scenario or "scenario").expanduser()
+    try:
+        data = json.loads(candidate.read_text(encoding="utf-8"))
+        scenario_name = str(data.get("name") or candidate.stem)
+    except (OSError, json.JSONDecodeError):
+        scenario_name = candidate.stem
     # Seconds, so two launches of one scenario within a minute get different IDs.
     timestamp = datetime.now(ZoneInfo(config.run_timezone)).strftime("%Y-%m-%d_%H-%M-%S")
     slug = slugify_run_component(

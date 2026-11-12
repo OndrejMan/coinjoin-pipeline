@@ -3,36 +3,13 @@
 set -euo pipefail
 
 COINJOIN_ENGINE="${COINJOIN_ENGINE:-wasabi}"
-if [[ "${COINJOIN_ENGINE}" == "joinmarket" ]]; then
-  SCENARIO_PATH="/app/scenarios/defaultJoinMarket.json"
-else
-  SCENARIO_PATH="/app/scenarios/overactive-local.json"
-fi
-COMPOSE_FILE="${COMPOSE_FILE:-}"
-PROJECT_NAME="${COINJOIN_COMPOSE_PROJECT:-blocksci-emulator}"
 HOST_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SCENARIOS_DIR="${SCENARIOS_DIR:-${HOST_ROOT_DIR}/../scenarios}"
 # The CLI's default runs root (paths.default_runs_root); the CLI always passes its own.
 export EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR:-${PWD}/coinjoin-runs}"
 export NOTEBOOKS_DIR="${NOTEBOOKS_DIR:-${EMULATION_LOGS_DIR}/.notebooks}"
-if [[ -z "${COMPOSE_FILE}" ]]; then
-  COMPOSE_FILE="${HOST_ROOT_DIR}/compose.yaml"
-fi
-if [[ ! -f "${COMPOSE_FILE}" && -f /compose.yaml ]]; then
-  COMPOSE_FILE="/compose.yaml"
-fi
-
-CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
-if [[ "${CONTAINER_RUNTIME}" != "docker" && "${CONTAINER_RUNTIME}" != "podman" ]]; then
-  echo "Unsupported CONTAINER_RUNTIME='${CONTAINER_RUNTIME}' (expected docker or podman)" >&2
-  exit 2
-fi
-
-if [[ -n "${CONTAINER_COMPOSE_COMMAND:-}" ]]; then
-  read -r -a COMPOSE_CMD <<< "${CONTAINER_COMPOSE_COMMAND}"
-else
-  COMPOSE_CMD=("${CONTAINER_RUNTIME}" "compose")
-fi
+# shellcheck source=pipeline/compose-runtime.sh
+source "${HOST_ROOT_DIR}/compose-runtime.sh"
 
 LOG_PID=""
 LOG_PID_IS_GROUP=false
@@ -73,22 +50,25 @@ handle_interrupt() {
 trap handle_interrupt INT TERM
 trap 'status=$?; cleanup_emulate_stack; exit "${status}"' EXIT
 
-if [[ $# -gt 0 ]]; then
-  if [[ "$1" == "--scenario" && $# -ge 2 ]]; then
-    SCENARIO_INPUT="$2"
-    shift 2
-  else
-    SCENARIO_INPUT="$1"
-    shift
-  fi
+# The CLI always names the scenario; its default per engine lives in execution/settings.py.
+if [[ $# -eq 0 ]]; then
+  echo "emulate.sh needs a scenario: emulate.sh --scenario <file under scenarios/>" >&2
+  exit 2
+fi
+if [[ "$1" == "--scenario" && $# -ge 2 ]]; then
+  SCENARIO_INPUT="$2"
+  shift 2
+else
+  SCENARIO_INPUT="$1"
+  shift
+fi
 
-  if [[ "$SCENARIO_INPUT" == /app/scenarios/* ]]; then
-    SCENARIO_PATH="$SCENARIO_INPUT"
-  else
-    SCENARIO_TRIMMED="${SCENARIO_INPUT#./}"
-    SCENARIO_TRIMMED="${SCENARIO_TRIMMED#scenarios/}"
-    SCENARIO_PATH="/app/scenarios/${SCENARIO_TRIMMED}"
-  fi
+if [[ "$SCENARIO_INPUT" == /app/scenarios/* ]]; then
+  SCENARIO_PATH="$SCENARIO_INPUT"
+else
+  SCENARIO_TRIMMED="${SCENARIO_INPUT#./}"
+  SCENARIO_TRIMMED="${SCENARIO_TRIMMED#scenarios/}"
+  SCENARIO_PATH="/app/scenarios/${SCENARIO_TRIMMED}"
 fi
 
 echo "Using scenario: ${SCENARIO_PATH}"

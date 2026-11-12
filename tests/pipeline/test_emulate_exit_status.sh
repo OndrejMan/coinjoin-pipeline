@@ -37,7 +37,7 @@ set +e
   cd "${PROJECT_DIR}"
   PATH="${FAKE_BIN}:${PATH}" \
     COMPOSE_FILE="${PROJECT_DIR}/compose.yaml" \
-    bash emulate.sh
+    bash emulate.sh --scenario overactive-local.json
 )
 RUN_EXIT_CODE=$?
 set -e

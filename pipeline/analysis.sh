@@ -18,24 +18,8 @@ else
 	echo "ACTIVE_RUN_ID is required for grouped artifacts." >&2
 	exit 2
 fi
-COMPOSE_FILE="${COMPOSE_FILE:-${HOST_ROOT_DIR}/compose.yaml}"
-if [[ ! -f "${COMPOSE_FILE}" && -f /compose.yaml ]]; then
-	COMPOSE_FILE="/compose.yaml"
-fi
-
-CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
-if [[ "${CONTAINER_RUNTIME}" != "docker" && "${CONTAINER_RUNTIME}" != "podman" ]]; then
-	echo "Unsupported CONTAINER_RUNTIME='${CONTAINER_RUNTIME}' (expected docker or podman)" >&2
-	exit 2
-fi
-
-if [[ -n "${CONTAINER_COMPOSE_COMMAND:-}" ]]; then
-	read -r -a COMPOSE_CMD <<< "${CONTAINER_COMPOSE_COMMAND}"
-else
-	COMPOSE_CMD=("${CONTAINER_RUNTIME}" "compose")
-fi
-
-PROJECT_NAME="${COINJOIN_COMPOSE_PROJECT:-blocksci-emulator}"
+# shellcheck source=pipeline/compose-runtime.sh
+source "${HOST_ROOT_DIR}/compose-runtime.sh"
 "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile analysis rm -sf blocksci coinjoin_analysis
 "${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile analysis up --force-recreate
 
