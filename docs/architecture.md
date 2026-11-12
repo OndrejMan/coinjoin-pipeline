@@ -179,4 +179,4 @@ Kept for local development and reproduction, not read for the thesis review:
 | Local Docker/Podman commands and Compose | `execution/containers.py`, `runtime.py`, `pipeline/compose.yaml`, `pipeline/*.sh` |
 | Kubernetes emulation without S3 | `execution/kubernetes_launch.py` |
 | Shared-storage PBS stages and graph | `execution/shared_storage_pbs.py`, `workflow.py`, `pbs/submission_local.py`, `pbs/templates_local.py`, `pbs/templates/local_*.sh` |
-| `runs`, `scenarios` and `external analyze` commands | `execution/research.py`, `run_catalog.py` |
+| `runs`, `scenarios` and `external-analyze` commands | `execution/research.py`, `run_catalog.py` |

@@ -1060,9 +1060,9 @@ def test_kubernetes_manifest_reuses_existing_namespace() -> None:
 
 def exporter_need_args(**overrides) -> SimpleNamespace:
     defaults = dict(
-        analysisPbs=False,
-        blocksciPbs=True,
-        mappingsPbs=False,
+        analysis_pbs=False,
+        blocksci_pbs=True,
+        mappings_pbs=False,
         blocksci_workflow="reusable",
         blocksci_task="detect",
     )
@@ -1080,8 +1080,8 @@ def test_only_stages_that_run_the_exporters_require_them() -> None:
     assert pbs_stages_need_exporters(exporter_need_args(blocksci_task="parse"))
     assert pbs_stages_need_exporters(exporter_need_args(blocksci_workflow="cached", blocksci_task="update"))
     for overrides in (
-        dict(blocksciPbs=False, analysisPbs=True),
-        dict(blocksciPbs=False, mappingsPbs=True),
+        dict(blocksci_pbs=False, analysis_pbs=True),
+        dict(blocksci_pbs=False, mappings_pbs=True),
         dict(blocksci_task="script"),
         dict(blocksci_task="notebook"),
     ):

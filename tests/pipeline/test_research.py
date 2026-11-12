@@ -181,6 +181,6 @@ class ResearchPreflightTests(unittest.TestCase):
             self.assertIn("sha256", manifest["inputs"]["false_cjtxs"][0])
             self.assertIn("--env", command)
             self.assertIn(
-                "REPRODUCTION_COMMAND=./runIt.sh external analyze --run-id external-run --resume",
+                "REPRODUCTION_COMMAND=./runIt.sh external-analyze --run-id external-run --resume",
                 command,
             )

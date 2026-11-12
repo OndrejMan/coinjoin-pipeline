@@ -29,7 +29,7 @@ from coinjoin_pipeline.images import IMAGE_ENVIRONMENT, REGISTRY_ENVIRONMENT
 
 REPO = Path(__file__).resolve().parents[2]
 STORED = Path(__file__).with_name("rendered_jobs")
-# Every example that submits S3 PBS jobs; mainnet-sync and external analyze render elsewhere.
+# Every example that submits S3 PBS jobs; mainnet-sync and external-analyze render elsewhere.
 EXAMPLES = sorted(path.stem for pattern in ("metacentrum-*.yaml", "wasabi-*.yaml") for path in REPO.glob(f"examples/{pattern}"))
 
 S3 = {

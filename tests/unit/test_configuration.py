@@ -58,8 +58,8 @@ def test_shorthand_actions_may_follow_options(tmp_path):
         "v1",
         True,
     )
-    external = load_configuration(["--runtime", "podman", "external", "analyze", "--run-id", "ext-1", "--resume"])
-    assert (external.action, external.runtime) == ("external analyze", "podman")
+    external = load_configuration(["--runtime", "podman", "external-analyze", "--run-id", "ext-1", "--resume"])
+    assert (external.action, external.runtime) == ("external-analyze", "podman")
     # A value that happens to spell an action is not the action word.
     assert load_configuration(["--run-id", "run", "emulate"]).action == "emulate"
 
@@ -165,7 +165,7 @@ def test_no_explicit_action_alongside_yaml(tmp_path):
 def test_external_resume_rejects_new_inputs():
     config = PipelineConfiguration.from_mapping(
         {
-            "action": "external analyze",
+            "action": "external-analyze",
             "external": {"resume": True, "baseline": "baseline.json"},
         }
     )
@@ -173,8 +173,8 @@ def test_external_resume_rejects_new_inputs():
         resolve_configuration(config)
 
 
-def test_alias_and_repeated_values_keep_cli_order():
-    config = load_configuration(["coinjoin", "--run-dir", "run-a", "--run-id=old", "--run-id", "new"])
+def test_repeated_values_keep_cli_order():
+    config = load_configuration(["coinjoin-analysis", "--run-dir", "run-a", "--run-id=old", "--run-id", "new"])
     assert config.action == "coinjoin-analysis"
     assert config.run_id == "new"
 
@@ -212,7 +212,7 @@ def test_s3_full_run_accepts_any_analyzer_subset(stages):
 
 
 def test_s3_full_run_mappings_need_the_baseline_it_computes():
-    with pytest.raises(ConfigurationError, match="--mappingsPbs requires --analysisPbs"):
+    with pytest.raises(ConfigurationError, match="--mappings-pbs requires --analysis-pbs"):
         resolve_configuration(_s3_full_run(stages={"analysis": False, "blocksci": True, "mappings": True}))
 
 

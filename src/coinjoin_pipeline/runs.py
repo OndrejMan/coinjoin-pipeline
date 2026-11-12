@@ -71,7 +71,7 @@ def store_host_manifest(target: Path, manifest: dict[str, object]) -> None:
     existing.setdefault("schema_version", 1)
     existing.setdefault(
         "mode",
-        "external" if manifest.get("action") == "external analyze" else "emulator",
+        "external" if manifest.get("action") == "external-analyze" else "emulator",
     )
     existing.setdefault("run_id", target.parent.name)
     launch_id = manifest.get("launch_id")

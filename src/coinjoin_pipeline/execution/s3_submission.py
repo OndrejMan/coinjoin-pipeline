@@ -286,7 +286,7 @@ def _submit_s3_pbs_stages(
             f"{run_prefix_uri(target.artifact_uri, target.run_id)}/{BASELINE_FILE}",
         ):
             raise ArtifactTransportError(
-                f"resuming without --analysisPbs requires an existing {BASELINE_FILE} for run {target.run_id}"
+                f"resuming without --analysis-pbs requires an existing {BASELINE_FILE} for run {target.run_id}"
             )
     if not args.dry_run and (args.stage_exporters or pbs_stages_need_exporters(args)):
         ensure_staged_exporters(args)

@@ -127,7 +127,7 @@ def test_blocksci_pbs_stage_submits_shared_staged_exporters(
             "wasabi",
             "--run-dir",
             "run-a",
-            "--blocksciPbs",
+            "--blocksci-pbs",
             "--pbs-bitcoin-datadir",
             str(bitcoin_datadir),
         ]
@@ -215,9 +215,9 @@ def _full_run_s3_args(**overrides) -> Namespace:
         reuse_namespace=True,
         dry_run=False,
         emulation_timeout=3600,
-        analysisPbs=True,
-        blocksciPbs=True,
-        mappingsPbs=False,
+        analysis_pbs=True,
+        blocksci_pbs=True,
+        mappings_pbs=False,
         pbs_walltime=None,
     )
     values.update(overrides)
@@ -285,7 +285,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         calls: list[str] = []
         mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(f"wait:{stage}")
 
-        run_full_run_s3(_full_run_s3_args(analysisPbs=False, blocksciPbs=False))
+        run_full_run_s3(_full_run_s3_args(analysis_pbs=False, blocksci_pbs=False))
 
         self.assertEqual(calls, ["wait:kubernetes-emulation"])
         mocks["require_qsub"].assert_not_called()
@@ -299,7 +299,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         calls: list[str] = []
         mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(f"wait:{stage}")
 
-        run_full_run_s3(_full_run_s3_args(analysisPbs=False))
+        run_full_run_s3(_full_run_s3_args(analysis_pbs=False))
 
         self.assertEqual(calls, ["wait:kubernetes-emulation", "wait:blocksci"])
 
@@ -311,7 +311,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         calls: list[str] = []
         mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(f"wait:{stage}")
 
-        run_full_run_s3(_full_run_s3_args(blocksciPbs=False))
+        run_full_run_s3(_full_run_s3_args(blocksci_pbs=False))
 
         self.assertEqual(calls, ["wait:kubernetes-emulation", "wait:coinjoin-analysis"])
 
@@ -342,7 +342,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         calls: list[str] = []
         mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(stage)
 
-        run_full_run_s3(_full_run_s3_args(mappingsPbs=True))
+        run_full_run_s3(_full_run_s3_args(mappings_pbs=True))
 
         self.assertEqual(
             calls,
@@ -394,7 +394,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         mocks["wait_for_s3_marker"].side_effect = wait
 
         with self.assertRaises(ArtifactTransportError):
-            run_full_run_s3(_full_run_s3_args(mappingsPbs=True))
+            run_full_run_s3(_full_run_s3_args(mappings_pbs=True))
 
         self.assertEqual(
             mocks["qdel_pbs_job"].call_args_list,
@@ -468,7 +468,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         mocks["wait_for_s3_marker"].side_effect = wait
 
         with self.assertRaises(ArtifactTransportError):
-            run_full_run_s3(_full_run_s3_args(mappingsPbs=True))
+            run_full_run_s3(_full_run_s3_args(mappings_pbs=True))
 
         mocks["qdel_pbs_job"].assert_called_once_with("report.job")
 

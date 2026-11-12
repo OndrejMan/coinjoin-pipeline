@@ -445,8 +445,8 @@ set +e
     --kubeconfig "${CONTAINER_KUBECONFIG}" \
     --image-prefix "${IMAGE_PREFIX}" \
     --kubernetes-btc-datadir "${BITCOIN_DATADIR}" \
-    --analysisPbs \
-    --blocksciPbs \
+    --analysis-pbs \
+    --blocksci-pbs \
     "${MIN_INPUT_COUNT_ARGS[@]}" \
     "${PBS_IMAGE_ARGS[@]}" \
     --pbs-bitcoin-datadir "${BITCOIN_DATADIR}" \

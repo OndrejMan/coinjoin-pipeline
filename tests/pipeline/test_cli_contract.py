@@ -1,6 +1,7 @@
 import pytest
 
 from coinjoin_pipeline.arguments import load_configuration
+from coinjoin_pipeline.configuration import ConfigurationError
 from coinjoin_pipeline.cli import main
 from coinjoin_pipeline.context import resolve_configuration
 
@@ -20,15 +21,10 @@ def test_top_level_help_exposes_actions_and_configuration_options(capsys, monkey
     assert "--dry-run" in output
 
 
-@pytest.mark.parametrize(
-    "flags",
-    [
-        ("--blocksci-script", "--blocksciScript"),
-        ("--blocksciScript", "--blocksci-script"),
-    ],
-)
-def test_option_aliases_follow_cli_order(flags):
-    config = load_configuration(["analyze", "--run-dir", "run", flags[0], "old.py", flags[1], "new.py"])
+def test_repeated_option_keeps_the_last_value():
+    config = load_configuration(
+        ["analyze", "--run-dir", "run", "--blocksci-script", "old.py", "--blocksci-script", "new.py"]
+    )
     assert config.blocksci.script == "new.py"
 
 
@@ -86,12 +82,26 @@ def test_unknown_action_lists_the_valid_ones(capsys):
     assert "full-run" in error and "download-report" in error
 
 
-def test_yaml_and_command_line_share_action_aliases(tmp_path):
+def test_actions_have_one_spelling():
+    with pytest.raises(ConfigurationError, match="unknown action 'coinjoin'"):
+        load_configuration(["coinjoin", "--run-dir", "run-a"])
+    with pytest.raises(SystemExit):
+        load_configuration(["external", "analyze", "--run-id", "x"])
+
+
+def test_yaml_takes_the_same_action_names(tmp_path):
     experiment = tmp_path / "experiment.yaml"
     experiment.write_text("action: coinjoin\nrun_dir: run-a\n")
-    assert load_configuration(["run", str(experiment)]).action == "coinjoin-analysis"
-    assert load_configuration(["coinjoin", "--run-dir", "run-a"]).action == "coinjoin-analysis"
-    assert load_configuration(["external-analyze", "--run-id", "x"]).action == "external analyze"
+    with pytest.raises(ConfigurationError):
+        load_configuration(["run", str(experiment)])
+    experiment.write_text("action: external-analyze\nrun_id: x\n")
+    assert load_configuration(["run", str(experiment)]).action == "external-analyze"
+
+
+def test_container_runtime_is_an_option_not_an_action():
+    with pytest.raises(SystemExit):
+        load_configuration(["container", "podman", "emulate"])
+    assert load_configuration(["--runtime", "podman", "emulate"]).runtime == "podman"
 
 
 def test_value_errors_name_the_flag_as_well_as_the_yaml_key():

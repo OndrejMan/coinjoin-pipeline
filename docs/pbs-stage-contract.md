@@ -29,13 +29,13 @@ jobs run the enumerator and Sake from `templates/mappings_run.sh`.
 
 | Stage name          | Submitted by                          | Template                          |
 |---------------------|---------------------------------------|-----------------------------------|
-| `blocksci`          | `--blocksciPbs`                       | `local_blocksci.sh`               |
-| `coinjoin-analysis` | `--analysisPbs`                       | `local_coinjoin_analysis.sh`      |
-| `coinjoin-mappings` | `--mappingsPbs`                       | `local_mappings.sh`               |
+| `blocksci`          | `--blocksci-pbs`                      | `local_blocksci.sh`               |
+| `coinjoin-analysis` | `--analysis-pbs`                      | `local_coinjoin_analysis.sh`      |
+| `coinjoin-mappings` | `--mappings-pbs`                      | `local_mappings.sh`               |
 | `unified-report`    | serial or parallel, after analyzers    | `local_blocksci.sh` (report-only command) |
 | S3 analyzer variants | `pbs-from-s3`, `full-run --artifact-backend s3` | `analyzer_jobs.py` (`coinjoin_analysis`), `blocksci_jobs.py` (`blocksci`) |
-| S3 mainnet baseline | `pbs-from-s3 --analysisPbs --dumplings-uri` | `analyzer_jobs.py` (`dumplings_baseline`) |
-| S3 `coinjoin-mappings` | Wasabi `--mappingsPbs` | `analyzer_jobs.py` (`coinjoin_mappings`) running `mappings_run.sh` |
+| S3 mainnet baseline | `pbs-from-s3 --analysis-pbs --dumplings-uri` | `analyzer_jobs.py` (`dumplings_baseline`) |
+| S3 `coinjoin-mappings` | Wasabi `--mappings-pbs` | `analyzer_jobs.py` (`coinjoin_mappings`) running `mappings_run.sh` |
 | S3 `blocksci-parse` | reusable BlockSci workflow | `blocksci_jobs.py` (`blocksci_parse`) |
 | S3 `blocksci-update` | versioned incremental cache update from a coin directory or the block archive | `blocksci_jobs.py` (`blocksci_update`) |
 | S3 cached work | `detect`, `script`, `external` or `notebook` over a reusable parse | `blocksci_analysis_jobs.py` (`blocksci_analysis`) |
@@ -62,7 +62,7 @@ compute jobs never remove remote markers, avoiding a queued old attempt
 deleting a newer attempt's marker. S3 jobs upload markers to
 `<artifact-uri>/<run-id>/.pbs/` instead of writing them locally.
 
-For `pbs-from-s3 --analysisPbs --blocksciPbs`, the analyzer jobs have no
+For `pbs-from-s3 --analysis-pbs --blocksci-pbs`, the analyzer jobs have no
 dependency on each other. The report-only job uses
 `afterok:<coinjoin-analysis-job>:<blocksci-job>` and therefore runs only after
 both analyzers have uploaded their S3 outputs successfully. The BlockSci job
@@ -79,7 +79,7 @@ ends the job with 143, and any other failure keeps its own status. After the mar
 it empties `$SCRATCHDIR` with MetaCentrum's `clean_scratch`, or by deleting its
 contents where that tool is missing.
 
-For Wasabi 2 with `--mappingsPbs`, the S3 mappings job downloads
+For Wasabi 2 with `--mappings-pbs`, the S3 mappings job downloads
 `coinjoin-analysis_data/coinjoin_tx_info.json`, preserves the shared-storage
 enumerator/Sake partial-result semantics, and uploads
 `coinjoin-mappings_data/`. When coinjoin-analysis is submitted in the same
@@ -206,7 +206,7 @@ instead of reusing a staged tree, and the job replaces
 (the last backup). Only the logs of every run stay. The run ID still names the
 PBS job and the run directory under `runs_root`.
 
-For mainnet, `dumplings_uri` (`--dumplings-uri`, with `--analysisPbs`) replaces
+For mainnet, `dumplings_uri` (`--dumplings-uri`, with `--analysis-pbs`) replaces
 the emulator input of the `coinjoin-analysis` stage. The job reads
 `<dumplings_uri>/manifest.json` (written last by mainnet-sync, so a copy being
 replaced has none), downloads `<dumplings_uri>/Scanner/` into scratch, checks

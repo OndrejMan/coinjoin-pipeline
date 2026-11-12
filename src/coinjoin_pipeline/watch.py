@@ -29,7 +29,6 @@ from .storage.s3 import RUN_ID_RULE, is_valid_run_id
 DEFAULT_NAMESPACE = KubernetesConfiguration().namespace
 DEFAULT_WAIT_SECONDS = 120
 ALL_COMPONENTS = {"controller", "uploader", "engine"}
-VALID_COMPONENTS = ALL_COMPONENTS | {"coordinator"}
 ENGINE_SELECTORS = {
     "wasabi": "app=wasabi-coordinator",
     # coinjoin-emulator labels pods with their runtime resource name, not
@@ -89,10 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--components",
         default="controller",
-        help=(
-            "Comma-separated Kubernetes log sources: controller,uploader,engine "
-            "(coordinator is a Wasabi-only compatibility alias)."
-        ),
+        help="Comma-separated Kubernetes log sources: controller,uploader,engine.",
     )
     parser.add_argument(
         "--all",
@@ -418,11 +414,8 @@ def _kubernetes_sources(
             description=f"outer pod for run {args.run_id}",
         )
         engine = args.engine
-        if components & {"engine", "coordinator"}:
-            if engine is None:
-                engine = _discover_engine(kubectl, outer_pod)
-            if "coordinator" in components and engine != "wasabi":
-                raise _SourceError("coordinator is Wasabi-specific; use --components engine for JoinMarket runs")
+        if "engine" in components and engine is None:
+            engine = _discover_engine(kubectl, outer_pod)
         sources: dict[str, list[str]] = {}
         for component in sorted(components):
             if component in {"controller", "uploader"}:
@@ -501,9 +494,9 @@ def main(
     watch_kubernetes = not args.pbs_only
     watch_pbs = args.pbs or args.pbs_only or bool(args.pbs_job)
     components = ALL_COMPONENTS if args.all else {item.strip() for item in args.components.split(",") if item.strip()}
-    unknown = components - VALID_COMPONENTS
+    unknown = components - ALL_COMPONENTS
     if unknown or not components:
-        return fail(f"invalid --components value; expected a subset of {','.join(sorted(VALID_COMPONENTS))}")
+        return fail(f"invalid --components value; expected a subset of {','.join(sorted(ALL_COMPONENTS))}")
 
     follow = not args.no_follow
     outer_pod = None

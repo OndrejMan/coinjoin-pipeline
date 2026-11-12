@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import re
 from dataclasses import MISSING, Field
 from functools import lru_cache
 from pathlib import Path
@@ -13,7 +12,6 @@ from typing import Literal, Union, get_args, get_origin, get_type_hints
 import yaml
 
 from .configuration import (
-    ACTION_ALIASES,
     ConfigurationError,
     PipelineAction,
     PipelineConfiguration,
@@ -36,7 +34,7 @@ def field_type(path: str):
     return model
 
 
-CONFIGURATION_FLAGS = ("--from-configuration", "--fromConfiguration")
+CONFIGURATION_FLAGS = ("--from-configuration",)
 # Host commands that need no experiment; DELEGATING_UTILITIES parse their own arguments.
 UTILITIES = (
     "version",
@@ -68,13 +66,13 @@ ACTION_SUMMARIES = {
     "emulate": "emulate a new run only",
     "analyze": "BlockSci analysis of --run-dir",
     "export": "unified report of --run-dir",
-    "coinjoin-analysis": "baseline coinjoin-analysis of --run-dir or --all-runs (alias: coinjoin)",
+    "coinjoin-analysis": "baseline coinjoin-analysis of --run-dir or --all-runs",
     "mappings": "Wasabi mappings and Sake of --run-dir on PBS",
     "pbs-from-s3": "submit PBS analysis jobs for a run already in S3",
     "mainnet-sync": "synchronize Bitcoin Core, Dumplings and the BlockSci index on PBS",
     "initialize": "pull the emulation and analysis images through Compose",
     "clean": "remove the local pipeline containers and volumes (needs --yes)",
-    "external analyze": "analyze an external Bitcoin datadir against a baseline",
+    "external-analyze": "analyze an external Bitcoin datadir against a baseline",
 }
 
 # Argument groups by the first segment of the model path; top-level fields are "".
@@ -88,9 +86,9 @@ SECTIONS = {
         "else the release tag --version.",
     ),
     "stages": ("PBS stages", "Run an analyzer as a PBS job instead of a local container."),
-    "blocksci": ("BlockSci", "Reusable tasks are submitted with pbs-from-s3 --blocksciPbs."),
+    "blocksci": ("BlockSci", "Reusable tasks are submitted with pbs-from-s3 --blocksci-pbs."),
     "joinmarket": ("JoinMarket detector", None),
-    "mappings": ("Wasabi mappings and Sake", "Used with --mappingsPbs (Wasabi runs only)."),
+    "mappings": ("Wasabi mappings and Sake", "Used with --mappings-pbs (Wasabi runs only)."),
     "coinjoin_analysis": (
         "coinjoin-analysis programs",
         "Run one upstream program instead of the default baseline; see docs/coinjoin-analysis-operations.md.",
@@ -101,7 +99,7 @@ SECTIONS = {
         "which overrides the stage's default.",
     ),
     "mainnet": ("mainnet-sync", "Only for action mainnet-sync; see docs/mainnet-synchronization.md."),
-    "external": ("external analyze", "Only for `cjp external analyze`."),
+    "external": ("external-analyze", "Only for `cjp external-analyze`."),
 }
 
 # Help text by model path. The YAML key and the default are appended automatically.
@@ -229,16 +227,6 @@ HELP = {
 }
 
 
-def option_flags(path: str, destination: str) -> list[str]:
-    """Every spelling of one option; the camelCase ones also take the usual kebab-case form."""
-    flags = [cli_flag(destination)]
-    if path == "blocksci.script":
-        flags.append("--blocksciScript")
-    if destination != destination.lower():
-        flags.append("--" + re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "-", destination).lower())
-    return flags
-
-
 def option_help(path: str, item: Field) -> str:
     """Help text of one option: its description, YAML key and effective default."""
     parts = path.split(".")
@@ -270,7 +258,7 @@ def action_index(argv: list[str]) -> int | None:
     takes_value = set(CONFIGURATION_FLAGS)
     for path, destination, _ in option_specs():
         if field_type(path) is not bool:
-            takes_value.update(option_flags(path, destination))
+            takes_value.add(cli_flag(destination))
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -346,12 +334,11 @@ def build_parser(paths: set[str] | None = None, *, add_help: bool = True) -> arg
             options.update(choices=get_args(annotation))
         else:
             options.update(type=annotation, metavar=_metavar(path))
-        groups[section].add_argument(*option_flags(path, destination), **options)  # type: ignore[arg-type]
+        groups[section].add_argument(cli_flag(destination), **options)  # type: ignore[arg-type]
     return parser
 
 
 def _canonical_action(action: str) -> str:
-    action = ACTION_ALIASES.get(action, action)
     if action not in get_args(PipelineAction):
         raise ConfigurationError(
             f"unknown action {action!r}; choose one of: {', '.join(get_args(PipelineAction))}, "
@@ -365,17 +352,13 @@ def load_configuration(argv: list[str]) -> PipelineConfiguration:
     index = action_index(argv)
     if index is not None:
         head, action, tail = argv[:index], argv[index], argv[index + 1 :]
-        if action == "container" and tail[:1] and tail[0] in {"docker", "podman"}:
-            argv = [*head, "--runtime", tail[0], *tail[1:]]
-        elif action == "run":
+        if action == "run":
             if tail[:1] and tail[0] in {"-h", "--help"}:
                 argv = [*head, *tail]
             elif not tail or tail[0].startswith("-"):
                 raise ConfigurationError("run requires a YAML configuration path: cjp run CONFIG.yaml")
             else:
                 argv = [*head, "--from-configuration", tail[0], *tail[1:]]
-        elif action == "external" and tail[:1] == ["analyze"]:
-            argv = [*head, "external analyze", *tail[1:]]
     parsed = vars(build_parser().parse_args(argv))
     path = parsed.pop("from_configuration", None)
     data = {}

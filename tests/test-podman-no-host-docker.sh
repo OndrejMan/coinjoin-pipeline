@@ -21,7 +21,7 @@ export PATH="$TMP_DIR/bin:$PATH" EMULATION_LOGS_DIR="$TMP_DIR/runs"
 "$PROJECT_DIR/runIt.sh" --runtime podman doctor > "$TMP_DIR/doctor"
 grep -q '^info' "$PODMAN_LOG"
 grep -q '^image inspect' "$PODMAN_LOG"
-"$PROJECT_DIR/runIt.sh" container podman emulate --engine wasabi --dry-run > "$TMP_DIR/dry-run"
+"$PROJECT_DIR/runIt.sh" --runtime podman emulate --engine wasabi --dry-run > "$TMP_DIR/dry-run"
 grep -Fq '[dry-run] runtime: podman' "$TMP_DIR/dry-run"
 test ! -e "$DOCKER_LOG"
 echo 'PASS: Podman selection and preflight never use the host Docker daemon.'

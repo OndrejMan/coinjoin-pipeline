@@ -47,8 +47,8 @@ when done.
 
 - [x] `pipeline_logging.exit_with_error` exits 2 for every failure; use `console.EXIT_FAILURE` (5)
   so scripts tell bad input from a failed run. scenario-lab only checks `code == 0`.
-- [x] kebab-case aliases for `--analysisPbs`, `--blocksciPbs`, `--mappingsPbs`, `--blocksciScript`,
-  `--fromConfiguration`; consider renaming `--version` (image tag). `--version` stays: scripts use it.
+- [x] one spelling per option: `--analysis-pbs`, `--blocksci-pbs`, `--mappings-pbs`, `--blocksci-script` and
+  `--from-configuration` only (the camelCase spellings are gone); `--version` (image tag) stays: scripts use it.
 - [x] Report schema 2: drop `detection_confusion_matrix` and the duplicated `run.joinmarket_*` /
   `run.first_wasabi2_block`; rename `transactions[*].blocksci.broadcast_time` (holds block time)
   to `block_time`. scenario-lab `src/domain/evaluation.ts` must read

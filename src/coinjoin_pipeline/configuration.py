@@ -38,7 +38,7 @@ PipelineAction = Literal[
     "mainnet-sync",
     "initialize",
     "clean",
-    "external analyze",
+    "external-analyze",
 ]
 Engine = Literal["wasabi", "joinmarket"]
 Driver = Literal["docker", "kubernetes"]
@@ -55,9 +55,6 @@ ExternalNetwork = Literal["bitcoin"]
 PBSScratchType = Literal["ssd", "local"]
 PBSMultijob = Literal["brno", "plzen", "global"]
 ImagePullPolicy = Literal["Always", "IfNotPresent", "Never"]
-# Alias -> canonical action, accepted from YAML and the command line alike.
-# Aliases are never named in error text.
-ACTION_ALIASES = {"coinjoin": "coinjoin-analysis", "external-analyze": "external analyze"}
 
 
 def option(default=None, *, name=None, minimum=None, actions=None):
@@ -197,9 +194,9 @@ class ExternalAnalysisConfiguration(ConfigurationModel):
 
 @dataclass(frozen=True, slots=True)
 class StageConfiguration(ConfigurationModel):
-    analysis: bool = option(False, name="analysisPbs")
-    blocksci: bool = option(False, name="blocksciPbs")
-    mappings: bool = option(False, name="mappingsPbs")
+    analysis: bool = option(False, name="analysis_pbs")
+    blocksci: bool = option(False, name="blocksci_pbs")
+    mappings: bool = option(False, name="mappings_pbs")
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,7 +318,7 @@ class PipelineConfiguration(ConfigurationModel):
     scenario: str | None = option(None, name="scenario")
     run_dir: str | None = option(None, name="run_dir", actions=("analyze", "mappings", "export", "coinjoin-analysis"))
     run_id: str | None = option(
-        None, name="run_id", actions=("emulate", "full-run", "pbs-from-s3", "mainnet-sync", "external analyze")
+        None, name="run_id", actions=("emulate", "full-run", "pbs-from-s3", "mainnet-sync", "external-analyze")
     )
     run_timezone: str = option("Europe/Prague", name="run_timezone")
     min_input_count: int | None = option(None, name="min_input_count", minimum=1)
@@ -361,8 +358,6 @@ class PipelineConfiguration(ConfigurationModel):
     @classmethod
     def from_mapping(cls, value, location=None):
         data = dict(require_mapping(value, "configuration"))
-        raw_action = data.get("action", "full-run")
-        data["action"] = ACTION_ALIASES.get(raw_action, raw_action) if isinstance(raw_action, str) else raw_action
         model = decode_model(cls, data, "configuration")
         provided = frozenset(flatten_mapping(data))
         return replace(model, _provided=provided)

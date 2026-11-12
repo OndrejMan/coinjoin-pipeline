@@ -126,11 +126,11 @@ export EMULATION_LOGS_DIR="${WORK_DIR}"
 
 echo "Running coinjoin-analysis through the documented runIt.sh PBS interface..."
 (cd "${PROJECT_DIR}" && ./runIt.sh coinjoin-analysis \
-  --run-dir "${RUN_DIR}" --analysisPbs --pbs-ncpus 1 --pbs-mem 2gb --pbs-scratch 1gb --pbs-walltime 00:10:00)
+  --run-dir "${RUN_DIR}" --analysis-pbs --pbs-ncpus 1 --pbs-mem 2gb --pbs-scratch 1gb --pbs-walltime 00:10:00)
 
 echo "Running BlockSci through the documented runIt.sh PBS interface..."
 (cd "${PROJECT_DIR}" && ./runIt.sh analyze --engine wasabi \
-  --run-dir "${RUN_DIR}" --blocksciPbs --pbs-bitcoin-datadir "${BITCOIN_DATADIR}" \
+  --run-dir "${RUN_DIR}" --blocksci-pbs --pbs-bitcoin-datadir "${BITCOIN_DATADIR}" \
   --pbs-ncpus 1 --pbs-mem 4gb --pbs-scratch 1gb --pbs-walltime 00:15:00)
 
 python3 - "${RUN_DIR}" <<'PY'

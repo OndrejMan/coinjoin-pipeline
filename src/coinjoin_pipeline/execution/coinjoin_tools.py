@@ -163,7 +163,7 @@ def _placement_errors(config: PipelineConfiguration) -> list[str]:
     if config.action not in {"coinjoin-analysis", "pbs-from-s3"}:
         errors.append("--analysis-program requires coinjoin-analysis or pbs-from-s3")
     if config.action == "pbs-from-s3" and not config.stages.analysis:
-        errors.append("--analysis-program on PBS requires --analysisPbs")
+        errors.append("--analysis-program on PBS requires --analysis-pbs")
     if config.stages.blocksci or config.stages.mappings or config.all_runs or config.dumplings_uri:
         errors.append("coinjoin-analysis operations run alone; disable BlockSci/mappings and select one run")
     if config.action == "coinjoin-analysis" and config.stages.analysis:

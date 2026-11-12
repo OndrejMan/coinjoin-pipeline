@@ -109,7 +109,7 @@ def inspect_run(runs_root: Path, run_id: str) -> None:
     print("Resume:")
     print(f"  ./runIt.sh export --run-dir {run_dir.name}")
     if mode_for_run(run_dir, manifest) == "external":
-        print(f"  ./runIt.sh external analyze --run-id {run_dir.name} --resume")
+        print(f"  ./runIt.sh external-analyze --run-id {run_dir.name} --resume")
 
 
 def runtime_check(runtime: str) -> None:
@@ -245,7 +245,7 @@ def external_analyze(args: argparse.Namespace) -> None:
             create_external_manifest(run_dir, datadir, baseline, args.network, args.coinjoin_type, false_cjtxs),
         )
 
-    reproduction_command = f"./runIt.sh external analyze --run-id {shlex.quote(args.run_id)} --resume"
+    reproduction_command = f"./runIt.sh external-analyze --run-id {shlex.quote(args.run_id)} --resume"
     command = [
         args.runtime,
         "run",

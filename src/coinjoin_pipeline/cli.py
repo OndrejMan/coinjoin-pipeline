@@ -75,8 +75,6 @@ def utility_usage(action: str) -> str:
 
 
 def _utility(argv: list[str]) -> int | None:
-    if argv[:1] == ["container"]:
-        return None
     values, remaining = build_parser(set(UTILITY_OPTIONS), add_help=False).parse_known_args(argv)
     supplied = vars(values)
     action = supplied.pop("action", None)
@@ -132,7 +130,7 @@ def execute(context: RunContext) -> None:
     from .execution import containers, orchestrator
 
     containers.install_termination_handlers()
-    if context.config.action == "external analyze":
+    if context.config.action == "external-analyze":
         from .execution.research import run_external_configuration
 
         run_external_configuration(context.config)
@@ -171,7 +169,7 @@ def start_host_manifest(
     root = config.runs_path
     for path in (root, root / ".notebooks"):
         path.mkdir(parents=True, exist_ok=True)
-    if config.action != "external analyze":
+    if config.action != "external-analyze":
         from .execution.locks import acquire_lock, command_lock_path
 
         # The orchestrator takes the same lock again; this process already holds it.

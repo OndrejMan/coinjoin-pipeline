@@ -37,8 +37,8 @@ def _args(tmp_path, **overrides):
         s3_secret_name="coinjoin-s3",
         namespace="coinjoin-ns",
         reuse_namespace=True,
-        analysisPbs=True,
-        blocksciPbs=True,
+        analysis_pbs=True,
+        blocksci_pbs=True,
     )
     values.update(overrides)
     return configuration(**values)

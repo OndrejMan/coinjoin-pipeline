@@ -273,8 +273,8 @@ def test_images_resolve_once_before_pbs_rendering():
     config = load_configuration(
         [
             "full-run",
-            "--analysisPbs",
-            "--blocksciPbs",
+            "--analysis-pbs",
+            "--blocksci-pbs",
             "--version",
             "stable",
             "--blocksci-image",
@@ -292,7 +292,7 @@ def test_explicit_pbs_image_override_wins():
         load_configuration(
             [
                 "full-run",
-                "--blocksciPbs",
+                "--blocksci-pbs",
                 "--pbs-blocksci-image",
                 "docker://registry/blocksci:pbs",
             ]
@@ -303,7 +303,7 @@ def test_explicit_pbs_image_override_wins():
 
 
 def test_capabilities_follow_actual_delegation():
-    config = load_configuration(["full-run", "--analysisPbs"])
+    config = load_configuration(["full-run", "--analysis-pbs"])
     assert "emulator" in required_image_components(config)
     assert "coinjoin_analysis" not in required_image_components(config)
     assert {
@@ -351,12 +351,15 @@ def test_run_id_is_safe_and_bounded(tmp_path):
     assert len(value) <= 63
 
 
-def test_camel_case_stage_flags_take_their_kebab_case_spelling_too() -> None:
+def test_stage_flags_have_only_the_kebab_case_spelling() -> None:
     from coinjoin_pipeline.arguments import load_configuration
 
     config = load_configuration(["pbs-from-s3", "--analysis-pbs", "--blocksci-pbs", "--mappings-pbs"])
 
     assert (config.stages.analysis, config.stages.blocksci, config.stages.mappings) == (True, True, True)
+    for removed in ("--analysisPbs", "--blocksciPbs", "--mappingsPbs", "--blocksciScript", "--fromConfiguration"):
+        with pytest.raises(SystemExit):
+            load_configuration(["pbs-from-s3", removed])
 
 
 def test_kubeconfig_defaults_to_the_first_file_of_the_environment(tmp_path, monkeypatch) -> None:
@@ -385,7 +388,7 @@ def test_image_registry_moves_every_default_image_but_not_explicit_ones(monkeypa
     config = load_configuration(
         [
             "full-run",
-            "--analysisPbs",
+            "--analysis-pbs",
             "--image-registry",
             "ghcr.io/someone/",
             "--blocksci-image",

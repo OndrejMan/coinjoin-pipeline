@@ -20,9 +20,9 @@ def _args(**overrides):
         namespace="coinjoin-ns",
         reuse_namespace=True,
         dry_run=False,
-        analysisPbs=False,
-        blocksciPbs=True,
-        mappingsPbs=False,
+        analysis_pbs=False,
+        blocksci_pbs=True,
+        mappings_pbs=False,
     )
     values.update(overrides)
     return Namespace(**values)

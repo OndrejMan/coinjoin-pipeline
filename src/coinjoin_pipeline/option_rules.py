@@ -148,10 +148,10 @@ def _general_errors(config: PipelineConfiguration) -> list[str]:
             value = config_value(config, path)
             if value is not None and value is not False:
                 errors.append(f"{cli_flag(destination)} is not supported for {config.action}")
-    if config.action == "external analyze" and not config.run_id:
-        errors.append("external analyze requires --run-id")
+    if config.action == "external-analyze" and not config.run_id:
+        errors.append("external-analyze requires --run-id")
     if config.all_runs and config.stages.analysis:
-        errors.append("--all-runs is not supported with --analysisPbs; select one run")
+        errors.append("--all-runs is not supported with --analysis-pbs; select one run")
     if not 1024 <= config.blocksci.notebook_port <= 65535:
         errors.append("--blocksci-notebook-port must be between 1024 and 65535")
     if config.artifacts.backend == "s3" and config.action != "pbs-from-s3":
@@ -167,9 +167,9 @@ def _general_errors(config: PipelineConfiguration) -> list[str]:
         if first and second and Path(first).expanduser().resolve() != Path(second).expanduser().resolve():
             errors.append("Kubernetes and PBS Bitcoin datadirs must identify the same directory")
     external = config.external
-    if config.action != "external analyze" and external.configured:
-        errors.append("external settings require action: external analyze")
-    if config.action == "external analyze":
+    if config.action != "external-analyze" and external.configured:
+        errors.append("external settings require action: external-analyze")
+    if config.action == "external-analyze":
         supplied = external.bitcoin_datadir is not None or external.baseline is not None
         if external.resume and supplied:
             errors.append("external.resume cannot be combined with external.bitcoin_datadir or external.baseline")
@@ -264,16 +264,16 @@ def _driver_errors(config: PipelineConfiguration) -> list[str]:
 def _pbs_stage_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
     errors: list[str] = []
     for flag, enabled, permitted in (
-        ("--analysisPbs", stages.analysis, ("full-run", "coinjoin-analysis", "pbs-from-s3")),
-        ("--blocksciPbs", stages.blocksci, ("full-run", "analyze", "pbs-from-s3")),
-        ("--mappingsPbs", stages.mappings, ("full-run", "mappings", "pbs-from-s3")),
+        ("--analysis-pbs", stages.analysis, ("full-run", "coinjoin-analysis", "pbs-from-s3")),
+        ("--blocksci-pbs", stages.blocksci, ("full-run", "analyze", "pbs-from-s3")),
+        ("--mappings-pbs", stages.mappings, ("full-run", "mappings", "pbs-from-s3")),
     ):
         if enabled and config.action not in permitted:
             errors.append(f"{flag} is supported only by {', '.join(permitted)}")
     for stage, resources, enabled, flag in (
-        ("analysis", config.pbs.analysis, stages.analysis, "--analysisPbs"),
-        ("blocksci", config.pbs.blocksci, stages.blocksci, "--blocksciPbs"),
-        ("mappings", config.pbs.mappings, stages.mappings, "--mappingsPbs"),
+        ("analysis", config.pbs.analysis, stages.analysis, "--analysis-pbs"),
+        ("blocksci", config.pbs.blocksci, stages.blocksci, "--blocksci-pbs"),
+        ("mappings", config.pbs.mappings, stages.mappings, "--mappings-pbs"),
     ):
         if _resources_supplied(config, stage, resources) and not enabled:
             errors.append(f"{stage}-specific PBS resources require {flag}")
@@ -287,20 +287,20 @@ def _blocksci_task_errors(config: PipelineConfiguration, stages: _PbsStages) -> 
     blocksci = config.blocksci
     workflow, task = blocksci.workflow, blocksci.task
     if workflow != "combined" and not stages.blocksci:
-        errors.append("reusable BlockSci workflows require --blocksciPbs")
+        errors.append("reusable BlockSci workflows require --blocksci-pbs")
     if task in {"parse", "update"}:
         required_workflow = "reusable" if task == "parse" else "cached"
         if action != "pbs-from-s3" or workflow != required_workflow:
             errors.append(f"--blocksci-task {task} requires pbs-from-s3 --blocksci-workflow {required_workflow}")
         if not stages.blocksci_alone:
-            errors.append(f"--blocksci-task {task} requires --blocksciPbs without --analysisPbs")
+            errors.append(f"--blocksci-task {task} requires --blocksci-pbs without --analysis-pbs")
     elif task not in {"detect", "external"}:
         if action != "pbs-from-s3":
             errors.append("BlockSci reusable tasks are submitted with pbs-from-s3")
         if workflow == "combined":
             errors.append("BlockSci reusable tasks require --blocksci-workflow reusable or cached")
         if not stages.blocksci_alone:
-            errors.append("BlockSci reusable tasks require --blocksciPbs without --analysisPbs")
+            errors.append("BlockSci reusable tasks require --blocksci-pbs without --analysis-pbs")
     if action == "pbs-from-s3" and task == "script" and not blocksci.script:
         errors.append("--blocksci-task script requires --blocksci-script")
     if action == "pbs-from-s3" and task != "script" and _supplied(config, "blocksci.script", blocksci.script):
@@ -347,9 +347,9 @@ def _dumplings_errors(config: PipelineConfiguration, stages: _PbsStages) -> list
         return []
     errors: list[str] = []
     if config.action != "pbs-from-s3" or not stages.analysis:
-        errors.append("--dumplings-uri requires pbs-from-s3 --analysisPbs")
+        errors.append("--dumplings-uri requires pbs-from-s3 --analysis-pbs")
     if stages.mappings:
-        errors.append("--dumplings-uri does not support --mappingsPbs")
+        errors.append("--dumplings-uri does not support --mappings-pbs")
     return errors
 
 
@@ -422,7 +422,7 @@ def _external_baseline_errors(config: PipelineConfiguration, stages: _PbsStages)
         if config.action != "pbs-from-s3" or blocksci.workflow == "combined":
             errors.append("--blocksci-task external requires pbs-from-s3 with reusable or cached workflow")
         if not stages.blocksci_alone:
-            errors.append("--blocksci-task external requires --blocksciPbs without --analysisPbs")
+            errors.append("--blocksci-task external requires --blocksci-pbs without --analysis-pbs")
         if not blocksci.external_baseline_uri:
             errors.append("--blocksci-task external requires --external-baseline-uri")
     elif blocksci.external_baseline_uri:
@@ -453,7 +453,7 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
     if action == "pbs-from-s3":
         errors.extend(f"pbs-from-s3 requires {flag}" for flag in _missing_s3_options(config, with_secret=False))
         if not any((stages.analysis, stages.blocksci, stages.mappings)):
-            errors.append("pbs-from-s3 requires --analysisPbs, --blocksciPbs, or --mappingsPbs")
+            errors.append("pbs-from-s3 requires --analysis-pbs, --blocksci-pbs, or --mappings-pbs")
     if (
         s3_backend
         and action in ("full-run", "pbs-from-s3")
@@ -508,7 +508,7 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
         # Any analyzer subset runs, emulation alone included. Mappings read the
         # coinjoin-analysis baseline, which a fresh run has only if it computes it.
         if stages.mappings and not stages.analysis:
-            errors.append("full-run --artifact-backend s3 --mappingsPbs requires --analysisPbs")
+            errors.append("full-run --artifact-backend s3 --mappings-pbs requires --analysis-pbs")
         for flag, path, value in (
             ("--parallel", "parallel", config.parallel),
             ("--blocksci-script", "blocksci.script", config.blocksci.script),
@@ -530,9 +530,9 @@ def _remaining_errors(config: PipelineConfiguration, stages: _PbsStages) -> list
     if blocksci.script and not Path(blocksci.script).expanduser().is_file():
         errors.append(f"BlockSci script not found: {blocksci.script}")
     if stages.mappings and config.engine != "wasabi":
-        errors.append("--mappingsPbs is supported only with --engine wasabi")
+        errors.append("--mappings-pbs is supported only with --engine wasabi")
     if stages.mappings and config.coinjoin_type != "wasabi2":
-        errors.append("--mappingsPbs requires --coinjoin-type wasabi2")
+        errors.append("--mappings-pbs requires --coinjoin-type wasabi2")
     if config.action == "mappings" and not stages.mappings:
-        errors.append("mappings requires --mappingsPbs")
+        errors.append("mappings requires --mappings-pbs")
     return errors

@@ -47,7 +47,7 @@ EMULATION_OVERRIDES = [
 ]
 # A mainnet analysis that only reads the published index of another run.
 MAINNET_SCAN = str(Path(__file__).resolve().parents[2] / "scripts" / "metacentrum_mainnet_coinjoin_scan.py")
-READ_ONLY_SCRIPT = [*PBS_FROM_S3, "--blocksciPbs", "--blocksci-task", "script", "--blocksci-script", MAINNET_SCAN]
+READ_ONLY_SCRIPT = [*PBS_FROM_S3, "--blocksci-pbs", "--blocksci-task", "script", "--blocksci-script", MAINNET_SCAN]
 SOURCE = ["--blocksci-cache-source-run-id", "mainnet-index"]
 PINNED_RANGE = [
     "--blocksci-pin-height",
@@ -59,7 +59,7 @@ PINNED_RANGE = [
 ]
 PERSISTENT_UPDATE = [
     *PBS_FROM_S3,
-    "--blocksciPbs",
+    "--blocksci-pbs",
     "--blocksci-workflow",
     "cached",
     "--blocksci-task",
@@ -80,7 +80,7 @@ VALID = {
     "analyze": ["analyze", "--engine", "wasabi", "--run-dir", "run-1"],
     "reusable parse from a bitcoin-blocks URI": [
         *PBS_FROM_S3,
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--blocksci-workflow",
         "reusable",
         "--blocksci-task",
@@ -96,7 +96,7 @@ VALID = {
     ],
     "cached update": [
         *PBS_FROM_S3,
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--blocksci-workflow",
         "cached",
         "--blocksci-task",
@@ -112,7 +112,7 @@ VALID = {
     ],
     "cached update from a bitcoin-blocks URI": [
         *PBS_FROM_S3,
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--blocksci-workflow",
         "cached",
         "--blocksci-task",
@@ -144,7 +144,7 @@ VALID = {
     ],
     "index backup": [
         *PBS_FROM_S3,
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--blocksci-workflow",
         "cached",
         "--blocksci-task",
@@ -158,7 +158,7 @@ VALID = {
     ],
     "index backup at a fixed state prefix": [
         *PBS_FROM_S3,
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--blocksci-workflow",
         "cached",
         "--blocksci-task",
@@ -182,14 +182,14 @@ VALID = {
     ],
     "mainnet baseline from Dumplings": [
         *PBS_FROM_S3,
-        "--analysisPbs",
+        "--analysis-pbs",
         "--coinjoin-type",
         "joinmarket",
         "--dumplings-uri",
         "s3://bucket/dumplings",
     ],
     "S3 emulation": ["emulate", *S3_EMULATION, *S3],
-    "S3 full-run": ["full-run", *S3_EMULATION, *S3, "--analysisPbs", "--blocksciPbs"],
+    "S3 full-run": ["full-run", *S3_EMULATION, *S3, "--analysis-pbs", "--blocksci-pbs"],
     "S3 emulation with its Job overrides": ["emulate", *S3_EMULATION, *S3, *EMULATION_OVERRIDES],
 }
 
@@ -212,7 +212,7 @@ INVALID = {
         "--run-dir",
         "run-1",
     ],
-    "mappings with JoinMarket": ["full-run", "--engine", "joinmarket", "--mappingsPbs"],
+    "mappings with JoinMarket": ["full-run", "--engine", "joinmarket", "--mappings-pbs"],
     "mappings with a JoinMarket CoinJoin type": [
         "mappings",
         "--engine",
@@ -221,7 +221,7 @@ INVALID = {
         "joinmarket",
         "--run-dir",
         "run-1",
-        "--mappingsPbs",
+        "--mappings-pbs",
     ],
     "unconfirmed clean": ["clean"],
     "S3 emulation without frontend credentials": ["emulate", *S3_EMULATION, *S3[:4]],
@@ -236,15 +236,15 @@ INVALID = {
         "full-run",
         *S3_EMULATION,
         *S3,
-        "--analysisPbs",
-        "--blocksciPbs",
+        "--analysis-pbs",
+        "--blocksci-pbs",
         "--parallel",
     ],
     "reusable BlockSci on shared storage": [
         "full-run",
         "--engine",
         "wasabi",
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--pbs-bitcoin-datadir",
         "/storage/btc",
         "--blocksci-workflow",
@@ -252,7 +252,7 @@ INVALID = {
     ],
     "update without a source cache": [
         *PBS_FROM_S3,
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--blocksci-workflow",
         "cached",
         "--blocksci-task",
@@ -266,7 +266,7 @@ INVALID = {
     ],
     "update without a Bitcoin source": [
         *PBS_FROM_S3,
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--blocksci-workflow",
         "cached",
         "--blocksci-task",
@@ -276,7 +276,7 @@ INVALID = {
     ],
     "two BlockSci sources": [
         *PBS_FROM_S3,
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--blocksci-workflow",
         "reusable",
         "--blocksci-task",
@@ -292,7 +292,7 @@ INVALID = {
     ],
     "network without a source": [
         *PBS_FROM_S3,
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--blocksci-workflow",
         "reusable",
         "--blocksci-task",
@@ -302,7 +302,7 @@ INVALID = {
     ],
     "script task without a script": [
         *PBS_FROM_S3,
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--blocksci-workflow",
         "reusable",
         "--blocksci-task",
@@ -310,7 +310,7 @@ INVALID = {
     ],
     "external task without a baseline": [
         *PBS_FROM_S3,
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--blocksci-workflow",
         "reusable",
         "--blocksci-task",
@@ -318,7 +318,7 @@ INVALID = {
     ],
     "source cache for detect": [
         *PBS_FROM_S3,
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--blocksci-workflow",
         "cached",
         *SOURCE,
@@ -338,7 +338,7 @@ INVALID = {
     ],
     "pin height outside a script task": [
         *PBS_FROM_S3,
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--blocksci-workflow",
         "cached",
         "--blocksci-task",
@@ -364,7 +364,7 @@ INVALID = {
     "multijob resource of another location": [*PERSISTENT_UPDATE, "--pbs-blocksci-multijob", "plzen"],
     "multijob for the coinjoin-analysis stage": [
         *PBS_FROM_S3,
-        "--analysisPbs",
+        "--analysis-pbs",
         "--pbs-analysis-multijob",
         "brno",
     ],
@@ -388,7 +388,7 @@ INVALID = {
     ],
     "backup task without a backup prefix": [
         *PBS_FROM_S3,
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--blocksci-workflow",
         "cached",
         "--blocksci-task",
@@ -398,7 +398,7 @@ INVALID = {
     ],
     "persistent index for detect": [
         *PBS_FROM_S3,
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--blocksci-workflow",
         "cached",
         "--blocksci-index-dir",
@@ -414,7 +414,7 @@ INVALID = {
     ],
     "Dumplings baseline without its PBS stage": [
         *PBS_FROM_S3,
-        "--blocksciPbs",
+        "--blocksci-pbs",
         "--dumplings-uri",
         "s3://bucket/dumplings",
     ],
@@ -429,7 +429,7 @@ INVALID = {
     ],
     "report resources without a report job": [
         *PBS_FROM_S3,
-        "--analysisPbs",
+        "--analysis-pbs",
         "--pbs-unified-report-ncpus",
         "2",
     ],
@@ -479,7 +479,7 @@ def test_every_input_path_rejects(argv, tmp_path):
         ("persistent index for detect", "--blocksci-index-dir requires --blocksci-task parse"),
         ("index state prefix for an analysis", "--blocksci-index-state-uri requires --blocksci-index-dir"),
         ("false positives outside the external task", "--external-false-cjtxs-uri requires --blocksci-task external"),
-        ("Dumplings baseline without its PBS stage", "--dumplings-uri requires pbs-from-s3 --analysisPbs"),
+        ("Dumplings baseline without its PBS stage", "--dumplings-uri requires pbs-from-s3 --analysis-pbs"),
     ],
 )
 def test_read_only_analysis_rules_name_the_violation(case, message):

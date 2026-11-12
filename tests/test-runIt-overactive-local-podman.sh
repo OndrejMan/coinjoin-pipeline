@@ -133,7 +133,7 @@ echo "Running complete Podman workflow with logs in ${LOGS_DIR}..."
     COINJOIN_EMULATOR_PULL_POLICY="${COINJOIN_EMULATOR_PULL_POLICY}" \
     COINJOIN_EMULATOR_IMAGE_PREFIX="${COINJOIN_EMULATOR_IMAGE_PREFIX}" \
     COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD}" \
-    bash runIt.sh container podman full-run \
+    bash runIt.sh --runtime podman full-run \
       --engine wasabi \
       --scenario scenarios/overactive-local.json \
       --min-input-count 15

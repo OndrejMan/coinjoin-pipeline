@@ -115,7 +115,7 @@ def test_utility_help_belongs_to_selected_command(capsys):
 
 def test_external_requires_run_identity_before_execution():
     config = load_configuration(
-        ["external", "analyze", "--bitcoin-datadir", "/tmp/btc", "--baseline", "/tmp/baseline.json"]
+        ["external-analyze", "--bitcoin-datadir", "/tmp/btc", "--baseline", "/tmp/baseline.json"]
     )
     with pytest.raises(ValueError, match="run.id"):
         resolve_configuration(config)
@@ -182,7 +182,7 @@ def test_shared_report_budget_matches_wait_budget_and_selected_image(tmp_path):
         load_configuration(
             [
                 "full-run",
-                "--blocksciPbs",
+                "--blocksci-pbs",
                 "--pbs-bitcoin-datadir",
                 str(tmp_path / "btc"),
                 "--pbs-unified-report-walltime",
@@ -283,8 +283,7 @@ def test_report_never_fills_producer_digest_from_current_host(tmp_path, monkeypa
 @pytest.mark.parametrize("dry_run", [False, True])
 def test_external_detector_overrides_reach_worker(tmp_path, monkeypatch, dry_run):
     argv = [
-        "external",
-        "analyze",
+        "external-analyze",
         "--run-id",
         "probe",
         "--runs-root",
@@ -348,7 +347,7 @@ def test_pbs_resume_failure_does_not_rewrite_original_launcher_manifest(tmp_path
                     str(tmp_path),
                     "--run-id",
                     "run-a",
-                    "--blocksciPbs",
+                    "--blocksci-pbs",
                     "--artifact-uri",
                     "s3://bucket/runs",
                     "--s3-endpoint-url",

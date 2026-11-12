@@ -266,7 +266,7 @@ PY
       timeout --foreground "${E2E_TIMEOUT}" python3 -m coinjoin_pipeline.cli pbs-from-s3 \
       --engine joinmarket --artifact-uri "${ARTIFACT_URI}" --run-id "${run_id}" \
       --s3-endpoint-url "${S3_ENDPOINT_URL}" --s3-credentials-file "${CREDENTIALS_FILE}" --s3-profile "${S3_PROFILE}" \
-      --blocksciPbs "$@" --blocksci-bitcoin-blocks-uri "${BLOCKS_URI}" --blocksci-network bitcoin \
+      --blocksci-pbs "$@" --blocksci-bitcoin-blocks-uri "${BLOCKS_URI}" --blocksci-network bitcoin \
       --blocksci-expected-block-hash "$checkpoint_hash" \
       "${PBS_IMAGE_ARGS[@]}" --pbs-ncpus 2 --pbs-mem 4gb --pbs-scratch 2gb --pbs-walltime 00:20:00
   ) 2>&1 | tee -a "${PIPELINE_OUTPUT_FILE}"
