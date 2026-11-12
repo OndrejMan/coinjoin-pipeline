@@ -23,7 +23,7 @@ from coinjoin_pipeline.execution.s3_emulation import pin_emulation_images, run_s
 from coinjoin_pipeline.execution.s3_markers import cancel_dependent_pbs_job, wait_for_s3_marker, wait_for_s3_pbs_stage
 from coinjoin_pipeline.execution.s3_staging import stage_kubernetes_s3_run
 from coinjoin_pipeline.execution.s3_submission import s3_full_run_plan_from_args, submit_s3_pbs_graph
-from coinjoin_pipeline.execution.stages import StageGraph, StagePlan, resource_group
+from coinjoin_pipeline.execution.stages import StageGraph, StagePlan, RESOURCE_GROUPS
 from coinjoin_pipeline.storage.s3 import (
     ArtifactTransportError,
     S3Access,
@@ -149,7 +149,7 @@ def wait_for_pbs_graph(
             pending=tuple(submitted[index + 1 :]),
             run_prefix=run_prefix,
             access=access,
-            walltime=stage_pbs_resources(args, resource_group(stage.kind)).walltime,
+            walltime=stage_pbs_resources(args, RESOURCE_GROUPS[stage.kind]).walltime,
         )
 
 

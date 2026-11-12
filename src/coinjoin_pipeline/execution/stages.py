@@ -8,7 +8,7 @@ orchestrator its wait order and cancellation policy, and ``--dry-run`` prints it
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
 
@@ -62,11 +62,6 @@ class StagePlan:
     dependencies: tuple[str, ...] = ()
 
 
-def resource_group(kind: StageKind) -> str:
-    """Return the PBS resource/walltime group a stage kind is budgeted from."""
-    return RESOURCE_GROUPS[kind]
-
-
 @dataclass(frozen=True)
 class StageGraph:
     """An ordered stage DAG plus the queries its executors need.
@@ -77,11 +72,16 @@ class StageGraph:
     """
 
     stages: tuple[StagePlan, ...]
+    # Checked and computed once; iterating the graph only replays it.
+    _ordered: tuple[StagePlan, ...] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
-        self.ordered()
+        object.__setattr__(self, "_ordered", self._order())
 
     def ordered(self) -> tuple[StagePlan, ...]:
+        return self._ordered
+
+    def _order(self) -> tuple[StagePlan, ...]:
         names = {stage.name for stage in self.stages}
         if len(names) != len(self.stages):
             raise ValueError("Stage names must be unique")
@@ -241,15 +241,14 @@ def s3_full_run_plan(
     analysis_pbs: bool = True,
     blocksci_pbs: bool = True,
     blocksci_task: str = "detect",
-    unified_report: bool = True,
+    action: str = "pbs-from-s3",
 ) -> StageGraph:
     """Build the canonical Kubernetes → S3 → PBS graph for one invocation.
 
     The two PBS analyzers are intentionally independent.  They publish their
     own artifacts, and only ``unified-report`` depends on both of them.  The
-    report is a separate stage for every detect workflow, including resumes
-    that consume a previously stored baseline, unless ``unified_report`` is
-    false: a full-run without coinjoin-analysis has no baseline to compare.
+    report is a separate stage whenever ``runs_unified_report`` says so: a
+    full-run without coinjoin-analysis has no baseline to compare.
     """
     emulation = StagePlan(
         name="kubernetes-emulation",
@@ -276,6 +275,8 @@ def s3_full_run_plan(
     # Completion order: the analyzers publish independently, and mappings is
     # waited for after BlockSci because it is the shorter of the two tails.
     stages = [stage for stage in (emulation, baseline, parse, work, mappings) if stage is not None]
-    if unified_report and blocksci_pbs and blocksci_task == "detect":
+    if runs_unified_report(
+        action=action, analysis_pbs=analysis_pbs, blocksci_pbs=blocksci_pbs, blocksci_task=blocksci_task
+    ):
         stages.append(_report_stage("pbs", baseline, work, mappings))
     return StageGraph(tuple(stages))

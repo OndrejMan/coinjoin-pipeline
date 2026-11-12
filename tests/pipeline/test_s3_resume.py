@@ -18,7 +18,6 @@ PLAN = s3_full_run_plan(
     mappings_pbs=False,
     blocksci_workflow="combined",
     blocksci_task="detect",
-    unified_report=True,
 )
 
 

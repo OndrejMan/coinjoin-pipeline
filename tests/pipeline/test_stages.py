@@ -115,7 +115,7 @@ def test_s3_full_run_without_baseline_publishes_blocksci_without_report() -> Non
         mappings_pbs=False,
         analysis_pbs=False,
         blocksci_pbs=True,
-        unified_report=False,
+        action="full-run",
     )
 
     assert [stage.name for stage in stages] == ["kubernetes-emulation", "blocksci"]

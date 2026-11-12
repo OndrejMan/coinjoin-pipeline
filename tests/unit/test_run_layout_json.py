@@ -15,7 +15,6 @@ def test_every_stage_of_the_layout_is_a_real_stage() -> None:
         mappings_pbs=False,
         blocksci_workflow="combined",
         blocksci_task="detect",
-        unified_report=True,
     )
     stages = {stage.name for stage in plan.stages} | {f"mainnet-{stage}" for stage in SYNC_STAGES}
     layout = run_layout.run_layout()

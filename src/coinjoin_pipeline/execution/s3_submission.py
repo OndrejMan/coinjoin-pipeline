@@ -42,7 +42,7 @@ from coinjoin_pipeline.execution.pbs_settings import (
 )
 from coinjoin_pipeline.execution.s3_markers import rollback_s3_pbs_submissions
 from coinjoin_pipeline.execution.s3_staging import ensure_staged_exporters, pbs_stages_need_exporters
-from coinjoin_pipeline.execution.stages import StageGraph, StageKind, StagePlan, runs_unified_report, s3_full_run_plan
+from coinjoin_pipeline.execution.stages import StageGraph, StageKind, StagePlan, s3_full_run_plan
 from coinjoin_pipeline.registry import pinned_reference
 from coinjoin_pipeline.storage.s3 import (
     ArtifactTransportError,
@@ -63,12 +63,7 @@ def s3_full_run_plan_from_args(args: PipelineConfiguration) -> StageGraph:
         mappings_pbs=args.stages.mappings,
         blocksci_workflow=args.blocksci.workflow,
         blocksci_task=args.blocksci.task,
-        unified_report=runs_unified_report(
-            action=args.action,
-            analysis_pbs=args.stages.analysis,
-            blocksci_pbs=args.stages.blocksci,
-            blocksci_task=args.blocksci.task,
-        ),
+        action=args.action,
     )
 
 
