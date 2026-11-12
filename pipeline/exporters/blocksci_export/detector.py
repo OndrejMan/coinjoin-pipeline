@@ -296,6 +296,21 @@ def scan_window(chain: BlocksciChain, start_height: int | None, end_height: int 
     return start, end
 
 
+def baseline_block_heights(chain: BlocksciChain, txids: Iterable[str]) -> dict[str, int | None]:
+    """Height of every baseline transaction in this index; None when the index does not hold it.
+
+    Dumplings records carry the transaction's position in its block, not the height,
+    so the external comparison takes the height from BlockSci.
+    """
+    heights: dict[str, int | None] = {}
+    for txid in txids:
+        try:
+            heights[txid] = int(cast("BlocksciBlock", chain.tx_with_hash(txid)).block_height)
+        except Exception:  # pylint: disable=broad-exception-caught  # the binding raises a bare RuntimeError
+            heights[txid] = None
+    return heights
+
+
 def _records_by_txid(txes: Iterable[object]) -> dict[str, TransactionRecord]:
     records = [normalize_blocksci_tx(tx) for tx in txes]
     return {txid: record for record in sorted(records, key=lambda item: item["txid"] or "") if (txid := record["txid"])}

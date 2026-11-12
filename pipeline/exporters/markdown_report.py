@@ -775,6 +775,31 @@ def render_scope_note(report: JsonObject) -> list[str]:
     return lines
 
 
+def render_coverage(report: JsonObject) -> list[str]:
+    coverage = report.get("coverage")
+    if not coverage:
+        return []
+    return section(
+        "Coverage",
+        "> Only heights BlockSci scanned are compared; baseline transactions elsewhere are not BlockSci misses.",
+        "",
+        *key_values(
+            [
+                ["scan window", f"[{coverage.get('start_height')}, {coverage.get('end_height')})"],
+                ["index blocks", coverage.get("index_blocks")],
+                ["pinned at height", coverage.get("pin_height")],
+                ["Dumplings snapshot height", coverage.get("dumplings_last_processed_height")],
+                ["Dumplings commit", coverage.get("dumplings_commit")],
+                ["baseline transactions", coverage.get("baseline_total")],
+                ["baseline inside the window", coverage.get("baseline_in_window")],
+                ["baseline outside the window", coverage.get("baseline_outside_window")],
+                ["baseline not in the index or above the pin", coverage.get("baseline_not_in_index")],
+            ],
+            key="field",
+        ),
+    )
+
+
 def render_baseline_filter(report: JsonObject) -> list[str]:
     baseline_filter = report.get("baseline_filter") or {}
     if not baseline_filter.get("enabled"):
@@ -853,6 +878,7 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
         *render_run(report),
         *render_detection_summary(report),
         *render_scope_note(report),
+        *render_coverage(report),
         *render_baseline_filter(report),
         *render_run_manifest(report),
         *render_emulator_detection(report, explorer_base_url),

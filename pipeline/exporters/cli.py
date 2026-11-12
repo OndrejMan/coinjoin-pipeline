@@ -10,6 +10,7 @@ from exporters.analysis_artifact import ARTIFACT_NAME
 from exporters.analysis_artifact import load_analysis as load_blocksci_analysis
 from exporters.artifact_paths import (
     BASELINE_FILE,
+    DUMPLINGS_SNAPSHOT_FILE,
     REPORT_JSON,
     blocksci_analysis_dir,
     coinjoin_analysis_dir,
@@ -29,6 +30,7 @@ from exporters.normalization import (
     load_exported_block_tx_index,
     load_false_positive_txids,
     normalize_coinjoin_analysis,
+    restrict_baseline_to_window,
 )
 from exporters.parameters import Detector, ReportImages, add_detector_arguments, add_image_arguments
 from exporters.report_builder import build_report
@@ -105,6 +107,15 @@ def load_run_analysis(args: argparse.Namespace, run_dir: Path) -> BlockSciAnalys
     )
 
 
+def add_dumplings_snapshot(coverage: JsonObject | None, run_dir: Path) -> None:
+    """Name the Dumplings snapshot an external baseline was cut from."""
+    snapshot_path = run_dir / DUMPLINGS_SNAPSHOT_FILE
+    if coverage is not None and snapshot_path.is_file():
+        snapshot = load_json(snapshot_path)
+        coverage["dumplings_last_processed_height"] = snapshot.get("last_processed_height")
+        coverage["dumplings_commit"] = snapshot.get("dumplings_commit")
+
+
 def assemble_report(args: argparse.Namespace) -> int:
     run_dir = resolve_run_dir(args.runs_root, args.run_dir)
     output_dir = report_dir(run_dir)
@@ -127,6 +138,12 @@ def assemble_report(args: argparse.Namespace) -> int:
         save_json(output_dir / "emulator_data.json", emulator_data)
 
     analysis = load_run_analysis(args, run_dir)
+    coverage = None
+    if args.mode == "external":
+        coinjoin_analysis, coverage = restrict_baseline_to_window(
+            coinjoin_analysis, analysis.get("scan_window"), analysis.get("baseline_heights")
+        )
+        add_dumplings_snapshot(coverage, run_dir)
     predicted_address_clusters = analysis.get("predicted_address_clusters")
     cluster_export_error = analysis.get("cluster_export_error")
     if args.skip_clustering:
@@ -152,6 +169,7 @@ def assemble_report(args: argparse.Namespace) -> int:
         mode=args.mode,
         network=args.network,
         image_provenance=analysis.get("image_provenance"),
+        coverage=coverage,
         baseline_filter=baseline_filter_summary(false_positive_sources, false_positive_txids, filtered_txids),
     )
     save_json(output_path, report)

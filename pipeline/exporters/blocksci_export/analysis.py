@@ -15,15 +15,21 @@ if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from exporters.analysis_artifact import ARTIFACT_NAME, SCHEMA_VERSION
-from exporters.artifact_paths import blocksci_analysis_dir
+from exporters.artifact_paths import BASELINE_FILE, blocksci_analysis_dir
 from exporters.blocksci_export.detector import (
     BLOCKSCI_IMPORT_ERROR,
+    baseline_block_heights,
     blocksci,
     export_blocksci_cluster_assignments_for_addresses,
     export_blocksci_records,
     export_subset_matching_records,
+    open_chain,
+    scan_window,
 )
-from exporters.common import save_json
+from exporters.common import (
+    load_json,
+    save_json,
+)
 from exporters.integration_diagnostics import build_integration_diagnostics
 from exporters.normalization import iter_exported_blocks, load_first_wasabi2_block, output_address
 from exporters.parameters import (
@@ -32,6 +38,7 @@ from exporters.parameters import (
     ReportImages,
     add_detector_arguments,
     add_image_arguments,
+    add_window_arguments,
 )
 from exporters.report_types import BlockSciAnalysisArtifact, SubsetMatchingAnalysis
 
@@ -60,12 +67,44 @@ def write_analysis(args: argparse.Namespace) -> Path:
             f"BlockSci Python module is required to export BlockSci analysis.{detail}"
         ) from BLOCKSCI_IMPORT_ERROR
 
+    pin_height = getattr(args, "pin_height", None)
+    max_block = None if pin_height is None else pin_height + 1
+    start_height = getattr(args, "scan_start_height", None)
+    end_height = getattr(args, "scan_end_height", None)
     detector = Detector.from_args(args, load_first_wasabi2_block(config_path))
-    records = export_blocksci_records(config_path, detector)
+    records = export_blocksci_records(
+        config_path,
+        detector,
+        max_block=max_block,
+        start_height=start_height,
+        end_height=end_height,
+    )
     subset_matching: SubsetMatchingAnalysis | None = None
     if detector.coinjoin_type == "joinmarket" and getattr(args, "mode", "emulator") == "emulator":
-        subset_records, skipped_txids = export_subset_matching_records(config_path, detector)
+        subset_records, skipped_txids = export_subset_matching_records(
+            config_path,
+            detector,
+            max_block=max_block,
+            start_height=start_height,
+            end_height=end_height,
+        )
         subset_matching = SubsetMatchingAnalysis(records=subset_records, skipped_txids=skipped_txids)
+    window_record, baseline_heights = None, None
+    if getattr(args, "mode", "emulator") == "external":
+        # The comparison may only judge heights both analyzers saw.
+        chain = open_chain(config_path, max_block)
+        start, end = scan_window(chain, start_height, end_height)
+        window_record = {
+            "start_height": start,
+            "end_height": end,
+            "end_exclusive": True,
+            "index_blocks": len(chain),
+            "index_last_block_hash": str(chain[len(chain) - 1].hash),
+            "pin_height": pin_height,
+        }
+        baseline_path = run_dir / BASELINE_FILE
+        if baseline_path.is_file():
+            baseline_heights = baseline_block_heights(chain, load_json(baseline_path).get("coinjoins", {}))
     images = ReportImages.from_args(args)
     image_ids = {name: getattr(args, name + "_image_id", None) for name in PROVENANCE_IMAGE_NAMES}
     diagnostics = (
@@ -104,6 +143,8 @@ def write_analysis(args: argparse.Namespace) -> Path:
         "integration_diagnostics": diagnostics,
         "predicted_address_clusters": clusters,
         "cluster_export_error": cluster_error,
+        "scan_window": window_record,
+        "baseline_heights": baseline_heights,
     }
     output_dir = blocksci_analysis_dir(run_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -121,6 +162,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skip-clustering", action="store_true")
     parser.add_argument("--cluster-output-dir", type=Path)
     add_detector_arguments(parser)
+    add_window_arguments(parser)
     add_image_arguments(parser)
     return parser.parse_args(argv)
 

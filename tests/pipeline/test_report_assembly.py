@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from exporters import cli as report_cli
-from exporters.artifact_paths import EXPORTED_BLOCKS_DIR
+from exporters.artifact_paths import DUMPLINGS_SNAPSHOT_FILE, EXPORTED_BLOCKS_DIR
 from exporters.common import f1_score, io_items, wallet_names
 from exporters.analysis_artifact import SCHEMA_VERSION
 from exporters.parameters import Detector
@@ -21,6 +21,7 @@ def write(path: Path, data: object) -> None:
 def external_run(tmp_path: Path) -> Path:
     run = tmp_path / "mainnet-compare"
     write(run / "coinjoin-analysis_data/coinjoin_tx_info.json", {"coinjoins": {TXID: {"txid": TXID}, "b" * 64: {}}})
+    write(run / DUMPLINGS_SNAPSHOT_FILE, {"last_processed_height": 850100, "dumplings_commit": "abc123"})
     args = report_cli.parse_args(["--run-dir", str(run), "--mode", "external"])
     write(
         run / "blocksci-analysis_data/blocksci_analysis.json",
@@ -33,9 +34,26 @@ def external_run(tmp_path: Path) -> Path:
             "records": {},
             "skipped_txids": [],
             "integration_diagnostics": None,
+            "scan_window": {"start_height": 850000, "end_height": 850050, "end_exclusive": True},
+            "baseline_heights": {TXID: 850010, "b" * 64: None},
         },
     )
     return run
+
+
+def test_external_report_records_the_window_snapshot(tmp_path):
+    run = external_run(tmp_path)
+
+    assert report_cli.main(["--run-dir", str(run), "--mode", "external", "--network", "bitcoin"]) == 0
+
+    report = json.loads((run / "coinjoinPipeline_data/unified_report.json").read_text())
+    coverage = report["coverage"]
+    assert coverage["baseline_in_window"] == 1
+    assert coverage["baseline_not_in_index"] == 1
+    assert coverage["dumplings_last_processed_height"] == 850100
+    assert coverage["dumplings_commit"] == "abc123"
+    assert report["evaluation_scope"] == "baseline_agreement_only"
+    assert report["baseline_filter"]["enabled"] is False
 
 
 def test_report_replaces_a_previous_report_that_is_not_an_object(tmp_path):
