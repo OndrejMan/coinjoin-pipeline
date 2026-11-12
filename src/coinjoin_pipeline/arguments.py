@@ -154,7 +154,7 @@ HELP = {
         "registry and owner of the project's images, e.g. ghcr.io/you (also $COINJOIN_IMAGE_REGISTRY; "
         "default: ghcr.io/ondrejman)"
     ),
-    "images.local_build": "use locally built images (*:local)",
+    "images.local_build": "use the images ./run-all.sh local builds (*:local)",
     "images.uploader": "S3 uploader image (default: container/uploader.image)",
     "images.unified_report": ("unified-report job image (default: container/unified-report.image)"),
     "stages.analysis": "run coinjoin-analysis as a PBS job",

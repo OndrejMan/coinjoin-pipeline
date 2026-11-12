@@ -36,7 +36,7 @@ def in_registry(image: str, registry: str | None) -> str:
     """A default image of the project's registry, moved to the configured one."""
     prefix = f"{DEFAULT_REGISTRY}/"
     return image_registry(registry) + "/" + image[len(prefix):] if image.startswith(prefix) else image
-# The tags a local build of each component's repository produces.
+# What ./run-all.sh local tags its images as.
 LOCAL_IMAGES = {
     "emulator": "coinjoin-emulator:local",
     "coinjoin_analysis": "coinjoin-analysis:local",

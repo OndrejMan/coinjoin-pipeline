@@ -1,0 +1,614 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+LOCAL_TAG="${LOCAL_TAG:-local}"
+LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE:-blocksci-cj:${LOCAL_TAG}}"
+LOCAL_BLOCKSCI_IMAGE="${LOCAL_BLOCKSCI_IMAGE:-blocksci-complete:${LOCAL_TAG}}"
+LOCAL_COINJOIN_EMULATOR_IMAGE="${LOCAL_COINJOIN_EMULATOR_IMAGE:-coinjoin-emulator:${LOCAL_TAG}}"
+LOCAL_COINJOIN_ANALYSIS_IMAGE="${LOCAL_COINJOIN_ANALYSIS_IMAGE:-coinjoin-analysis:${LOCAL_TAG}}"
+# Keep the public uv build-stage image in the local Docker daemon for local
+# builds. This avoids resolving GHCR on every cached BlockSci build.
+UPSTREAM_UV_IMAGE="${UPSTREAM_UV_IMAGE:-ghcr.io/astral-sh/uv:0.12.1}"
+LOCAL_UV_IMAGE="${LOCAL_UV_IMAGE:-astral-uv:0.12.1}"
+
+UPSTREAM_BLOCKSCI_IMAGE="${UPSTREAM_BLOCKSCI_IMAGE:-ghcr.io/ondrejman/blocksci-complete:latest}"
+UPSTREAM_COINJOIN_EMULATOR_IMAGE="${UPSTREAM_COINJOIN_EMULATOR_IMAGE:-ghcr.io/ondrejman/emulator-manager:latest}"
+UPSTREAM_COINJOIN_ANALYSIS_IMAGE="${UPSTREAM_COINJOIN_ANALYSIS_IMAGE:-ghcr.io/ondrejman/coinjoin-analysis:latest}"
+UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX="${UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX:-ghcr.io/ondrejman/}"
+
+# s5cmd uploader used by the block-archive S3 test. There is no local build of
+# it, so both image modes take the pinned reference the pipeline itself uses;
+# container/uploader.image stays the single source of truth.
+# Only the S3 tests need the uploader pin, and they resolve it themselves when
+# it is empty. Reading the file unconditionally aborts the launcher in the
+# isolated fixture repo of tests/test-run-all-local-failure-report.sh, which
+# holds nothing but the launcher scripts.
+if [[ -z "${UPLOADER_IMAGE:-}" && -r "${SCRIPT_DIR}/container/uploader.image" ]]; then
+  UPLOADER_IMAGE="$(tr -d '[:space:]' <"${SCRIPT_DIR}/container/uploader.image")"
+fi
+UPLOADER_IMAGE="${UPLOADER_IMAGE:-}"
+
+EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR:-${SCRIPT_DIR}/emulation_logs}"
+RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS:-}"
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") <local|github> [--build-only] [--pull-only] [--skip-build] [--skip-pull] [--skip-tests] [--tests-only] [--scenario <name-or-path>]...
+
+Run the bundled coinjoin-pipeline workflows with a selected image source.
+
+Modes:
+  local                       Build local images and run tests with those tags.
+  github                      Pull published GHCR images and run tests with them.
+
+Options:
+  --build-only                In local mode, build images and exit.
+                              In github mode, pull published images and exit.
+  --pull-only                 Pull published images and exit (github mode only).
+  --skip-build                Reuse existing local image tags (local mode only).
+  --skip-pull                 Do not pre-pull published images (github mode only).
+  --skip-tests                Do not run the shell test suite.
+  --tests-only                Run tests and no explicit --scenario workflows.
+  --scenario <name-or-path>   Run one or more scenario workflows before tests.
+
+Environment overrides:
+  LOCAL_TAG                                  Local image tag suffix.
+  BLOCKSCI_IMAGE,
+    COINJOIN_EMULATOR_IMAGE,
+    COINJOIN_ANALYSIS_IMAGE                 Selected image refs for either mode.
+  LOCAL_BLOCKSCI_IMAGE,
+    LOCAL_BLOCKSCI_BASE_IMAGE,
+    LOCAL_COINJOIN_EMULATOR_IMAGE,
+    LOCAL_COINJOIN_ANALYSIS_IMAGE           Local-mode defaults.
+  UPSTREAM_UV_IMAGE, LOCAL_UV_IMAGE         Source and daemon-local mirror
+                                              for the BlockSci uv build stage.
+  UPSTREAM_BLOCKSCI_IMAGE,
+    UPSTREAM_COINJOIN_EMULATOR_IMAGE,
+    UPSTREAM_COINJOIN_ANALYSIS_IMAGE        Github-mode defaults.
+  UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX   Image prefix for emulator pod images.
+  EMULATION_LOGS_DIR                        Output logs directory.
+EOF
+}
+
+IMAGE_MODE="${1:-}"
+if [[ "${IMAGE_MODE}" == "-h" || "${IMAGE_MODE}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+if [[ "${IMAGE_MODE}" == "upstream" ]]; then
+  IMAGE_MODE="github"
+fi
+if [[ "${IMAGE_MODE}" != "local" && "${IMAGE_MODE}" != "github" ]]; then
+  echo "ERROR: first argument must be 'local' or 'github'" >&2
+  usage >&2
+  exit 2
+fi
+shift
+
+BUILD_IMAGES=""
+PULL_IMAGES=""
+BUILD_ONLY=0
+PULL_ONLY=0
+RUN_SCENARIOS=0
+RUN_TESTS=1
+SCENARIOS=()
+CURRENT_CHILD_PID=""
+CURRENT_CHILD_PGID=""
+CURRENT_STEP_LABEL=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --build-only)
+      BUILD_ONLY=1
+      shift
+      ;;
+    --pull-only)
+      PULL_ONLY=1
+      shift
+      ;;
+    --skip-build)
+      BUILD_IMAGES=0
+      shift
+      ;;
+    --skip-pull)
+      PULL_IMAGES=0
+      shift
+      ;;
+    --skip-tests)
+      RUN_TESTS=0
+      shift
+      ;;
+    --tests-only)
+      RUN_SCENARIOS=0
+      RUN_TESTS=1
+      shift
+      ;;
+    --scenario)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --scenario requires a scenario filename or path" >&2
+        exit 2
+      fi
+      RUN_SCENARIOS=1
+      SCENARIOS+=("$2")
+      shift 2
+      ;;
+    --scenario=*)
+      RUN_SCENARIOS=1
+      SCENARIOS+=("${1#--scenario=}")
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ "${IMAGE_MODE}" == "local" ]]; then
+  BUILD_IMAGES="${BUILD_IMAGES:-1}"
+  PULL_IMAGES="${PULL_IMAGES:-0}"
+  if [[ "${PULL_ONLY}" == "1" ]]; then
+    echo "ERROR: --pull-only is only valid in github mode" >&2
+    exit 2
+  fi
+  BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE:-${LOCAL_BLOCKSCI_IMAGE}}"
+  COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-${LOCAL_COINJOIN_EMULATOR_IMAGE}}"
+  COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE:-${LOCAL_COINJOIN_ANALYSIS_IMAGE}}"
+  CHILD_IMAGE_MODE="local"
+  BLOCKSCI_PULL_POLICY_VALUE="never"
+  COINJOIN_EMULATOR_PULL_POLICY_VALUE="never"
+  COINJOIN_ANALYSIS_PULL_POLICY_VALUE="never"
+  COINJOIN_EMULATOR_IMAGE_PREFIX_VALUE="${COINJOIN_EMULATOR_IMAGE_PREFIX:-}"
+  COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD_VALUE="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-1}"
+else
+  BUILD_IMAGES="${BUILD_IMAGES:-0}"
+  PULL_IMAGES="${PULL_IMAGES:-1}"
+  # Kubernetes tests must also exercise published infrastructure in github mode.
+  export SKIP_LOCAL_IMAGE_BUILD=1
+  if [[ "${BUILD_IMAGES}" != "0" ]]; then
+    echo "ERROR: github mode does not build local images; use local mode instead" >&2
+    exit 2
+  fi
+  if [[ "${BUILD_ONLY}" == "1" ]]; then
+    PULL_ONLY=1
+  fi
+  BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE:-${UPSTREAM_BLOCKSCI_IMAGE}}"
+  COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE:-${UPSTREAM_COINJOIN_EMULATOR_IMAGE}}"
+  COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE:-${UPSTREAM_COINJOIN_ANALYSIS_IMAGE}}"
+  CHILD_IMAGE_MODE="upstream"
+  BLOCKSCI_PULL_POLICY_VALUE="${BLOCKSCI_PULL_POLICY:-always}"
+  COINJOIN_EMULATOR_PULL_POLICY_VALUE="${COINJOIN_EMULATOR_PULL_POLICY:-always}"
+  COINJOIN_ANALYSIS_PULL_POLICY_VALUE="${COINJOIN_ANALYSIS_PULL_POLICY:-always}"
+  COINJOIN_EMULATOR_IMAGE_PREFIX_VALUE="${COINJOIN_EMULATOR_IMAGE_PREFIX:-${UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX}}"
+  COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD_VALUE="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-}"
+fi
+
+if [[ "${RUN_SCENARIOS}" == "1" && "${#SCENARIOS[@]}" -eq 0 ]]; then
+  echo "ERROR: --scenario was requested but no scenarios were provided" >&2
+  exit 2
+fi
+
+if [[ "${BUILD_ONLY}" == "1" || "${PULL_ONLY}" == "1" ]]; then
+  RUN_SCENARIOS=0
+  RUN_TESTS=0
+fi
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "ERROR: required command not found: $1" >&2
+    exit 2
+  fi
+}
+
+handle_interrupt() {
+  trap - INT TERM
+  echo "Interrupted; stopping current ${IMAGE_MODE} workflow..." >&2
+
+  if [[ -n "${CURRENT_CHILD_PID}" ]] && kill -0 "${CURRENT_CHILD_PID}" >/dev/null 2>&1; then
+    if [[ -n "${CURRENT_CHILD_PGID}" ]]; then
+      kill -TERM "-${CURRENT_CHILD_PGID}" >/dev/null 2>&1 || true
+    else
+      kill -TERM "${CURRENT_CHILD_PID}" >/dev/null 2>&1 || true
+    fi
+    wait "${CURRENT_CHILD_PID}" >/dev/null 2>&1 || true
+  fi
+
+  exit 130
+}
+
+run_step() {
+  set +e
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$@" &
+    CURRENT_CHILD_PID=$!
+    CURRENT_CHILD_PGID="${CURRENT_CHILD_PID}"
+  else
+    "$@" &
+    CURRENT_CHILD_PID=$!
+    CURRENT_CHILD_PGID=""
+  fi
+
+  wait "${CURRENT_CHILD_PID}"
+  local status=$?
+  CURRENT_CHILD_PID=""
+  CURRENT_CHILD_PGID=""
+  set -e
+
+  if [[ "${status}" -ne 0 ]]; then
+    echo "FAILED: ${CURRENT_STEP_LABEL:-workflow step} (exit code ${status}). Logs: ${EMULATION_LOGS_DIR}" >&2
+  fi
+
+  return "${status}"
+}
+
+run_in_dir() {
+  local workdir="$1"
+  shift
+  run_step bash -c 'cd "$1"; shift; exec "$@"' _ "${workdir}" "$@"
+}
+
+run_with_selected_images_in_dir() {
+  local workdir="$1"
+  shift
+  run_in_dir "${workdir}" env \
+    EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
+    BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
+    BLOCKSCI_PULL_POLICY="${BLOCKSCI_PULL_POLICY_VALUE}" \
+    COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
+    COINJOIN_EMULATOR_PULL_POLICY="${COINJOIN_EMULATOR_PULL_POLICY_VALUE}" \
+    COINJOIN_EMULATOR_IMAGE_PREFIX="${COINJOIN_EMULATOR_IMAGE_PREFIX_VALUE}" \
+    COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD_VALUE}" \
+    COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
+    COINJOIN_ANALYSIS_PULL_POLICY="${COINJOIN_ANALYSIS_PULL_POLICY_VALUE}" \
+    BLOCKSCI_LAUNCH_JUPYTER=0 \
+    RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
+    "$@"
+}
+
+scenario_arg() {
+  local scenario="$1"
+  if [[ -f "${scenario}" ]]; then
+    printf '%s\n' "${scenario}"
+  elif [[ -f "${SCRIPT_DIR}/${scenario}" ]]; then
+    printf '%s\n' "${scenario}"
+  elif [[ -f "${SCRIPT_DIR}/scenarios/${scenario}" ]]; then
+    printf '%s\n' "scenarios/${scenario}"
+  else
+    echo "ERROR: scenario not found: ${scenario}" >&2
+    exit 2
+  fi
+}
+
+engine_for_scenario() {
+  local scenario="$1"
+  python3 - "$scenario" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+scenario = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if scenario.get("default_version") == "joinmarket":
+    print("joinmarket")
+else:
+    print("wasabi")
+PY
+}
+
+pull_image() {
+  local image="$1"
+  if [[ "${image}" != */* ]]; then
+    echo "Skipping pull for local image reference ${image}."
+    return 0
+  fi
+
+  echo "Pulling published image ${image}..."
+  CURRENT_STEP_LABEL="pulling image ${image}"
+  run_step docker pull "${image}"
+}
+
+verify_blocksci_image() {
+  local image="$1"
+  echo "Verifying BlockSci runtime in ${image}..."
+  CURRENT_STEP_LABEL="verifying BlockSci runtime in ${image}"
+  run_step docker run --rm --entrypoint /bin/bash "${image}" -lc \
+    'command -v blocksci_parser >/dev/null && python3 -c "import blocksci"'
+}
+
+prepare_local_uv_image() {
+  if docker image inspect "${LOCAL_UV_IMAGE}" >/dev/null 2>&1; then
+    echo "Using cached local uv image ${LOCAL_UV_IMAGE}."
+    return 0
+  fi
+
+  # Do not inherit a stale GHCR credential for this public image. The temporary
+  # Docker config is used only to seed a local daemon tag; it never modifies
+  # the user's normal Docker login state.
+  local isolated_docker_config
+  isolated_docker_config="$(mktemp -d)"
+  echo "Seeding local uv image ${LOCAL_UV_IMAGE} from public ${UPSTREAM_UV_IMAGE}..."
+  CURRENT_STEP_LABEL="pulling public uv image ${UPSTREAM_UV_IMAGE}"
+  if ! run_step env "DOCKER_CONFIG=${isolated_docker_config}" docker pull "${UPSTREAM_UV_IMAGE}"; then
+    rm -rf "${isolated_docker_config}"
+    echo "ERROR: could not pull the public uv image needed for a local BlockSci build." >&2
+    return 1
+  fi
+  rm -rf "${isolated_docker_config}"
+
+  CURRENT_STEP_LABEL="tagging local uv image ${LOCAL_UV_IMAGE}"
+  run_step docker tag "${UPSTREAM_UV_IMAGE}" "${LOCAL_UV_IMAGE}"
+}
+
+if [[ "${RUN_SCENARIOS}" == "1" ]]; then
+  require_command python3
+fi
+
+if [[ "${RUN_TESTS}" == "1" ]]; then
+  require_command uv
+fi
+
+if [[ "${BUILD_IMAGES}" == "1" || "${PULL_IMAGES}" == "1" || "${RUN_SCENARIOS}" == "1" || "${RUN_TESTS}" == "1" ]]; then
+  require_command docker
+  if ! docker info >/dev/null 2>&1; then
+    echo "ERROR: docker daemon is not reachable" >&2
+    exit 2
+  fi
+fi
+
+trap handle_interrupt INT TERM
+
+if [[ "${BUILD_IMAGES}" == "1" ]]; then
+  prepare_local_uv_image
+
+  echo "Building local BlockSci base image ${LOCAL_BLOCKSCI_BASE_IMAGE}..."
+  CURRENT_STEP_LABEL="building local BlockSci base image ${LOCAL_BLOCKSCI_BASE_IMAGE}"
+  # Always name the target: blocksci/Dockerfile carries the dependency stage,
+  # the shipped `complete` stage and a validation-only `test` stage, and an
+  # untargeted build would take the last one.
+  run_step docker build --target dependencies \
+    --build-arg "UV_IMAGE=${LOCAL_UV_IMAGE}" \
+    -t "${LOCAL_BLOCKSCI_BASE_IMAGE}" \
+    -f "${REPO_ROOT}/blocksci/Dockerfile" "${REPO_ROOT}/blocksci"
+
+  echo "Building local BlockSci complete image ${BLOCKSCI_IMAGE}..."
+  CURRENT_STEP_LABEL="building local BlockSci complete image ${BLOCKSCI_IMAGE}"
+  # `complete` is the same stage the publishing workflow ships, so local mode
+  # exercises the image shape that reaches MetaCentrum. DEPS_IMAGE reuses the
+  # base built above instead of recompiling the toolchain. BlockSci's own suites
+  # live in the `test` stage and in blocksci CI, not in this pipeline suite --
+  # building them in would add ~2.5GB and break the PBS Apptainer conversion.
+  run_step docker build --target complete \
+    --build-arg "DEPS_IMAGE=${LOCAL_BLOCKSCI_BASE_IMAGE}" \
+    --build-arg NTHREADS=10 \
+    -t "${BLOCKSCI_IMAGE}" \
+    -f "${REPO_ROOT}/blocksci/Dockerfile" \
+    "${REPO_ROOT}/blocksci"
+
+  echo "Building local CoinJoin emulator image ${COINJOIN_EMULATOR_IMAGE}..."
+  CURRENT_STEP_LABEL="building local CoinJoin emulator image ${COINJOIN_EMULATOR_IMAGE}"
+  run_step docker build \
+    --build-arg "UV_IMAGE=${LOCAL_UV_IMAGE}" \
+    -t "${COINJOIN_EMULATOR_IMAGE}" "${REPO_ROOT}/coinjoin-emulator"
+
+  echo "Building local coinjoin-analysis image ${COINJOIN_ANALYSIS_IMAGE}..."
+  CURRENT_STEP_LABEL="building local coinjoin-analysis image ${COINJOIN_ANALYSIS_IMAGE}"
+  run_step docker build -t "${COINJOIN_ANALYSIS_IMAGE}" -f "${REPO_ROOT}/coinjoin-analysis/docker/analysis.Dockerfile" "${REPO_ROOT}/coinjoin-analysis"
+fi
+
+if [[ "${IMAGE_MODE}" == "local" ]]; then
+  verify_blocksci_image "${BLOCKSCI_IMAGE}"
+fi
+
+if [[ "${PULL_IMAGES}" == "1" ]]; then
+  pull_image "${BLOCKSCI_IMAGE}"
+  pull_image "${COINJOIN_EMULATOR_IMAGE}"
+  pull_image "${COINJOIN_ANALYSIS_IMAGE}"
+fi
+
+if [[ "${BUILD_ONLY}" == "1" || "${PULL_ONLY}" == "1" ]]; then
+  if [[ "${IMAGE_MODE}" == "local" ]]; then
+    echo "Built local images only."
+  else
+    echo "Pulled published images only."
+  fi
+  exit 0
+fi
+
+mkdir -p "${EMULATION_LOGS_DIR}"
+
+if [[ "${RUN_SCENARIOS}" == "1" ]]; then
+  for scenario in "${SCENARIOS[@]}"; do
+    resolved_scenario="$(scenario_arg "${scenario}")"
+    scenario_path="${resolved_scenario}"
+    if [[ "${resolved_scenario}" != /* ]]; then
+      scenario_path="${SCRIPT_DIR}/${resolved_scenario}"
+    fi
+
+    scenario_engine="$(engine_for_scenario "${scenario_path}")"
+    run_args=(full-run --scenario "${resolved_scenario}" --engine "${scenario_engine}")
+
+    echo "Running ${resolved_scenario} with ${IMAGE_MODE} images..."
+    CURRENT_STEP_LABEL="scenario workflow ${resolved_scenario}"
+    run_with_selected_images_in_dir "${SCRIPT_DIR}" bash runIt.sh "${run_args[@]}"
+  done
+fi
+
+if [[ "${RUN_TESTS}" == "1" ]]; then
+  # Answer "can this machine run the suite at all" before spending hours on it:
+  # unreachable images, an expired registry credential, a full disk, leftovers
+  # from a crashed test, or a competing suite. Set PREFLIGHT_SKIP=1 to bypass.
+  if [[ -z "${PREFLIGHT_SKIP:-}" && -x "${SCRIPT_DIR}/tests/support/preflight.sh" ]]; then
+    if ! "${SCRIPT_DIR}/tests/support/preflight.sh" "${IMAGE_MODE}"; then
+      echo "ERROR: preflight failed; not starting the test suite." >&2
+      exit 2
+    fi
+  fi
+
+  tests=(
+    "tests/pipeline/test_emulate_exit_status.sh"
+    "tests/pipeline/test_emulate_interrupt_cleanup.sh"
+    "tests/pipeline/test_emulate_log_follower_cleanup.sh"
+    "tests/pipeline/test_delete_profiles.sh"
+    "tests/test-run-all-local-failure-report.sh"
+    "tests/test-runIt-overactive-local.sh"
+    "tests/test-wrapper-signal-cleanup.sh"
+    "tests/test-podman-no-host-docker.sh"
+    "tests/test-runIt-overactive-local-docker.sh"
+    "tests/test-runIt-liquidity-local-docker.sh"
+    "tests/test-runIt-joinmarket-local-docker.sh"
+    "tests/test-runIt-parallel-local-docker.sh"
+    "tests/test-kubernetes-k3d.sh"
+    "tests/test-kubernetes-pbs-analysis.sh"
+    "tests/test-parallel-pbs-analysis.sh"
+    "tests/test-kubernetes-s3-minio.sh"
+    "tests/test-bitcoin-block-archive-s3-minio.sh"
+  )
+
+  # Docker-built local images normally live in a different image store from
+  # rootless Podman. The dedicated Podman E2E can build its own local images
+  # when invoked directly, but the shared local suite must not silently pull
+  # published images instead of testing its selected local inputs.
+  if [[ "${IMAGE_MODE}" != "local" ]]; then
+    tests+=("tests/test-runIt-overactive-local-podman.sh")
+  fi
+
+  for test_script in "${tests[@]}"; do
+    if [[ ! -x "${SCRIPT_DIR}/${test_script}" ]]; then
+      echo "ERROR: test script is not executable: ${SCRIPT_DIR}/${test_script}" >&2
+      exit 2
+    fi
+
+    echo "Running ${test_script} with ${IMAGE_MODE} images..."
+    CURRENT_STEP_LABEL="test ${test_script}"
+    if [[ "${test_script}" == "tests/test-runIt-joinmarket-local-docker.sh" ]]; then
+      run_in_dir "${SCRIPT_DIR}" env \
+        EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
+        LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE}" \
+        LOCAL_BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
+        LOCAL_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
+        LOCAL_COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
+        UPSTREAM_BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
+        UPSTREAM_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
+        UPSTREAM_COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
+        COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD_VALUE}" \
+        LOCAL_IMAGES_PREBUILT=1 \
+        RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
+        bash "${test_script}" "${CHILD_IMAGE_MODE}"
+    elif [[ "${test_script}" == "tests/test-kubernetes-pbs-analysis.sh" ||
+      "${test_script}" == "tests/test-parallel-pbs-analysis.sh" ]]; then
+      # PBS executes analyzer images inside Apptainer, which cannot see host
+      # Docker tags. In github mode the analyzers stay registry-backed docker://
+      # references (MetaCentrum parity); in local mode the test exports the
+      # freshly built analyzer images as docker-archive tarballs so the whole
+      # suite runs offline against local code.
+      pbs_local_image_env=()
+      if [[ "${IMAGE_MODE}" == "local" ]]; then
+        pbs_local_image_env=(
+          "PBS_BLOCKSCI_LOCAL_IMAGE=${BLOCKSCI_IMAGE}"
+          "PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE=${COINJOIN_ANALYSIS_IMAGE}"
+        )
+      fi
+      run_in_dir "${SCRIPT_DIR}" env \
+        EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
+        COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
+        COINJOIN_EMULATOR_PULL_POLICY="${COINJOIN_EMULATOR_PULL_POLICY_VALUE}" \
+        BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
+        COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
+        "${pbs_local_image_env[@]}" \
+        IMAGE_PREFIX="${UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX}" \
+        COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD= \
+        bash "${test_script}" all
+    elif [[ "${test_script}" == "tests/test-kubernetes-s3-minio.sh" ]]; then
+      # The S3-compatible e2e imports the selected wrapper/emulator images into
+      # k3d. In local mode, analyzer images are exported as docker-archive
+      # tarballs because Apptainer cannot see host Docker tags. Supporting
+      # Wasabi infrastructure images still use the published image prefix.
+      pbs_local_image_env=()
+      if [[ "${IMAGE_MODE}" == "local" ]]; then
+        pbs_local_image_env=(
+          "PBS_BLOCKSCI_LOCAL_IMAGE=${BLOCKSCI_IMAGE}"
+          "PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE=${COINJOIN_ANALYSIS_IMAGE}"
+        )
+      fi
+      run_in_dir "${SCRIPT_DIR}" env \
+        COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
+        BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
+        COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
+        "${pbs_local_image_env[@]}" \
+        IMAGE_PREFIX="${UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX}" \
+        bash "${test_script}" wasabi
+    elif [[ "${test_script}" == "tests/test-bitcoin-block-archive-s3-minio.sh" ]]; then
+      # This is the archive-to-MinIO parser contract.  In local image mode,
+      # hand Apptainer the selected BlockSci image as a docker archive.
+      pbs_local_image_env=()
+      if [[ "${IMAGE_MODE}" == "local" ]]; then
+        pbs_local_image_env=("PBS_BLOCKSCI_LOCAL_IMAGE=${BLOCKSCI_IMAGE}")
+      fi
+      run_in_dir "${SCRIPT_DIR}" env \
+        BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
+        S5CMD_IMAGE="${UPLOADER_IMAGE}" \
+        "${pbs_local_image_env[@]}" \
+        bash "${test_script}"
+    elif [[ "${test_script}" == "tests/test-kubernetes-k3d.sh" ]]; then
+      run_in_dir "${SCRIPT_DIR}" env \
+        EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
+        IMAGE_PREFIX="${UPSTREAM_COINJOIN_EMULATOR_IMAGE_PREFIX}" \
+        EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
+        COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD= \
+        RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
+        bash "${test_script}"
+    elif [[ "${test_script}" == "tests/test-runIt-overactive-local-docker.sh" ||
+      "${test_script}" == "tests/test-runIt-liquidity-local-docker.sh" ||
+      "${test_script}" == "tests/test-runIt-parallel-local-docker.sh" ]]; then
+      run_in_dir "${SCRIPT_DIR}" env \
+        EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR}" \
+        LOCAL_TAG="${LOCAL_TAG}" \
+        LOCAL_BLOCKSCI_BASE_IMAGE="${LOCAL_BLOCKSCI_BASE_IMAGE}" \
+        LOCAL_BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
+        LOCAL_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
+        LOCAL_COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
+        BLOCKSCI_IMAGE="${BLOCKSCI_IMAGE}" \
+        COINJOIN_EMULATOR_IMAGE="${COINJOIN_EMULATOR_IMAGE}" \
+        COINJOIN_ANALYSIS_IMAGE="${COINJOIN_ANALYSIS_IMAGE}" \
+        LOCAL_IMAGES_PREBUILT=1 \
+        RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS}" \
+        bash "${test_script}" "${CHILD_IMAGE_MODE}"
+    else
+      run_with_selected_images_in_dir "${SCRIPT_DIR}" bash "${test_script}"
+    fi
+  done
+fi
+
+completed_parts=()
+if [[ "${RUN_SCENARIOS}" == "1" ]]; then
+  completed_parts+=("${#SCENARIOS[@]} ${IMAGE_MODE} coinjoin-pipeline run(s)")
+fi
+if [[ "${RUN_TESTS}" == "1" ]]; then
+  completed_parts+=("all coinjoin-pipeline shell tests")
+fi
+
+if [[ "${#completed_parts[@]}" -eq 0 ]]; then
+  if [[ "${BUILD_IMAGES}" == "1" ]]; then
+    completion_summary="local image build"
+  elif [[ "${PULL_IMAGES}" == "1" ]]; then
+    completion_summary="published image pull"
+  else
+    completion_summary="no workflows"
+  fi
+elif [[ "${#completed_parts[@]}" -eq 1 ]]; then
+  completion_summary="${completed_parts[0]}"
+else
+  completion_summary="${completed_parts[0]}"
+  for ((i = 1; i < ${#completed_parts[@]}; i++)); do
+    completion_summary+=", ${completed_parts[$i]}"
+  done
+fi
+
+echo "PASS: completed ${completion_summary}. Logs: ${EMULATION_LOGS_DIR}"
