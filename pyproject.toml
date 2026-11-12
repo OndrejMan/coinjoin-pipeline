@@ -20,6 +20,7 @@ dev = ["mypy>=1.18", "pylint>=3.3", "ruff>=0.6", "types-PyYAML"]
 [project.scripts]
 coinjoin-pipeline = "coinjoin_pipeline.cli:main"
 cjp = "coinjoin_pipeline.cli:main"
+lint = "coinjoin_pipeline.lint:main"
 
 [tool.setuptools]
 packages = [
