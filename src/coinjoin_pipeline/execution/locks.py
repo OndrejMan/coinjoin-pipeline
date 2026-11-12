@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import TextIO
 
-from coinjoin_pipeline.configuration import PipelineConfiguration
+from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution.pbs.submission import pbs_job_probe, recorded_pbs_job_ids
 from coinjoin_pipeline.execution.run_context import run_dir_under_root
 from coinjoin_pipeline.execution.probes import PROBE_QUEUED, PROBE_RUNNING, PROBE_UNKNOWN
@@ -65,6 +65,12 @@ def pbs_submit_lock_path(logs_root: Path, run_id: str) -> Path:
 
 def command_lock_path(args: PipelineConfiguration, logs_root: Path) -> Path:
     """Return the local/shared advisory lock that protects this command."""
+    if args.action in {"pbs-from-s3"}:
+        return pbs_submit_lock_path(logs_root, required(args.run_id, "--run-id"))
+    if args.action == "emulate" and args.artifacts.backend == "s3":
+        # The bucket prefix, Kubernetes Job and emulator pods are all keyed by the
+        # run ID, so S3 runs with different IDs can proceed side by side.
+        return logs_root / required(args.run_id, "--run-id") / ".pipeline.lock"
     if args.run_dir and args.action in {"analyze", "export", "coinjoin-analysis"}:
         return run_dir_under_root(args.run_dir, logs_root) / ".research.lock"
     return logs_root / ".pipeline.lock"
