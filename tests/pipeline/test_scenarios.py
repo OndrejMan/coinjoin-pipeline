@@ -97,3 +97,15 @@ class ScenarioValidationTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "Wasabi wallets only"):
                 validate_scenario(path, "joinmarket")
+
+    def test_postmix_smoke_scenario_spends_and_keeps_mixing(self):
+        root = Path(__file__).resolve().parents[2]
+        path = root / "scenarios" / "liquidity-postmix-smoke.json"
+        self.assertEqual(validate_scenario(path, "wasabi")["rounds"], 6)
+        spends = [
+            spend
+            for wallet in json.loads(path.read_text())["wallets"]
+            for spend in (wallet.get("wasabi") or {}).get("postmix_spends") or []
+        ]
+        self.assertTrue(spends)
+        self.assertTrue(all("value" in spend and not spend.get("all") for spend in spends))
