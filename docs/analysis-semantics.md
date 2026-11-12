@@ -1,0 +1,315 @@
+# Analysis semantics and provenance
+
+This document defines which artifacts produce labels and metrics in the
+pipeline. It is the contract to use when interpreting a unified report.
+
+## Emulator labels and detector metrics
+
+Producer-manifest validation belongs to coinjoin-pipeline. The standalone
+coinjoin-analysis parser reads source locations and protocol metadata, but does
+not validate manifest hashes, capture completeness or producer-positive counts.
+The pipeline validates those before using producer evidence as ground truth;
+missing analyzer detections remain visible as false negatives in that analyzer's
+evaluation rather than making its parser responsible for ground-truth integrity.
+
+Emulator-mode labels are independent of `coinjoin-analysis` detector output:
+
+- JoinMarket positives come from `joinmarket_round_events.json` records with
+  `status: "confirmed"` and exactly one reconciled `destination_matches` entry.
+  `multiple_matches` means several transactions match the destination;
+  `duplicate_destination` means several rounds share that address. Both statuses
+  make emulator labels unavailable, even if the manifest incorrectly declares
+  the capture complete. `duplicate_destination` takes precedence when both
+  problems occur; the matches remain recorded for diagnostics. The status is
+  the sole classification; there is no separate duplicate-destination boolean.
+- Wasabi 2 positives come from successful-broadcast records in the exported
+  coordinator `Logs.txt` (or the legacy combined backend log).
+- Every new emulator run includes `data/coinjoin_label_manifest.json`, which
+  declares capture completeness plus the size and SHA-256 digest of each exact
+  producer source and the producer-computed positive transaction count. Only
+  sources verified against a complete, engine-matching schema-1.0 manifest are
+  used, and the consumer's parsed positive count must match.
+- When a verified producer label source is present, exported non-coinbase
+  transactions absent from its positive records are negative labels. A
+  verified empty source is therefore valid evidence with zero positives.
+- When the manifest or a declared source is missing, incomplete, malformed,
+  modified, or truncated, every `is_coinjoin` value is `null`,
+  `evaluation_scope` is `emulator_labels_unavailable`, and no confusion matrix
+  or precision/recall values are emitted.
+- For older Wasabi manifests without a producer positive count, a manifest is
+  also rejected when its logs contain no parseable broadcast record while
+  exported blocks contain a transaction with at least five inputs. New
+  manifests can authoritatively declare zero positives without this
+  transaction-shape fallback.
+- Producer-positive txids must all occur in the exported block set. Any
+  unmatched positive makes the complete label set unavailable instead of
+  silently removing that transaction from the confusion matrix.
+
+`coinjoin_tx_info.json` remains the baseline-analyzer input to the agreement
+comparison. Its wallet/address ownership data may enrich emulator transaction
+records, but its `coinjoins` keys never determine `is_coinjoin`. Every report
+records `label_provenance`, including source paths and
+`baseline_used_for_labels: false`.
+
+When independent labels are available, schema-1.8 reports evaluate both
+BlockSci and `coinjoin-analysis` against the same set of exported non-coinbase
+transactions. The two confusion matrices are stored under
+`detector_evaluations.blocksci` and
+`detector_evaluations.coinjoin_analysis`; schema 2.0 dropped the old
+`detection_confusion_matrix` alias. `coinjoin-analysis` metrics use its normalized effective
+output after applying any `false_cjtxs.json*` sidecars recorded in
+`baseline_filter`; they do not describe the unfiltered raw detector output.
+
+Analyzer detections whose txids are absent from the exported emulator
+transaction universe are reported as `out_of_scope_detected_txids`. They are
+not silently discarded or classified as false positives because the producer
+label set contains no observation for them. Unknown emulator labels are counted
+in `unknown` and excluded from TP/FP/TN/FN rate denominators.
+
+The analyzer-agreement fields have a different meaning from the ground-truth
+matrices: `matched_by_both`, `missed_by_blocksci`, and `blocksci_only` compare
+the two detector outputs and do not by themselves establish a true positive,
+false negative, or false positive.
+
+The producer logs/events and manifest are run evidence and must be preserved.
+Historical runs without the manifest intentionally produce unavailable metrics
+when re-exported; regenerate them with a rebuilt emulator image rather than
+inferring completeness from file presence.
+
+External mode has no emulator labels and retains
+`evaluation_scope = "baseline_agreement_only"`.
+
+## Scenario funds check
+
+`summary.scenario_checks.input_sats_within_scenario_funds` bounds a **single**
+CoinJoin, not the sum of them: it holds when the largest detected CoinJoin's
+`total_input_sats` fits inside the scenario's `total_initial_funds_sats`. A
+multi-round scenario remixes the same coins, so every round after the first
+counts the same satoshis again and the aggregate legitimately exceeds the
+one-time funding — a 10-round `overactive-local` run sits around 1.5-2.3x, a
+3-round `default-joinmarket` run below 1x. Up to schema 1.7 the check compared
+that aggregate against the funding and therefore reported `false` on every
+multi-round Wasabi run; since schema 1.8 the aggregate is reported as
+`coinjoin_analysis_input_sats` with `coinjoin_input_sats_to_funds_ratio` (both
+informational, the ratio being the remix factor) and `max_coinjoin_input_sats`
+carries the value the check actually tests.
+
+## Scenario wallet-count check
+
+`summary.scenario_checks.wallet_count_matches` is protocol-dependent, and
+`wallet_count_rule` records which rule was applied:
+
+- **Wasabi (`exact`)** — every scenario wallet registers over the run, so the
+  observed wallet count must equal `scenario_wallet_count`.
+- **JoinMarket (`subset`)** — a taker picks a fixed number of counterparties per
+  round (4 by default), so makers that are never chosen never appear in a
+  CoinJoin. `default-joinmarket` runs 2 takers and 8 makers over 3 rounds and has
+  legitimately produced 7 to 10 observed wallets. The check therefore only
+  requires `0 < observed <= scenario_wallet_count`.
+
+Before schema 1.8 the rule was equality for both protocols, so JoinMarket runs
+reported `wallet_count_matches: false` on nearly every run; in an older report
+that `false` is a false negative, not a finding.
+
+## Wasabi threshold precedence
+
+The Wasabi 2 heuristic chooses an internal minimum input count when its
+optional `inputCount` argument is absent. For pre-height-850237 transactions,
+that internal minimum is 50; newer transactions use 20.
+
+The pipeline and exporter leave the option unset by default, so BlockSci uses
+the height-aware production threshold. An explicit `--min-input-count N`
+overrides that threshold, and the run manifest records that override as `N`;
+no override is recorded as `null`. Overrides must be positive integers; zero,
+negative, and non-numeric values are command-line errors.
+
+When supplied, the override is passed to the raw BlockSci detector. Clustering
+receives that detector's transaction set through
+`CoinjoinClusterManager.create_clustering_from_txes`, so it uses the same Wasabi 2
+input threshold without running detection again. JoinMarket clustering likewise
+uses the protocol heuristic's set. This requires a BlockSci build with the new
+binding; older builds report clustering as unavailable with a rebuild hint.
+
+Small regtest Wasabi rounds generally need an explicit
+`--min-input-count`. When production thresholds are used on pre-850237
+emulator blocks and BlockSci detects zero transactions, the JSON and Markdown
+reports carry a `wasabi_production_threshold_zero_detections` warning.
+
+## BlockSci bulk detector APIs
+
+- `filter_coinjoin_txes_raw` returns every transaction-level heuristic match
+  in the requested range. The report exporter and the mainnet scan use it for
+  every CoinJoin type; for JoinMarket it runs `isJoinMarketCoinJoin`, which
+  needs at least five outputs of one uniquely most frequent value. Change
+  values may repeat less often than the mix value; a tie between the most
+  frequent values is rejected. It does not exclude Whirlpool or Ashigaru
+  transactions.
+- `filter_coinjoin_txes` is a separate linked-transaction API. It returns both
+  endpoints of connections between matched transactions and excludes isolated
+  matches. It is useful for linked-chain analysis, not detector metrics.
+- `scan_coinjoins_by_subset_matching` directly scans the range with the
+  selected subset-matching detector (`possible` / `definite`) and returns
+  `(detected, skipped)`. `skipped` records searches that reached the
+  configured depth limit. This detector is not protocol-specific: it matches
+  equal-value outputs fundable by distinct input subsets and does not exclude
+  Wasabi, Whirlpool or Ashigaru. BlockSci deprecates it because its
+  backtracking is exponential in the input count. The analysis still runs it
+  on JoinMarket emulator runs, never on an external chain, and the report keeps
+  its result only as the `blocksci_subset_matching` comparison; the
+  `--joinmarket-*` options configure that comparison alone.
+
+The exporter fails with a rebuild instruction when the installed BlockSci
+module lacks the raw binding; it never silently substitutes the linked subset.
+
+On every path (Docker and PBS, serial and parallel), these detector results and
+the associated integration diagnostics and clustering assignments are persisted
+by `exporters/worker.py` as `blocksci-analysis_data/blocksci_analysis.json`
+(schema 1.3, whose BlockSci records carry `block_time` and whose `subset_matching` holds the deprecated
+JoinMarket scan; no other schema is read). Report assembly reads only this artifact
+and never scans BlockSci itself. It requires the artifact's run ID and detector parameters to exactly match the
+requested report; a mismatched or stale artifact fails rather than being
+silently combined with a different baseline.
+
+Every S3 parsing workflow, including `combined`, separates that analyzer artifact
+from the archived index. `blocksci-parse_data/manifest.json` schema 1.1 identifies the
+run, BlockSci image, exported maximum block, archive name (a zstd-compressed
+`blocksci_data.tar.zst`), and archive SHA-256.
+Consumers check the manifest and stream the archive through decompression and
+extraction while computing SHA-256. They may use the extracted index only after
+the entire transfer, extraction and checksum verification succeed. A successful
+S3 download alone does not prove that the parsed chain is valid. Standard detector output retains the same
+`blocksci-analysis_data/blocksci_analysis.json` contract regardless of whether
+it came from the combined or reusable workflow, so report semantics do not
+change.
+
+The same cache schema can represent emulator data, an external Bitcoin Core
+coin directory, or an imported BlockSci index; `source_kind` and `network` in
+the manifest preserve that provenance. Notebook and custom-script consumers
+operate only on the verified index. The standard detector remains tied to
+emulator label and exported-block inputs, so importing external chain data
+does not by itself create a unified emulator-comparison report.
+
+## PBS template inputs
+
+Before rendering a PBS script, the pipeline validates shared-storage paths,
+positive CPU counts, memory/scratch size grammar, walltime components, job and
+stage tokens, and container-image characters. Invalid values raise `PBSError`
+and are not interpolated into PBS directives or shell assignments.
+
+Stage command bodies are generated internally by the pipeline
+(`execution/pbs/commands.py`) and are the only shell a job runs in its container;
+everything else reaches the PBS worker as `settings.json` values, never as shell.
+
+## Unified report top-level keys
+
+Every key is present in every report; one that does not apply is `null`.
+
+| Key | Content |
+|---|---|
+| `schema_version` | Report schema (`exporters/common.py` `SCHEMA_VERSION`). |
+| `run` | Run ID, start time, scenario, CoinJoin type, BlockSci minimum input count, mode and network; the other detector parameters are in `run_manifest.detector`. |
+| `run_manifest`, `run_manifest_comparison` | Provenance (images and digests, detector, source commits, exporter tree hash, input hashes) and its diff against the report it replaced. |
+| `warnings` | `[{code, message}]`; today only `wasabi_production_threshold_zero_detections`: no Wasabi detections at regtest heights under the production input threshold. |
+| `integration_diagnostics` | Image provenance, chain height and exported-target checks of the BlockSci analysis. |
+| `scenario`, `emulator_data` | The scenario and the producer-label summary and provenance. |
+| `detector_evaluations`, `evaluation_scope` | Confusion matrices of both analyzers against producer labels, and which comparison the metrics stand for. |
+| `clustering_evaluation` | Pairwise precision and recall of BlockSci clusters against wallet ground truth. |
+| `blocksci_subset_matching` | JoinMarket emulator runs only: the deprecated subset-matching scan against coinjoin-analysis and the protocol heuristic, with the transactions its search gave up on. Its confusion matrix is `detector_evaluations.blocksci_subset_matching`. |
+| `coinjoin_mappings` | Wasabi mappings and Sake results, when the run computed them. |
+| `coverage` | External mode only: the BlockSci scan window and how much of the baseline falls in it. |
+| `baseline_filter` | The false-positive lists applied to the baseline and the transactions they removed. |
+| `liquidity_evaluation` | Pool liquidity from ground truth, coinjoin-analysis and BlockSci, and fin of large wallets and groups. |
+| `summary`, `divergences`, `transactions` | Counts, the analyzer disagreements and every compared transaction; its `coinjoin_analysis` side has the round's `broadcast_time`, its `blocksci` side the block's `block_time`. |
+
+## Run catalog report statuses
+
+`runs list` (`src/coinjoin_pipeline/execution/run_catalog.py::report_status`) classifies each
+run's `coinjoinPipeline_data/unified_report.json` into one of:
+
+- `missing` — no report file exists; the export stage has not run.
+- `invalid` — the report file exists but cannot be parsed as JSON.
+- `stale` — the report exists but one of its inputs changed after it was
+  written, so it describes a previous analyzer run; re-export to refresh it.
+  Reports record the SHA-256 of every input they read in
+  `run_manifest.inputs` (scenario, producer-label manifest, JoinMarket round
+  events, the emulator's `postmix_spends.json`, baseline and its false-positive
+  sidecars, the external baseline's `dumplings-snapshot.json`, BlockSci analysis
+  artifact, mappings; `REPORT_INPUT_FILES` in `exporters/artifact_paths.py`). An input that is rewritten or appears later marks the report
+  stale; an input missing locally (an S3 run with only the report downloaded)
+  does not. A report without recorded hashes is stale.
+- `baseline_agreement_only` — external mode; the report compares BlockSci with
+  `coinjoin-analysis` only and intentionally has no ground-truth metrics.
+- `emulator_labels_unavailable` — emulator mode, but independent producer
+  labels could not be verified (missing/incomplete/hash-mismatched
+  `coinjoin_label_manifest.json`, unparseable sources, or unmatched producer
+  positives). `is_coinjoin` is `null` everywhere and no confusion matrix or
+  precision/recall is emitted; the reason is in
+  `emulator_data.label_provenance.unavailable_reason`.
+- `diagnostics_missing` — the report predates or omits
+  `integration_diagnostics`.
+- `diagnostics_not_ok` — integration diagnostics ran and found a problem, or
+  reported a status other than the explicit `ok` (the check fails closed).
+- `complete` — emulator ground truth was available and diagnostics passed.
+
+`runs list` and `runs inspect` show each stage as `present`, `missing` or,
+for the report and its Markdown, `stale`. Every run-relative path comes from
+`pipeline/exporters/artifact_paths.py`.
+
+Runs made with an emulator image that predates the producer-label manifest
+always classify as `emulator_labels_unavailable` after re-export; regenerate
+them with a rebuilt emulator image if ground-truth metrics are needed.
+
+## Liquidity evaluation
+
+`liquidity_evaluation` in `unified_report.json` (schema 3.0) follows the
+transaction-centric pool liquidity of Svenda et al., PETS 2026, section 4.3.2.
+`pipeline/exporters/liquidity.py` classifies every coinjoin input and output
+three times:
+
+- Ground truth: the producer coinjoin labels mark the mix boundary and the
+  exported blocks give each output's spender. An input from a coinjoin is
+  `MIX_REMIX`, any other input `MIX_ENTER`; an output spent by a coinjoin is
+  `MIX_REMIX`, by another transaction `MIX_LEAVE`, and an unspent one
+  `MIX_STAY`. Wallet ownership comes from the same address mapping as the
+  clustering evaluation.
+- Observed: the `mix_event_type` coinjoin-analysis wrote into
+  `coinjoin_tx_info.json`.
+- BlockSci (`liquidity_evaluation.blocksci`): the analysis stage passes the
+  CoinJoins BlockSci detected to `Blockchain.classify_coinjoin_mix_events` and
+  stores the result as `mix_events` in `blocksci_analysis.json`. The detected
+  set is BlockSci's mix, so a missed CoinJoin leaves its inputs and outputs
+  `missing` (`unclassified_coinjoins`) and its remixes look like leaves, while a
+  false positive (`extra_coinjoins`) turns the inputs it funds into remixes. An
+  older BlockSci image or analysis artifact makes the subsection
+  `available: false` with a reason.
+
+Each gives the interim pool liquidity (inflow minus outflow, an outflow charged
+to the coinjoin that created the output), its variant charging only outputs that
+leave within `WINDOW_COINJOINS`, the outstanding unmoved outputs and the actively
+remixed liquidity. `unmoved_window` holds outputs classified as `MIX_STAY` or
+`MIX_REMIX` whose next spend is at least the window away (or unknown). A remix
+input retires its previous outpoint before new outputs are added. `MIX_LEAVE`
+outputs are excluded: interim already subtracts their value at creation.
+`active_remix` is interim minus this outstanding value; like interim it does not
+subtract CoinJoin fees. These retrospective metrics use the recorded future
+spender, not a forecast of which coins will remix. Mainnet analysis uses a
+one-month window; an emulated run lasts hours, so the window counts later
+coinjoins instead. Datasets exported before this correction accumulated all
+slow outputs permanently; re-export into a separate evidence directory to
+recompute those two series without overwriting the original artifacts.
+
+The ground truth is also split by wallet. A wallet whose own interim liquidity
+reaches at least half of the pool's at its peak is a large wallet. For each,
+`fin` measures what the observed curve reveals: the wallet's share of the inflow
+in the coinjoin with the largest observed inflow, and the wallet's share of the
+value leaving the mix in the descending part of the observed curve (from its peak
+to the lowest point after it), compared to its share of all leaving value
+(`lift`). This is the attribution argument of section 5.3.
+
+`postmix_spends` checks the emulator's spend schedule
+(`coinjoin_emulator_data/data/postmix_spends.json`) against the exported blocks.
+A JoinMarket spend lists one transaction per swept mixdepth under `txids`; it is
+confirmed once all of them are mined.
+The per-event dataset is written next to the report as `liquidity_dataset.json`
+and `liquidity_events.csv`. Without emulator data or independent coinjoin labels
+the section is `available: false` with a reason.
