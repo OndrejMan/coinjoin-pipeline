@@ -41,15 +41,17 @@ UTILITIES = (
     "doctor",
     "pull",
     "watch",
+    "status",
     "download-report",
     "clean-s3",
 )
-DELEGATING_UTILITIES = frozenset({"watch", "download-report", "clean-s3"})
+DELEGATING_UTILITIES = frozenset({"watch", "status", "download-report", "clean-s3"})
 UTILITY_SUMMARIES = {
     "version": "print the CLI version and the default component images",
     "doctor": "check the container runtime, the runs root and the default images",
     "pull": "pull every component image with the container runtime",
     "watch": "stream Kubernetes and PBS logs of one run",
+    "status": "report the PBS, Kubernetes and S3 marker state of runs",
     "download-report": "download the finished unified report of an S3 run",
     "clean-s3": "delete S3 artifacts of one run or a whole run root",
 }
