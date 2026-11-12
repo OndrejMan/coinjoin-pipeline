@@ -50,6 +50,11 @@ services:
       environment:
         - DOCKER_HOST=tcp://dind:2375
         - DOCKER_DEFAULT_PLATFORM=${COINJOIN_EMULATOR_DOCKER_PLATFORM:-}
+      volumes:
+        # DinD has its own (empty) registry auth, so a build inside it cannot pull
+        # a private base image. Hand this container the host's credentials so it
+        # can warm those images into DinD's cache before the manager builds.
+        - ${COINJOIN_REGISTRY_CONFIG:-./anonymous-docker-config.json}:/root/.docker/config.json:ro
       depends_on:
         dind:
           condition: service_healthy
