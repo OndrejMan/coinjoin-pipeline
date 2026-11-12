@@ -188,10 +188,8 @@ def select(arguments: argparse.Namespace) -> None:
         stored = sidecar.name + ".zst" if sidecar.name in packed else sidecar.name
         lines.append(f"cp {arguments.uri}/{stored} {blocks}/\n")
     arguments.commands.write_text("".join(lines), encoding="utf-8")
-    arguments.manifest_fields.write_text(
-        f',\n  "block_archive_last_file": {last},\n  "block_archive_index_sha256": "{index_sha256(sidecars, last)}"',
-        encoding="utf-8",
-    )
+    fields = {"block_archive_last_file": last, "block_archive_index_sha256": index_sha256(sidecars, last)}
+    arguments.manifest_fields.write_text(json.dumps(fields, indent=2) + "\n", encoding="utf-8")
     total = sum(sidecar.size for sidecar in chosen)
     print(f"[block-archive] downloading {len(chosen)} of {len(sidecars)} block files ({total} bytes)")
 
@@ -257,7 +255,7 @@ def build_parser() -> argparse.ArgumentParser:
     chooser.add_argument("--source-manifest", type=Path, help="cache manifest of the index being updated")
     chooser.add_argument("--packed", type=Path, help="file naming the block files stored only as .zst")
     chooser.add_argument("--commands", type=Path, required=True, help="s5cmd run file to write")
-    chooser.add_argument("--manifest-fields", type=Path, required=True, help="JSON fields for the new cache")
+    chooser.add_argument("--manifest-fields", type=Path, required=True, help="JSON object of the new cache's fields")
     chooser.set_defaults(handler=select)
 
     unpacker = commands.add_parser("unpack", help="unpack the downloaded .zst block files")

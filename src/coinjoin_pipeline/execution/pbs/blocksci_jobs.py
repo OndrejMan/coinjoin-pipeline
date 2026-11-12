@@ -357,8 +357,7 @@ def download_block_archive(
     stage.storage.run("run", str(commands), check=True, timeout=None)
     subprocess.run([*helper, "unpack", str(datadir / "blocks")], check=True)
     subprocess.run([*helper, "verify", str(datadir / "blocks"), "--max-block", str(max_block), *update], check=True)
-    # The helper writes the fields as they follow another manifest field.
-    return datadir, json.loads("{" + fields.read_text().strip().lstrip(",") + "}")
+    return datadir, json.loads(fields.read_text())
 
 
 def parse_source(stage: Stage, source: SourceSettings) -> tuple[Path | None, int, dict]:

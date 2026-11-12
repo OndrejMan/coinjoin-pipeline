@@ -151,7 +151,7 @@ def test_the_removed_global_manifest_alone_is_not_an_archive(tmp_path: Path) -> 
 def test_parse_downloads_only_the_prefix_up_to_the_tip_margin(tmp_path: Path) -> None:
     # Heights up to 12 + 6 sit in the first two files; the rest of the archive is not needed.
     assert select(tmp_path, TEN_PER_FILE, 12) == ["blk00000.dat", "blk00001.dat"]
-    fields = json.loads("{" + (tmp_path / "fields.json").read_text(encoding="utf-8").lstrip(",") + "}")
+    fields = json.loads((tmp_path / "fields.json").read_text(encoding="utf-8"))
     assert fields == {"block_archive_last_file": 1, "block_archive_index_sha256": index_sha256(TEN_PER_FILE, 1)}
 
 
