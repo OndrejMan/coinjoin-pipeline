@@ -10,7 +10,9 @@ The backup prefix holds one backup in the format of s5client.py (replace_backup,
 restore_backup): blocksci_index.tar.zst, its .sha256 and manifest.json, written last.
 A new backup deletes the old one first, so S3 never holds two copies; until its
 manifest exists there is no valid backup. The mainnet checkpoint job writes the same
-backup, so either job's backup restores in the other.
+backup, so either job's backup restores in the other. A run's own index in
+<run prefix>/blocksci-parse_data is a backup of this format too, of an index that
+lived in the job's scratch.
 
 Lock: one writer or many readers, as directories under <index>/.lock. Entries are built
 aside and renamed into place, which is atomic on NFS and BeeGFS without flock. Each
@@ -241,12 +243,14 @@ class IndexStore:
         self.path.mkdir(parents=True, exist_ok=True)
         (self.path / ".writing").touch()
 
-    def publish(self, config: Path, manifest: dict) -> dict:
+    def publish(self, config: Path, manifest: dict, *, in_place: bool = True) -> dict:
         """Record a finished parse or update: config, file list and manifest, then completeness.
 
-        The manifest gains where and when the index was recorded; it is returned as written.
+        The manifest gains when the index was recorded and, for an index kept in place, where;
+        a run's index lives only in the job's scratch until its backup. It is returned as written.
         """
-        manifest = {**manifest, "storage": "persistent", "index_dir": str(self.path), "published_at": utc_now()}
+        location = {"storage": "persistent", "index_dir": str(self.path)} if in_place else {}
+        manifest = {**manifest, **location, "published_at": utc_now()}
         if config.resolve() != (self.path / "config.json").resolve():
             shutil.copyfile(config, self.path / "config.json")
         for name, content in (

@@ -63,8 +63,7 @@ runs the tag.
 | In-cluster prefix preflight and artifact uploader | `execution/k8s_s3_prefix_preflight.sh`, `k8s_s3_uploader.sh`, their shared `k8s_s3_access.sh` header |
 | Kubernetes resource generation and diagnosis | `execution/kubernetes.py` |
 | Graph definitions and dependency queries | `execution/stages.py`, `stage_executor.py` |
-| S3 index archive transport shared by emulation caches, persistent backups and mainnet checkpoints | `storage/s5client.py` (`upload_archive`, `restore_archive`) |
-| Format of a single backup (persistent index, Core checkpoint): archive, `.sha256`, manifest written last | `storage/s5client.py` (`replace_backup`, `restore_backup`) |
+| Format of a single backup (a run's index, the persistent index, Core checkpoint): archive, `.sha256`, manifest written last | `storage/s5client.py` (`replace_backup`, `restore_backup`) |
 | Persistent index lock, completeness, backup and restore; the index manifest every parse and update records | `execution/pbs/index_store.py` (`IndexStore`, `index_manifest`) |
 | Run-directory layout (every run-relative path, marker sets, report inputs), imported by the host, the exporters and the PBS jobs | `pipeline/exporters/artifact_paths.py` (stdlib only; the jobs ship it) |
 | Command locks and S3 PBS overlap detection | `execution/locks.py` |

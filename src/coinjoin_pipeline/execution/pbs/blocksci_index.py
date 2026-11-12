@@ -2,8 +2,9 @@
 
 A run-local index lives in <run>/blocksci_data; the container sees the run under
 CONTAINER_RUNS_ROOT. A reusable index is published to <run prefix>/blocksci-parse_data
-as an archive, its checksum and, last, its manifest. A persistent index stays in a
-shared directory (index_store.py) and only its manifest is copied to the run.
+as a backup in the format of the persistent index's (index_store.py): an archive, its
+checksum and, last, its manifest. A persistent index stays in a shared directory and only
+its manifest is copied to the run.
 """
 
 from __future__ import annotations
@@ -20,9 +21,6 @@ from coinjoin_pipeline.execution.pbs.index_store import MANIFEST_SCHEMA, IndexSt
 from coinjoin_pipeline.execution.pbs.stage import CONTAINER_RUNS_ROOT, Stage, StageFailure
 from coinjoin_pipeline.execution.pbs.stage_settings import PersistentSettings
 
-
-# The archive of a reusable index in <run prefix>/blocksci-parse_data.
-INDEX_ARCHIVE = "blocksci_data.tar.zst"
 
 # Files without which a parsed index is unusable.
 INDEX_FILES = (BLOCKSCI_CONFIG_FILE, BLOCKSCI_DIR + "/parsed/chain/block.dat")
@@ -60,35 +58,32 @@ def check_manifest(manifest: dict, label: str, image_name: str, run_id: str | No
         raise StageFailure(f"{label} was produced by a different BlockSci image")
 
 
+def run_index(stage: Stage, prefix: str) -> IndexStore:
+    """The run's working index as an IndexStore whose backup is the run cache at prefix."""
+    return IndexStore(str(stage.work / BLOCKSCI_DIR), prefix, storage=stage.storage)
+
+
 def restore_index(
     stage: Stage, cache_dir: Path, prefix: str, run_id: str, label: str, check: Callable[[dict], None] | None = None
 ) -> dict:
-    """Verify a published index's metadata, then stream it into the run's working index.
+    """Check a published index's manifest, then restore it into the run's working index.
 
-    Only small metadata lands in cache_dir. The .writing marker stays on any failure, so
-    nothing reads an index whose whole stream was not extracted and verified.
+    The restore is the persistent index's: the archive is hashed while it is extracted,
+    only its declared members are accepted, and the restored files must match files.txt.
+    The .writing marker stays on any failure, so nothing reads a partly restored index.
+    The manifest is kept in cache_dir, where the job reads it.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path, sidecar = cache_dir / "manifest.json", cache_dir / f"{INDEX_ARCHIVE}.sha256"
+    manifest_path = cache_dir / "manifest.json"
     stage.storage.copy(f"{prefix}/manifest.json", str(manifest_path))
-    stage.storage.copy(f"{prefix}/{INDEX_ARCHIVE}.sha256", str(sidecar))
     manifest = json.loads(manifest_path.read_text())
     check_manifest(manifest, label, stage.settings["image_name"], run_id)
-    if manifest.get("archive") != INDEX_ARCHIVE:
-        raise StageFailure(f"{label} has an unsupported archive")
     if check is not None:
         check(manifest)
-    checksum = sidecar.read_text().split(" ", 1)[0].strip()
-    if manifest.get("archive_sha256") != checksum:
-        raise StageFailure(f"{label} manifest SHA-256 does not match its sidecar")
-    (stage.work / BLOCKSCI_DIR).mkdir(parents=True, exist_ok=True)
-    writing = stage.work / BLOCKSCI_DIR / ".writing"
-    writing.touch()
-    stage.storage.restore_archive(f"{prefix}/{INDEX_ARCHIVE}", stage.work, checksum)
+    run_index(stage, prefix).restore()
     for relative in INDEX_FILES:
         stage.require_file(relative, f"{label} did not contain {relative}")
     canonicalize_index(stage)
-    writing.unlink()
     return manifest
 
 

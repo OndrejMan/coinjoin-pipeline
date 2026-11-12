@@ -37,7 +37,6 @@ from exporters.artifact_paths import (
 )
 
 from coinjoin_pipeline.execution.pbs.blocksci_index import (
-    INDEX_ARCHIVE,
     INDEX_FILES,
     canonicalize_index,
     check_manifest,
@@ -45,6 +44,7 @@ from coinjoin_pipeline.execution.pbs.blocksci_index import (
     open_index,
     require_tools,
     restore_index,
+    run_index,
 )
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore, index_manifest
 from coinjoin_pipeline.execution.pbs.stage import CONTAINER_RUNS_ROOT, Stage, StageFailure
@@ -60,6 +60,8 @@ from coinjoin_pipeline.execution.pbs.stage_settings import (
 
 # An update's copy of the manifest of the index it extends; job scratch, never published.
 SOURCE_CACHE_DIR = "source-blocksci-parse_data"
+# What verify_chain found; job scratch beside the index, whose directory holds only the index.
+CHAIN_VERIFICATION_FILE = "chain-verification.json"
 
 
 def emulator_max_block(stage: Stage) -> int:
@@ -88,30 +90,15 @@ def emulator_bitcoin_datadir(stage: Stage) -> Path:
 
 
 def publish_index(stage: Stage, source_kind: str, network: str, max_block: int, extra: dict[str, object]) -> None:
-    """Stream the run's index to S3; its checksum sidecar and then its manifest make it valid.
+    """Record the run's index like a persistent one and publish it as its single backup.
 
     The previous manifest goes first, so a failed upload leaves no index that looks complete.
     """
-    prefix = f"{stage.run_prefix}/{BLOCKSCI_PARSE_DIR}"
-    archive = f"{prefix}/{INDEX_ARCHIVE}"
     stage.log("archiving reusable index")
-    stage.storage.remove(f"{prefix}/manifest.json")
-    checksum, _ = stage.storage.upload_archive(stage.work, [BLOCKSCI_DIR], archive, stage.settings["ncpus"])
-    cache = stage.work / BLOCKSCI_PARSE_DIR
-    cache.mkdir(parents=True, exist_ok=True)
-    sidecar = cache / f"{INDEX_ARCHIVE}.sha256"
-    sidecar.write_text(f"{checksum}  {INDEX_ARCHIVE}\n")
-    stage.storage.copy(sidecar, f"{archive}.sha256")
-    manifest = index_manifest(
-        stage.run_id,
-        stage.settings["image_name"],
-        source_kind,
-        network,
-        max_block,
-        {**extra, "archive": INDEX_ARCHIVE, "archive_sha256": checksum},
-    )
-    (cache / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    stage.storage.copy(cache / "manifest.json", f"{prefix}/manifest.json")
+    index = run_index(stage, f"{stage.run_prefix}/{BLOCKSCI_PARSE_DIR}")
+    manifest = index_manifest(stage.run_id, stage.settings["image_name"], source_kind, network, max_block, extra)
+    index.publish(stage.work / BLOCKSCI_CONFIG_FILE, manifest, in_place=False)
+    index.backup(threads=stage.settings["ncpus"])
 
 
 def blocksci(stage: Stage) -> None:
@@ -243,7 +230,7 @@ def verify_chain(
         *(["--expected-block-hash", str(source["expected_hash"])] if source.get("expected_hash") else []),
         *(["--source-manifest", f"{run_directory}/{SOURCE_CACHE_DIR}/manifest.json"] if update else []),
         "--output",
-        f"{run_directory}/{BLOCKSCI_DIR}/chain-verification.json",
+        f"{run_directory}/{CHAIN_VERIFICATION_FILE}",
     ]
     python = shlex.split(settings["python_command"])
     command = stage.image_command(
@@ -259,7 +246,7 @@ def verify_chain(
         cleanenv=True,
     )
     subprocess.run(command, check=True)
-    verified = json.loads((stage.work / BLOCKSCI_DIR / "chain-verification.json").read_text())
+    verified = json.loads((stage.work / CHAIN_VERIFICATION_FILE).read_text())
     return int(verified["exported_max_block"]), str(verified["exported_block_hash"])
 
 
@@ -333,7 +320,11 @@ def parse_source(stage: Stage, source: SourceSettings) -> tuple[Path | None, int
         for relative in ("config.json", "parsed/chain/block.dat"):
             if not (index / relative).is_file():
                 raise StageFailure(f"External BlockSci directory must contain {relative}: {index}")
-        shutil.copytree(index, stage.work / BLOCKSCI_DIR, symlinks=True)
+        # Only the index itself: its backup holds config.json and parsed/, and files.txt lists them.
+        imported = stage.work / BLOCKSCI_DIR
+        imported.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(index / "config.json", imported / "config.json")
+        shutil.copytree(index / "parsed", imported / "parsed")
         canonicalize_index(stage)
         found = re.search(r'"maxBlockNum"\s*:\s*(\d+)', (stage.work / BLOCKSCI_CONFIG_FILE).read_text())
         if found is None or int(found.group(1)) <= 0:

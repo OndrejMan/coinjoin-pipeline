@@ -172,11 +172,13 @@ silently combined with a different baseline.
 
 Every S3 parsing workflow, including `combined`, separates that analyzer artifact
 from the archived index. `blocksci-parse_data/manifest.json` schema 1.1 identifies the
-run, BlockSci image, exported maximum block, archive name (a zstd-compressed
-`blocksci_data.tar.zst`), and archive SHA-256.
+run, BlockSci image, exported maximum block, archive (a zstd-compressed
+`blocksci_index.tar.zst`, the same backup format as the persistent index's), its
+members and SHA-256.
 Consumers check the manifest and stream the archive through decompression and
-extraction while computing SHA-256. They may use the extracted index only after
-the entire transfer, extraction and checksum verification succeed. A successful
+extraction while computing SHA-256, accepting only regular files below the members.
+They may use the extracted index only after the entire transfer, extraction and
+checksum verification succeed and the files match `files.txt`. A successful
 S3 download alone does not prove that the parsed chain is valid. Standard detector output retains the same
 `blocksci-analysis_data/blocksci_analysis.json` contract regardless of whether
 it came from the combined or reusable workflow, so report semantics do not

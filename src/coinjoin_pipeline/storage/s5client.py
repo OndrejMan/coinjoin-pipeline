@@ -3,8 +3,8 @@
 Standard library only and Python 3.8 syntax: a PBS job copies this file next to its
 worker script and runs it with the node's ``python3``.
 
-It also owns the format of a single backup (the persistent index, the Core checkpoint):
-one archive, its ``.sha256`` and ``manifest.json`` under a prefix. ``replace_backup``
+It also owns the format of a single backup (a run's index, the persistent index, the Core
+checkpoint): one archive, its ``.sha256`` and ``manifest.json`` under a prefix. ``replace_backup``
 writes it and ``restore_backup`` reads it, so the two cannot drift apart.
 """
 
@@ -258,17 +258,6 @@ class S5Client:
                 raise S5Error(f"Reading {uri} failed")
         if expected_sha256 is not None and digest.hexdigest() != expected_sha256:
             raise S5Error("The S3 archive does not match its SHA-256")
-
-    def restore_archive(self, uri: str, destination: Path, expected_sha256: str) -> None:
-        """Stream ``uri`` through ``zstd -d | tar -x -C destination``, hashing it on the way.
-
-        The caller exposes what was extracted only after this returns.
-        """
-        with self.unpacked(uri, expected_sha256) as stream:
-            with _stage(["tar", "-C", str(destination), "-xf", "-"], stdin=stream) as extract:
-                stream.close()
-                if extract.wait() != 0:
-                    raise S5Error(f"Restoring {uri} failed")
 
     def copy_text(self, content: str, uri: str) -> None:
         """Upload a small text object."""

@@ -91,14 +91,17 @@ def test_the_streamed_archive_restores_the_same_verified_index(tmp_path):
     result = publish(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     files = cache(tmp_path)
+    # The same backup format as the persistent index's.
     assert sorted(p.name for p in files.iterdir()) == [
-        "blocksci_data.tar.zst",
-        "blocksci_data.tar.zst.sha256",
+        "blocksci_index.tar.zst",
+        "blocksci_index.tar.zst.sha256",
         "manifest.json",
     ]
     manifest = json.loads((files / "manifest.json").read_text())
     assert manifest["exported_max_block"] == 42
-    assert manifest["archive_sha256"] == hashlib.sha256((files / "blocksci_data.tar.zst").read_bytes()).hexdigest()
+    assert manifest["members"] == ["config.json", "files.txt", "manifest.json", "parsed"]
+    assert manifest["archive_sha256"] == hashlib.sha256((files / "blocksci_index.tar.zst").read_bytes()).hexdigest()
+    assert "index_dir" not in manifest
     original = (tmp_path / "scratch/coinjoin-run/source/blocksci_data/config.json").read_bytes()
     # No large archive or FIFO survives locally.
     assert not list((tmp_path / "scratch").rglob("*.tar.zst"))
@@ -111,31 +114,32 @@ def test_the_streamed_archive_restores_the_same_verified_index(tmp_path):
         "/runs/emulation/logs/target/blocksci_data/parsed"
     )
     assert not (restored / ".writing").exists()
+    assert (restored / "files.txt").read_text() == "config.json 47\nparsed/chain/block.dat 22\n"
     assert (tmp_path / "scratch/coinjoin-run/source/blocksci_data/config.json").read_bytes() == original
     assert not list((tmp_path / "scratch").rglob("*.tar.zst"))
 
 
-@pytest.mark.parametrize("failure", ["digest", "truncated", "metadata", "missing"])
+@pytest.mark.parametrize("failure", ["digest", "truncated", "missing", "image"])
 def test_invalid_archive_never_reaches_a_consumer(tmp_path, failure):
     assert publish(tmp_path).returncode == 0
     files = cache(tmp_path)
-    packed = files / "blocksci_data.tar.zst"
+    packed = files / "blocksci_index.tar.zst"
+    manifest = json.loads((files / "manifest.json").read_text())
     if failure == "digest":
         # Valid compressed data with extra bytes still has a different stream checksum.
-        manifest = json.loads((files / "manifest.json").read_text())
         manifest["archive_sha256"] = "0" * 64
-        (files / "manifest.json").write_text(json.dumps(manifest, indent=2))
-        (files / "blocksci_data.tar.zst.sha256").write_text("0" * 64 + "  blocksci_data.tar.zst\n")
     elif failure == "truncated":
         packed.write_bytes(packed.read_bytes()[:10])
-    elif failure == "metadata":
-        (files / "blocksci_data.tar.zst.sha256").write_text("0" * 64 + "  blocksci_data.tar.zst\n")
+    elif failure == "image":
+        manifest["blocksci_image"] = "docker://another-blocksci"
     else:
         packed.unlink()
+    (files / "manifest.json").write_text(json.dumps(manifest, indent=2))
     result = restore(tmp_path)
     assert result.returncode != 0
     assert not (tmp_path / "scratch/coinjoin-run/target/consumer-started").exists()
-    if failure != "metadata":
+    if failure != "image":
+        # The manifest was accepted, so the restore began and stays marked incomplete.
         assert (tmp_path / "scratch/coinjoin-run/target/blocksci_data/.writing").exists()
     assert not list((tmp_path / "scratch").rglob("*.fifo"))
 

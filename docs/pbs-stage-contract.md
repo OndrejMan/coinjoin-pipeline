@@ -90,7 +90,7 @@ A mappings-only `pbs-from-s3` submission consumes an existing baseline and does
 not create a report.
 
 Every S3 parser publishes
-`blocksci-parse_data/{blocksci_data.tar.zst,blocksci_data.tar.zst.sha256,manifest.json}`;
+`blocksci-parse_data/{blocksci_index.tar.zst,blocksci_index.tar.zst.sha256,manifest.json}`;
 there is no loose `blocksci_data/` upload. `combined` parses and analyzes in one
 job, while `reusable` publishes the index from a separate `blocksci-parse` job
 before dependent analysis. Both use the same schema-1.1 manifest and archive,
@@ -99,14 +99,17 @@ The dependent `blocksci-analyze` job never invokes `blocksci_parser`.
 The report job depends on `blocksci-analyze`, not on `blocksci-parse` directly.
 With `cached`, parsing is omitted and the saved index is restored.
 
-`S5Client.upload_archive` and `restore_archive` are the shared transport of
-run-local indexes, the persistent index backup and the mainnet checkpoints. Upload
+A run's index is a backup in the format of the persistent index's (below): the
+parser's `blocksci_data/` gets `files.txt` and `manifest.json` like a persistent
+index, and `S5Client.replace_backup` publishes it, so run caches, the persistent
+index backup and the mainnet checkpoints share one writer and one reader. Upload
 hashes the compressed stream on its way into `s5cmd pipe` (s5cmd 2.2 or later; nodes and
 images have 2.3). The checksum uploads after the archive and the manifest uploads last.
 Before replacing an index, the old completion manifest is removed. Restore
-fetches only metadata first, then streams the archive into scratch while hashing
-and extracting it. An incomplete marker remains until the complete stream and
-required index files are verified. No analysis or notebook starts on failure.
+fetches only the manifest first and checks its run and image, then
+`IndexStore.restore` extracts the archive beside the index while hashing it. An
+incomplete marker remains until the complete stream, its members and `files.txt`
+are verified. No analysis or notebook starts on failure.
 No emulation index is retained on multijob storage; persistent mainnet index
 locations, locking, update and backup lifecycle remain unchanged.
 

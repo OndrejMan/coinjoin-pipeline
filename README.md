@@ -504,9 +504,10 @@ prefix and does not regenerate the unified report by itself.
 ### Saved BlockSci index
 
 All S3 PBS parsing workflows publish the same
-`blocksci-parse_data/{blocksci_data.tar.zst,blocksci_data.tar.zst.sha256,manifest.json}`.
-The zstd archive contains the working `blocksci_data/` directory; the schema 1.1
-manifest records its run, image, source, exported maximum block and SHA-256.
+`blocksci-parse_data/{blocksci_index.tar.zst,blocksci_index.tar.zst.sha256,manifest.json}`,
+a backup in the format of the persistent index's: the zstd archive holds the index's
+`config.json`, `files.txt`, `manifest.json` and `parsed/`, and the schema 1.1
+manifest records its run, image, source, exported maximum block, members and SHA-256.
 The default `--blocksci-workflow combined` parses and analyzes in one job.
 `reusable` splits parsing and analysis into dependent jobs; `cached` skips
 parsing and reads a saved index. The job arrangement does not change the S3 format.

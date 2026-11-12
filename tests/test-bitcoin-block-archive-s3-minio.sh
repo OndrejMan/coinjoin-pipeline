@@ -288,7 +288,7 @@ wait_for_stage() {
 fetch_cache() {
   local run_id="$1" name="$2"
   s5 cp "${ARTIFACT_URI}/${run_id}/blocksci-parse_data/manifest.json" "${WORK_ROOT}/${name}-manifest.json" >/dev/null
-  s5 cp "${ARTIFACT_URI}/${run_id}/blocksci-parse_data/blocksci_data.tar.zst" "${WORK_ROOT}/${name}.tar.zst" >/dev/null
+  s5 cp "${ARTIFACT_URI}/${run_id}/blocksci-parse_data/blocksci_index.tar.zst" "${WORK_ROOT}/${name}.tar.zst" >/dev/null
   mkdir -p "${WORK_ROOT}/${name}"
   tar -C "${WORK_ROOT}/${name}" -I zstd -xf "${WORK_ROOT}/${name}.tar.zst"
 }
@@ -327,7 +327,7 @@ def load(name):
 
 def chain_records(cache, chain_file, record, fields):
     """Split a parsed/chain file into `record`-byte records, keeping the first `fields` bytes of each."""
-    data = (root / cache / "blocksci_data/parsed/chain" / chain_file).read_bytes()
+    data = (root / cache / "parsed/chain" / chain_file).read_bytes()
     if len(data) % record:
         raise SystemExit(f"FAIL: {cache} {chain_file} is not a whole number of {record}-byte records")
     return [data[offset:offset + fields] for offset in range(0, len(data), record)]

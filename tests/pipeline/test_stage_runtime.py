@@ -439,8 +439,7 @@ def test_blocksci_parser_and_chain_check_run_without_the_host_environment(tmp_pa
     blocksci_jobs.run_parser(stage, "true", tmp_path, 5, "parsing")
     assert stage.singularity.call_args.kwargs["cleanenv"] is True
 
-    verification = tmp_path / blocksci_jobs.BLOCKSCI_DIR / "chain-verification.json"
-    verification.parent.mkdir(parents=True)
+    verification = tmp_path / blocksci_jobs.CHAIN_VERIFICATION_FILE
     verification.write_text(json.dumps({"exported_max_block": 5, "exported_block_hash": "00"}), encoding="utf-8")
     monkeypatch.setattr(blocksci_jobs.subprocess, "run", mock.Mock())
     settings = {"source": {"network": "bitcoin_regtest"}, "python_command": "python3"}
