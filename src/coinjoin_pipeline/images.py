@@ -14,6 +14,8 @@ REPOSITORIES = {
     "emulator": "emulator-manager",
     "coinjoin_analysis": "coinjoin-analysis",
     "blocksci": "blocksci-complete",
+    "mappings": "coinjoin-mappings-enumerator",
+    "sake": "coinjoin-mappings-sake",
 }
 
 
@@ -39,11 +41,15 @@ LOCAL_IMAGES = {
     "emulator": "coinjoin-emulator:local",
     "coinjoin_analysis": "coinjoin-analysis:local",
     "blocksci": "blocksci-complete:local",
+    "mappings": "coinjoin-mappings-enumerator:local",
+    "sake": "coinjoin-mappings-sake:local",
 }
 IMAGE_ENVIRONMENT = {
     "emulator": "COINJOIN_EMULATOR_IMAGE",
     "coinjoin_analysis": "COINJOIN_ANALYSIS_IMAGE",
     "blocksci": "BLOCKSCI_IMAGE",
+    "mappings": "MAPPINGS_ENUMERATOR_IMAGE",
+    "sake": "SAKE_IMAGE",
 }
 DEFAULT_VERSION = "latest"
 
@@ -58,6 +64,8 @@ class Images:
     emulator: str
     coinjoin_analysis: str
     blocksci: str
+    mappings: str
+    sake: str
 
     def as_dict(self) -> dict[str, str]:
         return asdict(self)

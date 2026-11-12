@@ -70,6 +70,7 @@ SECTIONS = {
     "stages": ("PBS stages", "Run an analyzer as a PBS job instead of a local container."),
     "blocksci": ("BlockSci", None),
     "joinmarket": ("JoinMarket detector", None),
+    "mappings": ("Wasabi mappings and Sake", "Used with --mappings-pbs (Wasabi runs only)."),
     "pbs": (
         "PBS resources and images",
         "A stage-specific --pbs-<stage>-* value overrides the shared --pbs-* fallback, "
@@ -129,6 +130,7 @@ HELP = {
     "images.unified_report": ("unified-report job image (default: container/unified-report.image)"),
     "stages.analysis": "run coinjoin-analysis as a PBS job",
     "stages.blocksci": "run BlockSci as a PBS job",
+    "stages.mappings": "run the Wasabi mappings enumerator and Sake as PBS jobs",
     "blocksci.script": "Python script run over the parsed BlockSci index",
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
     **{
@@ -137,7 +139,7 @@ HELP = {
     },
     **{
         f"pbs.{component}_image": f"Singularity image of the {component.replace('_', '-')} PBS stage"
-        for component in ("blocksci", "coinjoin_analysis")
+        for component in ("blocksci", "coinjoin_analysis", "mappings_enumerator", "sake")
     },
     **{
         f"pbs.{name}": f"shared fallback {name.replace('_', '-')} of every PBS stage"

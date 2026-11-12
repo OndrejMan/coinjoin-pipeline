@@ -15,9 +15,11 @@ from exporters.artifact_paths import (
     BLOCKSCI_ANALYSIS_DIR,
     COINJOIN_ANALYSIS_DIR,
     EMULATOR_DIR,
+    MAPPINGS_DIR,
     STAGED_EXPORTERS_DIR,
 )
 
+from coinjoin_pipeline.configuration import MappingsConfiguration
 from coinjoin_pipeline.registry import pinned_reference
 from coinjoin_pipeline.storage.s3 import (
     S3Target,
@@ -32,6 +34,7 @@ from .defaults import DEFAULT_RESOURCES, PBSResources
 from .scripts import (
     STAGE_RUNTIME_MODULES,
     directives,
+    mappings_run,
     launcher,
     package_files,
     write_files,
@@ -39,6 +42,7 @@ from .scripts import (
 from .stage_settings import (
     BlocksciSettings,
     CommandSettings,
+    MappingsSettings,
     StageSettings,
     UnifiedReportSettings,
 )
@@ -52,6 +56,7 @@ BLOCKSCI = DEFAULT_RESOURCES["blocksci"]
 JobSettings = Union[
     CommandSettings,
     UnifiedReportSettings,
+    MappingsSettings,
     BlocksciSettings,
 ]
 
@@ -61,6 +66,25 @@ def render_coinjoin_analysis_s3_pbs(
 ) -> str:
     """Render the baseline job that runs coinjoin-analysis over the emulator logs."""
     return render_python_stage("coinjoin-analysis", target, resources, image, {"command": command})
+
+
+def render_mappings_s3_pbs(
+    target: S3Target,
+    enumerator_image: str,
+    sake_image: str,
+    settings: MappingsConfiguration = MappingsConfiguration(),
+    resources: PBSResources = DEFAULT_RESOURCES["mappings"],
+) -> str:
+    """Render the Wasabi mappings/Sake stage over S3-backed inputs."""
+    require_safe_image(enumerator_image, "enumerator image")
+    require_safe_image(sake_image, "Sake image")
+    return render_python_stage(
+        "coinjoin-mappings",
+        target,
+        resources,
+        None,
+        {"script": mappings_run(settings), "enumerator_image": enumerator_image, "sake_image": sake_image},
+    )
 
 
 def render_blocksci_s3_pbs(
@@ -139,6 +163,8 @@ def render_unified_report_s3_pbs(
     image: str,
     command: str,
     resources: PBSResources = DEFAULT_RESOURCES["unified_report"],
+    *,
+    include_mappings: bool = False,
 ) -> str:
     """Render the S3 report-only job that joins both analyzer outputs."""
     downloads = [
@@ -146,5 +172,6 @@ def render_unified_report_s3_pbs(
         EMULATOR_DIR,
         COINJOIN_ANALYSIS_DIR,
         BLOCKSCI_ANALYSIS_DIR,
+        *((MAPPINGS_DIR,) if include_mappings else ()),
     ]
     return render_python_stage("unified-report", target, resources, image, {"command": command, "downloads": downloads})

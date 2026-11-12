@@ -55,6 +55,7 @@ class _PbsStages:
 
     analysis: bool
     blocksci: bool
+    mappings: bool
 
     @classmethod
     def requested(cls, config: PipelineConfiguration) -> _PbsStages:
@@ -62,6 +63,7 @@ class _PbsStages:
         return cls(
             analysis=_supplied(config, "stages.analysis", stages.analysis),
             blocksci=_supplied(config, "stages.blocksci", stages.blocksci),
+            mappings=_supplied(config, "stages.mappings", stages.mappings),
         )
 
 
@@ -117,12 +119,14 @@ def _pbs_stage_errors(config: PipelineConfiguration, stages: _PbsStages) -> list
     for flag, enabled, permitted in (
         ("--analysis-pbs", stages.analysis, ("full-run", "pbs-from-s3")),
         ("--blocksci-pbs", stages.blocksci, ("full-run", "pbs-from-s3")),
+        ("--mappings-pbs", stages.mappings, ("full-run", "pbs-from-s3")),
     ):
         if enabled and config.action not in permitted:
             errors.append(f"{flag} is supported only by {', '.join(permitted)}")
     for stage, resources, enabled, flag in (
         ("analysis", config.pbs.analysis, stages.analysis, "--analysis-pbs"),
         ("blocksci", config.pbs.blocksci, stages.blocksci, "--blocksci-pbs"),
+        ("mappings", config.pbs.mappings, stages.mappings, "--mappings-pbs"),
     ):
         if _resources_supplied(config, stage, resources) and not enabled:
             errors.append(f"{stage}-specific PBS resources require {flag}")
@@ -149,8 +153,8 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
     s3_backend = config.artifacts.backend == "s3"
     if action == "pbs-from-s3":
         errors.extend(f"pbs-from-s3 requires {flag}" for flag in _missing_s3_options(config, with_secret=False))
-        if not any((stages.analysis, stages.blocksci)):
-            errors.append("pbs-from-s3 requires --analysis-pbs or --blocksci-pbs")
+        if not any((stages.analysis, stages.blocksci, stages.mappings)):
+            errors.append("pbs-from-s3 requires --analysis-pbs, --blocksci-pbs, or --mappings-pbs")
     if (
         s3_backend
         and action in ("full-run", "pbs-from-s3")
@@ -195,7 +199,10 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
         if _supplied(config, path, value) and not s3_emulation:
             errors.append(f"{flag} applies only to the S3 emulation Job (--driver kubernetes --artifact-backend s3)")
     if s3_backend and action == "full-run":
-        # Any analyzer subset runs, emulation alone included.
+        # Any analyzer subset runs, emulation alone included. Mappings read the
+        # coinjoin-analysis baseline, which a fresh run has only if it computes it.
+        if stages.mappings and not stages.analysis:
+            errors.append("full-run --artifact-backend s3 --mappings-pbs requires --analysis-pbs")
         for flag, path, value in (
             ("--parallel", "parallel", config.parallel),
             ("--blocksci-script", "blocksci.script", config.blocksci.script),
@@ -210,4 +217,8 @@ def _remaining_errors(config: PipelineConfiguration, stages: _PbsStages) -> list
     blocksci = config.blocksci
     if blocksci.script and not Path(blocksci.script).expanduser().is_file():
         errors.append(f"BlockSci script not found: {blocksci.script}")
+    if stages.mappings and config.engine != "wasabi":
+        errors.append("--mappings-pbs is supported only with --engine wasabi")
+    if stages.mappings and config.coinjoin_type != "wasabi2":
+        errors.append("--mappings-pbs requires --coinjoin-type wasabi2")
     return errors

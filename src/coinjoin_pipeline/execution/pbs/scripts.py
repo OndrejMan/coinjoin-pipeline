@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
 
 from .defaults import PBSResources
 from .validation import PBSError, require_safe_pbs_resources
 
+if TYPE_CHECKING:
+    from coinjoin_pipeline.configuration import MappingsConfiguration
+
+TEMPLATES = Path(__file__).parent / "templates"
 # src/ and pipeline/: a job ships each module at its path below the one that holds it,
 # so the node imports it as the frontend does.
 SOURCE_ROOTS = (Path(__file__).resolve().parents[3], EXPORTERS_ROOT.parent)
@@ -24,6 +30,10 @@ STAGE_RUNTIME_MODULES = (
     *(Path(__file__).with_name(name) for name in ("stage_settings.py", "stage.py", "analyzer_jobs.py")),
     *(Path(__file__).with_name(name) for name in ("blocksci_jobs.py", "stage_runtime.py")),
 )
+
+
+def template(name: str) -> str:
+    return (TEMPLATES / name).read_text(encoding="utf-8")
 
 
 def _delimiter(name: str) -> str:
@@ -94,3 +104,8 @@ def directives(job_name: str, resources: PBSResources) -> str:
             "#PBS -j oe",
         )
     )
+
+
+def mappings_run(settings: MappingsConfiguration) -> str:
+    """The enumerator and Sake run shared by the S3 and the shared-storage mappings jobs."""
+    return template("mappings_run.sh").format(**asdict(settings))

@@ -17,6 +17,7 @@ from coinjoin_pipeline.execution.pbs.submission import PBSJobSpec, persist_pbs_j
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_blocksci_s3_pbs,
     render_coinjoin_analysis_s3_pbs,
+    render_mappings_s3_pbs,
     render_unified_report_s3_pbs,
 )
 from coinjoin_pipeline.execution.pbs.validation import PBSError
@@ -46,6 +47,7 @@ def s3_full_run_plan_from_args(args: PipelineConfiguration) -> StageGraph:
     return s3_full_run_plan(
         analysis_pbs=args.stages.analysis,
         blocksci_pbs=args.stages.blocksci,
+        mappings_pbs=args.stages.mappings,
         unified_report=runs_unified_report(
             action=args.action,
             analysis_pbs=args.stages.analysis,
@@ -74,6 +76,7 @@ class S3StageRunner:
         """Submit the selected graph nodes in the established qsub order."""
         handlers = {
             StageKind.BASELINE: self._analysis,
+            StageKind.MAPPINGS: self._mappings,
             StageKind.BLOCKSCI_WORK: self._blocksci_work,
             StageKind.REPORT: self._report,
         }
@@ -100,6 +103,16 @@ class S3StageRunner:
         }
         script = render_coinjoin_analysis_s3_pbs(**common, command=coinjoin_analysis_pbs_command("collect_docker"))
         self._submit(stage, script)
+
+    def _mappings(self, stage: StagePlan) -> None:
+        script = render_mappings_s3_pbs(
+            target=self.target,
+            enumerator_image=pbs_image(self.args, "mappings_enumerator"),
+            sake_image=pbs_image(self.args, "sake"),
+            settings=self.args.mappings,
+            resources=stage_pbs_resources(self.args, "mappings"),
+        )
+        self._submit(stage, script, depends=True)
 
     def _blocksci(self) -> dict:
         """Renderer arguments every BlockSci job shares."""
@@ -134,6 +147,7 @@ class S3StageRunner:
                 unified_report_image=pinned_reference(report_image),
             ),
             resources=stage_pbs_resources(self.args, "unified_report"),
+            include_mappings=self.args.stages.mappings,
         )
         self._submit(stage, script, depends=True)
 
@@ -158,7 +172,7 @@ def _submit_s3_pbs_stages(args: PipelineConfiguration, submitted_jobs: list[tupl
     target = S3Target.from_args(args)
     access = target.access
     plan = s3_full_run_plan_from_args(args)
-    reads_baseline = any(stage.kind == StageKind.REPORT for stage in plan.stages)
+    reads_baseline = any(stage.kind in (StageKind.REPORT, StageKind.MAPPINGS) for stage in plan.stages)
     if not args.dry_run and not args.stages.analysis and reads_baseline:
         s3_access_preflight(access, target.artifact_uri)
         if not s3_object_exists(

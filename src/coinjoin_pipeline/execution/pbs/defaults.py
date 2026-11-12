@@ -24,6 +24,7 @@ class PBSResources:
 DEFAULT_RESOURCES = {
     "blocksci": PBSResources(8, "64gb", "100gb", "24:00:00"),
     "analysis": PBSResources(4, "16gb", "50gb", "04:00:00"),
+    "mappings": PBSResources(4, "16gb", "50gb", "04:00:00"),
     "unified_report": PBSResources(2, "8gb", "10gb", "01:00:00"),
 }
 
@@ -32,6 +33,8 @@ DEFAULT_PBS_IMAGES = {
     for component, name in (
         ("blocksci", "blocksci"),
         ("coinjoin_analysis", "coinjoin_analysis"),
+        ("mappings_enumerator", "mappings"),
+        ("sake", "sake"),
     )
 }
 BLOCKSCI_IMAGE_PYTHON_COMMAND = (

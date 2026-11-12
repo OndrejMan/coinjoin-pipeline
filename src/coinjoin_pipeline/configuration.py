@@ -43,6 +43,7 @@ CoinjoinType = Literal["wasabi2", "joinmarket"]
 ArtifactBackend = Literal["shared-storage", "s3"]
 ContainerRuntime = Literal["docker", "podman"]
 JoinMarketDetector = Literal["possible", "definite"]
+MappingMode = Literal["numeric", "all"]
 AnalysisAction = Literal["collect_docker", "analyze_only"]
 PBSScratchType = Literal["ssd", "local"]
 ImagePullPolicy = Literal["Always", "IfNotPresent", "Never"]
@@ -104,6 +105,8 @@ class ImageConfiguration(ConfigurationModel):
     emulator: str | None = option(None, name="emulator_image")
     coinjoin_analysis: str | None = option(None, name="coinjoin_analysis_image")
     blocksci: str | None = option(None, name="blocksci_image")
+    mappings: str | None = option(None, name="mappings_image")
+    sake: str | None = option(None, name="sake_image")
     uploader: str | None = option(None, name="uploader_image")
     unified_report: str | None = option(None, name="unified_report_image")
 
@@ -122,9 +125,21 @@ class JoinMarketConfiguration(ConfigurationModel):
 
 
 @dataclass(frozen=True, slots=True)
+class MappingsConfiguration(ConfigurationModel):
+    mining_fee_rate: int = option(1, name="mapping_mining_fee_rate", minimum=0)
+    coordination_fee_rate: float = option(0.003, name="mapping_coordination_fee_rate", minimum=0)
+    max_decomposition_fee: int = option(6000, name="mapping_max_decomposition_fee", minimum=0)
+    mode: MappingMode = option("numeric", name="mapping_mode")
+    timeout: int = option(60, name="mapping_timeout", minimum=1)
+    retry_timeout: int = option(600, name="mapping_retry_timeout", minimum=1)
+    sake_seed: int = option(20260704, name="sake_seed", minimum=0)
+
+
+@dataclass(frozen=True, slots=True)
 class StageConfiguration(ConfigurationModel):
     analysis: bool = option(False, name="analysis_pbs")
     blocksci: bool = option(False, name="blocksci_pbs")
+    mappings: bool = option(False, name="mappings_pbs")
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,8 +165,11 @@ class PBSConfiguration(ConfigurationModel):
     image: str | None = option(None, name="pbs_image")
     blocksci_image: str | None = option(None, name="pbs_blocksci_image")
     coinjoin_analysis_image: str | None = option(None, name="pbs_coinjoin_analysis_image")
+    mappings_enumerator_image: str | None = option(None, name="pbs_mappings_enumerator_image")
+    sake_image: str | None = option(None, name="pbs_sake_image")
     analysis: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     blocksci: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
+    mappings: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
     unified_report: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
 
 
@@ -179,6 +197,7 @@ class PipelineConfiguration(ConfigurationModel):
     images: ImageConfiguration = field(default_factory=ImageConfiguration)
     blocksci: BlockSciConfiguration = field(default_factory=BlockSciConfiguration)
     joinmarket: JoinMarketConfiguration = field(default_factory=JoinMarketConfiguration)
+    mappings: MappingsConfiguration = field(default_factory=MappingsConfiguration)
     stages: StageConfiguration = field(default_factory=StageConfiguration)
     pbs: PBSConfiguration = field(default_factory=PBSConfiguration)
     stage_exporters: bool = option(False, name="stage_exporters")

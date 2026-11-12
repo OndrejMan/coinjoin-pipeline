@@ -37,7 +37,7 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
     root = Path(config.runs_root).expanduser().resolve() if config.runs_root else default_runs_root()
     config = replace(config, runs_root=str(root))
     provided = set(config.provided)
-    for stage in ("analysis", "blocksci"):
+    for stage in ("analysis", "blocksci", "mappings"):
         path = f"stages.{stage}"
         if getattr(config.pbs, stage).configured and path not in provided:
             config = replace_path(config, path, True)
@@ -88,11 +88,15 @@ def resolve_run_images(config: PipelineConfiguration) -> tuple[PipelineConfigura
             emulator=images.emulator,
             coinjoin_analysis=images.coinjoin_analysis,
             blocksci=images.blocksci,
+            mappings=images.mappings,
+            sake=images.sake,
         ),
         pbs=replace(
             pbs,
             blocksci_image=pbs.blocksci_image or pbs.image or images.blocksci,
             coinjoin_analysis_image=pbs.coinjoin_analysis_image or pbs.image or images.coinjoin_analysis,
+            mappings_enumerator_image=pbs.mappings_enumerator_image or pbs.image or images.mappings,
+            sake_image=pbs.sake_image or pbs.image or images.sake,
         ),
     )
     if config.artifacts.backend == "s3":
@@ -130,6 +134,8 @@ def host_environment(config: PipelineConfiguration, images: Images, reproduction
         "COINJOIN_EMULATOR_IMAGE": images.emulator,
         "COINJOIN_ANALYSIS_IMAGE": images.coinjoin_analysis,
         "BLOCKSCI_IMAGE": images.blocksci,
+        "MAPPINGS_ENUMERATOR_IMAGE": images.mappings,
+        "SAKE_IMAGE": images.sake,
         "REPRODUCTION_COMMAND": reproduction,
         "PYTHONDONTWRITEBYTECODE": "1",
     }

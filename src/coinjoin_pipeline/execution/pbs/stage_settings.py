@@ -31,7 +31,7 @@ class StageSettings(_CommonSettings, total=False):
     below; each job function reads the latter through ``cast``.
     """
 
-    # The image the job runs.
+    # Every job but coinjoin-mappings runs one image.
     image: str
 
 
@@ -45,6 +45,14 @@ class CommandSettings(TypedDict):
 class UnifiedReportSettings(CommandSettings):
     # Run directories the report reads.
     downloads: list[str]
+
+
+class MappingsSettings(TypedDict):
+    """The shell shared with the shared-storage job, and its images."""
+
+    script: str
+    enumerator_image: str
+    sake_image: str
 
 
 class BlocksciSettings(CommandSettings):

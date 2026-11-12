@@ -25,6 +25,7 @@ class StageKind(Enum):
 
     EMULATION = "emulation"
     BASELINE = "baseline"
+    MAPPINGS = "mappings"
     BLOCKSCI_WORK = "blocksci-work"
     REPORT = "report"
 
@@ -32,6 +33,7 @@ class StageKind(Enum):
 #: The PBS resources (``pbs.<group>``) each kind of stage runs with.
 RESOURCE_GROUPS: dict[StageKind, str] = {
     StageKind.BASELINE: "analysis",
+    StageKind.MAPPINGS: "mappings",
     StageKind.BLOCKSCI_WORK: "blocksci",
     StageKind.REPORT: "unified_report",
 }
@@ -133,6 +135,11 @@ class StageGraph:
         return tuple(jobs[dependency] for dependency in stage.dependencies if dependency in jobs)
 
 
+def _mappings_stage(after: StagePlan) -> StagePlan:
+    """Mappings read the baseline output, or the emulation upload when no baseline runs."""
+    return StagePlan("coinjoin-mappings", StageKind.MAPPINGS, "pbs", (after.name,))
+
+
 def _report_stage(runner: RunnerName, *analyzers: StagePlan | None) -> StagePlan:
     """The unified report waits for every analyzer present in the graph."""
     return StagePlan(
@@ -166,6 +173,7 @@ def analysis_plan() -> StageGraph:
 
 def s3_full_run_plan(
     *,
+    mappings_pbs: bool,
     analysis_pbs: bool = True,
     blocksci_pbs: bool = True,
     unified_report: bool = True,
@@ -193,6 +201,7 @@ def s3_full_run_plan(
         if analysis_pbs
         else None
     )
+    mappings = _mappings_stage(baseline or emulation) if mappings_pbs else None
     # The BlockSci worker downloads the emulation bundle from the same S3 prefix as
     # the baseline worker, so it cannot start before the Kubernetes uploader has
     # published it either.
@@ -206,8 +215,9 @@ def s3_full_run_plan(
         if blocksci_pbs
         else None
     )
-    # Completion order: the analyzers publish independently.
-    stages = [stage for stage in (emulation, baseline, work) if stage is not None]
+    # Completion order: the analyzers publish independently, and mappings is
+    # waited for after BlockSci because it is the shorter of the two tails.
+    stages = [stage for stage in (emulation, baseline, work, mappings) if stage is not None]
     if unified_report and blocksci_pbs:
-        stages.append(_report_stage("pbs", baseline, work))
+        stages.append(_report_stage("pbs", baseline, work, mappings))
     return StageGraph(tuple(stages))

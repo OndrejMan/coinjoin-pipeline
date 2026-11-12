@@ -16,6 +16,7 @@ BLOCKSCI_ANALYSIS_DIR = "blocksci-analysis_data"
 REPORT_DIR = "coinjoinPipeline_data"
 COINJOIN_ANALYSIS_DIR = "coinjoin-analysis_data"
 EMULATOR_DIR = "coinjoin_emulator_data"
+MAPPINGS_DIR = "coinjoin-mappings_data"
 #: S3 runs only: the emulator's Bitcoin datadir, which the BlockSci parse reads.
 BITCOIN_DATA_DIR = "bitcoin_data"
 #: S3 runs only: the exporters staged into the run prefix for the BlockSci and report jobs.
