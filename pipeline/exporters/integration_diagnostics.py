@@ -58,9 +58,12 @@ def build_image_diagnostics(
     # Only these can be inspected; the others reach the manifest through build_run_manifest.
     for component in INSPECTED_IMAGE_COMPONENTS:
         reference = images.get(component)
-        inspected = docker_image_provenance(reference)
-        image_id = image_ids.get(component) or to_json_text(inspected.get("image_id"))
-        repo_digest = image_digests.get(component) or to_json_text(inspected.get("repo_digest"))
+        supplied_id, supplied_digest = image_ids.get(component), image_digests.get(component)
+        # The host inspected the image before the run and passed what it found; only an
+        # image it knew nothing about is inspected here, where the runtime may be absent.
+        inspected = {} if supplied_id or supplied_digest else docker_image_provenance(reference)
+        image_id = supplied_id or to_json_text(inspected.get("image_id"))
+        repo_digest = supplied_digest or to_json_text(inspected.get("repo_digest"))
         component_problems = []
         if not reference:
             component_problems.append("missing image reference")

@@ -71,3 +71,16 @@ def test_missing_reference_does_not_call_the_daemon():
         assert docker_image_provenance(None)["inspect_error"] == "image reference missing"
         assert docker_image_digest(None) is None
     run.assert_not_called()
+
+
+def test_images_the_host_already_inspected_are_not_inspected_again(monkeypatch) -> None:
+    from exporters import integration_diagnostics
+
+    inspected: list[object] = []
+    monkeypatch.setattr(integration_diagnostics, "docker_image_provenance", lambda image: inspected.append(image) or {})
+    images = {"blocksci": "blocksci:1", "coinjoin_analysis": "analysis:1", "coinjoin_emulator": "emulator:1"}
+    diagnostics, _ = integration_diagnostics.build_image_diagnostics(
+        images, image_ids={"blocksci": "sha256:id"}, image_digests={"coinjoin_analysis": "sha256:digest"}
+    )
+    assert inspected == ["emulator:1"]
+    assert diagnostics["blocksci"]["image_id"] == "sha256:id"
