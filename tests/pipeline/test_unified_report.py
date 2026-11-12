@@ -433,6 +433,24 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(records, {})
         self.assertEqual(chain.calls, [(0, 10, "wasabi2")])
 
+    def test_external_report_marks_metrics_as_baseline_agreement_only(self):
+        report = build_report(
+            Path("/tmp/external-run"),
+            normalize_coinjoin_analysis(coinjoin_analysis_fixture()),
+            blocksci_fixture(),
+            Detector("wasabi2"),
+            mode="external",
+            network="bitcoin",
+        )
+
+        self.assertEqual(report["run"]["mode"], "external")
+        self.assertEqual(report["run"]["network"], "bitcoin")
+        self.assertEqual(report["evaluation_scope"], "baseline_agreement_only")
+        self.assertNotIn("detection_confusion_matrix", report)
+        self.assertIsNone(report["detector_evaluations"])
+        markdown = render_report(report)
+        self.assertIn("precision, recall, and F1 are intentionally unavailable", markdown)
+
     def test_run_manifest_records_reproduction_command(self):
         with mock.patch.dict(
             os.environ,

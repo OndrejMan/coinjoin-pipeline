@@ -30,6 +30,7 @@ def parse_args(argv=None):
     parser.add_argument("--script", type=Path, default=os.environ.get("BLOCKSCI_SCRIPT") or None)
     parser.add_argument("--report", action="store_true")
     parser.add_argument("--share-output", action="store_true")
+    parser.add_argument("--mode", choices=("emulator", "external"), default="emulator")
     parser.add_argument("--skip-clustering", action="store_true")
     parser.add_argument("--cluster-output-dir", type=Path)
     parser.add_argument("--engine", default=os.environ.get("COINJOIN_ENGINE"))
@@ -50,25 +51,29 @@ def parse_args(argv=None):
 
 def parse_chain(args):
     args.config.parent.mkdir(parents=True, exist_ok=True)
-    maximum = args.max_block
-    if maximum is None:
-        heights = [
-            height for height in map(block_height_from_path, exported_block_paths(args.run_dir)) if height is not None
+    if not (args.mode == "external" and args.config.is_file()):
+        maximum = args.max_block
+        if maximum is None and args.mode != "external":
+            heights = [
+                height
+                for height in map(block_height_from_path, exported_block_paths(args.run_dir))
+                if height is not None
+            ]
+            if not heights:
+                raise ValueError("No exported block height is available for BlockSci parsing")
+            maximum = max(heights) + 1
+        command = [
+            "blocksci_parser",
+            str(args.config),
+            "generate-config",
+            args.network,
+            str(args.config.parent / "parsed"),
+            "--disk",
+            str(args.disk),
         ]
-        if not heights:
-            raise ValueError("No exported block height is available for BlockSci parsing")
-        maximum = max(heights) + 1
-    command = [
-        "blocksci_parser",
-        str(args.config),
-        "generate-config",
-        args.network,
-        str(args.config.parent / "parsed"),
-        "--disk",
-        str(args.disk),
-    ]
-    command.extend(["--max-block", str(maximum)])
-    subprocess.run(command, check=True)
+        if maximum is not None:
+            command.extend(["--max-block", str(maximum)])
+        subprocess.run(command, check=True)
     subprocess.run(["blocksci_parser", str(args.config), "update"], check=True)
     if args.share_output:
         # A root-owned Docker parser otherwise leaves its 0700 output unreadable to the host.
@@ -93,6 +98,8 @@ def execute(args):
     if args.phase == "report" or args.report:
         from exporters.cli import assemble_report
 
+        if args.mode == "emulator":
+            args.network = None
         assemble_report(args)
 
 

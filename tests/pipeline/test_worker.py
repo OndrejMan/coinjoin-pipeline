@@ -18,6 +18,18 @@ def test_parse_uses_exclusive_height_of_exported_run_tip(tmp_path):
     assert process.call_args_list[1].args[0][-1] == "update"
 
 
+def test_external_resume_keeps_existing_parser_configuration(tmp_path):
+    run = tmp_path / "run-a"
+    config = run / "blocksci_data/config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text("{}")
+    args = worker.parse_args(["parse", "--run-dir", str(run), "--mode", "external", "--network", "bitcoin"])
+    with mock.patch.object(worker.subprocess, "run") as process:
+        worker.execute(args)
+    assert process.call_count == 1
+    assert process.call_args.args[0] == ["blocksci_parser", str(config), "update"]
+
+
 def test_report_phase_does_not_parse_or_analyze(tmp_path):
     from exporters import cli
     from exporters.blocksci_export import analysis
