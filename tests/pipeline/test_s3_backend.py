@@ -55,6 +55,7 @@ from coinjoin_pipeline.execution.s3_markers import rollback_s3_pbs_submissions
 from coinjoin_pipeline.execution.s3_staging import pbs_stages_need_exporters
 from coinjoin_pipeline.storage.s3 import (  # noqa: E402
     ArtifactTransportError,
+    S3Access,
     S3Target,
 )
 
@@ -68,9 +69,7 @@ def settings_of(script: str) -> dict:
 S3_TARGET = S3Target(
     artifact_uri="s3://bucket/runs",
     run_id="run-1",
-    endpoint_url="https://s3.cl4.du.cesnet.cz",
-    credentials_file="/storage/user/.aws/credentials",
-    profile="coinjoin",
+    access=S3Access(endpoint_url="https://s3.cl4.du.cesnet.cz", credentials_file="/storage/user/.aws/credentials", profile="coinjoin"),
 )
 COMMON = dict(target=S3_TARGET)
 # An update of another run's cache from the block archive.
@@ -303,9 +302,7 @@ def test_s3_parse_without_zstd_fails_through_the_exit_trap(tmp_path: Path) -> No
         S3Target(
             artifact_uri="s3://bucket/runs",
             run_id="run-1",
-            endpoint_url="https://example.com",
-            credentials_file=str(credentials),
-            profile="coinjoin",
+            access=S3Access(endpoint_url="https://example.com", credentials_file=str(credentials), profile="coinjoin"),
         ),
         image="docker://blocksci",
         command="true",
@@ -409,9 +406,7 @@ def test_s3_bitcoin_archive_parse_uploads_failure_log_before_marker(
     target = S3Target(
         artifact_uri="s3://bucket/runs",
         run_id="run-1",
-        endpoint_url="https://example.com",
-        credentials_file=str(tmp_path / "missing-credentials"),
-        profile="coinjoin",
+        access=S3Access(endpoint_url="https://example.com", credentials_file=str(tmp_path / "missing-credentials"), profile="coinjoin"),
     )
     script = render_blocksci_parse_s3_pbs(
         target,

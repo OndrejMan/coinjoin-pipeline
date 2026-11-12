@@ -484,9 +484,9 @@ def render_python_stage(
         "job": job or stage,
         "run_id": validate_run_id(target.run_id),
         "run_prefix": validate_artifact_uri(target.run_prefix),
-        "endpoint": validate_s3_endpoint_url(target.endpoint_url),
-        "credentials": validate_credentials_file(target.credentials_file),
-        "profile": validate_s3_profile(target.profile),
+        "endpoint": validate_s3_endpoint_url(target.access.endpoint_url),
+        "credentials": validate_credentials_file(target.access.credentials_file),
+        "profile": validate_s3_profile(target.access.profile),
         "log_prefix": target.log_prefix,
         # The whole output goes to S3, so no stage needs PBS to copy its output file back.
         "job_log": f"{stage}.pbs.log",

@@ -20,7 +20,7 @@ from coinjoin_pipeline.execution.pbs.commands import (
     blocksci_script_pbs_command,
     blocksci_update_pbs_command,
 )
-from coinjoin_pipeline.storage.s3 import S3Target
+from coinjoin_pipeline.storage.s3 import S3Access, S3Target
 
 
 def main() -> int:
@@ -46,9 +46,7 @@ def main() -> int:
     target = S3Target(
         artifact_uri="s3://bucket/runs",
         run_id=args.run_id,
-        endpoint_url="https://s3.example.invalid",
-        credentials_file=args.credentials,
-        profile="test",
+        access=S3Access(endpoint_url="https://s3.example.invalid", credentials_file=args.credentials, profile="test"),
         state_prefix=args.state_uri,
     )
     with (

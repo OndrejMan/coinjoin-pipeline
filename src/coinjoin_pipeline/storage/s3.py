@@ -56,13 +56,16 @@ class S3Access:
 
 @dataclass(frozen=True)
 class S3Target:
-    """Identity of one S3-backed run and the credentials used to reach it."""
+    """Identity of one S3-backed run and the access that reaches it.
+
+    The three layers each have their own job: S3Target names the run's prefixes, S3Access
+    holds the endpoint and credentials, and storage/s5client.S5Client runs s5cmd. A PBS job
+    ships s5client.py alone, so S5Client cannot depend on these frontend types.
+    """
 
     artifact_uri: str
     run_id: str
-    endpoint_url: str
-    credentials_file: str
-    profile: str
+    access: S3Access
     # A fixed prefix shared by successive runs (the persistent index jobs) in place of
     # <artifact_uri>/<run_id>; each run replaces its state there and keeps its logs apart.
     state_prefix: str | None = None
@@ -77,24 +80,17 @@ class S3Target:
         """Where this run's logs live; under a fixed prefix every run keeps its own."""
         return f"{self.run_prefix}/logs/{self.run_id}" if self.state_prefix else f"{self.run_prefix}/logs"
 
-    @property
-    def access(self) -> S3Access:
-        """Return the frontend transport credentials for this run target."""
-        return S3Access(
-            endpoint_url=self.endpoint_url,
-            credentials_file=self.credentials_file,
-            profile=self.profile,
-        )
-
     @classmethod
     def from_args(cls, args: "PipelineConfiguration") -> "S3Target":
         """Build a target after the public CLI has validated its S3 options."""
         return cls(
             artifact_uri=required(args.artifacts.uri, "--artifact-uri"),
             run_id=required(args.run_id, "--run-id"),
-            endpoint_url=required(args.artifacts.endpoint_url, "--s3-endpoint-url"),
-            credentials_file=required(args.artifacts.credentials_file, "--s3-credentials-file"),
-            profile=required(args.artifacts.profile, "--s3-profile"),
+            access=S3Access(
+                endpoint_url=required(args.artifacts.endpoint_url, "--s3-endpoint-url"),
+                credentials_file=required(args.artifacts.credentials_file, "--s3-credentials-file"),
+                profile=required(args.artifacts.profile, "--s3-profile"),
+            ),
             state_prefix=args.blocksci.index_state_uri,
         )
 

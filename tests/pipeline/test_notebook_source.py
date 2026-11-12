@@ -21,7 +21,7 @@ from coinjoin_pipeline.execution.pbs.templates_s3 import (
 from coinjoin_pipeline.configuration import BlockSciConfiguration
 from coinjoin_pipeline.execution.pbs.scripts import embedded_file
 from coinjoin_pipeline.storage.s5client import S5Client
-from coinjoin_pipeline.storage.s3 import S3Target
+from coinjoin_pipeline.storage.s3 import S3Access, S3Target
 
 FAKE_S5CMD = Path(__file__).resolve().parents[1] / "support/persistent-index"
 pytestmark = pytest.mark.skipif(shutil.which("zstd") is None, reason="archive transport needs zstd")
@@ -156,7 +156,7 @@ def test_failed_upload_never_publishes_a_manifest(tmp_path):
 
 
 def test_notebook_source_is_archived_readonly_and_does_not_reparse():
-    target = S3Target("s3://bucket/runs", "target", "https://s3.test", "/storage/credentials", "test")
+    target = S3Target("s3://bucket/runs", "target", S3Access("https://s3.test", "/storage/credentials", "test"))
     script = render_blocksci_analyze_s3_pbs(
         target,
         "docker://blocksci",
@@ -201,7 +201,7 @@ def test_combined_report_job_reads_a_nested_datadir_and_only_present_optional_in
         'printf report > "$work/coinjoinPipeline_data/unified_report.json"\n'
     )
     singularity.chmod(0o755)
-    target = S3Target("s3://bucket/runs", "source", "https://s3.test", "/dev/null", "test")
+    target = S3Target("s3://bucket/runs", "source", S3Access("https://s3.test", "/dev/null", "test"))
     script = render_blocksci_s3_pbs(target, "docker://blocksci", "true", include_report=True)
     (tmp_path / "scratch").mkdir()
     result = subprocess.run(
@@ -241,7 +241,7 @@ def test_rendered_jobs_publish_the_same_restorable_index_format(tmp_path, workfl
         'printf analysis > "$work/blocksci-analysis_data/blocksci_analysis.json"\n'
     )
     singularity.chmod(0o755)
-    target = S3Target("s3://bucket/runs", "source", "https://s3.test", "/dev/null", "test")
+    target = S3Target("s3://bucket/runs", "source", S3Access("https://s3.test", "/dev/null", "test"))
     if workflow == "combined":
         script = render_blocksci_s3_pbs(target, "docker://blocksci", "true", include_report=False, export_analysis=True)
     else:

@@ -12,7 +12,7 @@ from coinjoin_pipeline.execution.pbs.defaults import DEFAULT_RESOURCES
 from coinjoin_pipeline.execution.pbs.scripts import embedded_file
 from coinjoin_pipeline.execution.pbs.templates_s3 import render_blocksci_parse_s3_pbs
 from coinjoin_pipeline.execution.s3_emulation import pin_emulation_images
-from coinjoin_pipeline.storage.s3 import S3Target
+from coinjoin_pipeline.storage.s3 import S3Access, S3Target
 
 # The conftest fixture replaces the module attribute; this keeps the real lookup.
 REAL_REGISTRY_DIGEST = registry.registry_digest
@@ -101,9 +101,7 @@ def test_pbs_job_runs_the_digest_but_keeps_the_index_identity(registry_digests) 
         target=S3Target(
             artifact_uri="s3://bucket/runs",
             run_id="run-1",
-            endpoint_url="https://s3.cl4.du.cesnet.cz",
-            credentials_file="/storage/user/.aws/credentials",
-            profile="coinjoin",
+            access=S3Access(endpoint_url="https://s3.cl4.du.cesnet.cz", credentials_file="/storage/user/.aws/credentials", profile="coinjoin"),
         ),
         image="docker://ghcr.io/x/blocksci:latest",
         command="parse",

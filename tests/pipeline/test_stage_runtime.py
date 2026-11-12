@@ -21,7 +21,7 @@ from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_mappings_s3_pbs,
     render_unified_report_s3_pbs,
 )
-from coinjoin_pipeline.storage.s3 import S3Target
+from coinjoin_pipeline.storage.s3 import S3Access, S3Target
 
 FAKE_S5CMD_DIR = Path(__file__).resolve().parents[1] / "support/persistent-index"
 RUN = "s3://bucket/runs/run-1"
@@ -117,9 +117,7 @@ def report_script(job: dict[str, Path], **options: bool) -> str:
     target = S3Target(
         artifact_uri="s3://bucket/runs",
         run_id="run-1",
-        endpoint_url="https://s3.example.org",
-        credentials_file=str(job["credentials"]),
-        profile="coinjoin",
+        access=S3Access(endpoint_url="https://s3.example.org", credentials_file=str(job["credentials"]), profile="coinjoin"),
     )
     return render_unified_report_s3_pbs(target, image="docker://report:1", command="report-command", **options)
 
@@ -210,9 +208,7 @@ def analysis_script(job: dict[str, Path]) -> str:
     target = S3Target(
         artifact_uri="s3://bucket/runs",
         run_id="run-1",
-        endpoint_url="https://s3.example.org",
-        credentials_file=str(job["credentials"]),
-        profile="coinjoin",
+        access=S3Access(endpoint_url="https://s3.example.org", credentials_file=str(job["credentials"]), profile="coinjoin"),
     )
     return render_coinjoin_analysis_s3_pbs(target, image="docker://coinjoin:1", command="collect")
 
@@ -265,9 +261,7 @@ def dumplings_script(job: dict[str, Path]) -> str:
     target = S3Target(
         artifact_uri="s3://bucket/runs",
         run_id="run-1",
-        endpoint_url="https://s3.example.org",
-        credentials_file=str(job["credentials"]),
-        profile="coinjoin",
+        access=S3Access(endpoint_url="https://s3.example.org", credentials_file=str(job["credentials"]), profile="coinjoin"),
     )
     return render_coinjoin_analysis_dumplings_s3_pbs(
         target, "docker://coinjoin:1", dumplings_uri=DUMPLINGS, coinjoin_type="wasabi2"
@@ -331,9 +325,7 @@ def mappings_script(job: dict[str, Path]) -> str:
     target = S3Target(
         artifact_uri="s3://bucket/runs",
         run_id="run-1",
-        endpoint_url="https://s3.example.org",
-        credentials_file=str(job["credentials"]),
-        profile="coinjoin",
+        access=S3Access(endpoint_url="https://s3.example.org", credentials_file=str(job["credentials"]), profile="coinjoin"),
     )
     return render_mappings_s3_pbs(target, "docker://enumerator:1", "docker://sake:1")
 
@@ -377,9 +369,7 @@ def test_mappings_provenance_hashes_a_local_sif_file(job: dict[str, Path]) -> No
     target = S3Target(
         artifact_uri="s3://bucket/runs",
         run_id="run-1",
-        endpoint_url="https://s3.example.org",
-        credentials_file=str(job["credentials"]),
-        profile="coinjoin",
+        access=S3Access(endpoint_url="https://s3.example.org", credentials_file=str(job["credentials"]), profile="coinjoin"),
     )
     upload_inputs(job, {"coinjoin-analysis_data/coinjoin_tx_info.json": '{"coinjoins": {}}'})
     process = start(job, render_mappings_s3_pbs(target, str(sif), "docker://sake:1"))
@@ -425,9 +415,7 @@ def test_blocksci_job_without_a_bitcoin_datadir_fails_before_parsing(job: dict[s
     target = S3Target(
         artifact_uri="s3://bucket/runs",
         run_id="run-1",
-        endpoint_url="https://s3.example.org",
-        credentials_file=str(job["credentials"]),
-        profile="coinjoin",
+        access=S3Access(endpoint_url="https://s3.example.org", credentials_file=str(job["credentials"]), profile="coinjoin"),
     )
     process = start(job, render_blocksci_s3_pbs(target, "docker://blocksci:1", "parse", include_report=False))
     output, _ = process.communicate(timeout=60)
