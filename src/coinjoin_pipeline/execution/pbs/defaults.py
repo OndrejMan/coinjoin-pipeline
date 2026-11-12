@@ -1,15 +1,17 @@
 """PBS defaults shared by rendering, submission, and command builders."""
 
 from dataclasses import dataclass
-from typing import get_args
+from typing import Literal, get_args
 
-from coinjoin_pipeline.configuration import PBSMultijob, PBSScratchType
 from coinjoin_pipeline.images import DEFAULT_VERSION, IMAGE_NAMES
 
 # MetaCentrum's scratch_local is a spinning disk on most nodes; the SSD scratch keeps
 # downloading, checksumming and unpacking from bounding every stage.
-PBS_SCRATCH_TYPES: tuple[str, ...] = get_args(PBSScratchType)
+PBSScratchType = Literal["ssd", "local"]
 # MetaCentrum multijob scratch locations (`-l select=...:multijob=<location>`).
+PBSMultijob = Literal["brno", "plzen", "global"]
+# The configuration takes both literals from here, so this module never imports it back.
+PBS_SCRATCH_TYPES: tuple[str, ...] = get_args(PBSScratchType)
 PBS_MULTIJOB_LOCATIONS: tuple[str, ...] = get_args(PBSMultijob)
 
 

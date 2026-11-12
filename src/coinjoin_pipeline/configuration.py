@@ -13,6 +13,9 @@ from pathlib import Path
 from types import NoneType, UnionType
 from typing import Literal, Mapping, TypeVar, Union, get_args, get_origin, get_type_hints
 
+from coinjoin_pipeline.execution.pbs.defaults import PBSMultijob, PBSScratchType
+from coinjoin_pipeline.execution.stages import BlockSciWorkflow
+
 T = TypeVar("T")
 
 
@@ -45,15 +48,12 @@ Driver = Literal["docker", "kubernetes"]
 CoinjoinType = Literal["wasabi2", "joinmarket"]
 ArtifactBackend = Literal["shared-storage", "s3"]
 ContainerRuntime = Literal["docker", "podman"]
-BlockSciWorkflow = Literal["combined", "reusable", "cached"]
 BlockSciTask = Literal["detect", "parse", "update", "script", "notebook", "external", "backup"]
 BlockSciNetwork = Literal["bitcoin", "bitcoin_testnet", "bitcoin_regtest"]
 JoinMarketDetector = Literal["possible", "definite"]
 MappingMode = Literal["numeric", "all"]
 AnalysisAction = Literal["collect_docker", "analyze_only"]
 ExternalNetwork = Literal["bitcoin"]
-PBSScratchType = Literal["ssd", "local"]
-PBSMultijob = Literal["brno", "plzen", "global"]
 ImagePullPolicy = Literal["Always", "IfNotPresent", "Never"]
 
 
