@@ -86,9 +86,8 @@ def build_run_manifest(
 ) -> RunManifest:
     exporters_root = Path(__file__).resolve().parent
     coinjoin_type = detector.coinjoin_type
-    inferred_engine = engine or os.environ.get("COINJOIN_ENGINE")
-    if not inferred_engine:
-        inferred_engine = "joinmarket" if coinjoin_type == "joinmarket" else "wasabi"
+    # Every caller passes --engine (default $COINJOIN_ENGINE); a direct call without it guesses.
+    inferred_engine = engine or ("joinmarket" if coinjoin_type == "joinmarket" else "wasabi")
     images = images or ReportImages()
     references, image_digests = resolve_manifest_images(
         images.reference_fields(), images.digest_fields(), image_provenance

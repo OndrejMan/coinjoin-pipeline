@@ -7,7 +7,7 @@
       "#PBS -j oe"
     ],
     "settings": {
-      "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py run --run-dir /runs/emulation/logs/2026-07-28-wasabi-k8s-s3-06 --coinjoin-type wasabi2 --min-input-count 10 --joinmarket-detector definite --joinmarket-min-base-fee 5000 --joinmarket-percentage-fee 4e-05 --joinmarket-max-depth 200000 --blocksci-image docker://ghcr.io/ondrejman/blocksci-complete:latest --coinjoin-analysis-image docker://ghcr.io/ondrejman/coinjoin-analysis:latest --coinjoin-emulator-image ghcr.io/ondrejman/emulator-manager:latest --uploader-image ghcr.io/example/uploader:fixed",
+      "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py run --run-dir /runs/emulation/logs/2026-07-28-wasabi-k8s-s3-06 --engine wasabi --coinjoin-type wasabi2 --min-input-count 10 --joinmarket-detector definite --joinmarket-min-base-fee 5000 --joinmarket-percentage-fee 4e-05 --joinmarket-max-depth 200000 --blocksci-image docker://ghcr.io/ondrejman/blocksci-complete:latest --coinjoin-analysis-image docker://ghcr.io/ondrejman/coinjoin-analysis:latest --coinjoin-emulator-image ghcr.io/ondrejman/emulator-manager:latest --uploader-image ghcr.io/example/uploader:fixed",
       "credentials": "/storage/brno2/home/xman/.aws/credentials",
       "endpoint": "https://s3.cl4.du.cesnet.cz",
       "export_analysis": true,
@@ -99,7 +99,7 @@
       "#PBS -j oe"
     ],
     "settings": {
-      "command": "python3 /mnt/exporters/worker.py report --run-dir /runs/emulation/logs/2026-07-28-wasabi-k8s-s3-06 --coinjoin-type wasabi2 --min-input-count 10 --joinmarket-detector definite --joinmarket-min-base-fee 5000 --joinmarket-percentage-fee 4e-05 --joinmarket-max-depth 200000 --uploader-image ghcr.io/example/uploader:fixed --unified-report-image ghcr.io/example/unified-report:fixed",
+      "command": "python3 /mnt/exporters/worker.py report --run-dir /runs/emulation/logs/2026-07-28-wasabi-k8s-s3-06 --engine wasabi --coinjoin-type wasabi2 --min-input-count 10 --joinmarket-detector definite --joinmarket-min-base-fee 5000 --joinmarket-percentage-fee 4e-05 --joinmarket-max-depth 200000 --uploader-image ghcr.io/example/uploader:fixed --unified-report-image ghcr.io/example/unified-report:fixed",
       "credentials": "/storage/brno2/home/xman/.aws/credentials",
       "downloads": [
         ".pipeline/exporters",

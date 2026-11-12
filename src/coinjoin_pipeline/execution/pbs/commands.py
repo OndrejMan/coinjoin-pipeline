@@ -184,6 +184,9 @@ def worker_command(
         phase,
         "--run-dir",
         f"{CONTAINER_RUNS_ROOT}/{run_id}",
+        # --cleanenv drops $COINJOIN_ENGINE, so the engine travels as an option like the images.
+        "--engine",
+        config.engine,
         *detector_arguments(config),
     ]
     if phase != "report":

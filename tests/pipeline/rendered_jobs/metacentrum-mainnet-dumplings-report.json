@@ -8,7 +8,7 @@
     ],
     "settings": {
       "artifact_uri": "s3://coinjoin-thesis/runs",
-      "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py analyze --run-dir /runs/emulation/logs/mainnet-s3-archive-900000 --coinjoin-type joinmarket --min-input-count default --joinmarket-detector definite --joinmarket-min-base-fee 5000 --joinmarket-percentage-fee 4e-05 --joinmarket-max-depth 200000 --blocksci-image docker://ghcr.io/ondrejman/blocksci-complete:latest --coinjoin-analysis-image docker://ghcr.io/ondrejman/coinjoin-analysis:latest --coinjoin-emulator-image ghcr.io/ondrejman/emulator-manager:latest --uploader-image ghcr.io/example/uploader:fixed --mode external --network bitcoin --skip-clustering --report",
+      "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py analyze --run-dir /runs/emulation/logs/mainnet-s3-archive-900000 --engine joinmarket --coinjoin-type joinmarket --min-input-count default --joinmarket-detector definite --joinmarket-min-base-fee 5000 --joinmarket-percentage-fee 4e-05 --joinmarket-max-depth 200000 --blocksci-image docker://ghcr.io/ondrejman/blocksci-complete:latest --coinjoin-analysis-image docker://ghcr.io/ondrejman/coinjoin-analysis:latest --coinjoin-emulator-image ghcr.io/ondrejman/emulator-manager:latest --uploader-image ghcr.io/example/uploader:fixed --mode external --network bitcoin --skip-clustering --report",
       "credentials": "/storage/brno2/home/<login>/.aws/credentials",
       "endpoint": "https://s3.cl4.du.cesnet.cz",
       "image": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
