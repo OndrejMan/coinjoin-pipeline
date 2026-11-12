@@ -208,7 +208,11 @@ def publish_persistent(
 def run_parser(
     stage: Stage, command: str, datadir: Path, max_block: int, message: str, index_binds: Sequence[str] = ()
 ) -> None:
-    """Run the job's parse command over datadir inside the BlockSci image."""
+    """Run the job's parse command over datadir inside the BlockSci image.
+
+    Like the combined job, it runs without the host environment: a module the PBS node
+    loaded (PYTHONPATH, LD_LIBRARY_PATH) must not reach the image's Python.
+    """
     stage.log(message)
     stage.singularity(
         f'cd "{CONTAINER_RUNS_ROOT}/$PBS_RUN_ID" && {command}',
@@ -219,6 +223,7 @@ def run_parser(
             *index_binds,
         ),
         environment=(f"PBS_RUN_ID={stage.run_id}", f"PBS_EXPORTED_MAX_BLOCK={max_block}"),
+        cleanenv=True,
     )
 
 
@@ -251,6 +256,7 @@ def verify_chain(
             f"{stage.work / STAGED_EXPORTERS_DIR}:/mnt/exporters:ro",
             *index_binds,
         ),
+        cleanenv=True,
     )
     subprocess.run(command, check=True)
     verified = json.loads((stage.work / BLOCKSCI_DIR / "chain-verification.json").read_text())

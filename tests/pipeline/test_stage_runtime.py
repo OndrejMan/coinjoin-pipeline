@@ -387,3 +387,22 @@ def test_blocksci_job_without_a_bitcoin_datadir_fails_before_parsing(job: dict[s
     assert remote(job, ".pbs/blocksci.failed").is_file()
     assert not remote(job, "blocksci-parse_data/manifest.json").exists()
     assert not (job["scratch"].parent / "singularity.calls").exists()
+
+
+def test_blocksci_parser_and_chain_check_run_without_the_host_environment(tmp_path: Path, monkeypatch) -> None:
+    from unittest import mock
+
+    from coinjoin_pipeline.execution.pbs import blocksci_jobs
+
+    stage = mock.Mock(run_id="run-1", runs_root=tmp_path, work=tmp_path)
+    stage.image_command.return_value = ["true"]
+    blocksci_jobs.run_parser(stage, "true", tmp_path, 5, "parsing")
+    assert stage.singularity.call_args.kwargs["cleanenv"] is True
+
+    verification = tmp_path / blocksci_jobs.BLOCKSCI_DIR / "chain-verification.json"
+    verification.parent.mkdir(parents=True)
+    verification.write_text(json.dumps({"exported_max_block": 5, "exported_block_hash": "00"}), encoding="utf-8")
+    monkeypatch.setattr(blocksci_jobs.subprocess, "run", mock.Mock())
+    settings = {"source": {"network": "bitcoin_regtest"}, "python_command": "python3"}
+    assert blocksci_jobs.verify_chain(stage, settings, 5, update=False, index_binds=()) == (5, "00")
+    assert stage.image_command.call_args.kwargs["cleanenv"] is True
