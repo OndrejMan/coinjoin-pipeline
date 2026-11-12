@@ -35,7 +35,9 @@ def image_names(registry: str | None = None) -> dict[str, str]:
 def in_registry(image: str, registry: str | None) -> str:
     """A default image of the project's registry, moved to the configured one."""
     prefix = f"{DEFAULT_REGISTRY}/"
-    return image_registry(registry) + "/" + image[len(prefix):] if image.startswith(prefix) else image
+    return image_registry(registry) + "/" + image[len(prefix) :] if image.startswith(prefix) else image
+
+
 # What ./run-all.sh local tags its images as.
 LOCAL_IMAGES = {
     "emulator": "coinjoin-emulator:local",

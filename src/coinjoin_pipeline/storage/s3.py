@@ -43,7 +43,6 @@ AWS_SCRUB_VARIABLES = (
 )
 
 
-
 class ArtifactTransportError(RuntimeError):
     """Raised when S3-compatible artifact transport fails on the frontend."""
 
