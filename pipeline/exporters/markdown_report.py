@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -363,6 +364,34 @@ def render_io_details(title: str, records: list[JsonObject], explorer_base_url: 
     return [f"#### {title}", "", *table(headers, rows), ""]
 
 
+def render_run_manifest(report: JsonObject) -> list[str]:
+    manifest = report.get("run_manifest") or {}
+    if not manifest:
+        return []
+
+    scenario = manifest.get("scenario") or {}
+    execution = manifest.get("execution") or {}
+    detector = manifest.get("detector") or {}
+    commits = manifest.get("source_commits") or {}
+
+    lines = section(
+        "Run Manifest",
+        *key_values(
+            [
+                ["scenario sha256", scenario.get("sha256")],
+                ["engine", execution.get("engine")],
+                ["coinjoin type", execution.get("coinjoin_type")],
+                ["detector", json.dumps(detector, sort_keys=True)],
+                ["coinjoin-emulator commit", commits.get("coinjoin_emulator")],
+                ["exporters commit", commits.get("exporters")],
+            ],
+            key="field",
+        ),
+    )
+
+    return lines
+
+
 def render_header(report: JsonObject) -> list[str]:
     lines = [
         "# BlockSci vs Emulator CoinJoin Report",
@@ -379,6 +408,8 @@ def render_header(report: JsonObject) -> list[str]:
 
 def render_run(report: JsonObject) -> list[str]:
     run = report.get("run") or {}
+    # Only the selected CoinJoin type's parameters are present.
+    detector = (report.get("run_manifest") or {}).get("detector") or {}
     scenario = report.get("scenario") or {}
     return section(
         "Run",
@@ -393,6 +424,7 @@ def render_run(report: JsonObject) -> list[str]:
                 ["scenario wallets", scenario.get("wallet_count")],
                 ["coinjoin type", run.get("coinjoin_type")],
                 ["BlockSci min input count", run.get("blocksci_min_input_count")],
+                ["FirstWasabi2Block", detector.get("first_wasabi2_block")],
                 ["scenario sha256", run.get("scenario_sha256")],
             ],
             key="field",
@@ -511,6 +543,7 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
         *render_run(report),
         *render_detection_summary(report),
         *render_scope_note(report),
+        *render_run_manifest(report),
         *render_emulator_detection(report, explorer_base_url),
         *render_analyzer_diagnostic(report, explorer_base_url),
     ]

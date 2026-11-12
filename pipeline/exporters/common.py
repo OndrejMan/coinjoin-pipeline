@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from collections import Counter
 from collections.abc import Iterator, Mapping
 from datetime import datetime
@@ -49,6 +50,27 @@ def canonical_json(data: JsonValue) -> str:
 
 def sha256_json(data: JsonValue) -> str:
     return hashlib.sha256(canonical_json(data).encode("utf-8")).hexdigest()
+
+
+def first_present(*values: str | None) -> str | None:
+    for value in values:
+        if value is not None and value != "":
+            return value
+    return None
+
+
+def git_commit_for_path(path: Path) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    commit = result.stdout.strip()
+    return commit or None
 
 
 def file_sha256(path: Path) -> str:

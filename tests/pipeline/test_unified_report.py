@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import sys
 import tempfile
 import types
@@ -28,6 +29,7 @@ from exporters.blocksci_export.detector import export_blocksci_records
 from exporters.cli import parse_args
 from exporters.common import SCHEMA_VERSION, save_json, sha256_json
 from exporters.emulator_data import build_emulator_data, load_wasabi_round_labels
+from exporters.manifest import build_run_manifest
 from exporters.markdown_report import render_report
 from exporters.parameters import Detector  # noqa: E402
 from exporters.normalization import (
@@ -207,6 +209,26 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(records, {})
         self.assertEqual(chain.calls, [(0, 10, "wasabi2")])
 
+    def test_run_manifest_records_reproduction_command(self):
+        with mock.patch.dict(
+            os.environ,
+            {"REPRODUCTION_COMMAND": "./runIt.sh full-run --engine joinmarket"},
+        ):
+            manifest = build_run_manifest(
+                Path("/tmp/run"),
+                None,
+                Detector(
+                    "joinmarket",
+                    min_input_count=1,
+                    first_wasabi2_block=0,
+                ),
+                "joinmarket",
+            )
+        self.assertEqual(
+            manifest["execution"]["reproduction_command"],
+            "./runIt.sh full-run --engine joinmarket",
+        )
+
     def test_parse_args_rejects_removed_test_values(self):
         with self.assertRaises(SystemExit):
             parse_args(["--run-dir", "run", "--test-values"])
@@ -222,6 +244,18 @@ class UnifiedReportTest(unittest.TestCase):
         for value in ("0", "-1", "not-a-number"):
             with self.subTest(value=value), self.assertRaises(SystemExit):
                 parse_args(["--run-dir", "run", "--min-input-count", value])
+
+    def test_parse_args_accepts_manifest_provenance(self):
+        args = parse_args(
+            [
+                "--run-dir",
+                "run",
+                "--emulator-git-commit",
+                "abc123",
+            ]
+        )
+
+        self.assertEqual(args.emulator_git_commit, "abc123")
 
     def test_build_report_exact_match(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -247,6 +281,13 @@ class UnifiedReportTest(unittest.TestCase):
         self.assertEqual(report["run"]["started_at"], "2026-05-24T15:42:00")
         self.assertEqual(report["run"]["scenario_name"], "default")
         self.assertEqual(report["run"]["scenario_sha256"], sha256_json(scenario_fixture()))
+        self.assertEqual(
+            report["run_manifest"]["scenario"]["sha256"],
+            sha256_json(scenario_fixture()),
+        )
+        self.assertEqual(report["run_manifest"]["execution"]["engine"], "wasabi")
+        self.assertEqual(report["run_manifest"]["execution"]["coinjoin_type"], "wasabi2")
+        self.assertEqual(report["run_manifest"]["detector"]["blocksci_min_input_count"], None)
         self.assertEqual(report["scenario"]["wallet_count"], 2)
         self.assertEqual(report["scenario"]["total_initial_funds_sats"], 3250000)
         self.assertEqual(report["summary"]["coinjoin_analysis_coinjoins"], 1)

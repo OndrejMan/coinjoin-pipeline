@@ -81,7 +81,7 @@ def selected_run_dir(config: PipelineConfiguration) -> Path | None:
     return config.runs_path / config.run_id if config.run_id else None
 
 
-def host_environment(config: PipelineConfiguration, images: Images) -> dict[str, str]:
+def host_environment(config: PipelineConfiguration, images: Images, reproduction: str) -> dict[str, str]:
     """Variables the launched stages read, set only while the run executes."""
     root = config.runs_path
     environment = {
@@ -94,6 +94,7 @@ def host_environment(config: PipelineConfiguration, images: Images) -> dict[str,
         "COINJOIN_EMULATOR_IMAGE": images.emulator,
         "COINJOIN_ANALYSIS_IMAGE": images.coinjoin_analysis,
         "BLOCKSCI_IMAGE": images.blocksci,
+        "REPRODUCTION_COMMAND": reproduction,
         "PYTHONDONTWRITEBYTECODE": "1",
     }
     if config.run_id:
@@ -113,9 +114,9 @@ class RunContext:
     run_dir: Path | None
 
     @classmethod
-    def prepare(cls, config: PipelineConfiguration) -> RunContext:
+    def prepare(cls, config: PipelineConfiguration, reproduction: str) -> RunContext:
         config, images = resolve_run_images(resolve_configuration(config))
-        return cls(config, images, host_environment(config, images), selected_run_dir(config))
+        return cls(config, images, host_environment(config, images, reproduction), selected_run_dir(config))
 
     @contextmanager
     def activate(self):

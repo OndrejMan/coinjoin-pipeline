@@ -7,7 +7,7 @@ import os
 from dataclasses import dataclass
 
 from exporters.common import DEFAULT_FIRST_WASABI2_BLOCK
-from exporters.report_types import DetectorParameters
+from exporters.report_types import DetectorManifest, DetectorParameters
 
 
 @dataclass(frozen=True)
@@ -34,6 +34,16 @@ class Detector:
             "coinjoin_type": self.coinjoin_type,
             "min_input_count": self.min_input_count,
         }
+
+    def manifest(self) -> DetectorManifest:
+        """Only the selected CoinJoin type's parameters."""
+        detector: DetectorManifest = {
+            "coinjoin_type": self.coinjoin_type,
+            "blocksci_min_input_count": self.min_input_count,
+        }
+        if self.coinjoin_type == "wasabi2":
+            detector["first_wasabi2_block"] = self.first_wasabi2_block
+        return detector
 
 
 def parse_min_input_count(value: str | None) -> int | None:

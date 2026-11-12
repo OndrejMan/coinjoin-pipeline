@@ -30,8 +30,10 @@ def parse_args(argv=None):
     parser.add_argument("--script", type=Path, default=os.environ.get("BLOCKSCI_SCRIPT") or None)
     parser.add_argument("--report", action="store_true")
     parser.add_argument("--share-output", action="store_true")
+    parser.add_argument("--engine", default=os.environ.get("COINJOIN_ENGINE"))
     parser.add_argument("--blocksci-analysis", type=Path)
     parser.add_argument("--output-name", default=REPORT_JSON)
+    parser.add_argument("--emulator-git-commit", default=os.environ.get("COINJOIN_EMULATOR_GIT_COMMIT"))
     add_detector_arguments(parser)
     args = parser.parse_args(argv)
     if args.run_dir is None:

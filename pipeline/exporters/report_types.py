@@ -1,10 +1,11 @@
-"""Typed shapes of the records the unified report compares.
+"""Typed shapes of the records the unified report compares and the provenance it keeps.
 
 ``JsonObject`` stays the type of free-form JSON (scenario files, emulator
 evidence, the rendered report).  The shapes here are the ones the report
 *computes on*: both analyzers are normalized into :class:`TransactionRecord`
-before they are compared.  Declaring them lets the type checker catch a renamed
-field on one side of the comparison, which a plain ``dict`` never could.
+before they are compared, and :class:`RunManifest` is the provenance a report
+keeps.  Declaring them lets the type checker catch a renamed field on
+one side of the comparison, which a plain ``dict`` never could.
 
 The exporters also run inside the BlockSci image (Python 3.8), so every
 subscripted type below appears only in annotations, which
@@ -97,6 +98,43 @@ class DetectionConfusionMatrix(TypedDict):
     false_positive_txids: list[str]
     false_negative_txids: list[str]
     out_of_scope_detected_txids: list[str]
+
+
+class _DetectorManifestFields(TypedDict):
+    coinjoin_type: str
+    blocksci_min_input_count: int | None
+
+
+class DetectorManifest(_DetectorManifestFields, total=False):
+    """Detector parameters; only the selected CoinJoin type's keys are present."""
+
+    first_wasabi2_block: int
+
+
+class ScenarioIdentity(TypedDict):
+    name: str | None
+    sha256: str | None
+
+
+class ExecutionManifest(TypedDict):
+    engine: str
+    coinjoin_type: str
+    reproduction_command: str | None
+
+
+class SourceCommits(TypedDict):
+    coinjoin_emulator: str | None
+    exporters: str | None
+
+
+class RunManifest(TypedDict):
+    """Provenance of one report."""
+
+    run_id: str
+    scenario: ScenarioIdentity
+    execution: ExecutionManifest
+    detector: DetectorManifest
+    source_commits: SourceCommits
 
 
 class DetectorParameters(TypedDict):

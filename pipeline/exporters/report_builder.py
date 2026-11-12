@@ -17,6 +17,7 @@ from exporters.comparison import (
     build_divergences,
     compare_records,
 )
+from exporters.manifest import build_run_manifest
 from exporters.parameters import Detector
 from exporters.report_types import TransactionRecord
 from exporters.scenario import build_scenario_checks
@@ -128,6 +129,8 @@ def build_report(
     scenario: JsonObject | None = None,
     *,
     emulator_data: JsonObject | None = None,
+    engine: str | None = None,
+    emulator_git_commit: str | None = None,
 ) -> JsonObject:
     """The unified report. Every top-level key is always present, null when it does not apply."""
     coinjoin_type, min_input_count = detector.coinjoin_type, detector.min_input_count
@@ -154,6 +157,13 @@ def build_report(
     )
     divergences = build_divergences(transactions)
     summary["divergence_counts"] = {name: len(items) for name, items in divergences.items()}
+    run_manifest = build_run_manifest(
+        run_dir,
+        scenario,
+        detector,
+        engine,
+        emulator_git_commit=emulator_git_commit,
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "run": {
@@ -164,6 +174,7 @@ def build_report(
             "blocksci_min_input_count": min_input_count,
             "scenario_sha256": scenario.get("sha256") if scenario else None,
         },
+        "run_manifest": run_manifest,
         "warnings": build_warnings(coinjoin_type, min_input_count, blocksci_records, emulator_data),
         "scenario": scenario,
         "emulator_data": {

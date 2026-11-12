@@ -85,7 +85,7 @@ def _utility(argv: list[str]) -> int | None:
     if action == "version":
         print_version()
         return EXIT_OK
-    context = RunContext.prepare(PipelineConfiguration.from_flat(supplied))
+    context = RunContext.prepare(PipelineConfiguration.from_flat(supplied), shlex.join(["cjp", *argv]))
     root = context.config.runs_path
     if remaining:
         return fail(f"unexpected arguments for {action}: {' '.join(remaining)}; see cjp {action} --help")
@@ -191,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
             if result is not None:
                 return result
         reproduction = shlex.join(["coinjoin-pipeline", *original])
-        context = RunContext.prepare(load_configuration(original))
+        context = RunContext.prepare(load_configuration(original), reproduction)
         config = context.config
         errors = preflight_errors(context)
         if errors:
