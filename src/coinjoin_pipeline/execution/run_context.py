@@ -47,12 +47,7 @@ def run_dir_under_root(run_dir_arg: str, runs_root: Path) -> Path:
     requested = Path(run_dir_arg).expanduser()
     resolved = requested.resolve() if requested.is_absolute() else (runs_root / requested).resolve()
     if resolved.parent != runs_root:
-        print(
-            f"[ERROR] --run-dir must name a run inside the runs root {runs_root}, but {resolved} is outside it.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
+        raise ValueError(f"--run-dir must name a run inside the runs root {runs_root}, but {resolved} is outside it")
     if not resolved.exists():
-        print(f"[ERROR] Run directory not found: {resolved}", file=sys.stderr)
-        sys.exit(2)
+        raise ValueError(f"run directory not found: {resolved}")
     return resolved

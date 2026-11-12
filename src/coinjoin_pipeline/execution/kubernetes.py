@@ -71,19 +71,15 @@ def _output(result: subprocess.CompletedProcess[str]) -> str:
 
 
 def _preflight(kubeconfig: Path, *arguments: str, namespace: str | None = None) -> str:
-    """Run one preflight command and exit with the usage code when it fails."""
+    """Run one preflight command; a failure is a usage error, like a refused option."""
     try:
         completed = kubectl(kubeconfig, *arguments, namespace=namespace)
-    except FileNotFoundError:
-        print("[ERROR] kubectl is required for the Kubernetes auth preflight.", file=sys.stderr)
-        sys.exit(2)
+    except FileNotFoundError as error:
+        raise ValueError("kubectl is required for the Kubernetes auth preflight") from error
     stdout, stderr = (completed.stdout or "").strip(), (completed.stderr or "").strip()
     if completed.returncode != 0:
-        print(f"[ERROR] Kubernetes preflight command failed: {shlex.join(completed.args)}", file=sys.stderr)
-        for text in (stdout, stderr):
-            if text:
-                print(text, file=sys.stderr)
-        sys.exit(2)
+        details = "".join(f"\n{text}" for text in (stdout, stderr) if text)
+        raise ValueError(f"Kubernetes preflight command failed: {shlex.join(completed.args)}{details}")
     if stderr:
         print(f"[kubectl] {stderr}", file=sys.stderr)
     return stdout
@@ -94,8 +90,7 @@ def _require_permissions(kubeconfig: Path, checks: tuple[tuple[str, str], ...], 
         output = _preflight(kubeconfig, "auth", "can-i", verb, resource, namespace=namespace)
         answer = next((line for line in reversed(output.splitlines()) if line.strip()), "")
         if answer.strip().lower() != "yes":
-            print(f"[ERROR] Kubernetes permission denied: can-i {verb} {resource} returned {output!r}", file=sys.stderr)
-            sys.exit(2)
+            raise ValueError(f"Kubernetes permission denied: can-i {verb} {resource} returned {output!r}")
 
 
 def kubernetes_auth_preflight(kubeconfig_path: Path, namespace: str, reuse_namespace: bool) -> None:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
 
 from coinjoin_pipeline.execution import settings
@@ -158,11 +157,10 @@ def container_scenario_path(scenario: str | None, scenarios_dir: Path, engine: s
     try:
         relative_path = scenario_path.relative_to(scenarios_dir.resolve())
     except ValueError:
-        print(
-            f"[ERROR] Scenario {scenario_path} is outside the scenarios directory {scenarios_dir}, so it cannot be mounted into the container. Copy it under {scenarios_dir} and pass it by name.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
+        raise ValueError(
+            f"scenario {scenario_path} is outside the scenarios directory {scenarios_dir}, so it cannot be "
+            f"mounted into the container; copy it under {scenarios_dir} and pass it by name"
+        ) from None
     return settings.CONTAINER_SCENARIOS_DIR + "/" + str(relative_path).replace(os.sep, "/")
 
 

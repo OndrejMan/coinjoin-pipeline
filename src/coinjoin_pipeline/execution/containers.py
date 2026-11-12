@@ -281,8 +281,7 @@ def run_script(
     blocksci_script: str | None = None,
 ) -> None:
     if not script.exists():
-        print(f"[ERROR] Script not found: {script}", file=sys.stderr)
-        sys.exit(1)
+        raise RuntimeError(f"script not found: {script}")
     env = compose_env(config, active_run_id, include_scenario=include_scenario, create_directories=True)
     if blocksci_script:
         env["BLOCKSCI_SCRIPT"] = blocksci_script
@@ -335,8 +334,7 @@ def run_coinjoin_analysis(
     if all_runs:
         active_run_ids = [path.name for path in sorted(run_dirs(emulation_logs_dir))]
         if not active_run_ids:
-            print(f"[ERROR] No emulation run folder found under {emulation_logs_dir}.", file=sys.stderr)
-            sys.exit(2)
+            raise ValueError(f"no emulation run folder found under {emulation_logs_dir}")
     else:
         selected = run_dir_under_root(required(run_dir_arg, "run_dir"), emulation_logs_dir.expanduser().resolve())
         active_run_ids = [selected.name]
@@ -344,11 +342,7 @@ def run_coinjoin_analysis(
         run_dir = emulation_logs_dir / active_run_id
         baseline_path = run_dir / BASELINE_FILE
         if analysis_action == "analyze_only" and (not baseline_path.is_file()):
-            print(
-                f"[ERROR] analyze_only requires an existing baseline: {baseline_path}",
-                file=sys.stderr,
-            )
-            sys.exit(2)
+            raise ValueError(f"analyze_only requires an existing baseline: {baseline_path}")
         with captured_pipeline_stage(emulation_logs_dir, "coinjoin-analysis baseline", run_dir):
             try:
                 run_coinjoin_analysis_docker_stage(active_run_id, analysis_action)
@@ -395,11 +389,9 @@ def container_run_pull_args(image: str, env_name: str) -> list[str]:
     if not pull_policy:
         pull_policy = "always" if "/" in image else "missing"
     if pull_policy not in settings.VALID_PULL_POLICIES:
-        print(
-            f"[ERROR] Invalid {env_name}={pull_policy!r}; expected one of: {', '.join(settings.VALID_PULL_POLICIES)}.",
-            file=sys.stderr,
+        raise ValueError(
+            f"invalid {env_name}={pull_policy!r}; expected one of: {', '.join(settings.VALID_PULL_POLICIES)}"
         )
-        sys.exit(2)
     return [f"--pull={pull_policy}"]
 
 
@@ -469,7 +461,7 @@ def export_preflight_error(coinjoin_ready: bool, blocksci_ready: bool, run_dir: 
         missing.append(str(blocksci_analysis_dir(run_dir) / ARTIFACT_NAME))
     command = "coinjoin-analysis" if not coinjoin_ready and blocksci_ready else "analyze"
     return (
-        f"[ERROR] Cannot export unified report for run '{run_dir.name}'; missing analytical input: "
+        f"cannot export unified report for run '{run_dir.name}'; missing analytical input: "
         + ", ".join(missing)
         + f". Run: cjp {command} --run-dir {shlex.quote(run_dir.name)}"
     )
@@ -524,8 +516,7 @@ def run_export_only(args: PipelineConfiguration) -> None:
     blocksci_ready = exists_or_unreadable(blocksci_analysis_dir(run_dir) / ARTIFACT_NAME)
     error = export_preflight_error(coinjoin_ready, blocksci_ready, run_dir)
     if error:
-        print(error, file=sys.stderr)
-        sys.exit(2)
+        raise ValueError(error)
     image = resolve_unified_report_image(args).removeprefix("docker://")
     validate_image(image)
     env["COINJOIN_UNIFIED_REPORT_IMAGE"] = image

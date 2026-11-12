@@ -972,11 +972,9 @@ class WrapperExportTest(unittest.TestCase):
             with (
                 mock.patch.dict(os.environ, env, clear=False),
                 mock.patch("coinjoin_pipeline.execution.containers.run_command") as run_mock,
-                self.assertRaises(SystemExit) as raised,
+                self.assertRaisesRegex(ValueError, "analyze_only requires an existing baseline"),
             ):
                 run_coinjoin_analysis("run-a", analysis_action="analyze_only")
-
-            self.assertEqual(raised.exception.code, 2)
             run_mock.assert_not_called()
 
     def test_kubernetes_emulator_command_places_driver_before_subcommand(self):
@@ -1143,10 +1141,9 @@ class WrapperExportTest(unittest.TestCase):
             "coinjoin_pipeline.execution.kubernetes.subprocess.run",
             side_effect=fake_run,
         ):
-            with self.assertRaises(SystemExit) as context:
+            with self.assertRaisesRegex(ValueError, "Kubernetes permission denied: can-i create pods"):
                 kubernetes_auth_preflight(Path("/kube/config"), "coinjoin-test", reuse_namespace=False)
 
-        self.assertEqual(context.exception.code, 2)
         self.assertEqual(
             calls[-1],
             _kubectl_cmd("--namespace", "coinjoin-test", "auth", "can-i", "create", "pods"),
@@ -1381,13 +1378,11 @@ class WrapperExportTest(unittest.TestCase):
             }
             with (
                 mock.patch.dict(os.environ, env, clear=True),
-                self.assertRaises(SystemExit) as error,
+                self.assertRaisesRegex(ValueError, "--copy-to-host requires KUBERNETES_COPY_TO_HOST_DIR"),
             ):
                 run_kubernetes_emulation(
                     Namespace(scenario="overactive-local.json", kubeconfig=str(kubeconfig), copy_to_host=True)
                 )
-
-            self.assertEqual(error.exception.code, 2)
 
     def test_container_run_pull_args_default_to_always_for_registry_images(self):
         with mock.patch.dict(os.environ, {}, clear=True):
@@ -1421,7 +1416,7 @@ class RunDirResolutionTests(unittest.TestCase):
     def test_typoed_run_dir_is_rejected_without_creating_it(self):
         with tempfile.TemporaryDirectory() as tmp:
             runs_root = Path(tmp)
-            with self.assertRaises(SystemExit):
+            with self.assertRaisesRegex(ValueError, "run directory not found"):
                 run_dir_under_root("does-not-exist", runs_root)
             self.assertFalse((runs_root / "does-not-exist").exists())
 
@@ -1432,7 +1427,7 @@ class RunDirResolutionTests(unittest.TestCase):
             runs_root.mkdir()
             outside = root / "archive" / "2026-07-09_08-14_default"
             outside.mkdir(parents=True)
-            with self.assertRaises(SystemExit):
+            with self.assertRaisesRegex(ValueError, "must name a run inside the runs root"):
                 run_dir_under_root(str(outside), runs_root)
 
     def test_valid_run_dir_resolves_under_root(self):
@@ -1472,7 +1467,7 @@ class ScenarioPathTests(unittest.TestCase):
             outside = root / "experiments" / "wasabi-40.json"
             outside.parent.mkdir(parents=True)
             outside.write_text("{}", encoding="utf-8")
-            with self.assertRaises(SystemExit):
+            with self.assertRaisesRegex(ValueError, "is outside the scenarios directory"):
                 container_scenario_path(str(outside), scenarios_dir)
 
     def test_nested_scenario_round_trips_without_flattening(self):
