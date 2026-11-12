@@ -698,7 +698,7 @@ class WrapperExportTest(unittest.TestCase):
             "BLOCKSCI_JOINMARKET_MAX_DEPTH": "200000",
         }
 
-        command = export_command("run-a", env)
+        command = " ".join(export_command("run-a", env))
 
         self.assertIn("--min-input-count 1", command)
         self.assertIn("/mnt/exporters/worker.py report", command)

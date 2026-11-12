@@ -148,12 +148,9 @@ def host_environment(config: PipelineConfiguration, images: Images, reproduction
         "REPRODUCTION_COMMAND": reproduction,
         "PYTHONDONTWRITEBYTECODE": "1",
     }
-    for key, value in (
-        ("COINJOIN_UPLOADER_IMAGE", config.images.uploader),
-        ("COINJOIN_UNIFIED_REPORT_IMAGE", config.images.unified_report),
-    ):
-        if value:
-            environment[key] = value
+    # The local report reads its image here; the S3 path takes the uploader from the configuration.
+    if config.images.unified_report:
+        environment["COINJOIN_UNIFIED_REPORT_IMAGE"] = config.images.unified_report
     if config.run_id:
         environment["PIPELINE_RUN_ID"] = config.run_id
     if config.kubernetes.copy_to_host:

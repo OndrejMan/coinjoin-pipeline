@@ -473,7 +473,8 @@ def export_preflight_error(coinjoin_ready: bool, blocksci_ready: bool, run_dir: 
     )
 
 
-def export_command(active_run_id: str, env: dict[str, str]) -> str:
+def export_command(active_run_id: str, env: dict[str, str]) -> list[str]:
+    """The report worker's argv for one run; a local run never uses the S3 uploader."""
     command = [
         "python3",
         "/mnt/exporters/worker.py",
@@ -502,13 +503,12 @@ def export_command(active_run_id: str, env: dict[str, str]) -> str:
         ("--coinjoin-emulator-image", env.get("COINJOIN_EMULATOR_IMAGE")),
         ("--coinjoin-emulator-image-id", env.get("COINJOIN_EMULATOR_IMAGE_ID")),
         ("--coinjoin-emulator-image-digest", env.get("COINJOIN_EMULATOR_IMAGE_DIGEST")),
-        ("--uploader-image", env.get("COINJOIN_UPLOADER_IMAGE")),
         ("--unified-report-image", env.get("COINJOIN_UNIFIED_REPORT_IMAGE")),
     ]
     for flag, value in optional_args:
         if value:
             command.extend([flag, value])
-    return " ".join((shlex.quote(part) for part in command))
+    return command
 
 
 def run_export_only(args: PipelineConfiguration) -> None:
@@ -542,6 +542,6 @@ def run_export_only(args: PipelineConfiguration) -> None:
         "--entrypoint",
         "",
         image,
-        *shlex.split(export_command(active_run_id, env)),
+        *export_command(active_run_id, env),
     ]
     run_command(command, cwd=settings.ROOT_DIR, env=env)
