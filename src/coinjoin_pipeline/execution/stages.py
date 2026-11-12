@@ -13,6 +13,11 @@ from enum import Enum
 from typing import Literal
 
 RunnerName = Literal["local", "kubernetes", "pbs"]
+# Stage names are part of the marker and log protocol; scenario-lab reads them through run_layout.
+EMULATION_STAGE = "kubernetes-emulation"
+BASELINE_STAGE = "coinjoin-analysis"
+BLOCKSCI_STAGE = "blocksci"
+REPORT_STAGE = "unified-report"
 # The configuration takes this from here, so the dependency graph imports nothing of the package.
 BlockSciWorkflow = Literal["combined", "reusable", "cached"]
 
@@ -152,7 +157,7 @@ def _mappings_stage(after: StagePlan) -> StagePlan:
 def _report_stage(runner: RunnerName, *analyzers: StagePlan | None) -> StagePlan:
     """The unified report waits for every analyzer present in the graph."""
     return StagePlan(
-        "unified-report",
+        REPORT_STAGE,
         StageKind.REPORT,
         runner,
         tuple(stage.name for stage in analyzers if stage is not None),
@@ -173,8 +178,8 @@ def analysis_plan(*, analysis_pbs: bool, blocksci_pbs: bool, mappings_pbs: bool)
     """Declare the experimental local graph: the same analyzer/report dependencies
     as ``s3_full_run_plan``, without an emulation node. Its node order is the
     serial execution order."""
-    baseline = StagePlan("coinjoin-analysis", StageKind.BASELINE, "pbs" if analysis_pbs else "local")
-    blocksci = StagePlan("blocksci", StageKind.BLOCKSCI_WORK, "pbs" if blocksci_pbs else "local")
+    baseline = StagePlan(BASELINE_STAGE, StageKind.BASELINE, "pbs" if analysis_pbs else "local")
+    blocksci = StagePlan(BLOCKSCI_STAGE, StageKind.BLOCKSCI_WORK, "pbs" if blocksci_pbs else "local")
     mappings = _mappings_stage(baseline) if mappings_pbs else None
     stages = [stage for stage in (baseline, blocksci, mappings) if stage is not None]
     stages.append(_report_stage("pbs" if blocksci_pbs else "local", baseline, blocksci, mappings))
@@ -208,7 +213,7 @@ def _blocksci_stages(
         # prefix as the baseline worker, so it cannot start before the
         # Kubernetes uploader has published it either.
         return None, StagePlan(
-            name="blocksci",
+            name=BLOCKSCI_STAGE,
             kind=StageKind.BLOCKSCI_WORK,
             runner="pbs",
             dependencies=(emulation.name,),
@@ -251,13 +256,13 @@ def s3_full_run_plan(
     full-run without coinjoin-analysis has no baseline to compare.
     """
     emulation = StagePlan(
-        name="kubernetes-emulation",
+        name=EMULATION_STAGE,
         kind=StageKind.EMULATION,
         runner="kubernetes",
     )
     baseline = (
         StagePlan(
-            name="coinjoin-analysis",
+            name=BASELINE_STAGE,
             kind=StageKind.BASELINE,
             runner="pbs",
             dependencies=(emulation.name,),
