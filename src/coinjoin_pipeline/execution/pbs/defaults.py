@@ -34,6 +34,7 @@ DEFAULT_RESOURCES = {
 # list of the jobs derives from this one. The checkpoint job compresses with one zstd
 # thread per CPU but needs little memory. The Scenario Lab keeps the same values.
 MAINNET_SYNC_RESOURCES = {
+    "restore": PBSResources(2, "4gb", "20gb", "12:00:00"),
     # mainnet.dbcache_mb is half of this memory; raise them together.
     "producer": PBSResources(2, "8gb", "20gb", "24:00:00"),
     "blocksci": PBSResources(4, "64gb", "20gb", "24:00:00"),

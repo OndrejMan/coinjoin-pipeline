@@ -1,4 +1,4 @@
-"""Manual Core/Dumplings → BlockSci → checkpoint PBS chain over a shared working directory."""
+"""Manual restore → Core/Dumplings → BlockSci → checkpoint PBS chain over a shared working directory."""
 
 from __future__ import annotations
 
@@ -178,8 +178,9 @@ def sync_settings(config: PipelineConfiguration, stage: str, budget: PBSResource
         "pbs_resources": {"ncpus": budget.ncpus, "mem": budget.mem},
         "core_image": with_singularity_scheme(config.mainnet.core_image),
         "dumplings_image": with_singularity_scheme(config.mainnet.dumplings_image),
-        # BlockSci writes the index; the checkpoint only reads it, so readers stay.
+        # Restore and BlockSci write the index; the checkpoint only reads it, so readers stay.
         "index_lock": {
+            "restore": "exclusive",
             "blocksci": "exclusive",
             "checkpoint": "shared",
         }.get(stage),
@@ -245,7 +246,7 @@ def render_sync(config: PipelineConfiguration, stage: str) -> str:
 def submit_sync(config: PipelineConfiguration) -> None:
     """Persist every ID immediately and roll back partial submissions.
 
-    The S3 state prefix is fixed: the producer job clears the previous run's state once it
+    The S3 state prefix is fixed: the restore job clears the previous run's state once it
     holds the dataset lock, so submission checks nothing there.
     """
     run_id = required(config.run_id, "run_id")

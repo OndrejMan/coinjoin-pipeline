@@ -29,9 +29,10 @@ if TYPE_CHECKING:  # TypeGuard needs Python 3.10; the PBS node never evaluates a
 from exporters.artifact_paths import pbs_marker
 
 from coinjoin_pipeline.execution.pbs.apptainer import MISSING_RUNTIME, alias_binds, exec_command, find_runtime
+from coinjoin_pipeline.execution.pbs.index_store import MEMBERS as INDEX_MEMBERS
 from coinjoin_pipeline.execution.pbs.index_store import inventory as index_inventory
 from coinjoin_pipeline.execution.pbs.index_store import usage_report, utc_now
-from coinjoin_pipeline.storage.s5client import SHA256, S5Client, S5Error
+from coinjoin_pipeline.storage.s5client import SHA256, S5Client, S5Error, new_staging
 
 # Core spans methods; cleanup below owns its lifetime rather than a single local with block.
 # pylint: disable=consider-using-with
@@ -103,6 +104,10 @@ def file_sizes(root: Path) -> dict[str, int]:
     return {str(path.relative_to(root)): path.stat().st_size for path in sorted(root.rglob("*")) if path.is_file()}
 
 
+def megabytes_per_second(size: int, seconds: float) -> float:
+    return round(size / 1e6 / max(seconds, 0.001), 1)
+
+
 def atomic_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -165,6 +170,10 @@ def resume_file(index: Path, blocks: Path) -> int:
     if not source.is_file() or source.stat().st_size < offset + size:
         raise ValueError("BlockSci parser resume file is missing or truncated")
     return number
+
+
+# The resume bytes of the parser, recorded in the index manifest and the Core checkpoint.
+SIGNATURE_KEYS = ("resume_file_number", "resume_file_prefix_size", "resume_file_prefix_sha256")
 
 
 def resume_signature(index: Path, blocks: Path) -> dict[str, object]:
@@ -269,7 +278,7 @@ class Worker:
     def reset_state(self) -> None:
         """Clear the previous synchronization's state; its logs stay under logs/<run-id>/."""
         stages = self.c["sync_stages"]
-        # <stage>.json is each job's progress.
+        # <stage>.json is each job's progress; restore.json also says what the restore did.
         names = ("ready.json", "done.json", "blocksci-index-manifest.json", *(f"{stage}.json" for stage in stages))
         for name in (*names, *(f"{stage}.quiescent" for stage in stages if stage != self.stage)):
             (self.run / name).unlink(missing_ok=True)
@@ -491,6 +500,25 @@ class Worker:
         self.publish_json(manifest_uri, manifest)
         return manifest_uri
 
+    def restore_dumplings(self, manifest_uri: str, destination: Path) -> None:
+        """Explicit recovery of Scanner/ into a new directory, checked against the manifest."""
+        files = self.storage.cat_json(manifest_uri).get("files")
+        if (
+            not isinstance(files, dict)
+            or not files
+            or any(name.startswith("/") or ".." in Path(name).parts for name in files)
+        ):
+            raise ValueError("Invalid Dumplings manifest")
+        staging = new_staging(destination)
+        try:
+            self.storage.copy(manifest_uri.rsplit("/", 1)[0] + "/Scanner/*", str(staging) + "/", timeout=6 * 3600)
+            if file_sizes(staging) != files:
+                raise ValueError("The restored Scanner/ does not match its manifest")
+            staging.rename(destination)
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging)
+
     def synchronize_core(self) -> JsonObject:
         target = self.c.get("target_height")
         last_report = None
@@ -549,6 +577,31 @@ class Worker:
                 target_height=target,
             )
         return frozen
+
+    def dataset_members(self) -> list[Path]:
+        """Working data that exist; locks, synchronization state and logs do not count."""
+        index = (self.index / name for name in INDEX_MEMBERS)
+        return [path for path in (self.datadir, self.dumps, self.archive_state, *index) if path.exists()]
+
+    def discard_dataset(self) -> None:
+        """Delete the working dataset and whatever else the root holds, such as old run logs.
+
+        Only the synchronization state and its lock stay. Everything moves aside first, so a
+        killed job never leaves a partial dataset that the producer would refuse; the restore
+        job removes such leftovers.
+        """
+        self.progress("clearing")
+        trash = self.root / f".clear-{self.run_id}"
+        index_trash = self.index / f".clear-{self.run_id}"
+        trash.mkdir()
+        index_trash.mkdir()
+        kept = {self.run, self.active, trash}
+        for path in (*(path for path in self.root.iterdir() if path not in kept), *self.dataset_members()):
+            if path.exists():
+                path.rename((index_trash if path.parent == self.index else trash) / path.name)
+        (self.index / ".writing").unlink(missing_ok=True)
+        shutil.rmtree(trash)
+        shutil.rmtree(index_trash)
 
     def cleanup(self) -> None:
         for process in self.children:

@@ -1,21 +1,32 @@
-"""The jobs of one mainnet synchronization, in their order: producer, blocksci and
-checkpoint. Each is a function over its PBS job's ``Worker``.
+"""The jobs of one mainnet synchronization, in their order: restore, producer, blocksci
+and checkpoint. Each is a function over its PBS job's ``Worker``.
 
-Each backup has one place: the old archive is deleted, the new one streamed and its size
-checked, and manifest.json, written last, makes it valid again.
+Working data are downloaded only by the restore job and only into an empty working
+dataset. Each backup has one place: the old archive is deleted, the new one streamed and
+its size checked, and manifest.json, written last, makes it valid again.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import shutil
+import socket
+import time
+from collections.abc import Callable
+from pathlib import Path
 
 from coinjoin_pipeline.execution.mainnet_worker import (
     RESUME_CHECKPOINT,
+    SIGNATURE_KEYS,
     JsonObject,
     Worker,
     atomic_json,
+    file_sizes,
     is_count,
     is_sha256,
+    megabytes_per_second,
     read_json,
     resume_file,
     resume_signature,
@@ -38,10 +49,183 @@ def require_ready(ready: JsonObject, run_id: str) -> int:
     return height
 
 
+def finish_restore(worker: Worker, action: str, **extra: object) -> None:
+    worker.progress("complete", None, None, "done", action=action, **extra)
+    worker.complete({"run_id": worker.run_id, "action": action, **extra})
+
+
+def measured(name: str, action: Callable[[], object], downloaded: int, target: Path) -> JsonObject:
+    """Run one restore step; download, unpacking and checks overlap, so it has one duration."""
+    started, cpu = time.monotonic(), sum(os.times()[:4])
+    action()
+    seconds = time.monotonic() - started
+    sizes = file_sizes(target)
+    unpacked = sum(sizes.values())
+    part = {
+        "seconds": round(seconds, 1),
+        "cpu_seconds": round(sum(os.times()[:4]) - cpu, 1),
+        "downloaded_bytes": downloaded,
+        "unpacked_bytes": unpacked,
+        "files": len(sizes),
+        "downloaded_mb_per_s": megabytes_per_second(downloaded, seconds),
+        "unpacked_mb_per_s": megabytes_per_second(unpacked, seconds),
+    }
+    print(f"restore part {name}: {json.dumps(part)}", flush=True)
+    return part
+
+
+def restore(worker: Worker) -> None:
+    """Job 0: fill an empty working dataset from the S3 backups, otherwise do nothing.
+
+    The working copy on multijob storage can expire. Only a completely empty one is
+    restored, from three backups of one synchronization; a partial one is never mixed
+    with backups, and the producer refuses it. A dataset whose index a failed job left
+    unfinished is emptied first, but only once the backups replacing it check out.
+    """
+    worker.stage = "restore"
+    worker.acquire_dataset()
+    worker.reset_state()
+    # Only a killed restore leaves these; both locks are held, so none is in use.
+    leftovers = (".restore-*", ".clear-*")
+    for leftover in (path for base in (worker.root, worker.index) for name in leftovers for path in base.glob(name)):
+        shutil.rmtree(leftover)
+    present = worker.dataset_members()
+    unfinished = (worker.index / ".writing").exists()
+    if present and not unfinished:
+        finish_restore(worker, "skipped-not-empty", present=[str(path) for path in present])
+        return
+    backups = {
+        name: prefix.rstrip("/") + "/manifest.json"
+        for name, prefix in (
+            ("core", worker.c["backup_uri"]),
+            ("index", worker.c["index_backup_uri"]),
+            ("dumplings", worker.c["dumplings_uri"]),
+        )
+    }
+    worker.progress("restore-check")
+    manifests = {
+        name: worker.storage.cat_json(uri, timeout=120) if worker.storage.exists(uri) else None
+        for name, uri in backups.items()
+    }
+    found = {name: value for name, value in manifests.items() if value is not None}
+    missing = sorted(backups.keys() - found.keys())
+    if not found:
+        if unfinished:
+            raise ValueError("The index is unfinished and S3 holds no backups to replace it")
+        if worker.storage.listing(worker.c["blocks_uri"].rstrip("/") + "/*"):
+            raise ValueError(
+                "S3 holds archived blocks but no backups; a new initial download would mix its block files "
+                "with the archived ones. Restore the backups or empty " + worker.c["blocks_uri"]
+            )
+        finish_restore(worker, "skipped-no-backup")
+        return
+    if missing:
+        raise ValueError("S3 lacks the backups " + ", ".join(missing) + "; the working dataset cannot be restored")
+    core, index, dumplings = found["core"], found["index"], found["dumplings"]
+    mismatches = [
+        label
+        for label, matches in (
+            ("the Core checkpoint names another index backup", core.get("index_backup") == backups["index"]),
+            ("run IDs differ", core.get("run_id") == index.get("run_id") == dumplings.get("run_id")),
+            (
+                "heights differ",
+                core.get("height") == index.get("exported_max_block") == dumplings.get("last_processed_height"),
+            ),
+            ("parser resume bytes differ", all(core.get(key) == index.get(key) for key in SIGNATURE_KEYS)),
+        )
+        if not matches
+    ]
+    if mismatches:
+        raise ValueError("The S3 backups do not belong together: " + "; ".join(mismatches))
+    if unfinished:
+        worker.discard_dataset()
+    started = time.monotonic()
+    worker.progress("restore-download", height=core["height"])
+    staging = worker.root / f".restore-{worker.run_id}"
+    index_staging = worker.index / f".restore-{worker.run_id}"
+    try:
+        staging.mkdir()
+        index_staging.mkdir(parents=True)
+        parts = {
+            "core": measured(
+                "core",
+                lambda: worker.storage.restore_backup(backups["core"], staging / "core"),
+                core["archive_size"],
+                staging / "core",
+            ),
+            "dumplings": measured(
+                "dumplings",
+                lambda: worker.restore_dumplings(backups["dumplings"], staging / "Scanner"),
+                sum(dumplings["files"].values()),
+                staging / "Scanner",
+            ),
+            "index": measured(
+                "index",
+                lambda: worker.storage.restore_backup(backups["index"], index_staging / "index"),
+                index["archive_size"],
+                index_staging / "index",
+            ),
+        }
+        # Every backup is downloaded and verified; only now does any of it take its place.
+        for entry in (staging / "core").iterdir():
+            entry.rename(worker.root / entry.name)
+        worker.dumps.mkdir()
+        (staging / "Scanner").rename(worker.dumps / "Scanner")
+        for entry in (index_staging / "index").iterdir():
+            entry.rename(worker.index / entry.name)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+        shutil.rmtree(index_staging, ignore_errors=True)
+    if not worker.index_matches_inventory():
+        raise ValueError("The restored index does not match its file inventory")
+    if resume_signature(worker.index, worker.core_dir / "blocks") != {key: core[key] for key in SIGNATURE_KEYS}:
+        raise ValueError("The restored index and Core blocks do not belong together")
+    finish_restore(
+        worker,
+        "restored",
+        height=core["height"],
+        hash=core["hash"],
+        backups=backups,
+        parts=parts,
+        total_seconds=round(time.monotonic() - started, 1),
+        host=socket.gethostname(),
+    )
+
+
+def require_complete_dataset(worker: Worker) -> None:
+    """Refuse a partly lost working dataset before Core starts.
+
+    The restore job fills only an empty dataset. An unfinished first synchronization
+    (unpruned blocks, no index yet) continues; anything else that is missing is an error.
+    """
+    present = {
+        "Core chainstate": (worker.core_dir / "chainstate").is_dir(),
+        "Core blocks": (worker.core_dir / "blocks").is_dir(),
+        "block archive state": worker.archive_state.is_dir(),
+        "Dumplings Scanner": (worker.dumps / "Scanner/LastProcessedBlockHeight.txt").is_file(),
+        "BlockSci index": (worker.index / "config.json").is_file(),
+    }
+    if not any(present.values()):
+        try:
+            restored = read_json(worker.run / "restore.json")
+        except (OSError, ValueError):
+            restored = {}
+        if restored.get("run_id") != worker.run_id or restored.get("action") != "skipped-no-backup":
+            raise ValueError("The working dataset is empty but this synchronization's restore job did not check S3")
+        return
+    missing = [name for name, found in present.items() if not found]
+    unfinished_first = not present["BlockSci index"] and (worker.core_dir / "blocks/blk00000.dat").is_file()
+    if missing and not unfinished_first:
+        raise ValueError(
+            "The working dataset is incomplete (missing: " + ", ".join(missing) + "). Remove "
+            f"{worker.root} and {worker.index} entirely; the next synchronization restores both from S3."
+        )
+
+
 def producer(worker: Worker) -> None:
     worker.stage = "producer"
     worker.acquire_dataset()
-    worker.reset_state()
+    require_complete_dataset(worker)
     atomic_json(worker.root / "current-ready.json", {"run_id": worker.run_id, "state": "preparing"})
     worker.progress("core-startup")
     worker.start_core(False)
