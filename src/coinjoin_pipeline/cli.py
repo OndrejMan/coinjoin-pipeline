@@ -12,6 +12,8 @@ from .arguments import (
 )
 from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, fail
 from .context import RunContext
+from .doctor import check as doctor_check
+from .doctor import required_capabilities, required_image_components, validate_arguments
 from .paths import PIPELINE_ROOT
 
 
@@ -34,6 +36,24 @@ def execute(context: RunContext) -> None:
     orchestrator.run_configuration(context.config)
 
 
+def preflight_errors(context: RunContext) -> list[str]:
+    """Option errors, then missing images and host capabilities."""
+    config = context.config
+    root = config.runs_path
+    runtime_root()
+    errors = validate_arguments(config, root)
+    errors.extend(
+        doctor_check(
+            config.runtime,
+            root,
+            context.images,
+            image_components=required_image_components(config),
+            capabilities=required_capabilities(config),
+        )
+    )
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     use_line_buffered_output()
     original = list(sys.argv[1:] if argv is None else argv)
@@ -44,7 +64,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         context = RunContext.prepare(load_configuration(original))
         config = context.config
-        runtime_root()
+        errors = preflight_errors(context)
+        if errors:
+            return fail(*errors)
         print(f"Run configuration: {config.action}")
         config.runs_path.mkdir(parents=True, exist_ok=True)
         with context.activate():
