@@ -45,7 +45,7 @@ Driver = Literal["docker", "kubernetes"]
 CoinjoinType = Literal["wasabi2", "joinmarket"]
 ArtifactBackend = Literal["shared-storage", "s3"]
 ContainerRuntime = Literal["docker", "podman"]
-BlockSciTask = Literal["detect", "parse"]
+BlockSciTask = Literal["detect", "parse", "script"]
 JoinMarketDetector = Literal["possible", "definite"]
 MappingMode = Literal["numeric", "all"]
 AnalysisAction = Literal["collect_docker", "analyze_only"]
@@ -119,6 +119,11 @@ class BlockSciConfiguration(ConfigurationModel):
     workflow: BlockSciWorkflow = option("combined", name="blocksci_workflow")
     task: BlockSciTask = option("detect", name="blocksci_task")
     script: str | None = option(None, name="blocksci_script")
+    # Script task only: the last height the analysis may see (Blockchain(config, pin_height + 1))
+    # and the half-open range [scan_start_height, scan_end_height) it scans.
+    pin_height: int | None = option(None, name="blocksci_pin_height", minimum=0)
+    scan_start_height: int | None = option(None, name="blocksci_scan_start_height", minimum=0)
+    scan_end_height: int | None = option(None, name="blocksci_scan_end_height", minimum=1)
 
 
 @dataclass(frozen=True, slots=True)

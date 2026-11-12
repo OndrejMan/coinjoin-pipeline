@@ -39,7 +39,9 @@ class _AnalysisIO(TypedDict):
 
 
 class AnalysisModeSettings(_AnalysisIO, total=False):
-    """What detection needs (analysis_modes)."""
+    """What detection or a user script needs (analysis_modes)."""
+
+    user_script: str
 
 
 class _CommonSettings(TypedDict):
@@ -104,4 +106,4 @@ class BlocksciSettings(IndexWriterSettings):
 
 
 class BlocksciAnalysisSettings(CommandSettings, AnalysisModeSettings):
-    """Detection over this run's index."""
+    """Detection or a user script over this run's index."""

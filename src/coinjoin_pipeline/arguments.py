@@ -130,7 +130,10 @@ HELP = {
     "stages.mappings": "run the Wasabi mappings enumerator and Sake as PBS jobs",
     "blocksci.workflow": "combined parses and detects in one job; reusable keeps the index; cached reuses one",
     "blocksci.task": "what the BlockSci job does; detect is the regular analysis",
-    "blocksci.script": "Python script run over the parsed BlockSci index",
+    "blocksci.script": "Python script run over the parsed index (local analyze, or --blocksci-task script)",
+    "blocksci.pin_height": "script task: the last height the analysis may see",
+    "blocksci.scan_start_height": "script task: first scanned height (inclusive)",
+    "blocksci.scan_end_height": "script task: end of the scanned range (exclusive)",
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
     "joinmarket.detector": "deprecated subset-matching JoinMarket scan of the report; definite matches more strictly",
     "joinmarket.min_base_fee": (
