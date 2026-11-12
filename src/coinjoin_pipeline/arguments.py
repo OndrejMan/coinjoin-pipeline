@@ -137,8 +137,7 @@ HELP = {
     "kubernetes.copy_to_host": "copy the emulation's Bitcoin data to the host (shared-storage backend only)",
     "kubernetes.infrastructure_local_build": "let the emulator build its infrastructure images locally",
     "kubernetes.distributor_startup_timeout": (
-        "seconds the Wasabi distributor may take to start in the S3 emulation Job "
-        "(fallback: $COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT)"
+        "seconds the Wasabi distributor may take to start in the S3 emulation Job (default: the emulator's own)"
     ),
     "kubernetes.btc_node_image": "Bitcoin node image of the S3 emulation",
     "kubernetes.btc_node_initial_block_count": ("blocks the S3 emulation's Bitcoin node mines before the run"),
@@ -162,7 +161,7 @@ HELP = {
     "stages.mappings": "run the Wasabi mappings enumerator and Sake as PBS jobs",
     "blocksci.workflow": "combined parses and detects in one job; reusable keeps the index; cached reuses one",
     "blocksci.task": "what the BlockSci job does; detect is the regular analysis",
-    "blocksci.script": "Python script of --blocksci-task script",
+    "blocksci.script": "Python script run over the parsed index (local analyze, or --blocksci-task script)",
     "blocksci.cache_source_run_id": "run whose BlockSci index cache this task reads",
     "blocksci.notebook_port": "preferred Jupyter port of --blocksci-task notebook (1024-65535)",
     "blocksci.notebooks_dir": "notebook directory of --blocksci-task notebook",
