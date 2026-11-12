@@ -190,8 +190,11 @@ class _PbsStages:
 
 def _action_errors(config: PipelineConfiguration) -> list[str]:
     """Rules of the emulation and analysis actions."""
+    from .execution.coinjoin_tools import option_errors
+
     stages = _PbsStages.requested(config)
     return [
+        *option_errors(config),
         *_run_selection_errors(config),
         *_driver_errors(config),
         *_pbs_stage_errors(config, stages),

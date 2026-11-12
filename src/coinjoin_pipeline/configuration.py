@@ -233,6 +233,31 @@ class PBSConfiguration(ConfigurationModel):
 
 
 @dataclass(frozen=True, slots=True)
+class CoinjoinAnalysisConfiguration(ConfigurationModel):
+    program: (
+        Literal[
+            "parse_cj_logs",
+            "parse_dumplings",
+            "ww2_analyze_client",
+            "scan_results_plot",
+            "file_check",
+            "visualize_coordinators",
+            "perf_processing",
+        ]
+        | None
+    ) = option(None, name="analysis_program")
+    actions: tuple[str, ...] = option((), name="analysis_operation")
+    cjtype: Literal["ww1", "ww2", "sw", "jm"] = option("ww2", name="analysis_cjtype")
+    target_paths: tuple[str, ...] = option((), name="analysis_target_path")
+    load_config: str | None = option(None, name="analysis_load_config")
+    env_vars: str | None = option(None, name="analysis_env_vars")
+    input_uri: str | None = option(None, name="analysis_input_uri")
+    input_dir: str | None = option(None, name="analysis_input_dir")
+    filename: str | None = option(None, name="analysis_filename")
+    data_mode: Literal["emulation", "mainnet"] = option("emulation", name="analysis_data_mode")
+
+
+@dataclass(frozen=True, slots=True)
 class PipelineConfiguration(ConfigurationModel):
     action: PipelineAction = option("full-run")
     runtime: ContainerRuntime = option("docker", name="runtime")
@@ -257,6 +282,7 @@ class PipelineConfiguration(ConfigurationModel):
     kubernetes: KubernetesConfiguration = field(default_factory=KubernetesConfiguration)
     artifacts: ArtifactConfiguration = field(default_factory=ArtifactConfiguration)
     images: ImageConfiguration = field(default_factory=ImageConfiguration)
+    coinjoin_analysis: CoinjoinAnalysisConfiguration = field(default_factory=CoinjoinAnalysisConfiguration)
     blocksci: BlockSciConfiguration = field(default_factory=BlockSciConfiguration)
     joinmarket: JoinMarketConfiguration = field(default_factory=JoinMarketConfiguration)
     mappings: MappingsConfiguration = field(default_factory=MappingsConfiguration)

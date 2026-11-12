@@ -36,7 +36,7 @@ def run_layout() -> dict[str, object]:
         "artifacts": {
             "emulator": {"directories": [paths.EMULATOR_DIR], "stage": EMULATION_STAGE},
             "analysis": {
-                "directories": [paths.COINJOIN_ANALYSIS_DIR],
+                "directories": [paths.COINJOIN_ANALYSIS_DIR, paths.COINJOIN_ANALYSIS_TOOLS_DIR],
                 "stage": BASELINE_STAGE,
             },
             "blocksci": {

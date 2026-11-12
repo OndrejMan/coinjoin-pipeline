@@ -16,6 +16,7 @@ from typing import TypedDict, Union
 from exporters.artifact_paths import (
     BLOCKSCI_ANALYSIS_DIR,
     COINJOIN_ANALYSIS_DIR,
+    COINJOIN_ANALYSIS_TOOLS_DIR,
     DUMPLINGS_SNAPSHOT_FILE,
     EMULATOR_DIR,
     MAPPINGS_DIR,
@@ -24,8 +25,13 @@ from exporters.artifact_paths import (
 
 from coinjoin_pipeline.configuration import (
     BlockSciConfiguration,
+    CoinjoinAnalysisConfiguration,
     MappingsConfiguration,
     required,
+)
+from coinjoin_pipeline.execution.coinjoin_tools import (
+    command as coinjoin_tools_command,
+    command_argv,
 )
 from coinjoin_pipeline.registry import pinned_reference
 from coinjoin_pipeline.storage.s3 import (
@@ -53,6 +59,7 @@ from .stage_settings import (
     BlocksciParseSettings,
     BlocksciSettings,
     BlocksciUpdateSettings,
+    CoinjoinToolsSettings,
     CommandSettings,
     DumplingsBaselineSettings,
     MappingsSettings,
@@ -81,6 +88,7 @@ BLOCKSCI = DEFAULT_RESOURCES["blocksci"]
 JobSettings = Union[
     CommandSettings,
     UnifiedReportSettings,
+    CoinjoinToolsSettings,
     DumplingsBaselineSettings,
     MappingsSettings,
     BlocksciSettings,
@@ -96,6 +104,34 @@ def render_coinjoin_analysis_s3_pbs(
 ) -> str:
     """Render the baseline job that runs coinjoin-analysis over the emulator logs."""
     return render_python_stage("coinjoin-analysis", target, resources, image, {"command": command})
+
+
+def render_coinjoin_tools_s3_pbs(
+    target: S3Target,
+    image: str,
+    options: CoinjoinAnalysisConfiguration,
+    resources: PBSResources = DEFAULT_RESOURCES["analysis"],
+) -> str:
+    """Run a shipped analyzer CLI on a copy; publish all files apart from the baseline."""
+    program = options.program or ""
+    return render_python_stage(
+        "coinjoin-analysis",
+        target,
+        resources,
+        image,
+        {
+            "program": program,
+            "output_directory": COINJOIN_ANALYSIS_TOOLS_DIR,
+            "input_uri": validated_s3_uri(options.input_uri, "analysis input URI") if options.input_uri else None,
+            "invocation": {
+                "argv": command_argv(options, target.run_id),
+                "image": image,
+                "input_uri": options.input_uri,
+            },
+            "command": "cd /work && " + coinjoin_tools_command(options, target.run_id),
+        },
+        job="coinjoin-tools",
+    )
 
 
 # coinjoin-analysis names per protocol: --cjtype, the Scanner/ output folder, data/<name>/false_cjtxs.json.

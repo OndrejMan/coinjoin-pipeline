@@ -88,6 +88,10 @@ SECTIONS = {
     "blocksci": ("BlockSci", "Reusable tasks are submitted with pbs-from-s3 --blocksci-pbs."),
     "joinmarket": ("JoinMarket detector", None),
     "mappings": ("Wasabi mappings and Sake", "Used with --mappings-pbs (Wasabi runs only)."),
+    "coinjoin_analysis": (
+        "coinjoin-analysis programs",
+        "Run one upstream program instead of the default baseline.",
+    ),
     "pbs": (
         "PBS resources and images",
         "A stage-specific --pbs-<stage>-* value overrides the shared --pbs-* fallback, "
@@ -189,6 +193,10 @@ HELP = {
     "blocksci.storage_report_uri": "with --blocksci-restore-index: S3 object receiving the kept copy's size",
     "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
     "pbs.bitcoin_datadir": "Bitcoin datadir the PBS BlockSci stage reads",
+    "coinjoin_analysis.actions": "program operation (repeatable)",
+    "coinjoin_analysis.target_paths": "program target path (repeatable)",
+    "coinjoin_analysis.input_uri": "S3 input of the program (pbs-from-s3)",
+    "coinjoin_analysis.input_dir": "local input directory of the program (coinjoin-analysis)",
     "external.bitcoin_datadir": "Bitcoin datadir to analyze",
     "external.baseline": "baseline to compare the detections against",
     "external.false_cjtxs": "false_cjtxs.json applied to the baseline (repeatable)",

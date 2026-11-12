@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from typing import cast
 
 from exporters.artifact_paths import (
@@ -27,6 +28,7 @@ from exporters.artifact_paths import (
 
 from coinjoin_pipeline.execution.pbs.stage import CONTAINER_RUNS_ROOT, CONTAINER_SELECTED_ROOT, Stage, StageFailure
 from coinjoin_pipeline.execution.pbs.stage_settings import (
+    CoinjoinToolsSettings,
     CommandSettings,
     DumplingsBaselineSettings,
     MappingsSettings,
@@ -83,6 +85,38 @@ def coinjoin_analysis(stage: Stage) -> None:
     )
     stage.require_file(BASELINE_FILE, f"Coinjoin analysis did not produce {BASELINE_FILE}")
     stage.upload(output, COINJOIN_ANALYSIS_DIR)
+
+
+def coinjoin_tools(stage: Stage) -> None:
+    """One invocation of a shipped coinjoin-analysis CLI on a copy of its input.
+
+    Every file it leaves, its log and invocation included, is published under its own
+    result directory even when the analyzer fails; the comparison baseline is untouched.
+    """
+    settings = cast(CoinjoinToolsSettings, stage.settings)
+    result_id = f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{os.environ.get('PBS_JOBID') or 'manual'}"
+    relative = f"{settings['output_directory']}/{settings['program']}/{result_id}"
+    output = stage.work / relative
+    (output / "input").mkdir(parents=True)
+    stage.finalizers.append(lambda: stage.upload(output, relative))
+    if settings.get("input_uri"):
+        source = str(settings["input_uri"]).rstrip("/")
+        stage.storage.run("sync", f"{source}/*", f"{output / 'input'}/", check=True, timeout=None)
+    else:
+        experiment = output / "input" / stage.run_id
+        experiment.mkdir(parents=True)
+        stage.download_optional(COINJOIN_ANALYSIS_DIR, experiment)
+        stage.download_optional(EMULATOR_DATA_DIR, experiment / "data")
+        if not any(path.is_file() for path in experiment.rglob("*")):
+            raise StageFailure("The run has no baseline or emulator data; provide analysis_input_uri")
+    (output / "invocation.json").write_text(json.dumps(settings["invocation"], indent=2) + "\n")
+    stage.singularity(
+        settings["command"],
+        binds=(f"{output}:/work:rw",),
+        environment=("MPLBACKEND=Agg", "MPLCONFIGDIR=/tmp/matplotlib"),
+        cleanenv=True,
+        log=output / "analysis.log",
+    )
 
 
 def dumplings_baseline(stage: Stage) -> None:
