@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -46,6 +47,35 @@ def analysis_output(stage: Stage, output: OutputSettings) -> Path:
     if output.get("notebook"):
         return submission_home() / "coinjoin-notebooks" / stage.run_id
     return stage.work / str(output["relative"])
+
+
+def seed_notebook(stage: Stage, output: Path) -> None:
+    """Write the optional initial file the submitter staged in ``.notebook/initial.json`` into the notebook directory."""
+    uri = f"{stage.run_prefix}/.notebook/initial.json"
+    if not stage.storage.exists(uri):
+        return
+    seed = stage.storage.cat_json(uri)
+    name, text = seed.get("name"), seed.get("text")
+    if (
+        not isinstance(name, str)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _.-]{0,119}\.(py|ipynb)", name)
+        or not isinstance(text, str)
+        or len(text.encode("utf-8")) > 256 * 1024
+        or "\0" in text
+    ):
+        raise StageFailure("Invalid initial notebook file in S3")
+    if name.endswith(".ipynb"):
+        document = json.loads(text)
+        if (
+            not isinstance(document, dict)
+            or document.get("nbformat") != 4
+            or not isinstance(document.get("cells"), list)
+        ):
+            raise StageFailure("Invalid version 4 initial notebook")
+    # Never overwrite an edited notebook, including when the same run is retried.
+    descriptor = os.open(str(output / name), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        stream.write(text)
 
 
 @contextmanager
@@ -133,6 +163,7 @@ def blocksci_analysis(stage: Stage) -> None:
         binds.append(f"{script}:/mnt/user-analysis.py:ro")
     control = None
     if settings["output"].get("notebook"):
+        seed_notebook(stage, output)
         control = notebook_control(stage)
         control.mkdir(parents=True, exist_ok=True)
         control.chmod(0o700)

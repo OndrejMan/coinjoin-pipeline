@@ -104,6 +104,16 @@ class S5Client:
         """Whether the exact key exists, not merely a key that starts with it."""
         return any(entry.get("key") == uri for entry in self.listing(uri, timeout))
 
+    def cat(self, uri: str, timeout: float | None = 60) -> str:
+        return self.run("cat", uri, check=True, timeout=timeout).stdout
+
+    def cat_json(self, uri: str, timeout: float | None = 60) -> dict:
+        """A JSON object stored at uri."""
+        value = json.loads(self.cat(uri, timeout))
+        if not isinstance(value, dict):
+            raise S5Error(f"{uri} does not hold a JSON object")
+        return value
+
     def copy(self, source: object, destination: str, timeout: float | None = 3600) -> None:
         self.run("cp", source, destination, check=True, timeout=timeout)
 
