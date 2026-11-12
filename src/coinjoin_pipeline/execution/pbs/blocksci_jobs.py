@@ -7,6 +7,7 @@ what both share.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import cast
 
@@ -95,8 +96,13 @@ def publish_index(stage: Stage, source_kind: str, network: str, max_block: int, 
 
 
 def blocksci(stage: Stage) -> None:
-    """Parse the emulated chain, detect CoinJoins and, with the baseline at hand, write the report."""
+    """Parse the emulated chain, detect CoinJoins and, with the baseline at hand, write the report.
+
+    The parsed index is published like the reusable workflow's, so cached jobs can reuse it.
+    """
     settings = cast(BlocksciSettings, stage.settings)
+    if shutil.which("zstd") is None:
+        raise StageFailure("zstd is required to pack or unpack the BlockSci cache")
     for name in (BITCOIN_DATA_DIR, EMULATOR_DIR, STAGED_EXPORTERS_DIR):
         stage.download(name)
     datadir = emulator_bitcoin_datadir(stage)
@@ -125,6 +131,7 @@ def blocksci(stage: Stage) -> None:
     for _, relative, wanted, producer in outputs:
         if wanted:
             stage.require_file(relative, f"{producer} did not produce {relative}")
+    publish_index(stage, "emulator", "bitcoin_regtest", max_block, {})
     for directory, _, wanted, _ in reversed(outputs):
         if wanted:
             stage.upload(stage.work / directory, directory)
