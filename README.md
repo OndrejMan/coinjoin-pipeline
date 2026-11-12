@@ -7,8 +7,9 @@ is thin; heavy work runs in explicitly versioned container images.
 This is a local prototype and is not published to PyPI.
 
 Manual mainnet Core/Dumplings → BlockSci synchronization is described in
-[the synchronization runbook](docs/mainnet-synchronization.md). It uses two
-dependent PBS jobs and keeps the working data in place between runs.
+[the synchronization runbook](docs/mainnet-synchronization.md). It chains six
+dependent PBS jobs (restore, producer, BlockSci, checkpoint, pack, clear) and
+carries the data from one run to the next in its S3 backups.
 
 ## Install and run
 
