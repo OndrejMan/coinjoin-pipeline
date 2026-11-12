@@ -29,9 +29,11 @@ def required(value: T | None, name: str) -> T:
 
 PipelineAction = Literal[
     "emulate",
+    "analyze",
     "coinjoin-analysis",
 ]
 Engine = Literal["wasabi", "joinmarket"]
+CoinjoinType = Literal["wasabi2", "joinmarket"]
 ContainerRuntime = Literal["docker", "podman"]
 
 
@@ -54,6 +56,7 @@ class ImageConfiguration(ConfigurationModel):
     version: str | None = option(None, name="version")
     emulator: str | None = option(None, name="emulator_image")
     coinjoin_analysis: str | None = option(None, name="coinjoin_analysis_image")
+    blocksci: str | None = option(None, name="blocksci_image")
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,10 +65,12 @@ class PipelineConfiguration(ConfigurationModel):
     runtime: ContainerRuntime = option("docker", name="runtime")
     runs_root: str | None = option(None, name="runs_root")
     engine: Engine = option("wasabi", name="engine")
+    coinjoin_type: CoinjoinType = option("wasabi2", name="coinjoin_type")
     scenario: str | None = option(None, name="scenario")
-    run_dir: str | None = option(None, name="run_dir", actions=("coinjoin-analysis",))
+    run_dir: str | None = option(None, name="run_dir", actions=("analyze", "coinjoin-analysis"))
     run_id: str | None = option(None, name="run_id", actions=("emulate",))
     run_timezone: str = option("Europe/Prague", name="run_timezone")
+    min_input_count: int | None = option(None, name="min_input_count", minimum=1)
     images: ImageConfiguration = field(default_factory=ImageConfiguration)
     _provided: frozenset[str] = field(default_factory=frozenset, repr=False, compare=False)
 

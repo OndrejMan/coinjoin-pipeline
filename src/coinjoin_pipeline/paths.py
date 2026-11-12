@@ -8,6 +8,7 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parents[1]
 PIPELINE_ROOT = PROJECT_ROOT / "pipeline"
+EXPORTERS_ROOT = PIPELINE_ROOT / "exporters"
 SCENARIOS_ROOT = PROJECT_ROOT / "scenarios"
 
 

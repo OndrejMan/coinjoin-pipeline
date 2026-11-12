@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# EXPERIMENTAL: local Docker path. Not part of the Kubernetes → S3 → PBS path that the thesis results come from.
+set -euo pipefail
+
+HOST_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export SCENARIOS_DIR="${SCENARIOS_DIR:-${HOST_ROOT_DIR}/../scenarios}"
+# The CLI's default runs root (paths.default_runs_root); the CLI always passes its own.
+export EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR:-${PWD}/coinjoin-runs}"
+export EXPORTERS_DIR="${EXPORTERS_DIR:-${HOST_ROOT_DIR}/exporters}"
+if [[ -n "${ACTIVE_RUN_ID:-}" ]]; then
+	export COINJOIN_ANALYSIS_SOURCE_PATH="${COINJOIN_ANALYSIS_SOURCE_PATH:-${EMULATION_LOGS_DIR}/${ACTIVE_RUN_ID}/coinjoin-analysis_data}"
+	export COINJOIN_ANALYSIS_MOUNT_PATH="${COINJOIN_ANALYSIS_MOUNT_PATH:-/runs/emulation/selected/${ACTIVE_RUN_ID}}"
+	export COINJOIN_ANALYSIS_TARGET_PATH="${COINJOIN_ANALYSIS_TARGET_PATH:-/runs/emulation/selected}"
+	export COINJOIN_ANALYSIS_INPUT_DATA_PATH="${COINJOIN_ANALYSIS_INPUT_DATA_PATH:-${EMULATION_LOGS_DIR}/${ACTIVE_RUN_ID}/coinjoin_emulator_data/data}"
+	mkdir -p "${COINJOIN_ANALYSIS_SOURCE_PATH}"
+else
+	echo "ACTIVE_RUN_ID is required for grouped artifacts." >&2
+	exit 2
+fi
+# shellcheck source=pipeline/compose-runtime.sh
+source "${HOST_ROOT_DIR}/compose-runtime.sh"
+"${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile analysis rm -sf blocksci coinjoin_analysis
+"${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile analysis up --force-recreate
+
+BLOCKSCI_CONTAINER_ID="$("${COMPOSE_CMD[@]}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}" --profile analysis ps -a -q blocksci)"
+if [[ -z "${BLOCKSCI_CONTAINER_ID}" ]]; then
+	echo "ERROR: BlockSci analysis container was not created." >&2
+	exit 1
+fi
+
+BLOCKSCI_EXIT_CODE="$("${CONTAINER_RUNTIME}" inspect --format '{{.State.ExitCode}}' "${BLOCKSCI_CONTAINER_ID}")"
+if [[ ! "${BLOCKSCI_EXIT_CODE}" =~ ^[0-9]+$ || "${BLOCKSCI_EXIT_CODE}" -gt 255 ]]; then
+	echo "ERROR: invalid BlockSci container exit code: ${BLOCKSCI_EXIT_CODE:-<empty>}" >&2
+	exit 1
+fi
+
+exit "${BLOCKSCI_EXIT_CODE}"

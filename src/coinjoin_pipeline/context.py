@@ -15,7 +15,7 @@ from .configuration import (
     PipelineConfiguration,
 )
 from .images import Images, resolve_images
-from .paths import default_runs_root, scenarios_dir
+from .paths import EXPORTERS_ROOT, default_runs_root, scenarios_dir
 from .runs import run_id_for
 
 
@@ -31,6 +31,8 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
         raise ConfigurationError(f"invalid run timezone: {config.run_timezone}") from error
     config = replace(config, runs_root=str(runs_root(config)))
     provided = set(config.provided)
+    if config.engine == "joinmarket" and "coinjoin_type" not in provided:
+        config = replace(config, coinjoin_type="joinmarket")
     if config.action == "emulate" and not config.run_dir:
         config = replace(config, run_id=run_id_for(config))
         provided.add("run_id")
@@ -53,6 +55,7 @@ def resolve_run_images(config: PipelineConfiguration) -> tuple[PipelineConfigura
             config.images,
             emulator=images.emulator,
             coinjoin_analysis=images.coinjoin_analysis,
+            blocksci=images.blocksci,
         ),
     )
     return config, images
@@ -71,10 +74,12 @@ def host_environment(config: PipelineConfiguration, images: Images) -> dict[str,
     root = config.runs_path
     environment = {
         "CONTAINER_RUNTIME": config.runtime,
+        "EXPORTERS_DIR": str(EXPORTERS_ROOT),
         "SCENARIOS_DIR": str(scenarios_dir()),
         "EMULATION_LOGS_DIR": str(root),
         "COINJOIN_EMULATOR_IMAGE": images.emulator,
         "COINJOIN_ANALYSIS_IMAGE": images.coinjoin_analysis,
+        "BLOCKSCI_IMAGE": images.blocksci,
         "PYTHONDONTWRITEBYTECODE": "1",
     }
     if config.run_id:
