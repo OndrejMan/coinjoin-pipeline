@@ -363,7 +363,6 @@ def render_s3_emulation_resources(
     secret_name: str,
     emulation_timeout_seconds: int = 21600,
     scheduling_timeout_seconds: int = S3_JOB_START_TIMEOUT_SECONDS,
-    reuse_namespace: bool = False,
     distributor_startup_timeout: str | None = None,
     btc_node_image: str | None = None,
     kubernetes_image_pull_policy: str | None = None,
@@ -495,8 +494,7 @@ def render_s3_emulation_resources(
             },
         },
     ]
-    if not reuse_namespace:
-        resources.insert(0, {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}})
+    # No Namespace: S3 mode requires --reuse-namespace, since its Secret must already exist there.
     return json.dumps({"apiVersion": "v1", "kind": "List", "items": resources}, indent=2)
 
 

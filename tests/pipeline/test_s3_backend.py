@@ -87,7 +87,7 @@ ANALYSIS = DEFAULT_RESOURCES["analysis"]
 _SUBMISSION_DIR: list[Path] = []
 
 
-def render_kubernetes_manifest(*, reuse_namespace: bool = False, engine: str = "wasabi") -> dict:
+def render_kubernetes_manifest(*, engine: str = "wasabi") -> dict:
     return json.loads(
         render_s3_emulation_resources(
             namespace="coinjoin",
@@ -100,7 +100,6 @@ def render_kubernetes_manifest(*, reuse_namespace: bool = False, engine: str = "
             artifact_uri="s3://bucket/runs",
             endpoint_url="https://s3.cl4.du.cesnet.cz",
             secret_name="coinjoin-s3",
-            reuse_namespace=reuse_namespace,
         )
     )
 
@@ -1052,7 +1051,7 @@ def test_apply_s3_resources_rolls_back_when_initial_apply_fails(
 
 
 def test_kubernetes_manifest_reuses_existing_namespace() -> None:
-    manifest = render_kubernetes_manifest(reuse_namespace=True)
+    manifest = render_kubernetes_manifest()
 
     assert all(item["kind"] != "Namespace" for item in manifest["items"])
     assert all(item["metadata"].get("namespace") == "coinjoin" for item in manifest["items"])

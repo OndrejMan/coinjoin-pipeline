@@ -56,7 +56,6 @@ def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
         endpoint_url=required(args.artifacts.endpoint_url, "--s3-endpoint-url"),
         secret_name=required(args.artifacts.secret_name, "--s3-secret-name"),
         emulation_timeout_seconds=args.emulation_timeout,
-        reuse_namespace=args.kubernetes.reuse_namespace,
         distributor_startup_timeout=_text(kubernetes.distributor_startup_timeout),
         btc_node_image=kubernetes.btc_node_image,
         kubernetes_image_pull_policy=kubernetes.image_pull_policy,
