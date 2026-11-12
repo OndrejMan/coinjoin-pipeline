@@ -1,6 +1,6 @@
 # Current execution architecture
 
-Updated 2026-10-20. The thesis results come from the Kubernetes → S3 → PBS
+Updated 2026-11-12. The thesis results come from the Kubernetes → S3 → PBS
 path. Every module outside that path carries an `EXPERIMENTAL` header and is
 listed under "Experimental paths" below.
 
@@ -62,9 +62,11 @@ runs the tag.
 | S3 index archive transport shared by emulation caches, persistent backups and mainnet checkpoints | `storage/s5client.py` (`upload_archive`, `restore_archive`) |
 | Format of a single backup (persistent index, Core checkpoint): archive, `.sha256`, manifest written last | `storage/s5client.py` (`replace_backup`, `restore_backup`) |
 | Persistent index lock, completeness, backup and restore; the index manifest every parse and update records | `execution/pbs/index_store.py` (`IndexStore`, `index_manifest`) |
-| Run-directory layout (every run-relative path, marker sets, report inputs) | `pipeline/exporters/artifact_paths.py` |
+| Run-directory layout (every run-relative path, marker sets, report inputs), imported by the host, the exporters and the PBS jobs | `pipeline/exporters/artifact_paths.py` (stdlib only; the jobs ship it) |
 | Command locks and S3 PBS overlap detection | `execution/locks.py` |
 | PBS submit, qdel, state probes; S3 job scripts | `execution/pbs/submission.py`, `templates_s3.py`, `analysis_modes.py`, `scripts.py`, `templates/`, `commands.py` |
+| qstat transport and what a qstat state means (queued, running, terminal) to every client | `execution/pbs/status.py` (`job_details`, `job_phase`) |
+| Recorded PBS job IDs of a run (`.pbs/<stage>.jobid`) | `execution/pbs/submission.py` (`recorded_pbs_job_ids`) |
 | PBS resources and image references | `execution/pbs/defaults.py` (`DEFAULT_RESOURCES`), `execution/pbs_settings.py` |
 | Scenario lookup and host/container scenario paths | `execution/scenarios.py` |
 | S3 targets, validation, listing and exact-key existence for run, watch/download/cleanup consumers | `storage/s3.py` |
@@ -72,7 +74,8 @@ runs the tag.
 | Required exporter files and their staging into a run prefix | `paths.py` (`REQUIRED_EXPORTERS`), `execution/s3_staging.py` |
 | s5cmd calls shared by the frontend, the mainnet worker and the Python PBS stages | `storage/s5client.py` |
 | Mainnet synchronization jobs on the node: entry, the six jobs, their shared dataset/Core/Dumplings services | `execution/mainnet_runtime.py`, `mainnet_jobs.py`, `mainnet_worker.py` (rendered by `mainnet_sync.py`) |
-| Every S3 PBS job (shell only writes and starts it): entry, job frame, settings types, jobs | `execution/pbs/stage_runtime.py`, `stage.py`, `stage_settings.py`, `analyzer_jobs.py`, `blocksci_jobs.py` |
+| Every S3 PBS job (shell only writes and starts it): entry, job frame, settings types, jobs | `execution/pbs/stage_runtime.py`, `stage.py`, `stage_settings.py`, `analyzer_jobs.py`, `blocksci_jobs.py` (index writers), `blocksci_analysis_jobs.py` (index reader), `blocksci_index.py` (what both share) |
+| Apptainer/Singularity on the node: runtime, `exec` command line, binds of multijob aliases | `execution/pbs/apptainer.py` (S3 stages and mainnet jobs alike) |
 | Container workload shared by Docker and Apptainer | `pipeline/exporters/worker.py` |
 | Parsed block-archive cache height, checkpoint and update continuity verification | `pipeline/exporters/verify_chain.py` |
 | Heavy BlockSci results | `pipeline/exporters/blocksci_export/analysis.py` |

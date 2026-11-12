@@ -8,20 +8,22 @@ side stay compatible.
 Every S3 job is `directives()` (`pbs/scripts.py`) and a few lines of shell that
 `render_python_stage` (`pbs/templates_s3.py`) writes: they put the worker's modules
 (`scripts.STAGE_RUNTIME_MODULES`: `pbs/stage_runtime.py`, the job modules
-`pbs/analyzer_jobs.py` and `pbs/blocksci_jobs.py`, `pbs/stage.py`,
-`pbs/stage_settings.py`, `storage/s5client.py`, `pbs/index_store.py`), any helper the
-job needs (`execution/block_archive.py`, `templates/blocksci_notebook.py`), a
-`settings.json` and a three-line `run.py` into `$SCRATCHDIR/.stage-runtime`, and run
-`python3 -s run.py settings.json` (Python 3.8 syntax, standard library only). Each
-module lands at its path below `src/` with empty package markers, so the node imports
-it exactly as the frontend does; `run.py`'s directory comes first on `sys.path` and
-`-s` leaves out the user's site-packages, so an installed `coinjoin_pipeline` never
-shadows the shipped one. The renderers validate the options and assemble
-the settings; the worker does the work. `settings.json` names the stage (its markers
-and logs) and the `job` function, since several jobs share a stage name. All s5cmd
-calls go through `S5Client`, which drops every `AWS_*` variable of the node.
-Shared-storage jobs keep `templates/local_preamble.sh`; both mappings jobs run the
-enumerator and Sake from `templates/mappings_run.sh`.
+`pbs/analyzer_jobs.py`, `pbs/blocksci_jobs.py` and `pbs/blocksci_analysis_jobs.py`
+with their shared `pbs/blocksci_index.py`, `pbs/stage.py`, `pbs/stage_settings.py`,
+`pbs/apptainer.py`, `storage/s5client.py`, `pbs/index_store.py` and the run layout
+`exporters/artifact_paths.py`), any helper the job needs
+(`execution/block_archive.py`, `templates/blocksci_notebook.py`), a `settings.json`
+and a three-line `run.py` into `$SCRATCHDIR/.stage-runtime`, and run `python3 -s
+run.py settings.json` (Python 3.8 syntax, standard library only). Each module lands at
+its path below `src/`, or below `pipeline/` for the run layout, with empty package
+markers, so the node imports it exactly as the frontend does; `run.py`'s directory
+comes first on `sys.path` and `-s` leaves out the user's site-packages, so an
+installed `coinjoin_pipeline` never shadows the shipped one. The renderers validate
+the options and assemble the settings; the worker does the work. `settings.json` names
+the stage (its markers and logs) and the `job` function, since several jobs share a
+stage name. All s5cmd calls go through `S5Client`, which drops every `AWS_*` variable
+of the node. Shared-storage jobs keep `templates/local_preamble.sh`; both mappings
+jobs run the enumerator and Sake from `templates/mappings_run.sh`.
 
 ## Stages
 
@@ -36,7 +38,7 @@ enumerator and Sake from `templates/mappings_run.sh`.
 | S3 `coinjoin-mappings` | Wasabi `--mappingsPbs` | `analyzer_jobs.py` (`coinjoin_mappings`) running `mappings_run.sh` |
 | S3 `blocksci-parse` | reusable BlockSci workflow | `blocksci_jobs.py` (`blocksci_parse`) |
 | S3 `blocksci-update` | versioned incremental cache update from a coin directory or the block archive | `blocksci_jobs.py` (`blocksci_update`) |
-| S3 cached work | `detect`, `script`, `external` or `notebook` over a reusable parse | `blocksci_jobs.py` (`blocksci_analysis`) |
+| S3 cached work | `detect`, `script`, `external` or `notebook` over a reusable parse | `blocksci_analysis_jobs.py` (`blocksci_analysis`) |
 | S3 `blocksci-backup` | `--blocksci-task backup` of a persistent index | `blocksci_jobs.py` (`blocksci_backup`) |
 | S3 `unified-report` | BlockSci detect selected, after selected analyzers; a `full-run` also needs coinjoin-analysis | `analyzer_jobs.py` (`unified_report`) |
 
@@ -304,6 +306,10 @@ Robustness rules:
 - A non-zero `qstat` exit only counts as job death when stderr explicitly says
   the job is unknown/finished; any other failure (PBS server restart, network
   hiccup) is inconclusive and polling continues.
+- `qstat` and `qdel` get 30 s (`PBS_COMMAND_TIMEOUT_SECONDS`); a hung command is
+  inconclusive like any other failure. Every client (marker waits, `status`,
+  `watch`, overlap checks) maps a qstat state to queued, running or terminal through
+  `pbs/status.job_phase`; only what an undocumented state means is left to each.
 - Markers are written to shared storage by the compute node, and NFS attribute
   caching can briefly show a finished (`F`) job before its `done` marker is
   visible; the frontend therefore waits one extra poll cycle after seeing a
