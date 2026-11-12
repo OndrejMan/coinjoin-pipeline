@@ -34,7 +34,7 @@ def required_capabilities(config: PipelineConfiguration) -> set[Capability]:
     if not config.dry_run:
         if config.driver == "kubernetes":
             capabilities.add(Capability.KUBECTL)
-        if uses_pbs:
+        if uses_pbs or (uses_s3 and config.action == "full-run"):
             capabilities.update((Capability.QSUB, Capability.QSTAT, Capability.QDEL))
         if uses_s3:
             capabilities.add(Capability.S5CMD_FRONTEND)

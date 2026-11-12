@@ -40,6 +40,7 @@ def s3_full_run_plan_from_args(args: PipelineConfiguration) -> StageGraph:
     return s3_full_run_plan(
         analysis_pbs=args.stages.analysis,
         blocksci_pbs=args.stages.blocksci,
+        action=args.action,
     )
 
 

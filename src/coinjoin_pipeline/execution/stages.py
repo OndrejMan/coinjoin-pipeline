@@ -1,8 +1,8 @@
 """Declarative stage plans for the CoinJoin analysis pipeline.
 
 No Docker, Kubernetes, PBS or subprocess code lives here: this is the dependency
-graph, defined once. Submission derives its scheduler dependencies from it and
-``--dry-run`` prints it.
+graph, defined once. Submission derives its scheduler dependencies from it, the
+orchestrator its wait order and cancellation policy, and ``--dry-run`` prints it.
 """
 
 from __future__ import annotations
@@ -32,6 +32,14 @@ class StageKind(Enum):
     BASELINE = "baseline"
     BLOCKSCI_WORK = "blocksci-work"
     REPORT = "report"
+
+
+#: The PBS resources (``pbs.<group>``) each kind of stage runs with.
+RESOURCE_GROUPS: dict[StageKind, str] = {
+    StageKind.BASELINE: "analysis",
+    StageKind.BLOCKSCI_WORK: "blocksci",
+    StageKind.REPORT: "unified_report",
+}
 
 
 @dataclass(frozen=True)
@@ -105,6 +113,23 @@ class StageGraph:
         """Return the stages submitted to the batch scheduler, in wait order."""
         return tuple(stage for stage in self.ordered() if stage.runner == "pbs")
 
+    def dependents_of(self, name: str) -> tuple[StagePlan, ...]:
+        """Return every stage that transitively depends on ``name``.
+
+        Used as the cancellation policy: when a stage fails, exactly its
+        dependents can no longer run, while unrelated stages keep going and
+        publish their own artifacts.
+        """
+        blocked = {name}
+        dependents: list[StagePlan] = []
+        for stage in self.ordered():
+            if stage.name in blocked:
+                continue
+            if blocked.intersection(stage.dependencies):
+                blocked.add(stage.name)
+                dependents.append(stage)
+        return tuple(dependents)
+
     def dependency_ids(self, name: str, jobs: Mapping[str, str]) -> tuple[str, ...]:
         """Return the submitted job IDs a stage must wait for, in graph order."""
         stage = self.get(name)
@@ -123,6 +148,16 @@ def _report_stage(runner: RunnerName, *analyzers: StagePlan | None) -> StagePlan
     )
 
 
+def runs_unified_report(*, action: str, analysis_pbs: bool, blocksci_pbs: bool) -> bool:
+    """Whether an S3 invocation has a unified-report stage.
+
+    The report joins BlockSci detection with the coinjoin-analysis baseline. A
+    pbs-from-s3 resume may join a baseline stored by an earlier invocation; a
+    full-run has one only if it computes it.
+    """
+    return blocksci_pbs and (analysis_pbs or action != "full-run")
+
+
 def analysis_plan() -> StageGraph:
     """Declare the experimental local graph: the same analyzer/report dependencies
     as ``s3_full_run_plan``, without an emulation node. Its node order is the
@@ -138,13 +173,14 @@ def s3_full_run_plan(
     *,
     analysis_pbs: bool = True,
     blocksci_pbs: bool = True,
+    action: str = "pbs-from-s3",
 ) -> StageGraph:
     """Build the canonical Kubernetes → S3 → PBS graph for one invocation.
 
     The two PBS analyzers are intentionally independent.  They publish their
     own artifacts, and only ``unified-report`` depends on both of them.  The
-    report is a separate stage, including resumes that consume a previously
-    stored baseline.
+    report is a separate stage whenever ``runs_unified_report`` says so: a
+    full-run without coinjoin-analysis has no baseline to compare.
     """
     emulation = StagePlan(
         name=EMULATION_STAGE,
@@ -176,6 +212,6 @@ def s3_full_run_plan(
     )
     # Completion order: the analyzers publish independently.
     stages = [stage for stage in (emulation, baseline, work) if stage is not None]
-    if blocksci_pbs:
+    if runs_unified_report(action=action, analysis_pbs=analysis_pbs, blocksci_pbs=blocksci_pbs):
         stages.append(_report_stage("pbs", baseline, work))
     return StageGraph(tuple(stages))
