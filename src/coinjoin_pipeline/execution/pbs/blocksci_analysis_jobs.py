@@ -1,10 +1,12 @@
-"""The S3 PBS job that reads a BlockSci index: detection.
+"""The S3 PBS job that reads a BlockSci index: detection or a user script.
 
 The index comes from this run's cache or read-only from another run's.
 """
 
 from __future__ import annotations
 
+import hashlib
+import shutil
 import socket
 from pathlib import Path
 from typing import cast
@@ -26,7 +28,7 @@ def analysis_output(stage: Stage, output: OutputSettings) -> Path:
 
 
 def blocksci_analysis(stage: Stage) -> None:
-    """Detection over an existing index.
+    """Detection or a user script over an existing index.
 
     Outputs are published even when the work fails. The index comes from this run's cache
     or read-only from another run's.
@@ -55,6 +57,12 @@ def blocksci_analysis(stage: Stage) -> None:
         stage.run_id,
         "BlockSci index",
     )
+    if settings.get("user_script"):
+        script = Path(str(settings["user_script"]))
+        shutil.copyfile(script, output / "script.py")
+        digest = hashlib.sha256(script.read_bytes()).hexdigest()
+        (output / "script.py.sha256").write_text(f"{digest}  {script}\n")
+        binds.append(f"{script}:/mnt/user-analysis.py:ro")
     stage.log(f"[{mode}] starting on {socket.getfqdn()}")
     stage.singularity(
         f'cd "{CONTAINER_RUNS_ROOT}/$PBS_RUN_ID" && {settings["command"]}',

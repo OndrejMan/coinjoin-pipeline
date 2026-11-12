@@ -13,6 +13,7 @@ from coinjoin_pipeline.execution.pbs.commands import (
     blocksci_export_pbs_command,
     blocksci_parse_pbs_command,
     blocksci_pbs_command,
+    blocksci_script_pbs_command,
     coinjoin_analysis_pbs_command,
 )
 from coinjoin_pipeline.execution.pbs.submission import PBSJobSpec, persist_pbs_job_id, submit_pbs_job
@@ -153,11 +154,12 @@ class S3StageRunner:
             )
             self._submit(stage, script)
             return
+        commands = {
+            "detect": lambda: blocksci_analysis_pbs_command(self.target.run_id, self.args),
+            "script": lambda: blocksci_script_pbs_command(self.target.run_id, self.args),
+        }
         script = render_blocksci_analyze_s3_pbs(
-            **self._blocksci(),
-            **self._index(),
-            command=blocksci_analysis_pbs_command(self.target.run_id, self.args),
-            mode=stage.name,
+            **self._blocksci(), **self._index(), command=commands[task](), mode=stage.name
         )
         self._submit(stage, script, depends=True)
 

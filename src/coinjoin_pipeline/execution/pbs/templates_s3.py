@@ -133,7 +133,7 @@ def render_blocksci_analyze_s3_pbs(
     mode: str = "blocksci-analyze",
     blocksci: BlockSciConfiguration = BlockSciConfiguration(),
 ) -> str:
-    """Render analysis work over a cached index."""
+    """Render analysis or custom-script work over a cached index."""
     if mode not in MODE_OUTPUTS:
         raise PBSError(f"Unsupported reusable BlockSci mode: {mode}")
     return render_python_stage(

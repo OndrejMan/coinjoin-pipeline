@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import shutil
+from pathlib import Path
 
 from .defaults import PBS_SCRATCH_TYPES, PBSResources
 
@@ -40,9 +41,17 @@ def require_qsub() -> None:
         raise PBSError("PBS stages must be run on a MetaCentrum frontend with qsub available")
 
 
+# Paths are rendered into PBS shell templates via str.format; restrict them to
+# characters that survive both PBS directives and unquoted shell contexts.
+SAFE_TEMPLATE_PATH_RE = re.compile(r"^[A-Za-z0-9/._+:@-]+$")
 SAFE_PBS_SIZE_RE = re.compile(r"^[1-9][0-9]*(?:b|kb|mb|gb|tb)$", re.IGNORECASE)
 SAFE_IMAGE_RE = re.compile(r"^[A-Za-z0-9/._+:@%=-]+$")
 SAFE_PBS_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def require_safe_template_path(path: Path, description: str) -> None:
+    if not SAFE_TEMPLATE_PATH_RE.fullmatch(str(path)):
+        raise PBSError(f"{description} contains characters unsafe for PBS job templates: {path}")
 
 
 def require_safe_image(image: str, description: str = "container image") -> None:
@@ -67,3 +76,16 @@ def require_safe_pbs_resources(resources: PBSResources) -> None:
 def require_safe_pbs_token(value: str, description: str) -> None:
     if not isinstance(value, str) or not value or not SAFE_PBS_TOKEN_RE.fullmatch(value):
         raise PBSError(f"{description} contains characters unsafe for PBS job templates: {value}")
+
+
+# Frontends such as skirit link /storage/<site>/home to the /auto automounter, which
+# every compute node mounts too, so a resolved shared path may start with either.
+SHARED_STORAGE_ROOTS = ("/storage/", "/auto/")
+
+
+def require_storage_path(run_dir: Path) -> None:
+    """PBS jobs need the path on shared MetaCentrum storage (/storage or its /auto mount)."""
+    resolved = str(run_dir.resolve())
+    if not resolved.startswith(SHARED_STORAGE_ROOTS):
+        raise PBSError(f"PBS jobs need run-dir on shared MetaCentrum storage (/storage), not: {resolved}")
+    require_safe_template_path(run_dir.resolve(), "PBS path")

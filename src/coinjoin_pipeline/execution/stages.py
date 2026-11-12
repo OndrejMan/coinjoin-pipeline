@@ -21,7 +21,7 @@ class StageKind(Enum):
 
     Stage *names* are part of the marker and log protocol and vary with the
     selected BlockSci workflow and task (``blocksci`` versus
-    ``blocksci-analyze``).  Runners and job
+    ``blocksci-analyze`` versus ``blocksci-script``).  Runners and job
     bookkeeping dispatch on the kind instead, so renaming a marker cannot
     silently break a dispatch table.
     """

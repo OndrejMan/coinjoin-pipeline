@@ -62,6 +62,7 @@ extend-select = ["ANN401", "TID251"]
 "tests/pipeline/*.py" = ["E402"]
 # Standalone helper scripts outside the package were never under the typing.Any ban.
 "import-emulation-blocks.py" = ["ANN401", "TID251"]
+"scripts/*.py" = ["ANN401", "TID251"]
 
 [tool.ruff.per-file-target-version]
 "pipeline/exporters/**/*.py" = "py38"

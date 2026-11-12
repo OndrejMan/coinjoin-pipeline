@@ -7,6 +7,7 @@ Marker waiting lives in ``execution/s3_markers.py`` and exporter staging in
 from __future__ import annotations
 
 import re
+import shlex
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -141,6 +142,10 @@ def validate_s3_profile(profile: str) -> str:
     if not PROFILE_RE.fullmatch(profile):
         raise ValueError("S3 profile must match [A-Za-z0-9][A-Za-z0-9._-]*")
     return profile
+
+
+def shell_assignment(name: str, value: str) -> str:
+    return f"{name}={shlex.quote(value)}"
 
 
 def s5_client(access: S3Access) -> S5Client:

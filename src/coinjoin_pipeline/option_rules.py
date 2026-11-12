@@ -79,6 +79,7 @@ def _action_errors(config: PipelineConfiguration) -> list[str]:
         *_driver_errors(config),
         *_pbs_stage_errors(config, stages),
         *_blocksci_task_errors(config, stages),
+        *_height_errors(config),
         *_s3_errors(config, stages),
         *_remaining_errors(config, stages),
     ]
@@ -151,6 +152,36 @@ def _blocksci_task_errors(config: PipelineConfiguration, stages: _PbsStages) -> 
             errors.append("--blocksci-task parse requires pbs-from-s3 --blocksci-workflow reusable")
         if not stages.blocksci_alone:
             errors.append("--blocksci-task parse requires --blocksci-pbs without --analysis-pbs")
+    elif task != "detect":
+        if action != "pbs-from-s3":
+            errors.append("BlockSci reusable tasks are submitted with pbs-from-s3")
+        if workflow == "combined":
+            errors.append("BlockSci reusable tasks require --blocksci-workflow reusable or cached")
+        if not stages.blocksci_alone:
+            errors.append("BlockSci reusable tasks require --blocksci-pbs without --analysis-pbs")
+    if action == "pbs-from-s3" and task == "script" and not blocksci.script:
+        errors.append("--blocksci-task script requires --blocksci-script")
+    if action == "pbs-from-s3" and task != "script" and _supplied(config, "blocksci.script", blocksci.script):
+        errors.append("--blocksci-script requires --blocksci-task script")
+    return errors
+
+
+def _height_errors(config: PipelineConfiguration) -> list[str]:
+    errors: list[str] = []
+    blocksci = config.blocksci
+    pin_height, scan_start, scan_end = blocksci.pin_height, blocksci.scan_start_height, blocksci.scan_end_height
+    if blocksci.task != "script":
+        for flag, path, height in (
+            ("--blocksci-pin-height", "blocksci.pin_height", pin_height),
+            ("--blocksci-scan-start-height", "blocksci.scan_start_height", scan_start),
+            ("--blocksci-scan-end-height", "blocksci.scan_end_height", scan_end),
+        ):
+            if _supplied(config, path, height):
+                errors.append(f"{flag} requires --blocksci-task script")
+    if scan_start is not None and scan_end is not None and scan_start >= scan_end:
+        errors.append("--blocksci-scan-start-height must be below --blocksci-scan-end-height")
+    if pin_height is not None and scan_end is not None and scan_end > pin_height + 1:
+        errors.append("--blocksci-scan-end-height must not exceed --blocksci-pin-height + 1")
     return errors
 
 

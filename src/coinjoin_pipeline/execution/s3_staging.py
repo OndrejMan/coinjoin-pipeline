@@ -90,8 +90,14 @@ def upload_exporters(access: S3Access, run_prefix: str, exporters_dir: Path) -> 
 
 
 def pbs_stages_need_exporters(args: PipelineConfiguration) -> bool:
-    """Return whether this S3 PBS invocation runs the exporter checkout: every BlockSci job does."""
-    return args.stages.blocksci
+    """Return whether this S3 PBS invocation runs the exporter checkout."""
+    if not args.stages.blocksci:
+        return False
+    task = args.blocksci.task
+    return args.blocksci.workflow == "combined" or task in {
+        "detect",
+        "parse",
+    }
 
 
 def ensure_staged_exporters(args: PipelineConfiguration) -> None:

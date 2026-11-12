@@ -5,9 +5,12 @@ from __future__ import annotations
 import shlex
 from typing import Literal
 
+from exporters.artifact_paths import BLOCKSCI_CONFIG_FILE, BLOCKSCI_CUSTOM_ANALYSIS_DIR
+
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.execution.pbs_settings import pbs_image
 from coinjoin_pipeline.registry import pinned_reference
+from coinjoin_pipeline.storage.s3 import shell_assignment
 
 from .defaults import BLOCKSCI_IMAGE_PYTHON_COMMAND
 from .validation import require_safe_image
@@ -34,6 +37,38 @@ def blocksci_analysis_pbs_command(
     config: PipelineConfiguration,
 ) -> str:
     return worker_command("analyze", run_id, config)
+
+
+def blocksci_script_pbs_command(
+    run_id: str,
+    config: PipelineConfiguration,
+) -> str:
+    """Build custom-script execution over an already parsed BlockSci index."""
+    run_dir = f"/runs/emulation/logs/{run_id}"
+    config_path = f"{run_dir}/{BLOCKSCI_CONFIG_FILE}"
+    output = f"{run_dir}/{BLOCKSCI_CUSTOM_ANALYSIS_DIR}"
+    environment = {
+        "ACTIVE_RUN_ID": run_id,
+        "BLOCKSCI_CONFIG": config_path,
+        "BLOCKSCI_RUN_DIR": run_dir,
+        "BLOCKSCI_OUTPUT_DIR": output,
+        "COINJOIN_TYPE": config.coinjoin_type,
+        "JOINMARKET_DETECTOR": config.joinmarket.detector,
+        "JOINMARKET_MIN_BASE_FEE": str(config.joinmarket.min_base_fee),
+        "JOINMARKET_PERCENTAGE_FEE": str(config.joinmarket.percentage_fee),
+        "JOINMARKET_MAX_DEPTH": str(config.joinmarket.max_depth),
+    }
+    if config.min_input_count is not None:
+        environment["MIN_INPUT_COUNT"] = str(config.min_input_count)
+    # Blockchain(config, n) shows blocks [0, n); the pin is the last height the script may see.
+    if config.blocksci.pin_height is not None:
+        environment["BLOCKSCI_MAX_BLOCK"] = str(config.blocksci.pin_height + 1)
+    if config.blocksci.scan_start_height is not None:
+        environment["SCAN_START_HEIGHT"] = str(config.blocksci.scan_start_height)
+    if config.blocksci.scan_end_height is not None:
+        environment["SCAN_END_HEIGHT"] = str(config.blocksci.scan_end_height)
+    assignments = " ".join(shell_assignment(name, value) for name, value in environment.items())
+    return f"{assignments} {BLOCKSCI_IMAGE_PYTHON_COMMAND} /mnt/user-analysis.py"
 
 
 def blocksci_export_pbs_command(
