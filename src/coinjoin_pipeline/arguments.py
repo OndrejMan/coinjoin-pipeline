@@ -40,7 +40,7 @@ ACTION_SUMMARIES = {
     "emulate": "emulate a new run only",
     "analyze": "BlockSci analysis of --run-dir",
     "export": "unified report of --run-dir",
-    "coinjoin-analysis": "baseline coinjoin-analysis of --run-dir",
+    "coinjoin-analysis": "baseline coinjoin-analysis of --run-dir or --all-runs",
 }
 
 # Argument groups by the first segment of the model path; top-level fields are "".
@@ -68,6 +68,7 @@ HELP = {
         "(default: BlockSci's height-aware threshold; small regtest rounds need an explicit value)"
     ),
     "dry_run": "validate and print the plan without starting containers, jobs or uploads",
+    "all_runs": "run coinjoin-analysis over every run in the runs root",
     "images.version": "release tag of every component image",
     "images.registry": (
         "registry and owner of the project's images, e.g. ghcr.io/you (also $COINJOIN_IMAGE_REGISTRY; "

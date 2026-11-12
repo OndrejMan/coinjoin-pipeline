@@ -15,6 +15,12 @@ def is_run_dir(path: Path, marker_files: tuple[str, ...] = EMULATION_MARKERS) ->
     return path.is_dir() and any((path / marker).exists() for marker in marker_files)
 
 
+def run_dirs(emulation_logs_dir: Path, marker_files: tuple[str, ...] = EMULATION_MARKERS) -> set[Path]:
+    if not emulation_logs_dir.exists():
+        return set()
+    return {child.resolve() for child in emulation_logs_dir.iterdir() if is_run_dir(child, marker_files)}
+
+
 def pipeline_run_id_env() -> str:
     """Return the host-pinned run id, ignoring an invalid environment value."""
     run_id_value = os.environ.get("PIPELINE_RUN_ID", "")
