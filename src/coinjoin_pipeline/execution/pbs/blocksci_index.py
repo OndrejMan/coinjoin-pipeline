@@ -45,6 +45,15 @@ def edit_config(stage: Stage, section: str, key: str, value: object) -> None:
     config.write_text(json.dumps(content, indent=4) + "\n")
 
 
+def config_value(stage: Stage, section: str, key: str) -> object:
+    """One key of the run's BlockSci config.json, or None when it has none."""
+    try:
+        content = json.loads((stage.work / BLOCKSCI_CONFIG_FILE).read_text())
+        return content[section][key]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def canonicalize_index(stage: Stage) -> None:
     """Point config.json at parsed/ as this job's container sees it; a copied index still names its old one."""
     edit_config(stage, "chainConfig", "dataDirectory", f"{container_run(stage)}/{BLOCKSCI_DIR}/parsed")
