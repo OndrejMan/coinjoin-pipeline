@@ -139,6 +139,12 @@ def compose_project_name(host_root_dir: Path) -> str:
     return f"{settings.COMPOSE_PROJECT}-{checkout_hash}"
 
 
+def blocksci_host_port(host_root_dir: Path) -> str:
+    """Pick a stable unprivileged notebook port for one pipeline checkout."""
+    checkout_hash = hashlib.sha256(str(host_root_dir).encode("utf-8")).hexdigest()
+    return str(20000 + int(checkout_hash[:8], 16) % 10000)
+
+
 def host_registry_config() -> Path | None:
     """Path to the host's Docker registry credentials, when there are any.
 
@@ -169,17 +175,25 @@ def compose_env(
     env = os.environ.copy()
     host_root_dir = settings.ROOT_DIR
     runs_root = default_runs_root()
+    notebooks_dir = runs_root / ".notebooks"
     emulation_logs_dir = runs_root
     exporters_dir = settings.ROOT_DIR / "exporters"
     env.setdefault(settings.COMPOSE_PROJECT_ENV, compose_project_name(host_root_dir))
+    env.setdefault("BLOCKSCI_HOST_PORT", blocksci_host_port(host_root_dir))
+    env.setdefault("NOTEBOOKS_DIR", str(notebooks_dir))
     env.setdefault("EMULATION_LOGS_DIR", str(emulation_logs_dir))
     env.setdefault("EXPORTERS_DIR", str(exporters_dir))
     scenario_root = scenarios_dir()
+    notebooks_dir = Path(env["NOTEBOOKS_DIR"]).expanduser().resolve()
     emulation_logs_dir = Path(env["EMULATION_LOGS_DIR"]).expanduser().resolve()
     exporters_dir = Path(env["EXPORTERS_DIR"]).expanduser().resolve()
     env["SCENARIOS_DIR"] = str(scenario_root)
+    env["NOTEBOOKS_DIR"] = str(notebooks_dir)
     env["EMULATION_LOGS_DIR"] = str(emulation_logs_dir)
     env["EXPORTERS_DIR"] = str(exporters_dir)
+    if create_directories:
+        # The BlockSci service mounts it; Docker would create a missing one owned by root.
+        notebooks_dir.mkdir(parents=True, exist_ok=True)
     env["COINJOIN_ENGINE"] = config.engine
     env["BLOCKSCI_COINJOIN_TYPE"] = config.coinjoin_type
     env["BLOCKSCI_MIN_INPUT_COUNT"] = "default" if config.min_input_count is None else str(config.min_input_count)

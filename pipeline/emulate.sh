@@ -7,6 +7,7 @@ HOST_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SCENARIOS_DIR="${SCENARIOS_DIR:-${HOST_ROOT_DIR}/../scenarios}"
 # The CLI's default runs root (paths.default_runs_root); the CLI always passes its own.
 export EMULATION_LOGS_DIR="${EMULATION_LOGS_DIR:-${PWD}/coinjoin-runs}"
+export NOTEBOOKS_DIR="${NOTEBOOKS_DIR:-${EMULATION_LOGS_DIR}/.notebooks}"
 # shellcheck source=pipeline/compose-runtime.sh
 source "${HOST_ROOT_DIR}/compose-runtime.sh"
 
