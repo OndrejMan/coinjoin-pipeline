@@ -56,15 +56,17 @@ run_signal_case() {
 
   # Build the invocation from the same function the production path uses.
   local command_file="${TMP_DIR}/command-${signal}.sh"
-  python3 - "${command_file}" "${LOGS_ROOT}" <<'PY'
+  # Each case gets its own run ID: generated IDs have minute resolution, so the
+  # second case would otherwise find the first one's launch and be refused.
+  python3 - "${command_file}" "${LOGS_ROOT}" "signal-${signal,,}" <<'PY'
 import sys
 from pathlib import Path
 
 import shlex
 
-destination, runs_root = Path(sys.argv[1]), Path(sys.argv[2])
+destination, runs_root, run_id = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 command = [sys.executable, "-m", "coinjoin_pipeline.cli", "emulate", "--engine", "wasabi",
-           "--scenario", "overactive-local.json", "--runs-root", str(runs_root)]
+           "--scenario", "overactive-local.json", "--runs-root", str(runs_root), "--run-id", run_id]
 destination.write_text("exec " + shlex.join(command) + "\n", encoding="utf-8")
 PY
 
