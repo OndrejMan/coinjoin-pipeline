@@ -20,10 +20,15 @@ class Capability(Enum):
 
 
 def required_capabilities(config: PipelineConfiguration) -> set[Capability]:
-    return {Capability.CONTAINER_RUNTIME}
+    capabilities: set[Capability] = set()
+    if not config.dry_run:
+        capabilities.add(Capability.CONTAINER_RUNTIME)
+    return capabilities
 
 
 def required_image_components(config: PipelineConfiguration) -> set[str]:
+    if config.dry_run:
+        return set()
     return {
         "emulate": {"emulator"},
         "coinjoin-analysis": {"coinjoin_analysis"},

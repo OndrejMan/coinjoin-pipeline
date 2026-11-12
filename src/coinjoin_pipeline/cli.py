@@ -38,6 +38,13 @@ def use_line_buffered_output() -> None:
             reconfigure(line_buffering=True)
 
 
+def print_dry_run_context(context: RunContext) -> None:
+    """What a dry run resolved before execution: where the run lives and which images it uses."""
+    print(f"[dry-run] run directory: {context.run_dir or '-'}")
+    for component, image in context.images.as_dict().items():
+        print(f"[dry-run] image {component}: {image}")
+
+
 def execute(context: RunContext) -> None:
     from .execution import containers, orchestrator
 
@@ -46,20 +53,21 @@ def execute(context: RunContext) -> None:
 
 
 def preflight_errors(context: RunContext) -> list[str]:
-    """Option errors, then missing images and host capabilities."""
+    """Option errors, then, for a real run, missing images and host capabilities."""
     config = context.config
     root = config.runs_path
     runtime_root()
     errors = validate_arguments(config, root)
-    errors.extend(
-        doctor_check(
-            config.runtime,
-            root,
-            context.images,
-            image_components=required_image_components(config),
-            capabilities=required_capabilities(config),
+    if not config.dry_run:
+        errors.extend(
+            doctor_check(
+                config.runtime,
+                root,
+                context.images,
+                image_components=required_image_components(config),
+                capabilities=required_capabilities(config),
+            )
         )
-    )
     return errors
 
 
@@ -120,7 +128,10 @@ def main(argv: list[str] | None = None) -> int:
         if errors:
             return fail(*errors)
         print(f"Run configuration: {config.action}")
-        target, manifest = start_host_manifest(context, original, reproduction)
+        if config.dry_run:
+            print_dry_run_context(context)
+        else:
+            target, manifest = start_host_manifest(context, original, reproduction)
         with context.activate():
             execute(context)
         code = EXIT_OK

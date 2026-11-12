@@ -74,6 +74,7 @@ class PipelineConfiguration(ConfigurationModel):
     run_id: str | None = option(None, name="run_id", actions=("emulate", "full-run"))
     run_timezone: str = option("Europe/Prague", name="run_timezone")
     min_input_count: int | None = option(None, name="min_input_count", minimum=1)
+    dry_run: bool = option(False, name="dry_run")
     images: ImageConfiguration = field(default_factory=ImageConfiguration)
     _provided: frozenset[str] = field(default_factory=frozenset, repr=False, compare=False)
 

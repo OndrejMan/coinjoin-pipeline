@@ -144,8 +144,11 @@ def compose_env(
     active_run_id: str | None = None,
     *,
     include_scenario: bool = True,
+    create_directories: bool | None = None,
 ) -> dict[str, str]:
     """Build the Compose environment for one configuration and optional run."""
+    if create_directories is None:
+        create_directories = not config.dry_run
     env = os.environ.copy()
     host_root_dir = settings.ROOT_DIR
     runs_root = default_runs_root()
@@ -179,7 +182,8 @@ def compose_env(
         env["ACTIVE_RUN_ID"] = active_run_id
         run_dir = emulation_logs_dir / active_run_id
         analysis_dir = run_dir / COINJOIN_ANALYSIS_DIR
-        analysis_dir.mkdir(parents=True, exist_ok=True)
+        if create_directories:
+            analysis_dir.mkdir(parents=True, exist_ok=True)
         env[settings.COINJOIN_ANALYSIS_SOURCE_PATH_ENV] = str(analysis_dir)
         env[settings.COINJOIN_ANALYSIS_MOUNT_PATH_ENV] = (
             f"{settings.COINJOIN_ANALYSIS_SELECTED_ROOT_CONTAINER}/{active_run_id}"
@@ -215,7 +219,7 @@ def run_script(
 ) -> None:
     if not script.exists():
         raise RuntimeError(f"script not found: {script}")
-    env = compose_env(config, active_run_id, include_scenario=include_scenario)
+    env = compose_env(config, active_run_id, include_scenario=include_scenario, create_directories=True)
     if script == settings.EMULATE_SCRIPT:
         relative_scenario = env["SCENARIO_CONTAINER_PATH"].removeprefix(settings.CONTAINER_SCENARIOS_DIR + "/")
         args = ("--scenario", "/app/scenarios/" + relative_scenario)
