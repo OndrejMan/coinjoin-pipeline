@@ -26,6 +26,7 @@ lint = "coinjoin_pipeline.lint:main"
 packages = [
   "coinjoin_pipeline",
   "coinjoin_pipeline.execution",
+  "coinjoin_pipeline.execution.pbs",
   "coinjoin_pipeline.storage",
   "exporters",
   "exporters.blocksci_export",

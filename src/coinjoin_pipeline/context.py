@@ -66,13 +66,14 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
 
 
 def resolve_run_images(config: PipelineConfiguration) -> tuple[PipelineConfiguration, Images]:
-    """Pin every image reference: the component images and the S3 job images."""
+    """Pin every image reference: component images, their PBS overrides and the S3 job images."""
     images = resolve_images(
         config.images.version,
         {item.name: getattr(config.images, item.name) for item in fields(Images)},
         local=config.images.local_build,
         registry=config.images.registry,
     )
+    pbs = config.pbs
     config = replace(
         config,
         images=replace(
@@ -80,6 +81,10 @@ def resolve_run_images(config: PipelineConfiguration) -> tuple[PipelineConfigura
             emulator=images.emulator,
             coinjoin_analysis=images.coinjoin_analysis,
             blocksci=images.blocksci,
+        ),
+        pbs=replace(
+            pbs,
+            blocksci_image=pbs.blocksci_image or pbs.image or images.blocksci,
         ),
     )
     if config.artifacts.backend == "s3":

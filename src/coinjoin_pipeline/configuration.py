@@ -43,6 +43,7 @@ ArtifactBackend = Literal["shared-storage", "s3"]
 ContainerRuntime = Literal["docker", "podman"]
 JoinMarketDetector = Literal["possible", "definite"]
 AnalysisAction = Literal["collect_docker", "analyze_only"]
+PBSScratchType = Literal["ssd", "local"]
 
 
 def option(default=None, *, name=None, minimum=None, actions=None):
@@ -106,6 +107,27 @@ class JoinMarketConfiguration(ConfigurationModel):
 
 
 @dataclass(frozen=True, slots=True)
+class PBSResourceConfiguration(ConfigurationModel):
+    ncpus: int | None = option(None, name="ncpus", minimum=1)
+    mem: str | None = option(None, name="mem")
+    scratch: str | None = option(None, name="scratch")
+    scratch_type: PBSScratchType | None = option(None, name="scratch_type")
+    walltime: str | None = option(None, name="walltime")
+
+
+@dataclass(frozen=True, slots=True)
+class PBSConfiguration(ConfigurationModel):
+    ncpus: int | None = option(None, name="pbs_ncpus", minimum=1)
+    mem: str | None = option(None, name="pbs_mem")
+    scratch: str | None = option(None, name="pbs_scratch")
+    scratch_type: PBSScratchType | None = option(None, name="pbs_scratch_type")
+    walltime: str | None = option(None, name="pbs_walltime")
+    image: str | None = option(None, name="pbs_image")
+    blocksci_image: str | None = option(None, name="pbs_blocksci_image")
+    blocksci: PBSResourceConfiguration = field(default_factory=PBSResourceConfiguration)
+
+
+@dataclass(frozen=True, slots=True)
 class PipelineConfiguration(ConfigurationModel):
     action: PipelineAction = option("full-run")
     runtime: ContainerRuntime = option("docker", name="runtime")
@@ -129,6 +151,7 @@ class PipelineConfiguration(ConfigurationModel):
     images: ImageConfiguration = field(default_factory=ImageConfiguration)
     blocksci: BlockSciConfiguration = field(default_factory=BlockSciConfiguration)
     joinmarket: JoinMarketConfiguration = field(default_factory=JoinMarketConfiguration)
+    pbs: PBSConfiguration = field(default_factory=PBSConfiguration)
     _provided: frozenset[str] = field(default_factory=frozenset, repr=False, compare=False)
 
     @property
@@ -249,6 +272,8 @@ def option_specs(model_type=PipelineConfiguration, prefix=""):
             yield from option_specs(annotation, path)
         else:
             destination = item.metadata.get("option")
+            if model_type is PBSResourceConfiguration:
+                destination = path.replace(".", "_")
             yield path, destination, item
 
 

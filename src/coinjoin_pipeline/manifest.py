@@ -19,6 +19,7 @@ PIPELINE_ENVIRONMENT_PREFIXES = (
     "BLOCKSCI_",
     "COINJOIN_",
     "KUBERNETES_",
+    "PBS_",
 )
 
 

@@ -66,8 +66,14 @@ SECTIONS = {
         "Each image is the explicit option, else its environment variable, else the --local-build tag, "
         "else the release tag --version.",
     ),
+    "stages": ("PBS stages", "Run an analyzer as a PBS job instead of a local container."),
     "blocksci": ("BlockSci", None),
     "joinmarket": ("JoinMarket detector", None),
+    "pbs": (
+        "PBS resources and images",
+        "A stage-specific --pbs-<stage>-* value overrides the shared --pbs-* fallback, "
+        "which overrides the stage's default.",
+    ),
 }
 
 # Help text by model path. The YAML key and the default are appended automatically.
@@ -113,16 +119,31 @@ HELP = {
     "images.uploader": "S3 uploader image (default: container/uploader.image)",
     "images.unified_report": ("unified-report job image (default: container/unified-report.image)"),
     "blocksci.script": "Python script run over the parsed BlockSci index",
+    "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
     **{
         f"images.{component}": f"{component.replace('_', '-')} image (also ${variable})"
         for component, variable in IMAGE_ENVIRONMENT.items()
+    },
+    **{
+        f"pbs.{component}_image": f"Singularity image of the {component.replace('_', '-')} PBS stage"
+        for component in ("blocksci",)
+    },
+    **{
+        f"pbs.{name}": f"shared fallback {name.replace('_', '-')} of every PBS stage"
+        for name in ("ncpus", "mem", "scratch", "scratch_type", "walltime")
     },
 }
 
 
 def option_help(path: str, item: Field) -> str:
     """Help text of one option: its description, YAML key and effective default."""
-    text = HELP.get(path, "")
+    parts = path.split(".")
+    if parts[0] == "pbs" and len(parts) == 3:
+        stage, name = parts[1], parts[2]
+        text = f"{stage.replace('_', '-')} PBS job {name.replace('_', '-')}"
+        text += f"; falls back to --pbs-{name.replace('_', '-')}"
+    else:
+        text = HELP.get(path, "")
     details = [f"YAML: {path}"]
     default = item.default
     if default is not MISSING and default not in (None, False, ()):
