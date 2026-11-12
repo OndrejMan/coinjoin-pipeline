@@ -171,6 +171,7 @@ class PipelineConfiguration(ConfigurationModel):
     joinmarket: JoinMarketConfiguration = field(default_factory=JoinMarketConfiguration)
     stages: StageConfiguration = field(default_factory=StageConfiguration)
     pbs: PBSConfiguration = field(default_factory=PBSConfiguration)
+    stage_exporters: bool = option(False, name="stage_exporters")
     _provided: frozenset[str] = field(default_factory=frozenset, repr=False, compare=False)
 
     @property

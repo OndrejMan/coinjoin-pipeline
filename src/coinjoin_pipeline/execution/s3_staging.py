@@ -1,4 +1,4 @@
-"""Stage the exporter checkout into a fresh S3 run prefix."""
+"""Stage the exporter checkout into an S3 run prefix and check what a prefix already holds."""
 
 from __future__ import annotations
 
@@ -37,6 +37,26 @@ def ensure_local_exporters(exporters_dir: Path) -> None:
             raise ArtifactTransportError(f"Required exporter is missing: {candidate}")
 
 
+STAGED_EXPORTERS_COMPLETE = "complete"
+STAGED_EXPORTERS_MISSING = "missing"
+STAGED_EXPORTERS_PARTIAL = "partial"
+
+
+def staged_exporters_state(access: S3Access, run_prefix: str) -> tuple[str, list[str]]:
+    """Classify the exporter tree already staged under a run prefix.
+
+    One file is no proof of a usable tree: an upload that died halfway leaves some, and
+    the compute node would fail only later, on a file that is missing.
+    """
+    prefix = staged_exporters_uri(run_prefix)
+    missing = [relative for relative in REQUIRED_EXPORTERS if not s3_object_exists(access, f"{prefix}{relative}")]
+    if not missing:
+        return STAGED_EXPORTERS_COMPLETE, []
+    if len(missing) == len(REQUIRED_EXPORTERS):
+        return STAGED_EXPORTERS_MISSING, missing
+    return STAGED_EXPORTERS_PARTIAL, missing
+
+
 def upload_exporters(access: S3Access, run_prefix: str, exporters_dir: Path) -> None:
     """Stage the checkout's exporters into the run prefix before the Job starts.
 
@@ -67,6 +87,37 @@ def upload_exporters(access: S3Access, run_prefix: str, exporters_dir: Path) -> 
     for relative in REQUIRED_EXPORTERS:
         if not s3_object_exists(access, f"{destination}{relative}"):
             raise ArtifactTransportError(f"exporter upload did not produce {destination}{relative}")
+
+
+def pbs_stages_need_exporters(args: PipelineConfiguration) -> bool:
+    """Return whether this S3 PBS invocation runs the exporter checkout: every BlockSci job does."""
+    return args.stages.blocksci
+
+
+def ensure_staged_exporters(args: PipelineConfiguration) -> None:
+    """Stage the checkout's exporters into a run prefix that has none.
+
+    The BlockSci job downloads ``.pipeline/exporters/`` from its own run
+    prefix. An S3 emulation stages it
+    before it starts, but a ``pbs-from-s3`` — a resumed detect, above all — can
+    start from a prefix that has none. Only the missing case uploads:
+    a prefix that already carries exporters keeps the ones its earlier stages
+    actually ran with.
+    """
+    target = S3Target.from_args(args)
+    state, missing = staged_exporters_state(target.access, target.run_prefix)
+    if state == STAGED_EXPORTERS_COMPLETE:
+        return
+    if state == STAGED_EXPORTERS_PARTIAL:
+        prefix = staged_exporters_uri(target.run_prefix)
+        raise ArtifactTransportError(
+            f"run prefix {prefix} carries an exporter tree without {', '.join(missing)}; "
+            "it predates the blocksci_export rename or a previous upload died halfway. "
+            "Re-staging it here would mix exporter versions across the run's stages, so "
+            "start a fresh --run-id (or delete the prefix and restage it deliberately)"
+        )
+    print(f"[stage] Run prefix has no exporters; uploading from {EXPORTERS_ROOT}")
+    upload_exporters(target.access, target.run_prefix, EXPORTERS_ROOT)
 
 
 def stage_kubernetes_s3_run(args: PipelineConfiguration) -> None:

@@ -98,6 +98,7 @@ HELP = {
     "yes": "confirm the destructive clean action",
     "analysis_action": "collect_docker collects the emulator logs first; analyze_only needs an existing baseline",
     "emulation_timeout": "seconds to wait for the emulation before giving up",
+    "stage_exporters": "always upload the exporters into the S3 run prefix, even when no PBS stage needs them",
     "kubernetes.namespace": "namespace of the run's Kubernetes resources",
     "kubernetes.reuse_namespace": "use an existing namespace instead of creating and deleting one",
     "kubernetes.kubeconfig": "kubeconfig file (default: ~/.kube/config)",

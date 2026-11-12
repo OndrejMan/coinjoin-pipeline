@@ -14,6 +14,7 @@ from coinjoin_pipeline.execution.pbs_settings import (
     stage_pbs_resources,
 )
 from coinjoin_pipeline.execution.s3_markers import rollback_s3_pbs_submissions
+from coinjoin_pipeline.execution.s3_staging import ensure_staged_exporters, pbs_stages_need_exporters
 from coinjoin_pipeline.execution.stages import StageGraph, StageKind, StagePlan, s3_full_run_plan
 from coinjoin_pipeline.storage.s3 import (
     S3Target,
@@ -102,6 +103,8 @@ def _submit_s3_pbs_stages(args: PipelineConfiguration, submitted_jobs: list[tupl
     """Submit the concrete S3 PBS DAG while preserving marker semantics."""
     target = S3Target.from_args(args)
     plan = s3_full_run_plan_from_args(args)
+    if not args.dry_run and (args.stage_exporters or pbs_stages_need_exporters(args)):
+        ensure_staged_exporters(args)
     runner = S3StageRunner(args, target, plan, submitted_jobs)
     runner.submit_all()
     return runner.jobs
