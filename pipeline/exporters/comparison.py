@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from exporters.common import JsonObject, wallet_names
-from exporters.report_types import IORecord, RecordSummary, TransactionRecord
+from collections.abc import Mapping
+
+from exporters.common import JsonObject, compute_optional_rate, f1_score, wallet_names
+from exporters.report_types import DetectionConfusionMatrix, IORecord, RecordSummary, TransactionRecord
 
 
 def compare_io(
@@ -122,3 +124,61 @@ def build_divergences(transactions: JsonObject) -> dict[str, list[JsonObject]]:
             )
 
     return divergences
+
+
+def build_detection_confusion_matrix(
+    emulator_data: JsonObject | None,
+    detected_records: Mapping[str, object],
+) -> DetectionConfusionMatrix | None:
+    if not emulator_data or not (emulator_data.get("label_provenance") or {}).get("independent"):
+        return None
+
+    emulator_transactions = emulator_data.get("transactions") or {}
+    evaluated_txids = set(emulator_transactions)
+    detected_txids = set(detected_records)
+    detected_in_scope_txids = detected_txids & evaluated_txids
+    out_of_scope_detected_txids = sorted(detected_txids - evaluated_txids)
+    true_positive = false_positive = true_negative = false_negative = unknown = 0
+    false_positives = []
+    false_negatives = []
+
+    for txid, tx in emulator_transactions.items():
+        expected = tx.get("is_coinjoin")
+        detected = txid in detected_in_scope_txids
+        if expected is True and detected:
+            true_positive += 1
+        elif expected is True:
+            false_negative += 1
+            false_negatives.append(txid)
+        elif expected is False and detected:
+            false_positive += 1
+            false_positives.append(txid)
+        elif expected is False:
+            true_negative += 1
+        else:
+            unknown += 1
+
+    precision = compute_optional_rate(true_positive, true_positive + false_positive)
+    recall = compute_optional_rate(true_positive, true_positive + false_negative)
+    specificity = compute_optional_rate(true_negative, true_negative + false_positive)
+    false_positive_rate = compute_optional_rate(false_positive, false_positive + true_negative)
+
+    return {
+        "evaluated_transactions": len(evaluated_txids),
+        "detected_transactions": len(detected_txids),
+        "detected_in_scope": len(detected_in_scope_txids),
+        "out_of_scope_detected": len(out_of_scope_detected_txids),
+        "true_positives": true_positive,
+        "false_positives": false_positive,
+        "true_negatives": true_negative,
+        "false_negatives": false_negative,
+        "unknown": unknown,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1_score(precision, recall),
+        "specificity": specificity,
+        "false_positive_rate": false_positive_rate,
+        "false_positive_txids": sorted(false_positives),
+        "false_negative_txids": sorted(false_negatives),
+        "out_of_scope_detected_txids": out_of_scope_detected_txids,
+    }

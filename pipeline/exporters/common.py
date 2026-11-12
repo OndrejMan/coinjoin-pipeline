@@ -145,6 +145,19 @@ def compute_rate(numerator: int, denominator: int, empty_default: float) -> floa
     return round(numerator / denominator, 6)
 
 
+def compute_optional_rate(numerator: int, denominator: int) -> float | None:
+    if denominator == 0:
+        return None
+    return round(numerator / denominator, 6)
+
+
+def f1_score(precision: float | None, recall: float | None) -> float | None:
+    """Harmonic mean of two rates, rounded like them; None when it is undefined."""
+    if precision is None or recall is None or precision + recall <= 0:
+        return None
+    return round(2 * precision * recall / (precision + recall), 6)
+
+
 IO_SIDES = ("inputs", "outputs")
 
 

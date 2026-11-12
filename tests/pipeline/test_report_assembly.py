@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from exporters.artifact_paths import EXPORTED_BLOCKS_DIR
-from exporters.common import io_items, wallet_names
+from exporters.common import f1_score, io_items, wallet_names
 from exporters.normalization import iter_exported_blocks
 
 
@@ -35,3 +35,6 @@ def test_shared_record_helpers():
     assert len(list(io_items(record))) == 4
     assert wallet_names(record) == ["wallet-000", "wallet-001"]
     assert wallet_names(None) == []
+    assert f1_score(0.5, 1.0) == 0.666667
+    assert f1_score(0.0, 0.0) is None
+    assert f1_score(None, 1.0) is None

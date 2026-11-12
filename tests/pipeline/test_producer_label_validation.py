@@ -7,6 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pipeline"))
 
+from exporters.comparison import build_detection_confusion_matrix
 from exporters.emulator_data import load_producer_labels, verified_producer_label_sources
 
 
@@ -145,3 +146,10 @@ def test_joinmarket_destination_conflicts_disable_ground_truth(tmp_path, status)
     load_producer_labels(tmp_path, "joinmarket", sources, provenance)
     assert provenance["independent"] is False
     assert "destination conflict" in provenance["unavailable_reason"]
+
+
+def test_baseline_omission_is_a_reported_false_negative():
+    ground_truth = {"label_provenance": {"independent": True}, "transactions": {"txA": {"is_coinjoin": True}}}
+    metrics = build_detection_confusion_matrix(ground_truth, {})
+    assert metrics["false_negatives"] == 1
+    assert metrics["false_negative_txids"] == ["txA"]

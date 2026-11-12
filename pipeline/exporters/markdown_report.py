@@ -43,6 +43,14 @@ def sats(value: JsonValue) -> str:
     return f"{int(str(value)):,}"
 
 
+def metric_value(value: JsonValue) -> str:
+    if value is None:
+        return "n/a"
+    if isinstance(value, float):
+        return f"{value:.6f}".rstrip("0").rstrip(".")
+    return str(value)
+
+
 def summary_value(record: JsonObject | None, field: str) -> JsonValue:
     if record is None:
         return None
@@ -144,6 +152,86 @@ def render_shared_mismatch_details(items: list[JsonObject]) -> list[str]:
         for mismatch in item.get("mismatches", []):
             lines.append(f"- {mismatch}")
         lines.append("")
+    return lines
+
+
+def render_emulator_detection(report: JsonObject, explorer_base_url: str) -> list[str]:
+    emulator_data = report.get("emulator_data") or {}
+    emulator_summary = emulator_data.get("summary") or {}
+    detector_evaluations = report.get("detector_evaluations")
+    if not detector_evaluations:
+        return []
+
+    detector_labels = {
+        "blocksci": "BlockSci",
+        "coinjoin_analysis": "coinjoin-analysis",
+    }
+    evaluation_rows = []
+    for detector, matrix in detector_evaluations.items():
+        if not matrix:
+            continue
+        evaluation_rows.append(
+            [
+                detector_labels.get(detector, detector),
+                matrix.get("true_positives"),
+                matrix.get("false_positives"),
+                matrix.get("true_negatives"),
+                matrix.get("false_negatives"),
+                matrix.get("unknown"),
+                metric_value(matrix.get("precision")),
+                metric_value(matrix.get("recall")),
+                metric_value(matrix.get("f1")),
+                metric_value(matrix.get("specificity")),
+                metric_value(matrix.get("false_positive_rate")),
+            ]
+        )
+
+    lines = [
+        *section(
+            "Emulator Data Coverage",
+            *key_values(
+                [
+                    ["chain transactions evaluated", emulator_summary.get("transactions")],
+                    ["emulator_data coinjoins", emulator_summary.get("coinjoin_transactions")],
+                    ["emulator_data non-coinjoins", emulator_summary.get("non_coinjoin_transactions")],
+                    ["unknown transactions", emulator_summary.get("unknown_transactions")],
+                    ["wallet addresses", emulator_summary.get("wallet_addresses")],
+                    ["labeled IO records", emulator_summary.get("labeled_io_records")],
+                    ["total IO records", emulator_summary.get("total_io_records")],
+                ]
+            ),
+        ),
+        *section(
+            "Emulator Data Detection Confusion Matrix",
+            *table(
+                ["detector", "TP", "FP", "TN", "FN", "unknown", "precision", "recall", "F1", "specificity", "FPR"],
+                evaluation_rows,
+            ),
+        ),
+    ]
+
+    divergence_lines = []
+    for detector, matrix in detector_evaluations.items():
+        if not matrix:
+            continue
+        detector_label = detector_labels.get(detector, detector)
+        for field, kind, description in (
+            ("false_negative_txids", "false negative", "emulator_data CoinJoin transaction(s) missed."),
+            ("false_positive_txids", "false positive", "non-CoinJoin transaction(s) detected."),
+            (
+                "out_of_scope_detected_txids",
+                "out of scope",
+                "detected transaction(s) were outside the exported emulator transaction universe.",
+            ),
+        ):
+            txids = matrix.get(field) or []
+            if txids:
+                divergence_lines.append(f"- {detector_label}: {len(txids)} {description}")
+                divergence_lines.extend(f"  - {kind}: {tx_value(txid, explorer_base_url)}" for txid in txids[:10])
+
+    if divergence_lines:
+        lines.extend(section("Emulator Data Detection Divergences", *divergence_lines))
+
     return lines
 
 
@@ -297,6 +385,7 @@ def render_run(report: JsonObject) -> list[str]:
         *key_values(
             [
                 ["run id", run.get("id")],
+                ["evaluation scope", report.get("evaluation_scope")],
                 ["run time", run.get("started_at")],
                 ["scenario", run.get("scenario_name")],
                 ["scenario rounds", scenario.get("rounds")],
@@ -346,6 +435,23 @@ def render_detection_summary(report: JsonObject) -> list[str]:
     ]
 
 
+def render_scope_note(report: JsonObject) -> list[str]:
+    """Why precision, recall and F1 are missing, when they are."""
+    scope = report.get("evaluation_scope")
+    if scope != "emulator_labels_unavailable":
+        return []
+    lines = [
+        "",
+        "> Independent emulator producer labels were unavailable. Transaction labels remain unknown; "
+        "precision, recall, and F1 are intentionally unavailable.",
+    ]
+    label_provenance = (report.get("emulator_data") or {}).get("label_provenance") or {}
+    unavailable_reason = label_provenance.get("unavailable_reason")
+    if unavailable_reason:
+        lines.append(f"> Reason: {unavailable_reason}")
+    return lines
+
+
 DIVERGENCE_KINDS = (
     ("missed_by_blocksci", "missed_by_blocksci"),
     ("blocksci_only", "blocksci_only"),
@@ -356,7 +462,11 @@ DIVERGENCE_KINDS = (
 def render_analyzer_diagnostic(report: JsonObject, explorer_base_url: str) -> list[str]:
     """The analyzer-vs-analyzer comparison, transaction by transaction."""
     divergences = report["divergences"]
-    lines = section("CoinJoin-Analysis vs BlockSci Diagnostic")
+    lines = section(
+        "CoinJoin-Analysis vs BlockSci Diagnostic",
+        "This section preserves the analyzer comparison. Reports use `emulator_data` as the "
+        "canonical source for chain-wide detection metrics.",
+    )
     lines.extend(render_notable_divergences(divergences))
     lines.extend(section("Divergence Overview"))
     overview_rows = [
@@ -400,6 +510,8 @@ def render_report(report: JsonObject, explorer_base_url: str = "http://localhost
         *render_header(report),
         *render_run(report),
         *render_detection_summary(report),
+        *render_scope_note(report),
+        *render_emulator_detection(report, explorer_base_url),
         *render_analyzer_diagnostic(report, explorer_base_url),
     ]
     return "\n".join(lines).rstrip() + "\n"
