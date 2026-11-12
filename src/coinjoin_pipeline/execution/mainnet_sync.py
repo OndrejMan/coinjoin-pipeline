@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import json
+import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from coinjoin_pipeline.configuration import required
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
-from coinjoin_pipeline.storage.s3 import shell_value, validate_artifact_uri, validate_run_id
+from coinjoin_pipeline.storage.s3 import validate_artifact_uri, validate_run_id
 from .pbs.defaults import MAINNET_SYNC_RESOURCES, PBSResources
 from .pbs.scripts import (
     APPTAINER,
@@ -214,7 +215,7 @@ def job_script(
         # Run by the BlockSci image's Python, from the bound job directory.
         "verify_chain.py": runtime_source(EXPORTERS_ROOT / "verify_chain.py"),
     }
-    identity = f"STAGE=mainnet-{stage}\nRUN_ID={shell_value(run_id)}\n"
+    identity = f"STAGE=mainnet-{stage}\nRUN_ID={shlex.quote(run_id)}\n"
     return f"""{directives(name, budget, getattr(config.pbs, stage).multijob)}
 set -euo pipefail
 umask 077
@@ -240,7 +241,7 @@ finish() {{
 trap finish EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
-test -r {shell_value(credentials)} || {{ echo 'S3 credentials file is not readable' >&2; exit 1; }}
+test -r {shlex.quote(credentials)} || {{ echo 'S3 credentials file is not readable' >&2; exit 1; }}
 for tool in s5cmd tar zstd; do command -v "$tool" >/dev/null || {{ echo "Required tool missing: $tool" >&2; exit 1; }}; done
 s5cmd pipe --help >/dev/null || {{ echo 's5cmd with pipe support is required' >&2; exit 1; }}
 STARTED=1

@@ -203,11 +203,6 @@ def shell_assignment(name: str, value: str) -> str:
     return f"{name}={shlex.quote(value)}"
 
 
-def shell_value(value: str) -> str:
-    """Quote one shell value without constructing a throwaway assignment."""
-    return shlex.quote(value)
-
-
 def s5_client(access: S3Access) -> S5Client:
     return S5Client(access.endpoint_url, access.credentials_file, access.profile)
 

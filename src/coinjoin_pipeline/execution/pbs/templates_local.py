@@ -5,10 +5,10 @@ Not part of the Kubernetes → S3 → PBS path that the thesis results come from
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
 from coinjoin_pipeline.configuration import MappingsConfiguration
-from coinjoin_pipeline.storage.s3 import shell_value
 
 from .defaults import DEFAULT_RESOURCES, PBSResources
 from .scripts import directives, mappings_run, template
@@ -98,7 +98,7 @@ def render_mappings_pbs(
         "coinjoin-mappings",
         run_dir,
         resources,
-        enumerator_image=shell_value(enumerator_image),
-        sake_image=shell_value(sake_image),
+        enumerator_image=shlex.quote(enumerator_image),
+        sake_image=shlex.quote(sake_image),
         mappings_run=mappings_run(settings),
     )
