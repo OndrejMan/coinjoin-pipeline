@@ -153,18 +153,19 @@ archive_failure_artifacts() {
 }
 
 inject_kubernetes_client_failure() {
-  local deadline=$((SECONDS + ${INJECT_KUBERNETES_CLIENT_APPEAR_TIMEOUT_SECONDS:-1200}))
-  until kubectl --kubeconfig "${HOST_KUBECONFIG}" get pod -n "${NAMESPACE}" \
-    "${INJECT_KUBERNETES_CLIENT_NAME}" >/dev/null 2>&1
+  # The emulator restarts a client that fails while the clients start, so the
+  # fault goes in only once the simulation runs, where a lost client is fatal.
+  local deadline=$((SECONDS + ${INJECT_KUBERNETES_CLIENT_APPEAR_TIMEOUT_SECONDS:-3600}))
+  until grep -q "Running simulation" "${PIPELINE_OUTPUT_FILE}" 2>/dev/null \
+    && kubectl --kubeconfig "${HOST_KUBECONFIG}" get pod -n "${NAMESPACE}" \
+      "${INJECT_KUBERNETES_CLIENT_NAME}" >/dev/null 2>&1
   do
     if (( SECONDS >= deadline )); then
-      echo "FAIL: pod ${INJECT_KUBERNETES_CLIENT_NAME} did not appear before fault injection" >&2
+      echo "FAIL: the simulation with pod ${INJECT_KUBERNETES_CLIENT_NAME} did not start before fault injection" >&2
       return 1
     fi
     sleep 2
   done
-  kubectl --kubeconfig "${HOST_KUBECONFIG}" wait -n "${NAMESPACE}" \
-    --for=condition=Ready "pod/${INJECT_KUBERNETES_CLIENT_NAME}" --timeout=20m
   sleep "${INJECT_KUBERNETES_CLIENT_DELAY_SECONDS:-15}"
   kubectl --kubeconfig "${HOST_KUBECONFIG}" delete pod -n "${NAMESPACE}" \
     "${INJECT_KUBERNETES_CLIENT_NAME}" --wait=false
