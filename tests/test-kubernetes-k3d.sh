@@ -353,7 +353,7 @@ echo "Running Kubernetes emulation test action '${ACTION}' in namespace '${NAMES
 (
   cd "${PROJECT_DIR}"
   timeout --foreground "${EMULATION_TIMEOUT}" \
-    ./runIt.sh container "${CONTAINER_RUNTIME}" "${ACTION}" \
+    ./runIt.sh "${ACTION}" --runtime "${CONTAINER_RUNTIME}" \
     --engine wasabi \
     --scenario "${SCENARIO}" \
     --driver kubernetes \
