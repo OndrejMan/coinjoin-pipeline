@@ -1,9 +1,10 @@
 mkdir -p "/artifacts/$RUN_ID/.k8s"
 write_s3_credentials
 # A deadline, not a countdown of the sleeps: the two kubectl calls per poll take time too.
-deadline=$((SECONDS + EMULATION_TIMEOUT_SECONDS))
+# BusyBox sh has no $SECONDS, so the clock comes from date.
+deadline=$(($(date +%s) + EMULATION_TIMEOUT_SECONDS))
 while [ ! -f /artifacts/.controller.done ] && [ ! -f /artifacts/.controller.failed ]; do
-  if [ "$SECONDS" -ge "$deadline" ]; then
+  if [ "$(date +%s)" -ge "$deadline" ]; then
     printf 'controller exceeded emulation timeout (%ss)\n' "$EMULATION_TIMEOUT_SECONDS" >&2
     printf 'failed\n' > /artifacts/.controller.failed
     break
