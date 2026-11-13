@@ -106,7 +106,12 @@ def main() -> int:
             )
         elif args.kind == "compare":
             config = PipelineConfiguration.from_flat(
-                {"coinjoin_type": "wasabi2", "min_input_count": 15, "blocksci_pin_height": args.pin_height}
+                {
+                    "coinjoin_type": "wasabi2",
+                    "min_input_count": 15,
+                    "blocksci_pin_height": args.pin_height,
+                    "pbs_image": common["image"],
+                }
             )
             script = templates_s3.render_blocksci_analyze_s3_pbs(
                 target,
@@ -117,7 +122,12 @@ def main() -> int:
             )
         else:
             config = PipelineConfiguration.from_flat(
-                {"coinjoin_type": "wasabi2", "min_input_count": 15, "blocksci_pin_height": args.pin_height}
+                {
+                    "coinjoin_type": "wasabi2",
+                    "min_input_count": 15,
+                    "blocksci_pin_height": args.pin_height,
+                    "pbs_image": common["image"],
+                }
             )
             script = templates_s3.render_blocksci_analyze_s3_pbs(
                 target,
