@@ -58,6 +58,8 @@ pointer=/tmp/mainnet-sync-local-result
 [[ "$mode" != mainnet ]] || pointer=/tmp/mainnet-sync-mainnet-result
 printf '%s\n' "$work" >"${MAINNET_LOCAL_RESULT_FILE:-$pointer}"
 printf '%s\n' "$work" >"$result/working-directory.txt"
+# A killed run skips the trap below; CI removes these containers from this list.
+printf '%s\n' "$seed" "$pbs" "$minio" >"$result/containers.txt"
 echo "Local integration evidence: $work"
 cleanup() {
   status=$?

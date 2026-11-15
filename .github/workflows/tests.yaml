@@ -306,6 +306,29 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # The test keeps its working dataset (up to ~150 GB) for local debugging; in CI
+      # it is removed after every outcome, including a timeout or a cancelled job.
+      - name: Remove the mainnet test containers and working dataset
+        if: always()
+        run: |
+          result="$TEST_RESULT_DIR/mainnet-sync-mainnet"
+          if [[ -s "$result/containers.txt" ]]; then
+            xargs -r docker rm -f <"$result/containers.txt" >/dev/null 2>&1 || true
+          fi
+          [[ -s "$result/working-directory.txt" ]] || exit 0
+          work=$(<"$result/working-directory.txt")
+          case "$work" in
+            "$PBS_TEST_STORAGE_ROOT"/mainnet-sync-mainnet-*) ;;
+            *) echo "Refusing to remove unexpected path: $work" >&2; exit 1 ;;
+          esac
+          [[ -e "$work" ]] || exit 0
+          # MinIO and PBS jobs write as other users, so the tree is removed as root.
+          docker run --rm --user 0:0 --network none --entrypoint rm \
+            -v "$(dirname "$work"):/parent" "$PBS_IMAGE" \
+            -rf --one-file-system "/parent/$(basename "$work")"
+          test ! -e "$work"
+          df -h "$PBS_TEST_STORAGE_ROOT"
+
       - name: Remove the mainnet test image tags
         if: always()
         run: docker image rm "$MAINNET_CORE_LOCAL_IMAGE" "$MAINNET_DUMPLINGS_LOCAL_IMAGE" "$MAINNET_BLOCKSCI_LOCAL_IMAGE" || true
