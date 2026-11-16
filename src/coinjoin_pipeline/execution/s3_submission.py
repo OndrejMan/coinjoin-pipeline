@@ -19,7 +19,7 @@ from coinjoin_pipeline.execution.pbs.commands import (
     blocksci_update_pbs_command,
     coinjoin_analysis_pbs_command,
 )
-from coinjoin_pipeline.execution.pbs.submission import PBSJobSpec, persist_pbs_job_id, submit_pbs_job
+from coinjoin_pipeline.execution.pbs.submission import PBSJobSpec, pbs_job_id_path, persist_pbs_job_id, submit_pbs_job
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
     render_blocksci_analyze_s3_pbs,
     render_blocksci_index_backup_s3_pbs,
@@ -47,6 +47,7 @@ from coinjoin_pipeline.storage.s3 import (
     run_prefix_uri,
     s3_access_preflight,
     s3_object_exists,
+    upload_s3_job_id,
 )
 
 
@@ -108,7 +109,11 @@ class S3StageRunner:
         if job_id:
             self.submitted_jobs.append((stage.name, job_id))
             self.jobs[stage.name] = job_id
-            persist_pbs_job_id(self.args.runs_path / self.target.run_id, stage.name, job_id)
+            run_dir = self.args.runs_path / self.target.run_id
+            persist_pbs_job_id(run_dir, stage.name, job_id)
+            upload_s3_job_id(
+                self.target.access, self.target.run_prefix, stage.name, pbs_job_id_path(run_dir, stage.name)
+            )
 
     def _index(self) -> dict:
         """Renderer arguments of a job over a BlockSci index: its settings and the multijob scratch it is on."""

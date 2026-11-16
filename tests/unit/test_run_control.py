@@ -100,6 +100,58 @@ def test_status_reports_an_unavailable_scheduler_instead_of_guessing(tmp_path, m
     assert report["warnings"] == ["PBS status is unavailable."]
 
 
+def test_status_takes_s3_job_ids_only_for_runs_without_a_local_record(tmp_path, commands, monkeypatch, capsys) -> None:
+    _record(tmp_path, "run-1", "blocksci", "11.pbs-m1.metacentrum.cz")
+    credentials = tmp_path / "credentials"
+    credentials.write_text("")
+    read = []
+
+    def s3_job_ids(access, prefix):
+        read.append(prefix)
+        return {"blocksci": "12.pbs-m1.metacentrum.cz", "report": "bad id;"}
+
+    monkeypatch.setattr("coinjoin_pipeline.run_records.s3_job_ids", s3_job_ids)
+    s3 = ["--artifact-uri", "s3://bucket/runs", "--s3-endpoint-url", "https://s3.example"]
+    s3 += ["--s3-credentials-file", str(credentials), "--s3-profile", "coinjoin"]
+
+    status.main(
+        ["--run-id", "run-1", "--run-id", "run-2", "--s3-job-ids", *s3, "--json", "--no-kubernetes"],
+        runs_root=tmp_path,
+    )
+
+    report = json.loads(capsys.readouterr().out)
+    # run-1 keeps its local record; only run-2, which has none, is read from S3.
+    assert read == ["s3://bucket/runs/run-2"]
+    assert report["runs"]["run-1"]["jobIds"] == {"blocksci": "11.pbs-m1.metacentrum.cz"}
+    assert report["runs"]["run-2"] == {
+        "jobIds": {"blocksci": "12.pbs-m1.metacentrum.cz"},
+        "pbs": {"blocksci": "queued"},
+    }
+    assert report["warnings"] == [
+        "Invalid PBS job ID in s3://bucket/runs/run-2/.pbs/report.jobid; check that job manually."
+    ]
+
+
+def test_status_reports_unreadable_s3_job_ids_as_a_warning(tmp_path, commands, monkeypatch, capsys) -> None:
+    from coinjoin_pipeline.storage.s3 import ArtifactTransportError
+
+    credentials = tmp_path / "credentials"
+    credentials.write_text("")
+
+    def unreadable(access, prefix):
+        raise ArtifactTransportError("listing failed")
+
+    monkeypatch.setattr("coinjoin_pipeline.run_records.s3_job_ids", unreadable)
+    s3 = ["--artifact-uri", "s3://bucket/runs", "--s3-endpoint-url", "https://s3.example"]
+    s3 += ["--s3-credentials-file", str(credentials), "--s3-profile", "coinjoin"]
+
+    status.main(["--run-id", "run-1", "--s3-job-ids", *s3, "--json", "--no-kubernetes"], runs_root=tmp_path)
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["runs"]["run-1"]["jobIds"] == {}
+    assert report["warnings"] == ["run-1: S3 job IDs are unavailable: listing failed"]
+
+
 def test_status_rejects_an_invalid_run_id(tmp_path, capsys) -> None:
     assert status.main(["--run-id", "../escape"], runs_root=tmp_path) != 0
     assert "run ID" in capsys.readouterr().err

@@ -50,7 +50,9 @@ All coordination state lives in the run directory under `.pbs/`:
   shared-storage jobs only, S3 jobs are piped to `qsub`).
 - `.pbs/<stage>.jobid` — the `qsub` job id and a newline, written atomically
   right after submission. Watch, overlap detection, cancellation and
-  scenario-lab read it; it is never pruned.
+  scenario-lab read it; it is never pruned. S3 submissions also copy it to
+  the run prefix, where `status --s3-job-ids` reads it for a run with no
+  local record.
 - `.pbs/<stage>.done` — written by the job's `on_exit` trap on exit status 0.
 - `.pbs/<stage>.failed` — written by the trap on any non-zero exit status.
 
@@ -377,7 +379,9 @@ Extra rules for the S3 chain:
   (`submit_pbs_text`). Job IDs live in orchestrator memory and are also
   persisted under the frontend's shared
   `<runs-root>/<run-id>/.pbs/*.jobid` directory for watching and overlap
-  detection.
+  detection. Each one is then copied to `<run-prefix>/.pbs/<stage>.jobid`, so
+  any frontend finds the run's jobs; a failed copy rolls the submission back
+  like a failed `qsub`.
 - `pbs-from-s3` holds
   `<runs-root>/<run-id>/.pbs-submit.lock` while preparing and submitting the
   graph. A later invocation refuses to overlap recorded queued/running jobs

@@ -115,6 +115,7 @@ def test_the_runner_skips_kept_stages_and_counts_finished_dependencies(tmp_path)
         mock.patch.object(s3_submission, "resolve_uploader_image", return_value="uploader:tag"),
         mock.patch.object(s3_submission, "pinned_reference", side_effect=lambda image: image),
         mock.patch.object(s3_submission, "clear_s3_stage_markers"),
+        mock.patch.object(s3_submission, "upload_s3_job_id") as upload,
         mock.patch.object(
             s3_submission,
             "submit_pbs_job",
@@ -129,6 +130,8 @@ def test_the_runner_skips_kept_stages_and_counts_finished_dependencies(tmp_path)
     assert submitted == [(REPORT, ("2.pbs",))]
     assert runner.jobs == {BLOCKSCI: "2.pbs", REPORT: "3.pbs"}
     assert (tmp_path / "run-1" / ".pbs" / "unified-report.jobid").read_text() == "3.pbs\n"
+    # Only the new job's ID is copied to S3; the adopted one was copied when it was submitted.
+    assert [call.args[2] for call in upload.call_args_list] == [REPORT]
 
 
 @pytest.fixture

@@ -25,6 +25,7 @@ def backend(monkeypatch, tmp_path):
         staged=[],
         exists=True,
         fail_stage=None,
+        fail_upload=None,
     )
     for name in (
         "render_coinjoin_analysis_s3_pbs",
@@ -60,6 +61,13 @@ def backend(monkeypatch, tmp_path):
         "clear_s3_stage_markers",
         lambda access, prefix, stage: state.events.append(("clear", stage)),
     )
+
+    def upload(access, prefix, stage, record):
+        if stage == state.fail_upload:
+            raise ArtifactTransportError("S3 refused the job ID")
+        state.events.append(("upload", stage, prefix, record.read_text()))
+
+    monkeypatch.setattr(s3_submission, "upload_s3_job_id", upload)
     monkeypatch.setattr(
         s3_submission,
         "ensure_staged_exporters",
@@ -101,8 +109,15 @@ def test_independent_analyzers_then_report_with_persisted_jobs(backend):
     ]
     assert backend.jobs[0].dependencies == backend.jobs[1].dependencies == ()
     assert backend.jobs[2].dependencies == ("1.server", "2.server")
+    # Each job ID reaches S3 right after its submission, from the local record.
     assert backend.events == [
-        (event, stage) for stage in ("coinjoin-analysis", "blocksci", "unified-report") for event in ("clear", "submit")
+        event
+        for number, stage in enumerate(("coinjoin-analysis", "blocksci", "unified-report"), 1)
+        for event in (
+            ("clear", stage),
+            ("submit", stage),
+            ("upload", stage, "s3://bucket/runs/run-1", f"{number}.server\n"),
+        )
     ]
     marker = Path(config.runs_root) / config.run_id / ".pbs/unified-report.jobid"
     assert marker.read_text() == "3.server\n"
@@ -113,6 +128,15 @@ def test_failed_submission_rolls_back_every_recorded_job(backend):
     with pytest.raises(RuntimeError, match="refused"):
         s3_submission.submit_s3_pbs_graph(backend.config())
     assert set(backend.cancelled) == {"1.server", "2.server"}
+
+
+def test_a_job_id_that_cannot_reach_s3_rolls_back_the_submission(backend):
+    backend.fail_upload = "blocksci"
+    with pytest.raises(ArtifactTransportError, match="refused the job ID"):
+        s3_submission.submit_s3_pbs_graph(backend.config())
+    # The job whose ID S3 refused is cancelled too: no other frontend could find it.
+    assert set(backend.cancelled) == {"1.server", "2.server"}
+    assert [job.stage for job in backend.jobs] == ["coinjoin-analysis", "blocksci"]
 
 
 def test_overlap_is_rejected_before_new_submission(backend, monkeypatch):

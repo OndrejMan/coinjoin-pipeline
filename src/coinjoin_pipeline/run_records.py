@@ -1,7 +1,7 @@
 """What the pipeline itself recorded about a run, read by ``status``, ``stop`` and ``--resume``.
 
 A run leaves three records outside any process: the PBS job IDs in
-``<runs-root>/<run-id>/.pbs/<stage>.jobid``, the Kubernetes resources labelled
+``<runs-root>/<run-id>/.pbs/<stage>.jobid`` (S3 runs also copy them to their prefix), the Kubernetes resources labelled
 ``coinjoin.run-id=<run-id>`` and the terminal markers in its S3 prefix. Reading
 them here keeps their names in one place instead of in every client.
 """
@@ -22,7 +22,15 @@ from .execution.pbs.submission import recorded_pbs_job_ids
 from .execution.probes import PROBE_RUNNING, PROBE_TERMINAL
 from .execution.pbs.validation import PBSError, require_safe_pbs_token
 from .configuration import KubernetesConfiguration
-from .storage.s3 import S3Access, run_prefix_uri, s3_object_exists, stage_marker_uri, upload_marker_uri
+from .storage.s3 import (
+    ArtifactTransportError,
+    S3Access,
+    run_prefix_uri,
+    s3_job_ids,
+    s3_object_exists,
+    stage_marker_uri,
+    upload_marker_uri,
+)
 
 # The pipeline's own default, so a run started without --namespace is found without it.
 DEFAULT_NAMESPACE = KubernetesConfiguration().namespace
@@ -67,22 +75,34 @@ RUNNING = "running"
 FINISHED = "finished"
 
 
-def recorded_jobs(run_ids: Iterable[str], roots: Iterable[Path]) -> tuple[dict[str, dict[str, str]], list[str]]:
-    """Recorded PBS job IDs by run and stage; an earlier root wins for the same stage."""
+def recorded_jobs(
+    run_ids: Iterable[str], roots: Iterable[Path], s3: tuple[S3Access, str] | None = None
+) -> tuple[dict[str, dict[str, str]], list[str]]:
+    """Recorded PBS job IDs by run and stage; an earlier root wins for the same stage.
+
+    With ``s3`` (access, artifact URI), a run with no local record takes the copies in its
+    S3 prefix, so its jobs are found from any frontend and after its directory is gone.
+    """
     jobs: dict[str, dict[str, str]] = {}
     warnings: list[str] = []
     roots = tuple(roots)
     for run_id in run_ids:
         found: dict[str, str] = {}
-        for root in roots:
-            run_dir = root / run_id
-            for stage, job_id in recorded_pbs_job_ids(run_dir).items():
+        records = [(str(root / run_id / ".pbs"), recorded_pbs_job_ids(root / run_id)) for root in roots]
+        if s3 is not None and not any(recorded for _, recorded in records):
+            prefix = run_prefix_uri(s3[1], run_id)
+            try:
+                records.append((f"{prefix}/.pbs", s3_job_ids(s3[0], prefix)))
+            except ArtifactTransportError as error:
+                warnings.append(f"{run_id}: S3 job IDs are unavailable: {error}")
+        for location, recorded in records:
+            for stage, job_id in recorded.items():
                 if stage in found:
                     continue
                 try:
                     require_safe_pbs_token(job_id, "PBS job ID")
                 except PBSError:
-                    warnings.append(f"Invalid PBS job ID in {run_dir / '.pbs' / stage}.jobid; check that job manually.")
+                    warnings.append(f"Invalid PBS job ID in {location}/{stage}.jobid; check that job manually.")
                     continue
                 found[stage] = job_id
         jobs[run_id] = found

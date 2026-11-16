@@ -21,8 +21,10 @@ from coinjoin_pipeline.storage.s3 import (
     clear_s3_stage_markers,
     ensure_empty_run_prefix,
     run_s5cmd,
+    s3_job_ids,
     s3_object_exists,
     s5_client,
+    upload_s3_job_id,
     validate_artifact_uri,
     validate_credentials_file,
     validate_s3_endpoint_url,
@@ -138,6 +140,46 @@ def test_clear_stage_markers_removes_both_in_one_call_and_checks_once() -> None:
 
     s5cmd.assert_called_once_with(ACCESS, "rm", *markers)
     listing.assert_called_once_with(ACCESS, "s3://bucket/runs/run-1/.pbs/blocksci.*")
+
+
+def test_upload_job_id_copies_the_local_record_to_the_stage_key(tmp_path) -> None:
+    record = tmp_path / "blocksci.jobid"
+    with mock.patch("coinjoin_pipeline.storage.s3.run_s5cmd", return_value=_completed(0)) as s5cmd:
+        upload_s3_job_id(ACCESS, "s3://bucket/runs/run-1", "blocksci", record)
+    s5cmd.assert_called_once_with(ACCESS, "cp", str(record), "s3://bucket/runs/run-1/.pbs/blocksci.jobid")
+
+
+def test_upload_job_id_raises_on_a_failed_copy(tmp_path) -> None:
+    with (
+        mock.patch("coinjoin_pipeline.storage.s3.run_s5cmd", return_value=_completed(1, "AccessDenied")),
+        pytest.raises(ArtifactTransportError, match="blocksci job ID.*AccessDenied"),
+    ):
+        upload_s3_job_id(ACCESS, "s3://bucket/runs/run-1", "blocksci", tmp_path / "blocksci.jobid")
+
+
+def test_s3_job_ids_reads_each_listed_record_by_stage() -> None:
+    prefix = "s3://bucket/runs/run-1"
+    listed = [
+        {"key": f"{prefix}/.pbs/blocksci.jobid"},
+        {"key": f"{prefix}/.pbs/unified-report.jobid"},
+        # ls lists by prefix: a longer key and an empty record are no job IDs.
+        {"key": f"{prefix}/.pbs/blocksci.jobid.tmp"},
+        {"key": f"{prefix}/.pbs/empty.jobid"},
+    ]
+    contents = {
+        f"{prefix}/.pbs/blocksci.jobid": "7.pbs\n",
+        f"{prefix}/.pbs/unified-report.jobid": "8.pbs\n",
+        f"{prefix}/.pbs/empty.jobid": "",
+    }
+    with (
+        mock.patch("coinjoin_pipeline.storage.s3.s3_listing", return_value=listed) as listing,
+        mock.patch(
+            "coinjoin_pipeline.storage.s3.run_s5cmd",
+            side_effect=lambda access, command, key: _completed(0, stdout=contents[key]),
+        ),
+    ):
+        assert s3_job_ids(ACCESS, prefix) == {"blocksci": "7.pbs", "unified-report": "8.pbs"}
+    listing.assert_called_once_with(ACCESS, f"{prefix}/.pbs/*.jobid")
 
 
 def test_clear_stage_markers_propagates_delete_errors() -> None:

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import urlparse
 
-from exporters.artifact_paths import KUBERNETES_MARKER_DIR, pbs_marker
+from exporters.artifact_paths import KUBERNETES_MARKER_DIR, PBS_MARKER_DIR, pbs_marker
 
 from coinjoin_pipeline.configuration import required
 from coinjoin_pipeline.storage.s5client import FRONTEND_S5CMD_VERSION, S5Client, S5Error, no_object_found, older_s5cmd
@@ -250,6 +250,36 @@ def clear_s3_stage_markers(access: S3Access, run_prefix: str, stage: str) -> Non
     left = sorted(listed & set(markers))
     if left:
         raise ArtifactTransportError(f"S3 markers still exist after deletion: {', '.join(left)}")
+
+
+def upload_s3_job_id(access: S3Access, run_prefix: str, stage: str, record: Path) -> None:
+    """Copy a stage's local ``.jobid`` record to ``.pbs/<stage>.jobid`` in the run prefix.
+
+    The S3 copy lets any frontend find the run's jobs after the local run directory is gone.
+    """
+    uri = stage_marker_uri(run_prefix, stage, "jobid")
+    result = run_s5cmd(access, "cp", str(record), uri)
+    if result.returncode != 0:
+        raise ArtifactTransportError(
+            f"s5cmd cp of the {stage} job ID failed (exit {result.returncode}): {(result.stderr or '').strip()}"
+        )
+
+
+def s3_job_ids(access: S3Access, run_prefix: str) -> dict[str, str]:
+    """The job IDs the run recorded in its S3 prefix, by stage; empty when it recorded none."""
+    jobs: dict[str, str] = {}
+    marker_root = f"{run_prefix}/{PBS_MARKER_DIR}/"
+    for entry in s3_listing(access, stage_marker_uri(run_prefix, "*", "jobid")):
+        key = str(entry.get("key", ""))
+        if not key.startswith(marker_root) or not key.endswith(".jobid"):
+            continue
+        stage = key[len(marker_root) : -len(".jobid")]
+        result = run_s5cmd(access, "cat", key)
+        if result.returncode != 0:
+            raise ArtifactTransportError(f"s5cmd cat {key} failed (exit {result.returncode})")
+        if stage and "/" not in stage and result.stdout.strip():
+            jobs[stage] = result.stdout.strip()
+    return jobs
 
 
 def require_s5cmd_version() -> None:

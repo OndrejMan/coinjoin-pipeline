@@ -19,7 +19,7 @@ from .run_records import (
     scheduler_states,
 )
 from .run_ids import validate_run_id
-from .storage.s3 import ArtifactTransportError, add_s3_arguments, s3_arguments_access
+from .storage.s3 import ArtifactTransportError, S3Access, add_s3_arguments, s3_arguments_access
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,14 +37,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--markers", action="store_true", help="Also read the upload and stage markers from the S3 run prefix."
     )
-    add_s3_arguments(parser, "S3 run root of --markers (default: $ARTIFACT_URI).")
+    parser.add_argument(
+        "--s3-job-ids",
+        action="store_true",
+        help="For a run with no local job record, read the job IDs it copied to its S3 run prefix.",
+    )
+    add_s3_arguments(parser, "S3 run root of --markers and --s3-job-ids (default: $ARTIFACT_URI).")
     add_record_arguments(parser)
     return parser
 
 
 def collect(args: argparse.Namespace, roots: list[Path]) -> dict[str, object]:
     run_ids = list(dict.fromkeys(args.run_id))
-    jobs, warnings = recorded_jobs(run_ids, roots)
+    s3: tuple[S3Access, str] | None = None
+    if args.markers or args.s3_job_ids:
+        artifact_uri, access = s3_arguments_access(args)
+        s3 = (access, artifact_uri)
+    jobs, warnings = recorded_jobs(run_ids, roots, s3 if args.s3_job_ids else None)
     states = None
     if not args.no_pbs:
         states = scheduler_states()
@@ -56,9 +65,6 @@ def collect(args: argparse.Namespace, roots: list[Path]) -> dict[str, object]:
             resolve_kubeconfig(args.kubeconfig), dict.fromkeys(args.namespace or [DEFAULT_NAMESPACE])
         )
         warnings.extend(kubernetes_warnings)
-    access = artifact_uri = None
-    if args.markers:
-        artifact_uri, access = s3_arguments_access(args)
     runs: dict[str, object] = {}
     for run_id in run_ids:
         entry: dict[str, object] = {"jobIds": jobs[run_id]}
@@ -66,9 +72,9 @@ def collect(args: argparse.Namespace, roots: list[Path]) -> dict[str, object]:
             entry["pbs"] = {stage: job_state(job_id, states) for stage, job_id in jobs[run_id].items()}
         if run_id in emulations:
             entry["emulation"] = emulations[run_id]
-        if access is not None and artifact_uri is not None:
+        if args.markers and s3 is not None:
             try:
-                entry["markers"] = run_markers(access, artifact_uri, run_id, jobs[run_id])
+                entry["markers"] = run_markers(*s3, run_id, jobs[run_id])
             except ArtifactTransportError as error:
                 warnings.append(f"{run_id}: S3 markers are unavailable: {error}")
         runs[run_id] = entry
