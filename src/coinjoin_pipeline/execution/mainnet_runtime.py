@@ -12,13 +12,14 @@ from __future__ import annotations
 import json
 import signal
 import sys
+import traceback
 from collections.abc import Callable
 from pathlib import Path
 
 from exporters.artifact_paths import pbs_marker
 
 from coinjoin_pipeline.execution.mainnet_jobs import blocksci, checkpoint, clear, pack, producer, restore
-from coinjoin_pipeline.execution.mainnet_worker import Worker
+from coinjoin_pipeline.execution.mainnet_worker import Worker, atomic_json, read_json
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore
 
 JOBS: dict[str, Callable[[Worker], None]] = {
@@ -29,6 +30,36 @@ JOBS: dict[str, Callable[[Worker], None]] = {
     "pack": pack,
     "clear": clear,
 }
+
+
+GENERIC_ERROR = "PBS stage failed before the worker recorded a cause; inspect the persistent job logs"
+
+
+def record_error(worker: Worker, error: Exception) -> None:
+    """Keep the cause for the shell trap's ``failed`` call and the traceback beside the uploaded logs.
+
+    The job's own output goes only to the PBS output file, which a frontend in a container
+    never receives, so the stage's progress JSON in S3 is where the lab can read the cause.
+    """
+    try:
+        atomic_json(
+            worker.run / f"{worker.stage}.error",
+            {"run_id": worker.run_id, "error": f"{type(error).__name__}: {error}"[:1000]},
+        )
+        worker.logs.mkdir(parents=True, exist_ok=True)
+        with (worker.logs / f"worker-{worker.stage}.log").open("a", encoding="utf-8") as log:
+            traceback.print_exception(type(error), error, error.__traceback__, file=log)
+    except OSError as failure:
+        print(f"Recording the failure failed: {failure}", file=sys.stderr)
+
+
+def recorded_error(worker: Worker) -> str:
+    try:
+        recorded = read_json(worker.run / f"{worker.stage}.error")
+    except (OSError, ValueError):
+        return GENERIC_ERROR
+    error = recorded.get("error")
+    return error if recorded.get("run_id") == worker.run_id and isinstance(error, str) else GENERIC_ERROR
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -46,15 +77,16 @@ def main(argv: list[str] | None = None) -> None:
         worker.stage = args[2][len("mainnet-") :] if args[2].startswith("mainnet-") else args[2]
         if (len(args) > 3 and args[3] == "0") or (worker.run / f"{worker.stage}.quiescent").is_file():
             worker.release_dataset()
-        worker.progress("failed", state="failed", error="PBS stage failed; inspect the persistent job logs")
+        worker.progress("failed", state="failed", error=recorded_error(worker))
         failed = pbs_marker("mainnet-" + worker.stage, "failed")
         worker.publish_json(f"{worker.remote}/{failed}", {"run_id": worker.run_id})
         worker.report_storage()
         return
     worker.stage = args[1]
     job = JOBS[args[1]]
-    # The fixed state directory may hold the marker of an earlier run of this stage.
+    # The fixed state directory may hold the markers of an earlier run of this stage.
     (worker.run / f"{worker.stage}.quiescent").unlink(missing_ok=True)
+    (worker.run / f"{worker.stage}.error").unlink(missing_ok=True)
 
     def interrupted(_signum: int, _frame: object) -> None:
         raise InterruptedError("PBS job interrupted")
@@ -70,6 +102,9 @@ def main(argv: list[str] | None = None) -> None:
         elif mode == "shared":
             index.lock_shared()
         job(worker)
+    except Exception as error:
+        record_error(worker, error)
+        raise
     finally:
         index.unlock()
         try:

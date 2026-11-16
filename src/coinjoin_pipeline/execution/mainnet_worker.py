@@ -111,6 +111,17 @@ def megabytes_per_second(size: int, seconds: float) -> float:
     return round(size / 1e6 / max(seconds, 0.001), 1)
 
 
+def last_line(path: Path, limit: int = 400) -> str:
+    """The last non-empty line of a component log, so a failure names its cause and not just the file."""
+    try:
+        with path.open("rb") as handle:
+            handle.seek(max(0, handle.seek(0, os.SEEK_END) - 8192))
+            lines = [line.strip() for line in handle.read().decode("utf-8", "replace").splitlines() if line.strip()]
+    except OSError:
+        return ""
+    return lines[-1][:limit] if lines else ""
+
+
 def atomic_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -329,7 +340,8 @@ class Worker:
                     poll()
                 time.sleep(self.c["poll_seconds"])
             if process.returncode:
-                raise RuntimeError(f"{name} exited with {process.returncode}; see {self.logs / (name + '.log')}")
+                path = self.logs / f"{name}.log"
+                raise RuntimeError(f"{name} exited with {process.returncode}: {last_line(path)} (see {path})")
         return process
 
     @property
@@ -409,7 +421,7 @@ class Worker:
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
                 self.progress("core-startup")
                 time.sleep(self.c["poll_seconds"])
-        raise RuntimeError("Core failed to start; see its persistent log")
+        raise RuntimeError(f"Core failed to start: {last_line(self.logs / f'core-{self.stage}.log')}")
 
     def stop_core(self, *, require_clean_exit: bool = True) -> None:
         if self.core is None:
@@ -560,7 +572,9 @@ class Worker:
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
                 self.progress("core-rpc-wait")
             if self.core is None or self.core.poll() is not None:
-                raise RuntimeError("Core stopped during synchronization")
+                raise RuntimeError(
+                    f"Core stopped during synchronization: {last_line(self.logs / f'core-{self.stage}.log')}"
+                )
             # Bounded tests must not keep downloading for a full reporting interval.
             time.sleep(min(self.c["poll_seconds"], 1) if target is not None else self.c["poll_seconds"])
         self.rpc("setnetworkactive", "false")

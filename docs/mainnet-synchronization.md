@@ -285,6 +285,15 @@ its logs are still archived to S3 under `<state_uri>/logs/<run-id>/`. PBS script
 submitted earlier contain the original worker, and this continuous saving does not apply
 to them retroactively.
 
+The job's own stdout/stderr goes only to the PBS output file, which PBS cannot copy back to
+a frontend in a container (`cj-frontend`), and the container does not see `runs_root` on
+the nodes either. A failed job therefore writes its cause into the `error` of its
+`<state_uri>/<stage>.json`, which the Lab shows at the phase: the exception, and for a
+failed Core, archiver or BlockSci the last line of that component's log (for example the
+Apptainer `FATAL:` line). The traceback goes to `worker-<stage>.log` beside the component logs and
+is uploaded with them to `<state_uri>/logs/<run-id>/`. A job that fails before the worker
+starts (missing credentials, `s5cmd` or `zstd`) reports only the generic message.
+
 ## Failures and concurrency
 
 Every job holds the exclusive dataset lock while it works. When the queue hands over,

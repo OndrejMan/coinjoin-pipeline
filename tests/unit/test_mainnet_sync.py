@@ -532,6 +532,46 @@ def test_failed_core_allows_failure_hook_to_release_only_its_dataset(worker, mon
     assert worker.active.exists() is foreign_owner
 
 
+def test_failure_hook_reports_the_cause_and_keeps_the_traceback(worker, monkeypatch):
+    # The PBS output file never reaches a frontend in a container: the cause must be in S3.
+    settings = worker.work / "settings.json"
+    settings.write_text("{}")
+    worker.stage = "producer"
+    worker.logs.mkdir(parents=True)
+    fatal = "FATAL:   container creation failed: mount a->b error: path escapes from parent"
+    (worker.logs / "core-producer.log").write_text(f"INFO:    Creating SIF file...\n{fatal}\n\n")
+    worker.core = subprocess.Popen([sys.executable, "-c", "raise SystemExit(255)"])
+    assert worker.core.wait(timeout=3) == 255
+    progress = []
+
+    def producer():
+        raise RuntimeError(f"Core failed to start: {mainnet_worker.last_line(worker.logs / 'core-producer.log')}")
+
+    monkeypatch.setattr(mainnet_runtime, "Worker", lambda *_: worker)
+    monkeypatch.setitem(mainnet_runtime.JOBS, "producer", lambda _worker: producer())
+    monkeypatch.setattr(worker, "publish_logs", lambda: None)
+    monkeypatch.setattr(worker, "progress", lambda *args, **kwargs: progress.append(kwargs))
+    monkeypatch.setattr(worker, "publish_json", lambda *args: None)
+    with pytest.raises(RuntimeError, match="path escapes from parent"):
+        mainnet_runtime.main([str(settings), "producer"])
+    assert "Traceback" in (worker.logs / "worker-producer.log").read_text()
+
+    mainnet_runtime.main([str(settings), "failed", "mainnet-producer", "1"])
+    assert progress[-1]["error"] == f"RuntimeError: Core failed to start: {fatal}"
+
+
+def test_failure_hook_ignores_the_cause_of_another_run(worker, monkeypatch):
+    settings = worker.work / "settings.json"
+    settings.write_text("{}")
+    atomic_json(worker.run / "producer.error", {"run_id": "an-earlier-run", "error": "old cause"})
+    progress = []
+    monkeypatch.setattr(mainnet_runtime, "Worker", lambda *_: worker)
+    monkeypatch.setattr(worker, "progress", lambda *args, **kwargs: progress.append(kwargs))
+    monkeypatch.setattr(worker, "publish_json", lambda *args: None)
+    mainnet_runtime.main([str(settings), "failed", "mainnet-producer", "0"])
+    assert progress[-1]["error"] == mainnet_runtime.GENERIC_ERROR
+
+
 def test_checkpoint_shutdown_still_rejects_failed_core(worker):
     worker.core = subprocess.Popen([sys.executable, "-c", "raise SystemExit(1)"])
     assert worker.core.wait(timeout=3) == 1
