@@ -19,17 +19,15 @@ def find_runtime() -> str | None:
 
 
 def alias_binds(path: str | Path, mode: str = "rw") -> list[str]:
-    """Bind path at itself, and at its target too when path is an alias.
+    """Bind the target of path at itself; the alias then resolves through the node's symlink.
 
-    MetaCentrum's /scratch/multijob-* aliases point outside /scratch, which the node binds
-    into every container: the alias alone resolves to nothing there and the bind is lost.
+    MetaCentrum's aliases (/scratch/multijob-*, /storage/<site>) are symlinks in directories
+    the node binds into every container, pointing outside them. Binding the target makes the
+    symlink resolve. A second bind at the alias itself is refused by SingularityCE 4.5
+    ("path escapes from parent"), because its destination crosses that absolute symlink.
     """
-    alias = str(Path(path))
-    real = os.path.realpath(alias)
-    binds = [f"{real}:{real}:{mode}"]
-    if real != alias:
-        binds.append(f"{real}:{alias}:{mode}")
-    return binds
+    real = os.path.realpath(Path(path))
+    return [f"{real}:{real}:{mode}"]
 
 
 def exec_command(

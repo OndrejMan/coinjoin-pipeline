@@ -279,7 +279,7 @@ class IndexStore:
         link.symlink_to(self.path / "parsed")
 
     def binds(self, mode: str) -> list[str]:
-        """Bind the index, and its target too when it is a multijob alias."""
+        """Bind the index's target; a multijob alias resolves through the node's symlink."""
         return alias_binds(self.path, mode)
 
     # Backup -----------------------------------------------------------------

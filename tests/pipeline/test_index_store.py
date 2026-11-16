@@ -313,13 +313,14 @@ def test_a_writer_proceeds_once_the_readers_finish(tmp_path):
     assert [reader.wait() for reader in readers] == [0, 0]
 
 
-def test_an_aliased_index_is_bound_at_its_target_too(tmp_path):
-    # A /scratch/multijob-* alias points to another filesystem the container lacks.
+def test_an_aliased_index_is_bound_only_at_its_target(tmp_path):
+    # A /scratch/multijob-* alias points to another filesystem the container lacks; a bind at
+    # the alias would cross the node's own symlink, which SingularityCE 4.5 refuses.
     (tmp_path / "beegfs").mkdir()
     (tmp_path / "alias").symlink_to(tmp_path / "beegfs")
     real = os.path.realpath(tmp_path / "beegfs")
 
-    assert store(tmp_path, index="alias").binds("ro") == [f"{real}:{real}:ro", f"{real}:{tmp_path}/alias:ro"]
+    assert store(tmp_path, index="alias").binds("ro") == [f"{real}:{real}:ro"]
 
 
 def test_a_plain_index_is_bound_once(tmp_path):

@@ -453,7 +453,9 @@ def test_parser_progress_and_s3_upload_use_the_shared_component_logs(worker, mon
 
 
 @pytest.mark.parametrize("readonly,index_writable", [(False, False), (True, True)])
-def test_container_binds_symlink_targets_without_changing_workload_paths(worker, tmp_path, readonly, index_writable):
+def test_container_binds_only_symlink_targets_without_changing_workload_paths(
+    worker, tmp_path, readonly, index_writable
+):
     storage = tmp_path / "beegfs"
     storage.mkdir()
     alias = tmp_path / "multijob-brno"
@@ -471,7 +473,8 @@ def test_container_binds_symlink_targets_without_changing_workload_paths(worker,
         source = path.resolve()
         suffix = ":ro" if ro else ":rw"
         assert f"{source}:{source}{suffix}" in binds
-        assert f"{source}:{path}{suffix}" in binds
+        # The alias resolves through the node's symlink; a bind there fails on SingularityCE 4.5.
+        assert not any(bind.split(":")[1] == str(path) for bind in binds)
     assert command[-3:] == [worker.c["blocksci_image"], "reader", datadir]
 
 
