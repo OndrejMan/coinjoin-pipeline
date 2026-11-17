@@ -183,7 +183,7 @@ and streams prefixed controller output without starting a container. Pass
 `--all` to multiplex the controller, S3 uploader, and the selected engine
 service (Wasabi coordinator or the stable JoinMarket distributor);
 the namespace defaults to the pipeline default `coinjoin` (pass
-`--namespace man5-ns` for the remote examples below). The host-level
+`--namespace <namespace>` for the remote examples below). The host-level
 `--runs-root` is also used when discovering `.pbs/*.jobid` files.
 `--frontend-log` adds an existing `tee` transcript, replayed from its start
 rather than its last `--tail` lines, and `--save` preserves the
@@ -276,7 +276,7 @@ coinjoin-pipeline full-run \
   --engine wasabi \
   --coinjoin-type wasabi2 \
   --driver kubernetes \
-  --namespace man5-ns --reuse-namespace \
+  --namespace <namespace> --reuse-namespace \
   --artifact-backend s3 \
   --artifact-uri s3://coinjoin-thesis/runs \
   --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
@@ -433,7 +433,7 @@ Submit Kubernetes emulation and upload:
 ```bash
 coinjoin-pipeline emulate \
   --driver kubernetes \
-  --namespace man5-ns --reuse-namespace \
+  --namespace <namespace> --reuse-namespace \
   --artifact-backend s3 \
   --artifact-uri s3://coinjoin-thesis/runs \
   --s3-endpoint-url https://s3.cl4.du.cesnet.cz \

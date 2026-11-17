@@ -7,7 +7,7 @@
       "#PBS -j oe"
     ],
     "settings": {
-      "artifact_uri": "s3://coinjoin-thesis/runs",
+      "artifact_uri": "s3://your-bucket/runs",
       "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py analyze --run-dir /runs/emulation/logs/example-run --engine wasabi --coinjoin-type wasabi2 --min-input-count default --joinmarket-detector definite --joinmarket-min-base-fee 5000 --joinmarket-percentage-fee 4e-05 --joinmarket-max-depth 200000 --blocksci-image docker://ghcr.io/ondrejman/blocksci-complete:latest --coinjoin-analysis-image docker://ghcr.io/ondrejman/coinjoin-analysis:latest --coinjoin-emulator-image ghcr.io/ondrejman/emulator-manager:latest --uploader-image ghcr.io/example/uploader:fixed",
       "credentials": "/storage/brno2/home/<login>/.aws/credentials",
       "endpoint": "https://s3.cl4.du.cesnet.cz",
@@ -23,7 +23,7 @@
       ],
       "job": "blocksci-analysis",
       "job_log": "blocksci-analyze.pbs.log",
-      "log_prefix": "s3://coinjoin-thesis/runs/example-run/logs",
+      "log_prefix": "s3://your-bucket/runs/example-run/logs",
       "ncpus": 8,
       "output": {
         "relative": "blocksci-analysis_data"
@@ -35,7 +35,7 @@
       "persistent": null,
       "profile": "coinjoin",
       "run_id": "example-run",
-      "run_prefix": "s3://coinjoin-thesis/runs/example-run",
+      "run_prefix": "s3://your-bucket/runs/example-run",
       "source_run_id": null,
       "stage": "blocksci-analyze"
     },
@@ -75,7 +75,7 @@
       "image_name": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
       "job": "blocksci-parse",
       "job_log": "blocksci-parse.pbs.log",
-      "log_prefix": "s3://coinjoin-thesis/runs/example-run/logs",
+      "log_prefix": "s3://your-bucket/runs/example-run/logs",
       "ncpus": 8,
       "pbs_resources": {
         "mem": "64gb",
@@ -85,7 +85,7 @@
       "profile": "coinjoin",
       "python_command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3",
       "run_id": "example-run",
-      "run_prefix": "s3://coinjoin-thesis/runs/example-run",
+      "run_prefix": "s3://your-bucket/runs/example-run",
       "source": {
         "description": "emulator Bitcoin and exported-block inputs",
         "kind": "emulator",
@@ -129,11 +129,11 @@
       "image_name": "docker://ghcr.io/ondrejman/coinjoin-analysis:latest",
       "job": "coinjoin-analysis",
       "job_log": "coinjoin-analysis.pbs.log",
-      "log_prefix": "s3://coinjoin-thesis/runs/example-run/logs",
+      "log_prefix": "s3://your-bucket/runs/example-run/logs",
       "ncpus": 4,
       "profile": "coinjoin",
       "run_id": "example-run",
-      "run_prefix": "s3://coinjoin-thesis/runs/example-run",
+      "run_prefix": "s3://your-bucket/runs/example-run",
       "stage": "coinjoin-analysis"
     },
     "shipped_files": [
@@ -170,11 +170,11 @@
       "enumerator_image": "docker://ghcr.io/ondrejman/coinjoin-mappings-enumerator:latest",
       "job": "coinjoin-mappings",
       "job_log": "coinjoin-mappings.pbs.log",
-      "log_prefix": "s3://coinjoin-thesis/runs/example-run/logs",
+      "log_prefix": "s3://your-bucket/runs/example-run/logs",
       "ncpus": 4,
       "profile": "coinjoin",
       "run_id": "example-run",
-      "run_prefix": "s3://coinjoin-thesis/runs/example-run",
+      "run_prefix": "s3://your-bucket/runs/example-run",
       "sake_image": "docker://ghcr.io/ondrejman/coinjoin-mappings-sake:latest",
       "script": "# Run the enumerator and Sake over $INPUT into $OUT; both read and write under $WORK.\nENUMERATOR_SIF=\"$SCRATCHDIR/coinjoin-mappings-enumerator.sif\"\nSAKE_SIF=\"$SCRATCHDIR/coinjoin-mappings-sake.sif\"\nfetch_sif() {\n  case \"$1\" in\n    docker://*|oras://*|library://*|http://*|https://*) singularity pull --force \"$2\" \"$1\" ;;\n    *) test -f \"$1\"; cp \"$1\" \"$2\" ;;\n  esac\n}\nfetch_sif \"$ENUMERATOR_IMAGE\" \"$ENUMERATOR_SIF\"\nfetch_sif \"$SAKE_IMAGE\" \"$SAKE_SIF\"\n# A pinned reference names its registry digest; a pull of a bare tag has none, because the\n# SIF built from it hashes differently on every pull. A local SIF file is its own identity.\nimage_digest() {\n  case \"$1\" in\n    *@sha256:*) echo \"sha256:${1##*@sha256:}\" ;;\n    docker://*|oras://*|library://*|http://*|https://*) ;;\n    *) echo \"sha256:$(sha256sum \"$2\" | awk '{print $1}')\" ;;\n  esac\n}\nENUMERATOR_DIGEST=\"$(image_digest \"$ENUMERATOR_IMAGE\" \"$ENUMERATOR_SIF\")\"\nSAKE_DIGEST=\"$(image_digest \"$SAKE_IMAGE\" \"$SAKE_SIF\")\"\nin_enumerator() {\n  singularity exec --bind \"$WORK:$WORK:rw\" \"$ENUMERATOR_SIF\" \"$@\"\n}\n# Exit status 1 is a partial result only when the tool's summary counts errors.\naccept_partial() {\n  if [ \"$1\" -ne 0 ]; then\n    test \"$1\" -eq 1\n    in_enumerator python3 -c \\\n      'import json,sys; d=json.load(open(sys.argv[1])); assert d.get(\"summary\",{}).get(\"errors\",0)>0' \"$2\"\n  fi\n}\n\nset +e\nin_enumerator python3 /app/run.py \\\n  \"$INPUT\" --output \"$OUT/enumerator.json\" \\\n  --mining-fee-rate 1 --coordination-fee-rate 0.003 \\\n  --max-decomposition-fee 6000 --mode numeric \\\n  --timeout 60 --retry-timeout 600\nENUMERATOR_STATUS=$?\nset -e\naccept_partial \"$ENUMERATOR_STATUS\" \"$OUT/enumerator.json\"\n\nset +e\nsingularity exec --bind \"$WORK:$WORK:rw\" \"$SAKE_SIF\" dotnet /app/Sake.dll \\\n  --input \"$INPUT\" --output \"$OUT/sake.json\" --seed 20260704\nSAKE_STATUS=$?\nset -e\naccept_partial \"$SAKE_STATUS\" \"$OUT/sake.json\"\n\n# The only place that decides the stage's status: a timeout or an error in either summary\n# makes it partial. The report shows the status as written here.\nin_enumerator python3 - \"$OUT\" \"$ENUMERATOR_IMAGE\" \"$SAKE_IMAGE\" \"$ENUMERATOR_DIGEST\" \"$SAKE_DIGEST\" <<'PY'\nimport json\nimport sys\n\nout, enumerator_image, sake_image, enumerator_digest, sake_digest = sys.argv[1:]\nwith open(out + \"/enumerator.json\") as stream:\n    enumerator = json.load(stream)\nwith open(out + \"/sake.json\") as stream:\n    sake = json.load(stream)\nenumerator_summary, sake_summary = enumerator.get(\"summary\", {}), sake.get(\"summary\", {})\nfailures = (enumerator_summary.get(\"timed_out\", 0), enumerator_summary.get(\"errors\", 0), sake_summary.get(\"errors\", 0))\ncombined = {\n    \"schema_version\": \"1.0\",\n    \"status\": \"partial\" if any(failures) else \"complete\",\n    \"provenance\": {\n        \"enumerator_image\": enumerator_image,\n        \"sake_image\": sake_image,\n        \"enumerator_image_digest\": enumerator_digest or None,\n        \"sake_image_digest\": sake_digest or None,\n    },\n    \"enumerator\": enumerator,\n    \"sake\": sake,\n}\nwith open(out + \"/coinjoin_mappings.json\", \"w\") as stream:\n    json.dump(combined, stream, indent=2, sort_keys=True)\nPY\ntest -f \"$OUT/coinjoin_mappings.json\" || { echo \"CoinJoin mappings did not produce coinjoin_mappings.json\" >&2; exit 1; }\n",
       "stage": "coinjoin-mappings"
@@ -222,11 +222,11 @@
       "image_name": "docker://ghcr.io/example/unified-report:fixed",
       "job": "unified-report",
       "job_log": "unified-report.pbs.log",
-      "log_prefix": "s3://coinjoin-thesis/runs/example-run/logs",
+      "log_prefix": "s3://your-bucket/runs/example-run/logs",
       "ncpus": 2,
       "profile": "coinjoin",
       "run_id": "example-run",
-      "run_prefix": "s3://coinjoin-thesis/runs/example-run",
+      "run_prefix": "s3://your-bucket/runs/example-run",
       "stage": "unified-report"
     },
     "shipped_files": [

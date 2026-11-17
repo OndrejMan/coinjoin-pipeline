@@ -16,7 +16,7 @@ images:
 
 artifacts:
   backend: s3
-  uri: s3://xman-coinjoin-new/runs
+  uri: s3://your-bucket/runs
   endpoint_url: https://s3.cl4.du.cesnet.cz
   credentials_file: /storage/brno2/home/<login>/.aws/credentials
   profile: coinjoin
@@ -30,11 +30,11 @@ blocksci:
   # Create /scratch/multijob-brno/<login>/ once by hand; PBS does not.
   index_dir: /scratch/multijob-brno/<login>/blocksci-mainnet
   # Read only to restore the working copy; the backup job writes it.
-  index_backup_uri: s3://xman-coinjoin-new/bitcoin-mainnet/blocksci-index
+  index_backup_uri: s3://your-bucket/bitcoin-mainnet/blocksci-index
   # Markers and the working copy's manifest live here, replaced by every index job;
   # logs stay under logs/<run_id>/. Nothing is written to runs/<run_id>/.
-  index_state_uri: s3://xman-coinjoin-new/bitcoin-mainnet/index
-  bitcoin_blocks_uri: s3://xman-coinjoin-new/bitcoin-mainnet/blocks
+  index_state_uri: s3://your-bucket/bitcoin-mainnet/index
+  bitcoin_blocks_uri: s3://your-bucket/bitcoin-mainnet/blocks
   network: bitcoin
   # Set both on every run to the new target height and its trusted hash; shown
   # with the checkpoint of metacentrum-mainnet-s3-blocks-parse.yaml so the file

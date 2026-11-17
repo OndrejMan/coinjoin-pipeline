@@ -3,18 +3,18 @@
 # this job runs parse_dumplings over that copy and stores coinjoin_tx_info.json,
 # the image's curated false_cjtxs.json and dumplings-snapshot.json under its own run.
 # The comparison (blocksci.task: external) then points at them:
-#   external_baseline_uri: s3://xman-coinjoin-new/runs/<run_id>/coinjoin-analysis_data/coinjoin_tx_info.json
-#   external_false_cjtxs_uri: s3://xman-coinjoin-new/runs/<run_id>/coinjoin-analysis_data/false_cjtxs.json
+#   external_baseline_uri: s3://your-bucket/runs/<run_id>/coinjoin-analysis_data/coinjoin_tx_info.json
+#   external_false_cjtxs_uri: s3://your-bucket/runs/<run_id>/coinjoin-analysis_data/false_cjtxs.json
 action: pbs-from-s3
 engine: joinmarket
 coinjoin_type: joinmarket
 
 run_id: mainnet-baseline-joinmarket-20261019
-dumplings_uri: s3://xman-coinjoin-new/bitcoin-mainnet/dumplings
+dumplings_uri: s3://your-bucket/bitcoin-mainnet/dumplings
 
 artifacts:
   backend: s3
-  uri: s3://xman-coinjoin-new/runs
+  uri: s3://your-bucket/runs
   endpoint_url: https://s3.cl4.du.cesnet.cz
   credentials_file: /storage/brno2/home/<login>/.aws/credentials
   profile: coinjoin

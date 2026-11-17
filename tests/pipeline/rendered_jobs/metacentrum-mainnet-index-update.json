@@ -7,7 +7,7 @@
       "#PBS -j oe"
     ],
     "settings": {
-      "artifact_uri": "s3://xman-coinjoin-new/runs",
+      "artifact_uri": "s3://your-bucket/runs",
       "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py update --run-dir /runs/emulation/logs/mainnet-index-update-20261019",
       "credentials": "/storage/brno2/home/<login>/.aws/credentials",
       "endpoint": "https://s3.cl4.du.cesnet.cz",
@@ -15,14 +15,14 @@
       "image_name": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
       "job": "blocksci-update",
       "job_log": "blocksci-update.pbs.log",
-      "log_prefix": "s3://xman-coinjoin-new/bitcoin-mainnet/index/logs/mainnet-index-update-20261019",
+      "log_prefix": "s3://your-bucket/bitcoin-mainnet/index/logs/mainnet-index-update-20261019",
       "ncpus": 8,
       "pbs_resources": {
         "mem": "64gb",
         "ncpus": 8
       },
       "persistent": {
-        "backup_uri": "s3://xman-coinjoin-new/bitcoin-mainnet/blocksci-index",
+        "backup_uri": "s3://your-bucket/bitcoin-mainnet/blocksci-index",
         "dumplings_dir": null,
         "dumplings_uri": null,
         "in_scratch": false,
@@ -36,9 +36,9 @@
       "profile": "coinjoin",
       "python_command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3",
       "run_id": "mainnet-index-update-20261019",
-      "run_prefix": "s3://xman-coinjoin-new/bitcoin-mainnet/index",
+      "run_prefix": "s3://your-bucket/bitcoin-mainnet/index",
       "source": {
-        "blocks_uri": "s3://xman-coinjoin-new/bitcoin-mainnet/blocks",
+        "blocks_uri": "s3://your-bucket/bitcoin-mainnet/blocks",
         "description": "verified Bitcoin block archive from S3",
         "expected_hash": "000000000000000000010538edbfd2d5b809a33dd83f284aeea41c6d0d96968a",
         "kind": "bitcoin-blocks-s3",

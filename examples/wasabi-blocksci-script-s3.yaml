@@ -14,9 +14,9 @@ min_input_count: 10
 
 artifacts:
   backend: s3
-  uri: s3://xman-coinjoin-new/runs
+  uri: s3://your-bucket/runs
   endpoint_url: https://s3.cl4.du.cesnet.cz
-  credentials_file: /storage/brno2/home/xman/.aws/credentials
+  credentials_file: /storage/brno2/home/<login>/.aws/credentials
   profile: coinjoin
 
 stages:

@@ -6,25 +6,25 @@ run_id: mainnet-sync-CHANGE-ME
 artifacts:
   backend: s3
   endpoint_url: https://s3.cl4.du.cesnet.cz
-  credentials_file: /storage/brno2/home/xman/.aws/credentials
+  credentials_file: /storage/brno2/home/<login>/.aws/credentials
   profile: coinjoin
 mainnet:
   # Recommended minimum for a run exercising Dumplings (starts at height 336861).
   # Omit for the current tip. Actual frozen height can be higher.
   target_height: 400000
-  root: /scratch/multijob-brno/xman/bitcoin-mainnet
-  state_uri: s3://xman-coinjoin-new/bitcoin-mainnet/sync
-  backup_uri: s3://xman-coinjoin-new/bitcoin-mainnet/core-checkpoint
-  blocks_uri: s3://xman-coinjoin-new/bitcoin-mainnet/blocks
-  dumplings_uri: s3://xman-coinjoin-new/bitcoin-mainnet/dumplings
+  root: /scratch/multijob-brno/<login>/bitcoin-mainnet
+  state_uri: s3://your-bucket/bitcoin-mainnet/sync
+  backup_uri: s3://your-bucket/bitcoin-mainnet/core-checkpoint
+  blocks_uri: s3://your-bucket/bitcoin-mainnet/blocks
+  dumplings_uri: s3://your-bucket/bitcoin-mainnet/dumplings
   # Use rebuilt images containing the changes in this workspace; pin them before deployment.
   core_image: ghcr.io/ondrejman/bitcoin-block-archive:latest
   dumplings_image: ghcr.io/ondrejman/dumplings:latest
   dbcache_mb: 4096
   reorg_reserve: 2016
 blocksci:
-  index_dir: /scratch/multijob-brno/xman/blocksci-mainnet
-  index_backup_uri: s3://xman-coinjoin-new/bitcoin-mainnet/blocksci-index
+  index_dir: /scratch/multijob-brno/<login>/blocksci-mainnet
+  index_backup_uri: s3://your-bucket/bitcoin-mainnet/blocksci-index
 # Six chained jobs: restore (fills an empty working dataset from S3, otherwise ends at
 # once), producer, blocksci, checkpoint (index backup, pruning and Core checkpoint) and
 # pack (compresses pruned block files in S3; the synchronization is done before it starts)

@@ -14,7 +14,7 @@
       "image_name": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
       "job": "blocksci-parse",
       "job_log": "blocksci-parse.pbs.log",
-      "log_prefix": "s3://coinjoin-thesis/runs/mainnet-850000/logs",
+      "log_prefix": "s3://your-bucket/runs/mainnet-850000/logs",
       "ncpus": 8,
       "pbs_resources": {
         "mem": "64gb",
@@ -24,7 +24,7 @@
       "profile": "coinjoin",
       "python_command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3",
       "run_id": "mainnet-850000",
-      "run_prefix": "s3://coinjoin-thesis/runs/mainnet-850000",
+      "run_prefix": "s3://your-bucket/runs/mainnet-850000",
       "source": {
         "datadir": "/storage/brno2/home/<login>/bitcoin-mainnet",
         "description": "external Bitcoin Core block directory",

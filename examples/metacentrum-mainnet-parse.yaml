@@ -11,7 +11,7 @@ images:
 
 artifacts:
   backend: s3
-  uri: s3://coinjoin-thesis/runs
+  uri: s3://your-bucket/runs
   endpoint_url: https://s3.cl4.du.cesnet.cz
   credentials_file: /storage/brno2/home/<login>/.aws/credentials
   profile: coinjoin

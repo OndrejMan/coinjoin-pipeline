@@ -8,13 +8,13 @@
     ],
     "settings": {
       "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py parse --run-dir /runs/emulation/logs/liquidity-large-wallet-20261015-1653 --network bitcoin_regtest --disk /mnt/data/regtest --max-block $((PBS_EXPORTED_MAX_BLOCK + 1))",
-      "credentials": "/storage/brno2/home/xman/.aws/credentials",
+      "credentials": "/storage/brno2/home/<login>/.aws/credentials",
       "endpoint": "https://s3.cl4.du.cesnet.cz",
       "image": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
       "image_name": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
       "job": "blocksci-parse",
       "job_log": "blocksci-parse.pbs.log",
-      "log_prefix": "s3://xman-coinjoin-new/runs/liquidity-large-wallet-20261015-1653/logs",
+      "log_prefix": "s3://your-bucket/runs/liquidity-large-wallet-20261015-1653/logs",
       "ncpus": 2,
       "pbs_resources": {
         "mem": "16gb",
@@ -24,7 +24,7 @@
       "profile": "coinjoin",
       "python_command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3",
       "run_id": "liquidity-large-wallet-20261015-1653",
-      "run_prefix": "s3://xman-coinjoin-new/runs/liquidity-large-wallet-20261015-1653",
+      "run_prefix": "s3://your-bucket/runs/liquidity-large-wallet-20261015-1653",
       "source": {
         "description": "emulator Bitcoin and exported-block inputs",
         "kind": "emulator",
@@ -61,16 +61,16 @@
       "#PBS -j oe"
     ],
     "settings": {
-      "artifact_uri": "s3://xman-coinjoin-new/runs",
+      "artifact_uri": "s3://your-bucket/runs",
       "command": "ACTIVE_RUN_ID=liquidity-large-wallet-20261015-1653 BLOCKSCI_CONFIG=/runs/emulation/logs/liquidity-large-wallet-20261015-1653/blocksci_data/config.json BLOCKSCI_RUN_DIR=/runs/emulation/logs/liquidity-large-wallet-20261015-1653 BLOCKSCI_OUTPUT_DIR=/runs/emulation/logs/liquidity-large-wallet-20261015-1653/blocksci-custom-analysis_data COINJOIN_TYPE=wasabi2 JOINMARKET_DETECTOR=definite JOINMARKET_MIN_BASE_FEE=5000 JOINMARKET_PERCENTAGE_FEE=4e-05 JOINMARKET_MAX_DEPTH=200000 MIN_INPUT_COUNT=10 PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/user-analysis.py",
-      "credentials": "/storage/brno2/home/xman/.aws/credentials",
+      "credentials": "/storage/brno2/home/<login>/.aws/credentials",
       "endpoint": "https://s3.cl4.du.cesnet.cz",
       "image": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
       "image_name": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
       "inputs": [],
       "job": "blocksci-analysis",
       "job_log": "blocksci-script.pbs.log",
-      "log_prefix": "s3://xman-coinjoin-new/runs/liquidity-large-wallet-20261015-1653/logs",
+      "log_prefix": "s3://your-bucket/runs/liquidity-large-wallet-20261015-1653/logs",
       "ncpus": 2,
       "output": {
         "relative": "blocksci-custom-analysis_data"
@@ -79,7 +79,7 @@
       "persistent": null,
       "profile": "coinjoin",
       "run_id": "liquidity-large-wallet-20261015-1653",
-      "run_prefix": "s3://xman-coinjoin-new/runs/liquidity-large-wallet-20261015-1653",
+      "run_prefix": "s3://your-bucket/runs/liquidity-large-wallet-20261015-1653",
       "source_run_id": null,
       "stage": "blocksci-script",
       "user_script": "<repo>/scripts/blocksci_script_smoke.py"

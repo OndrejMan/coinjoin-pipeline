@@ -8,16 +8,16 @@ min_input_count: 10
 emulation_timeout: 43200
 
 kubernetes:
-  namespace: man5-ns
+  namespace: your-namespace
   reuse_namespace: true
-  kubeconfig: /storage/brno2/home/xman/.kube/kuba-cluster.yaml
+  kubeconfig: /storage/brno2/home/<login>/.kube/<namespace-kubeconfig>.yaml
 
 artifacts:
   backend: s3
-  uri: s3://xman-coinjoin-new/runs
+  uri: s3://your-bucket/runs
   endpoint_url: https://s3.cl4.du.cesnet.cz
   secret_name: coinjoin-s3-credentials
-  credentials_file: /storage/brno2/home/xman/.aws/credentials
+  credentials_file: /storage/brno2/home/<login>/.aws/credentials
   profile: coinjoin
 
 stages:

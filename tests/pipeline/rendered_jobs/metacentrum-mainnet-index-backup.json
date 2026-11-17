@@ -11,10 +11,10 @@
       "endpoint": "https://s3.cl4.du.cesnet.cz",
       "job": "blocksci-backup",
       "job_log": "blocksci-backup.pbs.log",
-      "log_prefix": "s3://xman-coinjoin-new/bitcoin-mainnet/index/logs/mainnet-index-backup-20261025",
+      "log_prefix": "s3://your-bucket/bitcoin-mainnet/index/logs/mainnet-index-backup-20261025",
       "ncpus": 8,
       "persistent": {
-        "backup_uri": "s3://xman-coinjoin-new/bitcoin-mainnet/blocksci-index",
+        "backup_uri": "s3://your-bucket/bitcoin-mainnet/blocksci-index",
         "dumplings_dir": null,
         "dumplings_uri": null,
         "in_scratch": false,
@@ -27,7 +27,7 @@
       },
       "profile": "coinjoin",
       "run_id": "mainnet-index-backup-20261025",
-      "run_prefix": "s3://xman-coinjoin-new/bitcoin-mainnet/index",
+      "run_prefix": "s3://your-bucket/bitcoin-mainnet/index",
       "stage": "blocksci-backup"
     },
     "shipped_files": [

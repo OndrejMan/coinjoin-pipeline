@@ -14,7 +14,7 @@
       "image_name": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
       "job": "blocksci-parse",
       "job_log": "blocksci-parse.pbs.log",
-      "log_prefix": "s3://coinjoin-thesis/runs/mainnet-s3-archive-900000/logs",
+      "log_prefix": "s3://your-bucket/runs/mainnet-s3-archive-900000/logs",
       "ncpus": 8,
       "pbs_resources": {
         "mem": "64gb",
@@ -24,9 +24,9 @@
       "profile": "coinjoin",
       "python_command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3",
       "run_id": "mainnet-s3-archive-900000",
-      "run_prefix": "s3://coinjoin-thesis/runs/mainnet-s3-archive-900000",
+      "run_prefix": "s3://your-bucket/runs/mainnet-s3-archive-900000",
       "source": {
-        "blocks_uri": "s3://xman-coinjoin-new/bitcoin-mainnet/blocks",
+        "blocks_uri": "s3://your-bucket/bitcoin-mainnet/blocks",
         "description": "verified Bitcoin block archive from S3",
         "expected_hash": "000000000000000000010538edbfd2d5b809a33dd83f284aeea41c6d0d96968a",
         "kind": "bitcoin-blocks-s3",

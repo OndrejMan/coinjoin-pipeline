@@ -8,7 +8,7 @@
     ],
     "settings": {
       "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py run --run-dir /runs/emulation/logs/2026-07-28-wasabi-k8s-s3-06 --engine wasabi --coinjoin-type wasabi2 --min-input-count 10 --joinmarket-detector definite --joinmarket-min-base-fee 5000 --joinmarket-percentage-fee 4e-05 --joinmarket-max-depth 200000 --blocksci-image docker://ghcr.io/ondrejman/blocksci-complete:latest --coinjoin-analysis-image docker://ghcr.io/ondrejman/coinjoin-analysis:latest --coinjoin-emulator-image ghcr.io/ondrejman/emulator-manager:latest --uploader-image ghcr.io/example/uploader:fixed",
-      "credentials": "/storage/brno2/home/xman/.aws/credentials",
+      "credentials": "/storage/brno2/home/<login>/.aws/credentials",
       "endpoint": "https://s3.cl4.du.cesnet.cz",
       "export_analysis": true,
       "image": "docker://ghcr.io/ondrejman/blocksci-complete:latest",
@@ -16,7 +16,7 @@
       "include_report": false,
       "job": "blocksci",
       "job_log": "blocksci.pbs.log",
-      "log_prefix": "s3://xman-coinjoin-new/runs/2026-07-28-wasabi-k8s-s3-06/logs",
+      "log_prefix": "s3://your-bucket/runs/2026-07-28-wasabi-k8s-s3-06/logs",
       "ncpus": 8,
       "pbs_resources": {
         "mem": "64gb",
@@ -24,7 +24,7 @@
       },
       "profile": "coinjoin",
       "run_id": "2026-07-28-wasabi-k8s-s3-06",
-      "run_prefix": "s3://xman-coinjoin-new/runs/2026-07-28-wasabi-k8s-s3-06",
+      "run_prefix": "s3://your-bucket/runs/2026-07-28-wasabi-k8s-s3-06",
       "stage": "blocksci"
     },
     "shipped_files": [
@@ -57,17 +57,17 @@
     ],
     "settings": {
       "command": "python -m cj_process.parse_cj_logs --action collect_docker --target-path /runs/emulation/selected",
-      "credentials": "/storage/brno2/home/xman/.aws/credentials",
+      "credentials": "/storage/brno2/home/<login>/.aws/credentials",
       "endpoint": "https://s3.cl4.du.cesnet.cz",
       "image": "docker://ghcr.io/ondrejman/coinjoin-analysis:latest",
       "image_name": "docker://ghcr.io/ondrejman/coinjoin-analysis:latest",
       "job": "coinjoin-analysis",
       "job_log": "coinjoin-analysis.pbs.log",
-      "log_prefix": "s3://xman-coinjoin-new/runs/2026-07-28-wasabi-k8s-s3-06/logs",
+      "log_prefix": "s3://your-bucket/runs/2026-07-28-wasabi-k8s-s3-06/logs",
       "ncpus": 2,
       "profile": "coinjoin",
       "run_id": "2026-07-28-wasabi-k8s-s3-06",
-      "run_prefix": "s3://xman-coinjoin-new/runs/2026-07-28-wasabi-k8s-s3-06",
+      "run_prefix": "s3://your-bucket/runs/2026-07-28-wasabi-k8s-s3-06",
       "stage": "coinjoin-analysis"
     },
     "shipped_files": [
@@ -100,7 +100,7 @@
     ],
     "settings": {
       "command": "python3 /mnt/exporters/worker.py report --run-dir /runs/emulation/logs/2026-07-28-wasabi-k8s-s3-06 --engine wasabi --coinjoin-type wasabi2 --min-input-count 10 --joinmarket-detector definite --joinmarket-min-base-fee 5000 --joinmarket-percentage-fee 4e-05 --joinmarket-max-depth 200000 --uploader-image ghcr.io/example/uploader:fixed --unified-report-image ghcr.io/example/unified-report:fixed",
-      "credentials": "/storage/brno2/home/xman/.aws/credentials",
+      "credentials": "/storage/brno2/home/<login>/.aws/credentials",
       "downloads": [
         ".pipeline/exporters",
         "coinjoin_emulator_data",
@@ -112,11 +112,11 @@
       "image_name": "docker://ghcr.io/example/unified-report:fixed",
       "job": "unified-report",
       "job_log": "unified-report.pbs.log",
-      "log_prefix": "s3://xman-coinjoin-new/runs/2026-07-28-wasabi-k8s-s3-06/logs",
+      "log_prefix": "s3://your-bucket/runs/2026-07-28-wasabi-k8s-s3-06/logs",
       "ncpus": 2,
       "profile": "coinjoin",
       "run_id": "2026-07-28-wasabi-k8s-s3-06",
-      "run_prefix": "s3://xman-coinjoin-new/runs/2026-07-28-wasabi-k8s-s3-06",
+      "run_prefix": "s3://your-bucket/runs/2026-07-28-wasabi-k8s-s3-06",
       "stage": "unified-report"
     },
     "shipped_files": [

@@ -9,12 +9,12 @@ images:
   version: latest
 
 kubernetes:
-  namespace: man5-ns
+  namespace: your-namespace
   reuse_namespace: true
 
 artifacts:
   backend: s3
-  uri: s3://coinjoin-thesis/runs
+  uri: s3://your-bucket/runs
   endpoint_url: https://s3.cl4.du.cesnet.cz
   secret_name: coinjoin-s3-credentials
   credentials_file: /storage/brno2/home/<login>/.aws/credentials
