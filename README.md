@@ -329,7 +329,10 @@ and `pbs.mappings` enable their corresponding PBS stages.
 ```
 
 `examples/metacentrum-regtest-s3.yaml` is the recommended regtest full-run
-configuration. Mainnet is deliberately split into two submissions:
+configuration. The examples hold placeholders, not a real account: copy the ones you use
+to `examples/local/` (ignored by Git) and replace `<login>`, `your-bucket`,
+`your-namespace` and `<namespace-kubeconfig>` with your MetaCentrum login, S3 bucket,
+Kubernetes namespace and kubeconfig, then run that copy. Mainnet is deliberately split into two submissions:
 
 For the default JoinMarket regtest scenario, use the measured MetaCentrum
 profile. It requests 2 CPUs, 16 GB RAM, and 8 GB scratch for BlockSci, plus
