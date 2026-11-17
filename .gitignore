@@ -12,3 +12,6 @@ build/
 .vscode/
 .idea/
 .ipynb_checkpoints/
+
+# Your own copies of the examples, with your account, bucket and namespace.
+examples/local/
