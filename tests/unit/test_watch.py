@@ -50,7 +50,7 @@ def test_default_namespace_matches_pipeline_default() -> None:
 
 def test_kubernetes_log_command_supports_follow_and_timestamps() -> None:
     command = _kubernetes_log_command(
-        ["kubectl", "--namespace", "man5-ns"],
+        ["kubectl", "--namespace", "coinjoin-ns"],
         "outer-pod",
         "controller",
         tail=200,
@@ -60,7 +60,7 @@ def test_kubernetes_log_command_supports_follow_and_timestamps() -> None:
     assert command == [
         "kubectl",
         "--namespace",
-        "man5-ns",
+        "coinjoin-ns",
         "logs",
         "pod/outer-pod",
         "-c",
@@ -89,7 +89,7 @@ def test_main_builds_unified_all_component_sources() -> None:
                     "--run-id",
                     "run-1",
                     "--namespace",
-                    "man5-ns",
+                    "coinjoin-ns",
                     "--kubeconfig",
                     kubeconfig.name,
                     "--all",
@@ -124,7 +124,7 @@ def test_main_all_discovers_joinmarket_engine_service() -> None:
                     "--run-id",
                     "run-1",
                     "--namespace",
-                    "man5-ns",
+                    "coinjoin-ns",
                     "--kubeconfig",
                     kubeconfig.name,
                     "--all",

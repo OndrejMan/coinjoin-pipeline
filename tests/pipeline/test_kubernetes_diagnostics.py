@@ -12,7 +12,7 @@ from coinjoin_pipeline.execution.kubernetes import collect_s3_emulation_diagnost
 def test_quota_failure_summary_keeps_the_complete_controller_log() -> None:
     quota_failure = (
         "ERROR | Terminating exception: Kubernetes CPU quota exhausted while creating pod "
-        "'wasabi-client-000' in namespace 'man5-ns': quota 'default-cldp6' rejected "
+        "'wasabi-client-000' in namespace 'coinjoin-ns': quota 'default-cldp6' rejected "
         "limits.cpu=1 (used limits.cpu=31500m; limit limits.cpu=32)."
     )
     controller_output = "\n".join([quota_failure, *(f"diagnostic line {index}" for index in range(150))])
@@ -23,7 +23,7 @@ def test_quota_failure_summary_keeps_the_complete_controller_log() -> None:
     ]
 
     with mock.patch("coinjoin_pipeline.execution.kubernetes.subprocess.run", side_effect=completed) as run:
-        diagnostics = collect_s3_emulation_diagnostics(Path("/kube/config"), "man5-ns", "job-1")
+        diagnostics = collect_s3_emulation_diagnostics(Path("/kube/config"), "coinjoin-ns", "job-1")
 
     assert "--- controller failure summary ---\n" + quota_failure in diagnostics
     controller_log = diagnostics.split("--- controller logs ---\n", 1)[1].split("--- uploader logs ---", 1)[0]
@@ -50,7 +50,7 @@ def test_client_gone_failure_is_summarized_before_cleanup_tail() -> None:
     ]
 
     with mock.patch("coinjoin_pipeline.execution.kubernetes.subprocess.run", side_effect=completed):
-        diagnostics = collect_s3_emulation_diagnostics(Path("/kube/config"), "man5-ns", "job-1")
+        diagnostics = collect_s3_emulation_diagnostics(Path("/kube/config"), "coinjoin-ns", "job-1")
 
     assert "--- controller failure summary ---\n" + client_gone in diagnostics
 
@@ -72,7 +72,7 @@ def test_original_traceback_survives_a_long_cleanup_log() -> None:
     ]
 
     with mock.patch("coinjoin_pipeline.execution.kubernetes.subprocess.run", side_effect=completed):
-        diagnostics = collect_s3_emulation_diagnostics(Path("/kube/config"), "man5-ns", "job-1")
+        diagnostics = collect_s3_emulation_diagnostics(Path("/kube/config"), "coinjoin-ns", "job-1")
 
     assert traceback in diagnostics
     assert "cleanup line 149" in diagnostics
