@@ -218,6 +218,14 @@ launcher values taking precedence over inherited values. Secret-bearing keys
 are omitted from this environment snapshot.
 The analytical report separately records resolved image IDs and repository digests.
 
+An S3 `full-run` or `emulate` also copies this record to
+`<run-prefix>/research_manifest.json`: once after the exporters are staged, with
+status `prepared`, and again when the command ends, with its outcome. The command,
+the configuration and the pipeline commit of a run therefore stay with its artifacts
+after the frontend's run directory is gone. `--resume-run` first takes over the
+launches the S3 copy records and its run directory lacks, so a resume from another
+frontend keeps the original launch. `pbs-from-s3` records no launch.
+
 ## Artifact backends
 
 `shared-storage` remains the default. Kubernetes and PBS continue to use the

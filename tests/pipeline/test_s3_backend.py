@@ -602,6 +602,17 @@ def test_prefix_preflight_accepts_both_listing_shapes(listing: str) -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_prefix_preflight_accepts_the_launch_record_beside_the_exporters() -> None:
+    result = run_prefix_preflight(STAGED_KEYS_LISTING + "2026/07/26 04:00:00  512  research_manifest.json\n")
+    assert result.returncode == 0, result.stderr
+
+
+def test_prefix_preflight_rejects_a_launch_record_below_the_prefix_root() -> None:
+    result = run_prefix_preflight(STAGED_KEYS_LISTING + "2026/07/26 04:00:00  512  old/research_manifest.json\n")
+    assert result.returncode == 1
+    assert "old/research_manifest.json" in result.stderr
+
+
 def test_prefix_preflight_rejects_a_reused_run_prefix() -> None:
     result = run_prefix_preflight(STAGED_KEYS_LISTING + "2026/07/26 04:00:00  512  .k8s/upload.done\n")
     assert result.returncode == 1

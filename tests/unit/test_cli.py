@@ -17,7 +17,7 @@ from coinjoin_pipeline.doctor import (
 )
 from coinjoin_pipeline.images import resolve_images
 from coinjoin_pipeline.manifest import redact
-from coinjoin_pipeline.runs import run_id_for, store_host_manifest
+from coinjoin_pipeline.runs import adopt_recorded_launches, run_id_for, store_host_manifest
 from coinjoin_pipeline.run_ids import validate_run_id
 
 
@@ -217,6 +217,38 @@ def test_command_on_a_locked_run_leaves_its_record_alone(tmp_path):
         assert cli.main([*S3_FULL_RUN, "--runs-root", str(tmp_path), "--resume-run"]) == 5
     execute.assert_not_called()
     assert json.loads(manifest.read_text()) == ORIGINAL_LAUNCH
+
+
+def test_s3_run_uploads_its_record_when_staged_and_when_finished(tmp_path):
+    from coinjoin_pipeline.execution import s3_run_manifest
+
+    statuses = []
+
+    def upload(_access, source, uri, **_options):
+        statuses.append((uri, json.loads(source.read_text())["host_launcher"]["status"]))
+
+    with (
+        mock.patch.object(cli, "doctor_check", return_value=[]),
+        mock.patch.object(
+            cli, "execute", side_effect=lambda context: s3_run_manifest.publish_run_manifest(context.config)
+        ),
+        mock.patch.object(s3_run_manifest, "upload_s3_file", side_effect=upload),
+    ):
+        assert cli.main([*S3_FULL_RUN, "--runs-root", str(tmp_path)]) == 0
+    uri = "s3://bucket/runs/run-a/research_manifest.json"
+    assert statuses == [(uri, "prepared"), (uri, "completed")]
+
+
+def test_adopted_launches_precede_the_ones_the_run_directory_holds(tmp_path):
+    target = tmp_path / "run-a/research_manifest.json"
+    store_host_manifest(target, {"launch_id": "third"})
+    store_host_manifest(target, {"launch_id": "fourth"})
+    recorded = {"host_launcher": {"launch_id": "second"}, "earlier_host_launchers": [{"launch_id": "first"}]}
+    adopt_recorded_launches(target, recorded)
+    adopt_recorded_launches(target, recorded)
+    data = json.loads(target.read_text())
+    assert [item["launch_id"] for item in data["earlier_host_launchers"]] == ["first", "second", "third"]
+    assert data["host_launcher"] == {"launch_id": "fourth"}
 
 
 def test_an_invocation_updates_its_own_record_after_another_took_over(tmp_path):

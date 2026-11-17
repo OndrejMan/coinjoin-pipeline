@@ -393,6 +393,16 @@ for marker in .k8s/upload.failed .pbs/coinjoin-analysis.failed .pbs/blocksci.fai
     exit 1
   fi
 done
+# The frontend's launch record: uploaded before the Job, and again with the outcome.
+s5 cat "${ARTIFACT_URI}/${RUN_ID}/research_manifest.json" | python3 -c '
+import json, sys
+launch = json.load(sys.stdin)["host_launcher"]
+assert launch["status"] == "completed" and launch["exit_code"] == 0, launch
+assert launch["configuration"]["run_id"] == sys.argv[1], launch["configuration"]["run_id"]
+' "${RUN_ID}" || {
+  echo "FAIL: the bucket holds no finished launch record of ${RUN_ID}" >&2
+  exit 1
+}
 
 s5 cp "${ARTIFACT_URI}/${RUN_ID}/coinjoinPipeline_data/unified_report.json" \
   "${WORK_ROOT}/results/unified_report.json" >/dev/null

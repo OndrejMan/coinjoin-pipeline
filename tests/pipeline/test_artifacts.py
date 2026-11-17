@@ -22,8 +22,10 @@ from coinjoin_pipeline.storage.s3 import (
     ensure_empty_run_prefix,
     run_s5cmd,
     s3_job_ids,
+    s3_json,
     s3_object_exists,
     s5_client,
+    upload_s3_file,
     upload_s3_job_id,
     validate_artifact_uri,
     validate_credentials_file,
@@ -155,6 +157,37 @@ def test_upload_job_id_raises_on_a_failed_copy(tmp_path) -> None:
         pytest.raises(ArtifactTransportError, match="blocksci job ID.*AccessDenied"),
     ):
         upload_s3_job_id(ACCESS, "s3://bucket/runs/run-1", "blocksci", tmp_path / "blocksci.jobid")
+
+
+def test_upload_file_reports_a_failed_and_an_unfinished_copy(tmp_path) -> None:
+    uri = "s3://bucket/runs/run-1/research_manifest.json"
+    with mock.patch("coinjoin_pipeline.storage.s5client.subprocess.run", return_value=_completed(0)) as s5cmd:
+        upload_s3_file(ACCESS, tmp_path / "research_manifest.json", uri, timeout=120)
+    assert s5cmd.call_args.args[0][-3:] == ["cp", str(tmp_path / "research_manifest.json"), uri]
+    assert s5cmd.call_args.kwargs["timeout"] == 120
+    with (
+        mock.patch("coinjoin_pipeline.storage.s5client.subprocess.run", return_value=_completed(1, "AccessDenied")),
+        pytest.raises(ArtifactTransportError, match="research_manifest.json failed.*AccessDenied"),
+    ):
+        upload_s3_file(ACCESS, tmp_path / "research_manifest.json", uri)
+    with (
+        mock.patch(
+            "coinjoin_pipeline.storage.s5client.subprocess.run", side_effect=subprocess.TimeoutExpired("s5cmd", 120)
+        ),
+        pytest.raises(ArtifactTransportError, match="did not finish in 120 s"),
+    ):
+        upload_s3_file(ACCESS, tmp_path / "research_manifest.json", uri, timeout=120)
+
+
+def test_s3_json_reads_an_existing_object_only() -> None:
+    uri = "s3://bucket/runs/run-1/research_manifest.json"
+    with mock.patch("coinjoin_pipeline.storage.s5client.subprocess.run", return_value=_listed(uri + ".old")):
+        assert s3_json(ACCESS, uri) is None
+    with mock.patch(
+        "coinjoin_pipeline.storage.s5client.subprocess.run",
+        side_effect=[_listed(uri), _completed(0, stdout='{"run_id": "run-1"}')],
+    ):
+        assert s3_json(ACCESS, uri) == {"run_id": "run-1"}
 
 
 def test_s3_job_ids_reads_each_listed_record_by_stage() -> None:

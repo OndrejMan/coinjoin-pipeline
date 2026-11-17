@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import urlparse
 
-from exporters.artifact_paths import KUBERNETES_MARKER_DIR, PBS_MARKER_DIR, pbs_marker
+from exporters.artifact_paths import KUBERNETES_MARKER_DIR, PBS_MARKER_DIR, RUN_MANIFEST, pbs_marker
 
 from coinjoin_pipeline.configuration import required
 from coinjoin_pipeline.storage.s5client import FRONTEND_S5CMD_VERSION, S5Client, S5Error, no_object_found, older_s5cmd
@@ -220,6 +220,11 @@ def upload_marker_uri(run_prefix: str, outcome: str) -> str:
     return f"{run_prefix}/{KUBERNETES_MARKER_DIR}/upload.{outcome}"
 
 
+def run_manifest_uri(run_prefix: str) -> str:
+    """``<run-prefix>/research_manifest.json``: the frontend's launch record, copied beside the artifacts."""
+    return f"{run_prefix}/{RUN_MANIFEST}"
+
+
 def s3_listing(access: S3Access, pattern: str) -> list[dict[str, object]]:
     """The objects ``ls`` lists for pattern, empty when none; any other failure raises."""
     return _s5(access, lambda client: client.listing(pattern, timeout=None))
@@ -233,6 +238,25 @@ def s3_object_exists(access: S3Access, object_uri: str) -> bool:
 def s3_prefix_has_objects(access: S3Access, prefix: str) -> bool:
     """Whether any object lies below ``prefix/``."""
     return bool(s3_listing(access, f"{prefix}/*"))
+
+
+def s3_json(access: S3Access, object_uri: str) -> dict[str, object] | None:
+    """The JSON object stored at exactly this key, None when the key does not exist."""
+    if not s3_object_exists(access, object_uri):
+        return None
+    return _s5(access, lambda client: client.cat_json(object_uri))
+
+
+def upload_s3_file(access: S3Access, source: Path, object_uri: str, *, timeout: float | None = None) -> None:
+    """Copy one local file to ``object_uri``, replacing what is there."""
+    try:
+        result = _s5(access, lambda client: client.run("cp", source, object_uri, timeout=timeout))
+    except subprocess.TimeoutExpired as error:
+        raise ArtifactTransportError(f"s5cmd cp to {object_uri} did not finish in {timeout:g} s") from error
+    if result.returncode != 0:
+        raise ArtifactTransportError(
+            f"s5cmd cp to {object_uri} failed (exit {result.returncode}): {(result.stderr or '').strip()}"
+        )
 
 
 def clear_s3_stage_markers(access: S3Access, run_prefix: str, stage: str) -> None:

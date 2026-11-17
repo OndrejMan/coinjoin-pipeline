@@ -12,6 +12,7 @@ from exporters.common import tree_sha256
 
 from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution.kubernetes import kubernetes_s3_auth_preflight, resolve_kubeconfig
+from coinjoin_pipeline.execution.s3_run_manifest import publish_run_manifest
 from coinjoin_pipeline.paths import EXPORTERS_ROOT, REQUIRED_EXPORTERS
 from coinjoin_pipeline.storage.s3 import (
     ArtifactTransportError,
@@ -143,7 +144,8 @@ def stage_kubernetes_s3_run(args: PipelineConfiguration) -> None:
     Shared by ``full-run --artifact-backend s3`` and the standalone ``emulate``
     S3 branch. Both preflights run before the upload on purpose: a failed auth
     check must not leave staged exporters behind under a run id that then needs
-    cleaning up.
+    cleaning up. The launch record follows the exporters; the in-cluster prefix
+    preflight expects exactly these two in an otherwise empty prefix.
     """
     target = S3Target.from_args(args)
     access = target.access
@@ -157,3 +159,4 @@ def stage_kubernetes_s3_run(args: PipelineConfiguration) -> None:
     ensure_empty_run_prefix(access, target.artifact_uri, target.run_id)
     print(f"[stage] Uploading exporters from {EXPORTERS_ROOT}")
     upload_exporters(access, target.run_prefix, EXPORTERS_ROOT)
+    publish_run_manifest(args)

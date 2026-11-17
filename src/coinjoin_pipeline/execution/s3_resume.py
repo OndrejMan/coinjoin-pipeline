@@ -22,6 +22,7 @@ from coinjoin_pipeline.execution.kubernetes import kubectl, resolve_kubeconfig, 
 from coinjoin_pipeline.execution.pbs.submission import pbs_job_probe, qdel_error, read_pbs_job_id
 from coinjoin_pipeline.execution.pbs.validation import require_qsub
 from coinjoin_pipeline.execution.probes import PROBE_QUEUED, PROBE_RUNNING, PROBE_UNKNOWN
+from coinjoin_pipeline.execution.s3_run_manifest import publish_run_manifest
 from coinjoin_pipeline.execution.s3_submission import ResumedGraph, s3_full_run_plan_from_args, submit_s3_pbs_graph
 from coinjoin_pipeline.execution.s3_workflow import (
     print_full_run_completed,
@@ -175,6 +176,8 @@ def resume_s3_full_run(args: PipelineConfiguration) -> None:
     run_prefix = run_prefix_uri(target.artifact_uri, target.run_id)
     plan = s3_full_run_plan_from_args(args)
     s3_access_preflight(target.access, target.artifact_uri)
+    if not args.dry_run:
+        publish_run_manifest(args, continued=True)
     if plan.scheduled() and not args.dry_run:
         require_qsub()
     _resume_emulation(args, run_prefix, target)

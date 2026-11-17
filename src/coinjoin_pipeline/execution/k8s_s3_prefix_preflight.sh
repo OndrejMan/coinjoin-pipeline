@@ -1,17 +1,19 @@
 write_s3_credentials
-# The frontend stages .pipeline/exporters/ into this prefix before creating the
-# Job, so that path is expected here; anything else still means a reused run id.
+# The frontend stages .pipeline/exporters/ and its launch record
+# research_manifest.json into this prefix before creating the Job, so those are
+# expected here; anything else still means a reused run id.
 # The filter must survive both `s5cmd ls` output shapes: a recursive listing of
 # full keys (.pipeline/exporters/...) if the wildcard crosses "/", and a plain
 # "DIR .pipeline/" row if it does not. Matching on `.pipeline` alone covers both;
-# nothing else the pipeline writes carries that string, and a genuinely reused
-# prefix still shows its own rows.
+# nothing else the pipeline writes carries that string. The launch record is
+# matched only at the prefix root, where both shapes list it by its bare name,
+# and a genuinely reused prefix still shows its own rows.
 set +e
 listing="$(s5 ls "$ARTIFACT_URI/$RUN_ID/*" 2>&1)"
 status=$?
 set -e
 if [ "$status" -eq 0 ]; then
-  unexpected="$(printf '%s\n' "$listing" | grep -v '\.pipeline' || true)"
+  unexpected="$(printf '%s\n' "$listing" | grep -v -e '\.pipeline' -e ' research_manifest\.json$' || true)"
   if [ -n "$unexpected" ]; then
     echo "run prefix $ARTIFACT_URI/$RUN_ID/ already contains artifacts; choose a fresh --run-id" >&2
     printf '%s\n' "$unexpected" >&2

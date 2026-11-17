@@ -93,3 +93,25 @@ def store_host_manifest(target: Path, manifest: dict[str, object]) -> None:
     if earlier:
         existing["earlier_host_launchers"] = earlier
     atomic_write(target, existing)
+
+
+def adopt_recorded_launches(target: Path, recorded: dict[str, object]) -> None:
+    """Put the launches another copy of the manifest records before the ones this copy holds.
+
+    A run continued from another frontend starts from an empty run directory, so its
+    manifest knows only the continuing launch. The launches of the copy in S3 that it
+    lacks, told apart by ``launch_id``, become its earliest ones.
+    """
+    existing = read_host_manifest(target)
+    held = existing.get("earlier_host_launchers")
+    earlier = list(held) if isinstance(held, list) else []
+    known = {item.get("launch_id") for item in (*earlier, existing.get("host_launcher")) if isinstance(item, dict)}
+    theirs = recorded.get("earlier_host_launchers")
+    adopted = [
+        item
+        for item in (*(theirs if isinstance(theirs, list) else []), recorded.get("host_launcher"))
+        if isinstance(item, dict) and item.get("launch_id") not in known
+    ]
+    if adopted:
+        existing["earlier_host_launchers"] = [*adopted, *earlier]
+        atomic_write(target, existing)

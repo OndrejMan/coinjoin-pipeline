@@ -238,6 +238,10 @@ def main(argv: list[str] | None = None) -> int:
         if target and manifest is not None:
             mark_finished(manifest, code)
             store_host_manifest(target, manifest)
+            from .execution.s3_run_manifest import republish_run_manifests
+
+            # The copy in the run's S3 prefix, when this command published one.
+            republish_run_manifests()
         from .execution.locks import close_locks
 
         # A command refused before execution still holds the lock start_host_manifest took.
