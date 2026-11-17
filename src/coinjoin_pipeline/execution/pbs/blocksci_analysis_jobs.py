@@ -128,12 +128,63 @@ def notebook_control(stage: Stage) -> Path:
 
 
 def analysis_output(stage: Stage, output: OutputSettings) -> Path:
-    """Where the mode writes; a notebook writes to the submitting user's home by default."""
+    """Where the mode writes; a notebook writes to the submitting user's home by default.
+
+    Jupyter saves there as the user works, so a job that dies without finalizing loses nothing.
+    """
     if output.get("notebooks_dir"):
         return Path(str(output["notebooks_dir"]))
     if output.get("notebook"):
         return submission_home() / "coinjoin-notebooks" / stage.run_id
     return stage.work / str(output["relative"])
+
+
+def directory_state(root: Path) -> dict[str, tuple[int, int]]:
+    """Every file below root with its size and modification time, by its path relative to root."""
+    state = {}
+    for folder, _directories, names in os.walk(root):
+        for name in names:
+            path = Path(folder) / name
+            status = path.stat()
+            state[path.relative_to(root).as_posix()] = (status.st_size, status.st_mtime_ns)
+    return state
+
+
+def publish_output(stage: Stage, output: Path, settings: OutputSettings) -> None:
+    """Upload what the mode wrote; a notebook's default directory then leaves the submitter's home.
+
+    A directory the user named (``notebooks_dir``) is theirs and stays. The default one is
+    removed only when S3 lists every file of it with its size and nothing changed while
+    the upload ran, so shared storage keeps the saved work whenever the copy is in doubt.
+    """
+    kept_in_home = bool(settings.get("notebook")) and not settings.get("notebooks_dir")
+    before = directory_state(output) if kept_in_home and output.is_dir() else None
+    stage.upload(output, settings["relative"])
+    if before is None:
+        return
+    prefix = f"{stage.run_prefix}/{settings['relative']}/"
+    try:
+        listed = stage.storage.listing(prefix + "*")
+        uploaded = {
+            str(entry["key"])[len(prefix) :]: entry.get("size", 0)
+            for entry in listed
+            if str(entry.get("key", "")).startswith(prefix)
+        }
+        unchanged = directory_state(output) == before
+    except (OSError, subprocess.SubprocessError, S5Error) as error:
+        stage.log(f"notebooks stay in {output}: the upload could not be checked ({error})")
+        return
+    missing = sorted(name for name, (size, _modified) in before.items() if uploaded.get(name) != size)
+    if missing or not unchanged:
+        reason = f"S3 does not hold {missing[0]}" if missing else "a file changed during the upload"
+        stage.log(f"notebooks stay in {output}: {reason}")
+        return
+    try:
+        shutil.rmtree(output)
+    except OSError as error:
+        stage.log(f"notebooks are in S3, but {output} could not be removed: {error}")
+        return
+    stage.log(f"notebooks are in {prefix}; removed {output}")
 
 
 def seed_notebook(stage: Stage, output: Path) -> None:
@@ -213,13 +264,14 @@ def notebook_connection(stage: Stage, control: Path) -> Iterator[None]:
 def blocksci_analysis(stage: Stage) -> None:
     """Detection, an external comparison, a user script or a notebook over an existing index.
 
-    Outputs are published even when the work fails. The index comes from this run's cache,
-    read-only from another run's, or in place from a persistent directory.
+    Outputs are published even when the work fails; a notebook's default directory in the
+    submitter's home is removed once S3 holds it (``publish_output``). The index comes from
+    this run's cache, read-only from another run's, or in place from a persistent directory.
     """
     settings = cast(BlocksciAnalysisSettings, stage.settings)
     mode = stage.name
     output = analysis_output(stage, settings["output"])
-    stage.finalizers.append(lambda: stage.upload(output, settings["output"]["relative"]))
+    stage.finalizers.append(lambda: publish_output(stage, output, settings["output"]))
     stage.log(f"[{mode}] downloading required reusable BlockSci inputs")
     for download in settings["inputs"]:
         if "run" in download:

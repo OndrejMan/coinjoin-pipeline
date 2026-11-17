@@ -707,9 +707,11 @@ time, so this task does not call `build.sh`, compile BlockSci, or parse again:
 The PBS output prints the assigned node, port, and Jupyter token. Stream that
 output with `./runIt.sh watch --run-id '<id>' --pbs-only --pbs` and create an
 SSH tunnel to the assigned compute node through the normal MetaCentrum access
-path. Stop the PBS job when finished; notebook files are uploaded to
-`blocksci-notebooks_data/` (or written directly to the supplied shared
-directory).
+path. Stop the PBS job when finished. Without `--blocksci-notebooks-dir` Jupyter
+saves to `~/coinjoin-notebooks/<run-id>` in the submitter's home; when the job
+ends it uploads that directory to `blocksci-notebooks_data/` and removes it from
+the home once S3 lists every file with its size and none changed during the
+upload. A supplied shared directory is uploaded too and always stays.
 
 After `.pbs/unified-report.done` appears, download the canonical report
 directly on the frontend without starting Docker or Podman:
