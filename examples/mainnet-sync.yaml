@@ -38,7 +38,7 @@ pbs:
     multijob: brno
   producer:
     ncpus: 2
-    mem: 8gb
+    mem: 16gb
     scratch: 20gb
     walltime: '24:00:00'
     multijob: brno

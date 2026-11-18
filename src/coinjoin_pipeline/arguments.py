@@ -233,7 +233,7 @@ HELP = {
     "mainnet.dumplings_uri": "S3 prefix of the published Dumplings Scanner/ copy and its manifest",
     "mainnet.core_image": "image running Bitcoin Core and the block archiver",
     "mainnet.dumplings_image": "image running the Dumplings scanner",
-    "mainnet.dbcache_mb": "Core -dbcache in MB; keep it at half the producer job's memory",
+    "mainnet.dbcache_mb": "Core -dbcache in MB; at most a quarter of the producer job's memory, Dumplings needs the rest",
     "mainnet.reorg_reserve": "blocks below the frozen tip that pruning keeps, so a reorganization can be undone",
     "mainnet.poll_seconds": "seconds between progress checks of the running jobs",
     "mainnet.clear_after_sync": "empty the dataset after the last job; the next restore job refills it from S3",
