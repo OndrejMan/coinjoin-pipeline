@@ -52,7 +52,18 @@ working data exists on the multijob (`bitcoin/`, `dumplings/`, `archive-state/`,
 index's `config.json`, `files.txt`, `manifest.json` or `parsed/`; locks, `sync/` and logs
 do not count).
 
-- **Something exists:** it ends at once with `restore.json: skipped-not-empty`.
+- **Everything exists:** it ends at once with `restore.json: skipped-not-empty`.
+- **Core exists, but `dumplings/` or the index is missing:** the missing part was deleted
+  on its own (the Lab offers that), for example to scan again after a change of the
+  Dumplings detection. The job restores only that part from its backup and writes
+  `restored-missing`. The index must continue from the block files that are here: its
+  `files.txt` and the parser cursor `resume_file_*` are checked against them before
+  anything takes its place. The Scanner is checked against its manifest; the producer
+  then checks its chain anchor and that Core still has the blocks after its height. A
+  missing part without a backup stays missing (an unfinished first synchronization).
+- **Core is missing, but something else exists:** `skipped-not-empty`, and the producer
+  refuses the dataset. Core is never restored alone, because blocks downloaded again lie
+  elsewhere in the `blk*.dat` files than the index expects.
 - **Something exists, but the index has `.writing`:** a BlockSci job failed in the middle
   of writing, so nothing can continue. If the backup manifests in S3 pass the same checks
   as below, it deletes the whole working dataset and restores it from S3; the work of the
@@ -70,17 +81,16 @@ do not count).
 
   It then downloads all three into `.restore-<run-id>/`, checking SHA-256 and size,
   and only then moves them into place. It checks `files.txt` and the parser cursor
-  against the restored blocks and writes `restored`. A partial dataset is never mixed
-  with the backups.
+  against the restored blocks and writes `restored`.
 
 `mainnet-producer` first checks that the dataset is complete: Core chainstate and blocks,
 `archive-state/`, the Scanner height and the index's `config.json`.
 
 - **Everything is missing:** it passes only when this run's `restore.json` says
   `skipped-no-backup`.
-- **Part is missing:** it stops before it starts Core and lists what is missing. The fix
-  is to delete the whole `mainnet.root` and `blocksci.index_dir`; the next
-  synchronization restores them.
+- **Part is missing** that the restore job could not refill: it stops before it starts
+  Core and lists what is missing. The fix is to delete the whole `mainnet.root` and
+  `blocksci.index_dir`; the next synchronization restores them.
 - **A first synchronization under way** (no index, but `blk00000.dat`) continues.
 
 The producer then synchronizes Core with `prune=1`, `txindex=0`, `blocksxor=0`.

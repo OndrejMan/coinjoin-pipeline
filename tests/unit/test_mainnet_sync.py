@@ -1099,19 +1099,69 @@ def test_an_index_job_restores_the_checkpoint_jobs_index_backup(worker, monkeypa
 
 
 @pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
-def test_restore_job_leaves_a_dataset_that_is_not_empty(worker, monkeypatch):
-    events = []
-    fake_components(worker, monkeypatch, events)
+@pytest.mark.parametrize("deleted", [("index",), ("dumplings",), ("dumplings", "index")])
+def test_restore_job_refills_what_was_deleted_beside_core(worker, monkeypatch, deleted):
+    fake_components(worker, monkeypatch, [])
     synchronize(worker, "restore", "producer", "blocksci", "checkpoint")
-    shutil.rmtree(worker.index)
-    monkeypatch.setattr(
-        worker.storage, "restore_backup", lambda *args: pytest.fail("a partial dataset is never mixed")
+    index_files = (worker.index / "files.txt").read_text()
+    chainstate = (worker.core_dir / "chainstate/state.dat").stat().st_mtime_ns
+    for part in deleted:
+        shutil.rmtree(worker.index if part == "index" else worker.dumps)
+    worker.run_id = "mainnet-sync-local-2"
+    synchronize(worker, "restore")
+    restore = json.loads((worker.run / "restore.json").read_text())
+    assert (restore["action"], set(restore["parts"]), set(restore["backups"])) == (
+        "restored-missing",
+        set(deleted),
+        set(deleted),
     )
+    assert (worker.index / "files.txt").read_text() == index_files
+    assert (worker.dumps / "Scanner/LastProcessedBlockHeight.txt").read_text() == str(HEIGHT)
+    # Core is not downloaded again.
+    assert (worker.core_dir / "chainstate/state.dat").stat().st_mtime_ns == chainstate
+    assert not [*worker.root.glob(".restore-*"), *worker.index.glob(".restore-*")]
+    worker.stage = "producer"
+    mainnet_jobs.require_complete_dataset(worker)
+
+
+@pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
+def test_restore_job_never_refills_core_alone(worker, monkeypatch):
+    fake_components(worker, monkeypatch, [])
+    synchronize(worker, "restore", "producer", "blocksci", "checkpoint")
+    shutil.rmtree(worker.datadir)
+    monkeypatch.setattr(worker.storage, "restore_backup", lambda *args: pytest.fail("Core is never restored alone"))
     synchronize(worker, "restore")
     assert json.loads((worker.run / "restore.json").read_text())["action"] == "skipped-not-empty"
     worker.stage = "producer"
-    with pytest.raises(ValueError, match=r"incomplete \(missing: BlockSci index\)"):
+    with pytest.raises(ValueError, match=r"incomplete \(missing: Core chainstate, Core blocks\)"):
         mainnet_jobs.require_complete_dataset(worker)
+
+
+@pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")
+def test_restore_job_refuses_an_index_backup_of_other_block_files(worker, monkeypatch):
+    fake_components(worker, monkeypatch, [])
+    synchronize(worker, "restore", "producer", "blocksci", "checkpoint")
+    shutil.rmtree(worker.index)
+    shutil.rmtree(worker.dumps)
+    # Blocks downloaded again: the parser's resume bytes differ from the backup's.
+    resume = worker.core_dir / "blocks/blk00001.dat"
+    resume.write_bytes(bytes([1]) * resume.stat().st_size)
+    worker.stage = "restore"
+    with pytest.raises(ValueError, match="does not continue from the Core blocks here"):
+        mainnet_jobs.restore(worker)
+    # Nothing took its place, not even the Scanner that did check out.
+    assert not worker.dumps.exists() and not (worker.index / "config.json").exists()
+    assert not [*worker.root.glob(".restore-*"), *worker.index.glob(".restore-*")]
+
+
+def test_restore_job_leaves_a_part_without_a_backup_missing(worker):
+    (worker.core_dir / "blocks").mkdir(parents=True)
+    (worker.core_dir / "blocks/blk00000.dat").write_bytes(bytes(88))
+    synchronize(worker, "restore")
+    assert json.loads((worker.run / "restore.json").read_text())["action"] == "skipped-not-empty"
+    # An unfinished first synchronization: no index and no Scanner yet, and nothing to restore them from.
+    worker.stage = "producer"
+    mainnet_jobs.require_complete_dataset(worker)
 
 
 @pytest.mark.skipif(shutil.which("zstd") is None, reason="requires zstd")

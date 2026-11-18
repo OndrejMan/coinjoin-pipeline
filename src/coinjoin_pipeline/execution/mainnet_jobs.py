@@ -43,6 +43,7 @@ from coinjoin_pipeline.execution.mainnet_worker import (
 from coinjoin_pipeline.execution.pbs.index_store import ARCHIVE as INDEX_ARCHIVE
 from coinjoin_pipeline.execution.pbs.index_store import MEMBERS as INDEX_MEMBERS
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore, index_manifest, utc_now
+from coinjoin_pipeline.execution.pbs.index_store import inventory as index_inventory
 from coinjoin_pipeline.storage.s5client import S5Error, stream_sha256
 
 
@@ -98,13 +99,87 @@ def raw_download(worker: Worker, name: str, uri: str, size: int) -> JsonObject:
     return raw
 
 
-def restore(worker: Worker) -> None:
-    """Job 0: fill an empty working dataset from the S3 backups, otherwise do nothing.
+def restore_missing(worker: Worker, backups: dict[str, str]) -> JsonObject | None:
+    """Refill Dumplings or the index, deleted on their own, beside the Core data that stayed.
 
-    The working copy on multijob storage can expire. Only a completely empty one is
-    restored, from three backups of one synchronization; a partial one is never mixed
-    with backups, and the producer refuses it. A dataset whose index a failed job left
-    unfinished is emptied first, but only once the backups replacing it check out.
+    Core is never restored alone: the index resumes from the bytes of Core's block files,
+    and blocks downloaded again land elsewhere in them. A part without a backup stays
+    missing, as in an unfinished first synchronization. Nothing takes its place before
+    every part is downloaded and checked: the index against the block files here, the
+    Scanner against its manifest. The producer checks the Scanner's chain anchor.
+    """
+    if not worker.datadir.exists():
+        return None
+    absent = {
+        "dumplings": not worker.dumps.exists(),
+        "index": not any((worker.index / name).exists() for name in INDEX_MEMBERS),
+    }
+    manifests = {
+        name: worker.storage.cat_json(backups[name], timeout=120)
+        for name, missing in absent.items()
+        if missing and worker.storage.exists(backups[name])
+    }
+    if not manifests:
+        return None
+    started = time.monotonic()
+    worker.progress("restore-download")
+    staging = worker.root / f".restore-{worker.run_id}"
+    index_staging = worker.index / f".restore-{worker.run_id}"
+    scanner, index = staging / "Scanner", index_staging / "index"
+    parts = {}
+    try:
+        if "dumplings" in manifests:
+            staging.mkdir()
+            parts["dumplings"] = measured(
+                "dumplings",
+                lambda: worker.restore_dumplings(backups["dumplings"], scanner),
+                sum(manifests["dumplings"]["files"].values()),
+                scanner,
+            )
+        if "index" in manifests:
+            index_staging.mkdir(parents=True)
+            parts["index"] = measured(
+                "index",
+                lambda: worker.storage.restore_backup(backups["index"], index),
+                manifests["index"]["archive_size"],
+                index,
+            )
+            if (index / "files.txt").read_text() != index_inventory(index):
+                raise ValueError("The restored index does not match its file inventory")
+            try:
+                signature = resume_signature(index, worker.core_dir / "blocks")
+            except ValueError as error:
+                raise ValueError(f"The index backup does not continue from the Core blocks here: {error}") from error
+            if signature != {key: manifests["index"].get(key) for key in SIGNATURE_KEYS}:
+                raise ValueError(
+                    "The index backup does not continue from the Core blocks here; "
+                    "delete the whole working dataset to restore both"
+                )
+        if "dumplings" in parts:
+            worker.dumps.mkdir()
+            scanner.rename(worker.dumps / "Scanner")
+        if "index" in parts:
+            for entry in index.iterdir():
+                entry.rename(worker.index / entry.name)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+        shutil.rmtree(index_staging, ignore_errors=True)
+    return {
+        "backups": {name: backups[name] for name in parts},
+        "parts": parts,
+        "total_seconds": round(time.monotonic() - started, 1),
+        "host": socket.gethostname(),
+    }
+
+
+def restore(worker: Worker) -> None:
+    """Job 0: fill an empty working dataset from the S3 backups, or the part deleted from it.
+
+    The working copy on multijob storage can expire. A completely empty one is restored
+    from three backups of one synchronization. Where the Core data stayed, a missing
+    Scanner or index comes back alone (``restore_missing``); any other partial dataset is
+    never mixed with backups, and the producer refuses it. A dataset whose index a failed
+    job left unfinished is emptied first, but only once the backups replacing it check out.
     """
     worker.stage = "restore"
     worker.acquire_dataset()
@@ -115,9 +190,6 @@ def restore(worker: Worker) -> None:
         shutil.rmtree(leftover)
     present = worker.dataset_members()
     unfinished = (worker.index / ".writing").exists()
-    if present and not unfinished:
-        finish_restore(worker, "skipped-not-empty", present=[str(path) for path in present])
-        return
     backups = {
         name: prefix.rstrip("/") + "/manifest.json"
         for name, prefix in (
@@ -126,6 +198,13 @@ def restore(worker: Worker) -> None:
             ("dumplings", worker.c["dumplings_uri"]),
         )
     }
+    if present and not unfinished:
+        refilled = restore_missing(worker, backups)
+        if refilled:
+            finish_restore(worker, "restored-missing", **refilled)
+        else:
+            finish_restore(worker, "skipped-not-empty", present=[str(path) for path in present])
+        return
     worker.progress("restore-check")
     manifests = {
         name: worker.storage.cat_json(uri, timeout=120) if worker.storage.exists(uri) else None
