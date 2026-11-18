@@ -29,6 +29,11 @@ from coinjoin_pipeline.execution.mainnet_worker import (
 )
 
 
+@pytest.fixture(autouse=True)
+def no_core_settle_wait(monkeypatch):
+    monkeypatch.setattr(mainnet_worker, "CORE_SETTLE_SECONDS", 0)
+
+
 @pytest.fixture
 def config(tmp_path):
     return resolve_run_images(resolve_configuration(
@@ -235,6 +240,7 @@ def test_bounded_sync_freezes_actual_tip_during_initial_download(worker, monkeyp
             {"blocks": 50, "headers": 900000, "initialblockdownload": True},
             {"blocks": 100, "headers": 900000, "initialblockdownload": True},
             {"blocks": 102, "bestblockhash": "b" * 64},
+            {"blocks": 102, "bestblockhash": "b" * 64},
         ]
     )
     calls, progress, sleeps = [], [], []
@@ -254,7 +260,7 @@ def test_bounded_sync_freezes_actual_tip_during_initial_download(worker, monkeyp
     assert not any(method == "getnetworkinfo" for method, _ in calls)
     assert progress[0][0] == ("core-sync", 50, target)
     assert progress[0][1]["target_height"] == target
-    assert sleeps == [1]
+    assert sleeps == [1, mainnet_worker.CORE_SETTLE_SECONDS]
 
 
 def test_unbounded_sync_still_waits_for_initial_download_and_headers(worker, monkeypatch):
@@ -263,6 +269,7 @@ def test_unbounded_sync_still_waits_for_initial_download_and_headers(worker, mon
             {"blocks": 100, "headers": 100, "initialblockdownload": True},
             {"blocks": 100, "headers": 101, "initialblockdownload": False},
             {"blocks": 101, "headers": 101, "initialblockdownload": False},
+            {"blocks": 101, "bestblockhash": "b" * 64},
             {"blocks": 101, "bestblockhash": "b" * 64},
         ]
     )
@@ -276,7 +283,7 @@ def test_unbounded_sync_still_waits_for_initial_download_and_headers(worker, mon
     sleeps = []
     monkeypatch.setattr("coinjoin_pipeline.execution.mainnet_worker.time.sleep", sleeps.append)
     assert worker.synchronize_core()["blocks"] == 101
-    assert len(sleeps) == 2
+    assert len(sleeps) == 3
 
 
 def test_existing_higher_chain_is_frozen_without_rollback(worker, monkeypatch):
@@ -291,8 +298,16 @@ def test_existing_higher_chain_is_frozen_without_rollback(worker, monkeypatch):
     monkeypatch.setattr(worker, "progress", lambda *args, **kw: None)
     monkeypatch.setattr(worker, "stop_core", lambda: calls.append("stop"))
     monkeypatch.setattr(worker, "start_core", lambda offline: calls.append(("start", offline)))
+    monkeypatch.setattr("coinjoin_pipeline.execution.mainnet_worker.time.sleep", lambda _: None)
     assert worker.synchronize_core()["blocks"] == 150
-    assert calls == ["getblockchaininfo", "setnetworkactive", "stop", ("start", True), "getblockchaininfo"]
+    assert calls == [
+        "getblockchaininfo",
+        "setnetworkactive",
+        "stop",
+        ("start", True),
+        "getblockchaininfo",
+        "getblockchaininfo",
+    ]
 
 
 def test_frozen_height_includes_blocks_validated_after_networking_was_disabled(worker, monkeypatch):
@@ -320,8 +335,29 @@ def test_frozen_height_includes_blocks_validated_after_networking_was_disabled(w
     monkeypatch.setattr(worker, "stop_core", stop)
     monkeypatch.setattr(worker, "start_core", start)
     monkeypatch.setattr(worker, "progress", lambda *args, **kw: None)
+    monkeypatch.setattr("coinjoin_pipeline.execution.mainnet_worker.time.sleep", lambda _: None)
     assert worker.synchronize_core() == {"blocks": 400022, "bestblockhash": "400022"}
     assert not state["stopped"] and not state["network"]
+
+
+def test_frozen_height_waits_for_blocks_connected_from_disk_after_the_offline_restart(worker, monkeypatch):
+    worker.c["target_height"] = 400000
+    heights = iter([400013, 400013, 400590, 400595, 400595])
+    sleeps = []
+
+    def rpc(method, *args):
+        if method == "getblockchaininfo":
+            height = next(heights)
+            return {"blocks": height, "bestblockhash": str(height)}
+        return None
+
+    monkeypatch.setattr(worker, "rpc", rpc)
+    monkeypatch.setattr(worker, "stop_core", lambda: None)
+    monkeypatch.setattr(worker, "start_core", lambda offline: None)
+    monkeypatch.setattr(worker, "progress", lambda *args, **kw: None)
+    monkeypatch.setattr("coinjoin_pipeline.execution.mainnet_worker.time.sleep", sleeps.append)
+    assert worker.synchronize_core() == {"blocks": 400595, "bestblockhash": "400595"}
+    assert sleeps == [mainnet_worker.CORE_SETTLE_SECONDS] * 3
 
 
 @pytest.mark.parametrize("height", [100000, 500000])

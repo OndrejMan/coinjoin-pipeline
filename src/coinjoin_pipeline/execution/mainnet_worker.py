@@ -42,6 +42,9 @@ from coinjoin_pipeline.storage.s5client import SHA256, S5Client, S5Error, new_st
 # Free-form JSON documents: manifests, progress records, Core RPC answers.
 JsonObject = dict
 
+# How long an offline Core must keep the same tip before Dumplings pins its height.
+CORE_SETTLE_SECONDS = 10
+
 
 class PbsResources(TypedDict):
     ncpus: int
@@ -580,6 +583,20 @@ class Worker:
             if staging.exists():
                 shutil.rmtree(staging)
 
+    def settled_chain(self) -> JsonObject:
+        """Wait until an offline Core stops connecting the blocks it already stored.
+
+        Without peers Core still connects blocks downloaded ahead of its tip after a
+        restart, so the height Dumplings pins must hold for CORE_SETTLE_SECONDS first.
+        """
+        info = self.rpc_info("getblockchaininfo")
+        while True:
+            time.sleep(CORE_SETTLE_SECONDS)
+            later = self.rpc_info("getblockchaininfo")
+            if later.get("blocks") == info.get("blocks") and later.get("bestblockhash") == info.get("bestblockhash"):
+                return later
+            info = later
+
     def synchronize_core(self) -> JsonObject:
         target = self.c.get("target_height")
         last_report = None
@@ -624,11 +641,11 @@ class Worker:
             # Bounded tests must not keep downloading for a full reporting interval.
             time.sleep(min(self.c["poll_seconds"], 1) if target is not None else self.c["poll_seconds"])
         self.rpc("setnetworkactive", "false")
-        # Disabling P2P does not drain blocks already being validated. A clean
-        # offline restart makes the height stable before Dumplings pins it.
+        # Disabling P2P does not drain blocks already being validated, and an offline
+        # restart still connects stored blocks; settled_chain waits for both to end.
         self.stop_core()
         self.start_core(True)
-        frozen = self.rpc_info("getblockchaininfo")
+        frozen = self.settled_chain()
         if target is not None:
             if frozen["blocks"] < target:
                 raise ValueError("Core fell below the requested height while freezing the chain")
