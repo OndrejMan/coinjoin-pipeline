@@ -321,9 +321,15 @@ After an error the dataset is unlocked only if the worker confirmed that its pro
 ended, or if they never started. A non-zero exit code of a Core that already ended does
 not prevent unlocking after an error; it still forbids publishing the checkpoint. A
 timeout or a failed stop that does not confirm the end of the process keeps the lock.
-After SIGKILL/OOM, `.sync-active` can remain. First check that both PBS jobs and Core
-ended; then its directory can be renamed for an audit. Do not remove it automatically by
-age: some job may still be running.
+After SIGKILL/OOM, walltime or a node failure, `.sync-active` remains, and `afterok`
+cancels the rest of that chain. Every job therefore checks a lock it finds when taking the
+dataset: when `qstat -x -f` reports the owner in `owner.json` ended (`F`, `X`, `C`) or no
+longer knows it, the job renames the lock to `.sync-active.ended-<job>-<run-id>` for an
+audit, removes the RPC cookie its Core left and takes the dataset; PBS has killed every
+process of an ended job, Core included.
+A lock of the job's own ID is the previous attempt of a PBS rerun and is taken without
+asking. A queued or running owner, a qstat that does not answer, or a lock without a job
+ID stop the job. The lock is never judged by its age.
 
 On MetaCentrum, `/scratch/multijob-brno` is a symlink to BeeGFS. The worker therefore
 binds the working directories under both the original path and the real one from

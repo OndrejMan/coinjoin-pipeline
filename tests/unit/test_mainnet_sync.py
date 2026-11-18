@@ -502,6 +502,76 @@ def test_failed_worker_uploads_logs_even_when_cleanup_fails(worker, monkeypatch,
     assert (worker.run / "producer.quiescent").exists() is not cleanup_fails
 
 
+def killed_lock(worker, job="25654655.pbs-m1"):
+    # What an OOM-killed producer leaves: its lock, which afterok then never lets anyone release.
+    worker.active.mkdir(parents=True)
+    atomic_json(worker.active / "owner.json", {"run_id": "mainnet-sync-old", "job_id": job})
+
+
+def test_lock_of_a_job_pbs_reports_ended_is_kept_aside_and_taken(worker, monkeypatch):
+    killed_lock(worker)
+    asked = []
+    monkeypatch.setattr(mainnet_worker, "pbs_job_ended", lambda job: asked.append(job) or True)
+    monkeypatch.setenv("PBS_JOBID", "30000000.pbs-m1")
+    worker.core_dir.mkdir(parents=True, exist_ok=True)
+    (worker.core_dir / ".cookie").write_text("left by the killed Core")
+    worker.acquire_dataset()
+    assert asked == ["25654655.pbs-m1"]
+    assert worker.owns_dataset()
+    assert not (worker.core_dir / ".cookie").exists()
+    (kept,) = worker.root.glob(".sync-active.ended-25654655-*")
+    assert json.loads((kept / "owner.json").read_text())["run_id"] == "mainnet-sync-old"
+
+
+@pytest.mark.parametrize(("ended", "reason"), [(False, "still queued or running"), (None, "not answered for")])
+def test_lock_of_a_live_or_unanswered_job_stays(worker, monkeypatch, ended, reason):
+    killed_lock(worker)
+    monkeypatch.setattr(mainnet_worker, "pbs_job_ended", lambda job: ended)
+    with pytest.raises(RuntimeError, match=f"PBS job 25654655.pbs-m1, which is {reason}"):
+        worker.acquire_dataset()
+    assert not worker.owns_dataset()
+    assert not list(worker.root.glob(".sync-active.ended-*"))
+
+
+def test_rerun_takes_its_own_lock_without_asking_pbs(worker, monkeypatch):
+    killed_lock(worker, "30000000.pbs-m1")
+    monkeypatch.setattr(mainnet_worker, "pbs_job_ended", lambda job: pytest.fail("asked PBS"))
+    monkeypatch.setenv("PBS_JOBID", "30000000.pbs-m1")
+    worker.acquire_dataset()
+    assert worker.owns_dataset()
+
+
+def test_lock_without_a_pbs_job_is_never_released(worker, monkeypatch):
+    worker.active.mkdir(parents=True)
+    monkeypatch.setattr(mainnet_worker, "pbs_job_ended", lambda job: True)
+    with pytest.raises(RuntimeError, match="a lock without a PBS job"):
+        worker.acquire_dataset()
+    assert worker.active.exists()
+
+
+@pytest.mark.parametrize(
+    ("script", "expected"),
+    [
+        ("echo '    job_state = F'", True),
+        ("echo '    job_state = R'", False),
+        ("echo '    job_state = Q'", False),
+        ("echo 'qstat: Unknown Job Id 1.pbs' >&2; exit 153", True),
+        ("echo 'qstat: cannot connect to server' >&2; exit 1", None),
+    ],
+)
+def test_pbs_answer_decides_whether_a_lock_owner_ended(tmp_path, monkeypatch, script, expected):
+    qstat = tmp_path / "qstat"
+    qstat.write_text(f"#!/bin/sh\n{script}\n")
+    qstat.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
+    assert mainnet_worker.pbs_job_ended("1.pbs") is expected
+
+
+def test_missing_qstat_cannot_tell(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert mainnet_worker.pbs_job_ended("1.pbs") is None
+
+
 @pytest.mark.parametrize("foreign_owner", [False, True])
 def test_failed_core_allows_failure_hook_to_release_only_its_dataset(worker, monkeypatch, foreign_owner):
     settings = worker.work / "settings.json"

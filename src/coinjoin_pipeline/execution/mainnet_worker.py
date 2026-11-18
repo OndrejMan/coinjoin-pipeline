@@ -30,6 +30,7 @@ from exporters.artifact_paths import INDEX_MANIFEST_COPY, pbs_marker
 
 from coinjoin_pipeline.execution.pbs.apptainer import MISSING_RUNTIME, alias_binds, exec_command, find_runtime
 from coinjoin_pipeline.execution.pbs.index_store import MEMBERS as INDEX_MEMBERS
+from coinjoin_pipeline.execution.pbs.index_store import PBS_JOB_ID, pbs_job_ended
 from coinjoin_pipeline.execution.pbs.index_store import inventory as index_inventory
 from coinjoin_pipeline.execution.pbs.index_store import usage_report, utc_now
 from coinjoin_pipeline.storage.s5client import SHA256, S5Client, S5Error, new_staging
@@ -274,8 +275,53 @@ class Worker:
     def acquire_dataset(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         # mkdir is atomic on the shared filesystem. No expiry guesses across queue waits.
-        self.active.mkdir()
+        try:
+            self.active.mkdir()
+        except FileExistsError:
+            holder = self.release_ended_dataset()
+            if holder is None:
+                try:
+                    self.active.mkdir()
+                except FileExistsError:
+                    holder = "another job, which took it first"
+            if holder is not None:
+                raise RuntimeError(f"The working dataset is locked by {holder}; {self.active} stays") from None
+            # That job's Core died with it; its cookie would make the Lab's cleanup refuse.
+            (self.core_dir / ".cookie").unlink(missing_ok=True)
         atomic_json(self.active / "owner.json", {"run_id": self.run_id, "job_id": os.environ.get("PBS_JOBID")})
+
+    def dataset_owner(self, lock: Path) -> str | None:
+        try:
+            job = read_json(lock / "owner.json").get("job_id")
+        except (OSError, ValueError, AttributeError):
+            return None
+        return job if isinstance(job, str) and PBS_JOB_ID.fullmatch(job) else None
+
+    def release_ended_dataset(self) -> str | None:
+        """Set aside a lock whose PBS job has ended: None once it is, else who holds it.
+
+        A job PBS kills (out of memory, walltime, node failure) never releases its lock, and
+        afterok cancels the rest of its chain, so the next synchronization meets it. PBS must
+        report the owner ended or unknown; a lock of this very job is a rerun's previous
+        attempt. The lock is kept as .sync-active.ended-<job>-<run> for an audit.
+        """
+        job = self.dataset_owner(self.active)
+        if job is None:
+            return "a lock without a PBS job"
+        ended = job == os.environ.get("PBS_JOBID") or pbs_job_ended(job)
+        if ended is not True:
+            return f"PBS job {job}, which is {'still queued or running' if ended is False else 'not answered for'}"
+        kept = self.active.with_name(f"{self.active.name}.ended-{job.split('.')[0]}-{self.run_id}")
+        try:
+            self.active.rename(kept)
+        except FileNotFoundError:
+            return "another job, which released it first"
+        if self.dataset_owner(kept) != job:
+            # Another job took the lock between the check and the rename: give it back.
+            kept.rename(self.active)
+            return "another job"
+        print(f"Released the dataset lock of ended PBS job {job}; it is kept in {kept}", flush=True)
+        return None
 
     def release_dataset(self) -> None:
         if self.owns_dataset():
