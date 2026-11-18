@@ -280,6 +280,47 @@ def test_a_lock_left_by_a_killed_job_expires(tmp_path, capsys):
     assert reader.held == tmp_path / "index/.lock/readers/reader"
 
 
+def fake_qstat(tmp_path, monkeypatch, state):
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    (tools / "qstat").write_text(f"#!/bin/sh\necho '    job_state = {state}'\n")
+    (tools / "qstat").chmod(0o755)
+    monkeypatch.setenv("PATH", str(tools) + os.pathsep + os.environ["PATH"])
+
+
+def test_a_lock_of_a_pbs_job_that_ended_is_cleared_before_it_expires(tmp_path, monkeypatch, capsys):
+    store(tmp_path, job="123.pbs-m1", lock_seconds=3600).lock_exclusive()
+    fake_qstat(tmp_path, monkeypatch, "F")
+
+    reader = store(tmp_path, job="reader")
+    reader.lock_shared()
+
+    assert "clearing lock writer of ended PBS job 123.pbs-m1" in capsys.readouterr().out
+    assert reader.held == tmp_path / "index/.lock/readers/reader"
+
+
+def test_a_lock_of_a_running_pbs_job_stays_until_it_expires(tmp_path, monkeypatch):
+    store(tmp_path, job="123.pbs-m1", lock_seconds=3600).lock_shared()
+    fake_qstat(tmp_path, monkeypatch, "R")
+
+    with pytest.raises(IndexStoreError, match="readers still hold"):
+        store(tmp_path, job="writer").lock_exclusive()
+
+    assert (tmp_path / "index/.lock/readers/123.pbs-m1").is_dir()
+
+
+def test_a_rerun_clears_the_entry_of_its_earlier_attempt(tmp_path, monkeypatch):
+    store(tmp_path, job="123.pbs-m1", lock_seconds=3600).lock_shared()
+    monkeypatch.setenv("PBS_JOBID", "123.pbs-m1")
+    monkeypatch.setenv("PATH", str(tmp_path))  # PBS is not asked about its own job
+
+    rerun = store(tmp_path, job="123.pbs-m1")
+    rerun.lock_exclusive()
+
+    assert rerun.held == tmp_path / "index/.lock/writer"
+    assert not (tmp_path / "index/.lock/readers/123.pbs-m1").exists()
+
+
 def test_a_purged_file_makes_the_working_copy_incomplete(tmp_path):
     parse_index(tmp_path)
     (tmp_path / "index/parsed/chain/block.dat").unlink()

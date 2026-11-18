@@ -17,8 +17,8 @@ lived in the job's scratch.
 Lock: one writer or many readers, as directories under <index>/.lock. Entries are built
 aside and renamed into place, which is atomic on NFS and BeeGFS without flock. Each
 holds its job ID and an expiry past the job's walltime, so an entry a killed job left
-is cleared instead of blocking the index forever. scenario-lab's multijob cleanup
-reads the same entries.
+is cleared instead of blocking the index forever; an entry whose PBS job qstat reports
+ended is cleared at once. scenario-lab's multijob cleanup reads the same entries.
 """
 
 from __future__ import annotations
@@ -26,7 +26,9 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import shutil
+import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +46,31 @@ MANIFEST_SCHEMA = "1.1"
 ARCHIVE = "blocksci_index.tar.zst"
 # What a backup holds; everything else in the working copy is lock or job state.
 MEMBERS = ("config.json", "files.txt", "manifest.json", "parsed")
+
+
+# qstat states of a job that has ended: PBS Pro F (finished) and X (subjob), Torque C.
+ENDED_JOB_STATES = frozenset({"F", "X", "C"})
+PBS_JOB_ID = re.compile(r"[0-9]+(?:\.[A-Za-z0-9._-]+)?")
+
+
+def pbs_job_ended(job_id: str) -> bool | None:
+    """True when PBS reports the job ended or no longer knows it, None when it cannot tell."""
+    try:
+        reply = subprocess.run(
+            ["qstat", "-x", "-f", job_id],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if reply.returncode != 0:
+        detail = (reply.stderr or reply.stdout).lower()
+        return True if "unknown job" in detail or "job has finished" in detail else None
+    state = re.search(r"^\s*job_state\s*=\s*(\S+)", reply.stdout, re.MULTILINE)
+    return state.group(1) in ENDED_JOB_STATES if state else None
 
 
 class IndexStoreError(RuntimeError):
@@ -165,24 +192,35 @@ class IndexStore:
             shutil.rmtree(staging, ignore_errors=True)
             return False
 
+    def owner_ended(self, job: str) -> bool:
+        """A PBS job's entry PBS reports ended, or this job's own entry from a rerun's earlier attempt."""
+        if not PBS_JOB_ID.fullmatch(job):
+            return False
+        return job == os.environ.get("PBS_JOBID") or pbs_job_ended(job) is True
+
     def clear_expired(self) -> None:
+        """Clear entries a killed job left: past their expiry, or of a job that has ended."""
         now = int(time.time())
         readers = self.lock / "readers"
         entries = [self.lock / "writer", *(sorted(readers.iterdir()) if readers.is_dir() else [])]
         for entry in entries:
-            if not entry.is_dir():
+            if not entry.is_dir() or entry == self.held:
                 continue
             try:
                 expires = int((entry / "expires").read_text().strip())
             except (OSError, ValueError):
                 expires = 0
+            try:
+                job = (entry / "job").read_text().strip()
+            except OSError:
+                job = "unknown"
             if now >= expires:
-                try:
-                    job = (entry / "job").read_text().strip()
-                except OSError:
-                    job = "unknown"
                 print(f"[index] clearing expired lock {entry.name} of job {job}", flush=True)
-                shutil.rmtree(entry, ignore_errors=True)
+            elif self.owner_ended(job):
+                print(f"[index] clearing lock {entry.name} of ended PBS job {job}", flush=True)
+            else:
+                continue
+            shutil.rmtree(entry, ignore_errors=True)
 
     def _wait(self, deadline: float, message: str) -> None:
         if time.time() >= deadline:

@@ -164,7 +164,9 @@ Writers (`parse`, `update`) take an exclusive lock and readers (`backup` and the
 analyses) a shared one,
 held as directories under `<index>/.lock` that are renamed into place (atomic on
 NFS and BeeGFS without `flock`). Each entry holds the PBS job ID and an expiry
-600 s past the walltime, after which another job clears it. A job waits up to
+600 s past the walltime, after which another job clears it; an entry whose job
+`qstat -x -f` reports ended (`F`, `X`, `C`, or no longer known) is cleared at once,
+and a PBS rerun clears the entry of its own earlier attempt. A job waits up to
 half its walltime for the lock, then fails. A copy is complete when it has no
 `.writing` marker and its files match `files.txt`; writers set `.writing` until
 they record `config.json`, `manifest.json` (the S3 cache fields an update reads,

@@ -443,7 +443,7 @@ never streams an archive and needs 2.1 for `sync --exclude`. Consumers run only 
 Persistent mainnet indexes still stay in shared storage and are read/updated in
 place; emulations do not introduce a persistent working copy. Their lock
 (`<index>/.lock`, one writer or many readers, each entry with its job ID and an
-expiry past the job's walltime) is shared by the S3 index jobs, the mainnet
+expiry past the job's walltime, cleared early once PBS reports that job ended) is shared by the S3 index jobs, the mainnet
 synchronization and scenario-lab's multijob cleanup.
 
 A parse from a block archive in S3 (`blocksci.bitcoin_blocks_uri`) goes through
