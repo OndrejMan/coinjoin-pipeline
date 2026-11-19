@@ -14,42 +14,42 @@
       "joinmarket": { "role": "taker" }
     },
     {
-      "funds": [1000000, 500000],
+      "funds": [1010000, 505000],
       "delay_blocks": 1,
       "joinmarket": { "role": "maker" }
     },
     {
-      "funds": [3000000, 500000],
+      "funds": [3030000, 515000],
       "delay_blocks": 1,
       "joinmarket": { "role": "maker" }
     },
     {
-      "funds": [1000000, 500000],
+      "funds": [1020000, 525000],
       "delay_blocks": 1,
       "joinmarket": { "role": "maker" }
     },
     {
-      "funds": [3000000, 600000],
+      "funds": [3040000, 610000],
       "delay_blocks": 1,
       "joinmarket": { "role": "maker" }
     },
     {
-      "funds": [200000, 50000],
+      "funds": [213000, 53000],
       "delay_blocks": 1,
       "joinmarket": { "role": "maker" }
     },
     {
-      "funds": [3000000],
+      "funds": [3050000],
       "delay_blocks": 1,
       "joinmarket": { "role": "maker" }
     },
     {
-      "funds": [1000000, 500000],
+      "funds": [1030000, 535000],
       "delay_blocks": 1,
       "joinmarket": { "role": "maker" }
     },
     {
-      "funds": [3000000, 15000],
+      "funds": [3060000, 15000],
       "delay_blocks": 1,
       "joinmarket": { "role": "maker" }
     }
