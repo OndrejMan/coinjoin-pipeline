@@ -884,7 +884,6 @@ def test_s3_controller_explicitly_runs_in_cluster(engine):
     command = shlex.split(controller["command"][-1])
     assert command.count("--in-cluster") == 1
     assert command.index("--in-cluster") < command.index("run")
-    assert "--disable-port-forward" in command
 
 
 def test_s3_controller_knows_its_own_pod_to_own_the_emulation_pods() -> None:

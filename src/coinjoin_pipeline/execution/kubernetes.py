@@ -374,7 +374,7 @@ def render_s3_emulation_resources(
     controller = (
         'python manager.py --driver kubernetes --in-cluster --engine "$ENGINE" run '
         '--scenario /config/scenario.json --namespace "$NAMESPACE" --reuse-namespace '
-        '--disable-port-forward --image-prefix "$IMAGE_PREFIX" --run-id "$RUN_ID" '
+        '--image-prefix "$IMAGE_PREFIX" --run-id "$RUN_ID" '
         '--btc-node-arg=-blocksxor=0 --download-btc-data "/app/logs/$RUN_ID/bitcoin_data" '
         "--controller-done-marker /app/logs/.controller.done "
         "--controller-failed-marker /app/logs/.controller.failed"
