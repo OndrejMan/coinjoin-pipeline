@@ -42,7 +42,9 @@ def run_kubernetes_emulation(
     By default the btc-node pod writes directly to a shared host path; with
     ``copy_to_host`` the data is downloaded through the Kubernetes API instead.
     """
-    scenario, engine, kubernetes = config.scenario, config.engine, config.kubernetes
+    scenario, kubernetes = config.scenario, config.kubernetes
+    if not scenario:
+        raise ValueError("Kubernetes emulation requires --scenario")
     copy_to_host = kubernetes.copy_to_host
     env = containers.compose_env(config, create_directories=True)
     host_root_dir = containers.default_host_root_dir()
@@ -60,11 +62,8 @@ def run_kubernetes_emulation(
     emulation_logs_dir.mkdir(parents=True, exist_ok=True)
     if copy_to_host:
         local_btc_data_dir.mkdir(parents=True, exist_ok=True)
-    if scenario:
-        source = scenarios.scenario_source_path(scenario, scenarios_dir, engine)
-        container_scenario = scenarios.container_scenario_path(str(source), scenarios_dir, engine)
-    else:
-        container_scenario = scenarios.default_container_scenario(engine)
+    source = scenarios.scenario_source_path(scenario, scenarios_dir)
+    container_scenario = scenarios.container_scenario_path(str(source), scenarios_dir)
     kubeconfig_path = resolve_kubeconfig(kubernetes.kubeconfig)
     if not kubeconfig_path.exists():
         raise ValueError(f"kubeconfig not found at {kubeconfig_path}; pass --kubeconfig or create ~/.kube/config")

@@ -10,10 +10,8 @@ from coinjoin_pipeline.execution import settings
 from coinjoin_pipeline import paths
 
 
-def scenario_source_path(value: str | None, scenarios_dir: Path, engine: str = settings.DEFAULT_ENGINE) -> Path:
-    """Resolve an explicit host file or a name inside the default catalogue."""
-    if not value:
-        return host_scenario_path(default_container_scenario(engine), scenarios_dir)
+def scenario_source_path(value: str, scenarios_dir: Path) -> Path:
+    """Resolve an explicit host file or a name inside the catalogue."""
     candidate = Path(value).expanduser()
     if candidate.is_file():
         return candidate.resolve()
@@ -133,17 +131,7 @@ def packaged_scenarios(engine: str | None = None) -> list[dict[str, object]]:
     return results
 
 
-def default_container_scenario(engine: str) -> str:
-    return (
-        settings.DEFAULT_JOINMARKET_CONTAINER_SCENARIO
-        if engine == "joinmarket"
-        else settings.DEFAULT_CONTAINER_SCENARIO
-    )
-
-
-def container_scenario_path(scenario: str | None, scenarios_dir: Path, engine: str = settings.DEFAULT_ENGINE) -> str:
-    if not scenario:
-        return default_container_scenario(engine)
+def container_scenario_path(scenario: str, scenarios_dir: Path) -> str:
     scenario_path = Path(scenario).expanduser()
     if not scenario_path.is_absolute():
         parts = scenario_path.parts

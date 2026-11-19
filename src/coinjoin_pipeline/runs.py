@@ -22,20 +22,21 @@ def slugify_run_component(value: str, *, max_length: int) -> str:
     return slug or "scenario"
 
 
-def scenario_file(value: str | None, engine: str) -> Path | None:
-    """The scenario file execution will read (a path, a name in the catalogue, or the engine's default), else None."""
+def scenario_file(value: str | None) -> Path | None:
+    """The scenario file execution will read (a path or a name in the catalogue), else None."""
     from .execution.scenarios import scenario_source_path
     from .paths import scenarios_dir
 
-    named = scenario_source_path(value, scenarios_dir(), engine)
+    if not value:
+        return None
+    named = scenario_source_path(value, scenarios_dir())
     return named if named.is_file() else None
 
 
 def run_id_for(config: PipelineConfiguration) -> str:
     if config.run_id:
         return config.run_id
-    # Without a scenario the emulator runs its engine's default one (execution/settings.py).
-    candidate = scenario_file(config.scenario, config.engine)
+    candidate = scenario_file(config.scenario)
     if candidate is None:
         candidate = Path(config.scenario or "scenario").expanduser()
     try:

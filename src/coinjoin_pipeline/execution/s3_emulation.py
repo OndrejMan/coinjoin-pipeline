@@ -36,7 +36,9 @@ def _text(value: int | None) -> str | None:
 
 def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
     """Render and submit a Kubernetes job that uploads its artifacts to S3."""
-    scenario_path = scenario_source_path(args.scenario, scenarios_dir(), args.engine)
+    if not args.scenario:
+        raise RuntimeError("Kubernetes S3 emulation requires --scenario")
+    scenario_path = scenario_source_path(args.scenario, scenarios_dir())
     if not scenario_path.is_file():
         raise RuntimeError(f"Scenario file not found: {scenario_path}")
     kubernetes = args.kubernetes

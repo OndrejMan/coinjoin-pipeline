@@ -117,7 +117,7 @@ echo "Using BlockSci image ${BLOCKSCI_IMAGE}, emulator image ${COINJOIN_EMULATOR
     COINJOIN_EMULATOR_IRC_SERVER_IMAGE="${COINJOIN_EMULATOR_IRC_SERVER_IMAGE:-}" \
     COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-}" \
     COINJOIN_COMPOSE_PROJECT="${COMPOSE_PROJECT}" \
-    bash runIt.sh full-run --engine joinmarket
+    bash runIt.sh full-run --engine joinmarket --scenario scenarios/defaultJoinMarket.json
   ) 2>&1 | tee "${RUN_LOG}"
 ) &
 RUN_PID=$!

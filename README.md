@@ -60,7 +60,8 @@ The YAML `scenario` field accepts the same path. Relative paths are resolved fro
 the directory where the CLI is invoked. Local Docker/Podman and Kubernetes
 launchers mount the selected file's directory read-only; Kubernetes → S3 embeds
 its contents in the Job's ConfigMap. No copy into the emulator checkout is needed.
-The pipeline's own `scenarios/` remains available for defaults and test fixtures.
+`emulate` and `full-run` always need a scenario; there is no default. The pipeline's
+own `scenarios/` holds only the scenarios its tests pass explicitly.
 Optional top-level `description` and `category` fields are catalogue metadata:
 they are sent unchanged to the emulator but do not affect the pipeline,
 coinjoin-analysis, or BlockSci.

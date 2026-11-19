@@ -1,5 +1,6 @@
 action: full-run
 engine: wasabi
+scenario: scenarios/overactive-local.json
 coinjoin_type: wasabi2
 driver: kubernetes
 emulation_timeout: 21600

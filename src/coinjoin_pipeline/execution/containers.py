@@ -218,12 +218,11 @@ def compose_env(
     env.setdefault("COINJOIN_EMULATOR_IMAGE", default_image("emulator", registry))
     scenario = config.scenario if include_scenario else None
     if scenario:
-        source = scenario_source_path(scenario, scenario_root, config.engine)
+        source = scenario_source_path(scenario, scenario_root)
         if not source.is_relative_to(scenario_root):
             scenario_root = source.parent
             env["SCENARIOS_DIR"] = str(scenario_root)
-        scenario = str(source)
-    env["SCENARIO_CONTAINER_PATH"] = container_scenario_path(scenario, scenario_root, config.engine)
+        env["SCENARIO_CONTAINER_PATH"] = container_scenario_path(str(source), scenario_root)
     add_image_provenance_env(env)
     if active_run_id:
         env["ACTIVE_RUN_ID"] = active_run_id

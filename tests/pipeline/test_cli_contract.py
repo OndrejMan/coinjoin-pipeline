@@ -115,17 +115,31 @@ def test_value_errors_name_the_flag_as_well_as_the_yaml_key():
 
 def test_dry_run_prints_the_resolved_run_and_images(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr("coinjoin_pipeline.cli.execute", lambda _context: None)
-    argv = ["full-run", "--runs-root", str(tmp_path), "--run-id", "run-a", "--version", "v9", "--dry-run"]
+    argv = ["full-run", "--scenario", "scenarios/overactive-local.json", "--runs-root", str(tmp_path)]
+    argv += ["--run-id", "run-a", "--version", "v9", "--dry-run"]
     assert main(argv) == 0
     output = capsys.readouterr().out
     assert f"[dry-run] run directory: {tmp_path / 'run-a'}" in output
     assert "[dry-run] image blocksci: ghcr.io/ondrejman/blocksci-complete:v9" in output
 
 
+@pytest.mark.parametrize("argv", [["emulate"], ["full-run"], ["--engine", "wasabi"]])
+def test_a_run_requires_an_explicit_scenario(tmp_path, capsys, monkeypatch, argv):
+    monkeypatch.setattr("coinjoin_pipeline.cli.execute", lambda _context: pytest.fail("must not execute"))
+    assert main([*argv, "--runs-root", str(tmp_path), "--dry-run"]) == 2
+    assert "requires --scenario; there is no default scenario" in capsys.readouterr().err
+
+
+def test_doctor_needs_no_scenario(tmp_path, monkeypatch):
+    monkeypatch.setattr("coinjoin_pipeline.cli.doctor_check", lambda *_args, **_kwargs: [])
+    assert main(["doctor", "--runs-root", str(tmp_path)]) == 0
+
+
 def test_every_preflight_error_gets_its_own_line(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr("coinjoin_pipeline.cli.execute", lambda _context: pytest.fail("must not execute"))
     monkeypatch.setattr("coinjoin_pipeline.cli.doctor_check", lambda *_args, **_kwargs: ["first", "second"])
-    assert main(["emulate", "--runs-root", str(tmp_path), "--run-id", "run-a"]) == 2
+    argv = ["emulate", "--scenario", "scenarios/overactive-local.json", "--runs-root", str(tmp_path)]
+    assert main([*argv, "--run-id", "run-a"]) == 2
     assert capsys.readouterr().err.splitlines() == ["ERROR: first", "ERROR: second"]
 
 

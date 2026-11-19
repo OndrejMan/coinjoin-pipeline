@@ -41,6 +41,8 @@ def test_executes_typed_configuration_in_process_and_restores_environment(tmp_pa
                     "full-run",
                     "--engine",
                     "joinmarket",
+                    "--scenario",
+                    "scenarios/defaultJoinMarket.json",
                     "--runs-root",
                     str(tmp_path),
                     "--run-id",
@@ -63,7 +65,9 @@ def test_failed_execution_finishes_manifest(tmp_path):
         mock.patch.object(cli, "doctor_check", return_value=[]),
         mock.patch.object(cli, "execute", side_effect=RuntimeError("failed stage")),
     ):
-        assert cli.main(["emulate", "--runs-root", str(tmp_path), "--run-id", "failed-run"]) == 5
+        argv = ["emulate", "--scenario", "scenarios/overactive-local.json", "--runs-root", str(tmp_path)]
+        argv += ["--run-id", "failed-run"]
+        assert cli.main(argv) == 5
     manifest = json.loads((tmp_path / "failed-run/research_manifest.json").read_text())
     assert manifest["host_launcher"]["status"] == "failed"
     assert manifest["host_launcher"]["exit_code"] == 5
@@ -105,7 +109,17 @@ def test_manifest_records_effective_environment_without_secrets(tmp_path, fails)
         mock.patch.object(cli, "execute", side_effect=execute),
     ):
         code = cli.main(
-            ["emulate", "--runs-root", str(tmp_path), "--run-id", "run-a", "--blocksci-image", "blocksci:explicit"]
+            [
+                "emulate",
+                "--scenario",
+                "scenarios/overactive-local.json",
+                "--runs-root",
+                str(tmp_path),
+                "--run-id",
+                "run-a",
+                "--blocksci-image",
+                "blocksci:explicit",
+            ]
         )
         assert code == (5 if fails else 0)
         assert dict(os.environ) == inherited
@@ -132,6 +146,8 @@ def test_dry_run_does_not_overwrite_manifest_or_preflight_runtime(tmp_path):
             cli.main(
                 [
                     "full-run",
+                    "--scenario",
+                    "scenarios/overactive-local.json",
                     "--runs-root",
                     str(tmp_path),
                     "--run-id",
@@ -149,6 +165,8 @@ def test_dry_run_does_not_overwrite_manifest_or_preflight_runtime(tmp_path):
 
 S3_FULL_RUN = [
     "full-run",
+    "--scenario",
+    "scenarios/overactive-local.json",
     "--engine",
     "wasabi",
     "--driver",

@@ -13,12 +13,13 @@ exit 99
 FAKE
 chmod +x "$TMP_DIR/bin/docker"
 export PATH="$TMP_DIR/bin:$PATH"
-"$PROJECT_DIR/runIt.sh" full-run --engine wasabi --dry-run > "$TMP_DIR/output"
+"$PROJECT_DIR/runIt.sh" full-run --engine wasabi --scenario scenarios/overactive-local.json --dry-run > "$TMP_DIR/output"
 grep -Fq '[dry-run] action: full-run' "$TMP_DIR/output"
 test ! -e "$EMULATION_LOGS_DIR"
-cat > "$TMP_DIR/run.yaml" <<'YAML'
+cat > "$TMP_DIR/run.yaml" <<YAML
 action: full-run
 engine: joinmarket
+scenario: $PROJECT_DIR/scenarios/defaultJoinMarket.json
 YAML
 (cd "$TMP_DIR" && "$PROJECT_DIR/runIt.sh" run "$TMP_DIR/run.yaml" --dry-run) > "$TMP_DIR/output"
 grep -Fq '[dry-run] engine: joinmarket' "$TMP_DIR/output"
