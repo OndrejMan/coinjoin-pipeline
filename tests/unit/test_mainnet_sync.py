@@ -398,6 +398,32 @@ def test_producer_reports_core_height_separately_from_scanner_progress(worker, m
     assert ready["height"] == ready["dumplings_height"] == height
 
 
+def test_producer_stops_at_the_first_unresolved_tx0_candidate(worker, monkeypatch):
+    worker.c["target_height"] = 700000
+    block_hash = "a" * 64
+    polls = []
+    monkeypatch.setattr(worker, "start_core", lambda _: None)
+    monkeypatch.setattr(worker, "stop_core", lambda: None)
+    monkeypatch.setattr(worker, "synchronize_core", lambda: {"blocks": 700000, "bestblockhash": block_hash})
+    monkeypatch.setattr(worker, "rpc", lambda method, *args: block_hash if method == "getblockhash" else 700000)
+    monkeypatch.setattr(worker, "container_command", lambda *args, **kwargs: list(args))
+    monkeypatch.setattr(worker, "archive", lambda: pytest.fail("the scan must stop before the archive"))
+
+    def scan(command, name, poll):
+        misses = worker.dumps / "Scanner/Tx0CandidateMisses.txt"
+        poll()
+        polls.append("clean")
+        misses.write_text("703965 c7589e2835 unresolved\n")
+        poll()
+        polls.append("unreachable")
+
+    monkeypatch.setattr(worker, "run_command", scan)
+    first_synchronization(worker)
+    with pytest.raises(ValueError, match="first: 703965 c7589e2835 unresolved"):
+        mainnet_jobs.producer(worker)
+    assert polls == ["clean"]
+
+
 @pytest.mark.parametrize("chain,height", [("main", 99999), ("regtest", 99)])
 def test_short_historical_chain_keeps_all_blocks(worker, monkeypatch, chain, height):
     worker.chain = chain

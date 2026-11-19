@@ -360,7 +360,17 @@ def producer(worker: Worker) -> None:
     scanner.mkdir(parents=True, exist_ok=True)
     atomic_json(anchor_path, {"height": height, "hash": block_hash})
 
+    misses = scanner / "Tx0CandidateMisses.txt"
+
     def scan_progress() -> None:
+        # Dumplings never resolves a recorded miss, and scanner_complete refuses any, so stop now
+        # instead of after the rest of the scan.
+        try:
+            first_miss = next(iter(misses.read_text().splitlines()), "")
+        except OSError:
+            first_miss = ""
+        if first_miss:
+            raise ValueError(f"Dumplings has unresolved Tx0 candidates (first: {first_miss}); scan stopped early")
         try:
             current = int(scan_height.read_text())
         except (OSError, ValueError):
