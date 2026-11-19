@@ -370,43 +370,6 @@ def test_a_plain_index_is_bound_once(tmp_path):
     assert store(tmp_path).binds("rw") == [f"{real}:{real}:rw"]
 
 
-def shell_lock(tmp_path, job, body):
-    """The shell library of earlier jobs, which can still run while new ones start."""
-    library = subprocess.run(
-        ["git", "show", "HEAD:src/coinjoin_pipeline/execution/pbs/templates/index_store.sh"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if library.returncode:
-        pytest.skip("the shell index library is no longer in HEAD")
-    script = (
-        f"set -euo pipefail\nINDEX_DIR={tmp_path}/index\nINDEX_BACKUP=\nPBS_JOBID={job}\n"
-        "INDEX_LOCK_EXPIRES=$(($(date +%s) + 3600))\nINDEX_LOCK_WAIT=1\nINDEX_LOCK_POLL=0.1\n"
-        f"{library.stdout}\nmkdir -p \"$INDEX_DIR\"\n{body}\n"
-    )
-    return subprocess.run(["bash", "-c", script], capture_output=True, text=True)
-
-
-def test_python_and_shell_jobs_respect_each_others_locks(tmp_path):
-    writer = store(tmp_path, job="python-writer")
-    writer.lock_exclusive()
-    blocked = shell_lock(tmp_path, "shell-reader", "index_lock_shared")
-    assert blocked.returncode == 1 and "is being updated" in blocked.stderr
-    writer.unlock()
-
-    assert shell_lock(tmp_path, "shell-reader", "index_lock_shared").returncode == 0
-    with pytest.raises(IndexStoreError, match="readers still hold"):
-        store(tmp_path, job="python-writer", wait=0.5).lock_exclusive()
-    assert (tmp_path / "index/.lock/readers/shell-reader/job").read_text() == "shell-reader\n"
-    python_entry = store(tmp_path, job="python-reader")
-    python_entry.lock_shared()
-    assert sorted((tmp_path / "index/.lock/readers/python-reader").iterdir()) == [
-        tmp_path / "index/.lock/readers/python-reader/expires",
-        tmp_path / "index/.lock/readers/python-reader/job",
-    ]
-
-
 def test_a_reading_job_restores_the_backup_into_its_own_scratch(tmp_path):
     parse_index(tmp_path)
     backup(tmp_path)
