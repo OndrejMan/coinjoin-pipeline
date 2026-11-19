@@ -44,7 +44,7 @@ pbs:
     multijob: brno
   blocksci:
     ncpus: 4
-    mem: 64gb
+    mem: 160gb
     scratch: 20gb
     walltime: '24:00:00'
     multijob: brno

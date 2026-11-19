@@ -108,7 +108,7 @@ target. The next pass checks the original branch even when a partial scan is res
 A reorganization, or importing an old Scanner without this link, requires an explicit
 check or restore; detections do not carry over between branches automatically.
 
-`mainnet-blocksci` (64 GB) checks the exact generation and, under the exclusive lock,
+`mainnet-blocksci` (160 GB) checks the exact generation and, under the exclusive lock,
 updates the index directly over the same blk files. It checks the block count H+1 and the
 hash at H, writes `manifest.json` and `files.txt` and deletes `.writing`: the index is
 complete even though it has no backup yet. Core does not run in this job.
