@@ -25,8 +25,8 @@ uv run lint
 coinjoin-pipeline version
 cjp doctor
 coinjoin-pipeline pull
-coinjoin-pipeline full-run --engine joinmarket --dry-run
-coinjoin-pipeline full-run --engine joinmarket
+coinjoin-pipeline full-run --engine joinmarket --scenario scenarios/defaultJoinMarket.json --dry-run
+coinjoin-pipeline full-run --engine joinmarket --scenario scenarios/defaultJoinMarket.json
 # Small regtest Wasabi rounds need an explicit input threshold.
 coinjoin-pipeline full-run --engine wasabi \
   --scenario scenarios/overactive-local.json \
@@ -154,7 +154,7 @@ generations.
 Developer compatibility entrypoints use the same CLI:
 
 ```bash
-./runIt.sh full-run --engine joinmarket --local-build --dry-run
+./runIt.sh full-run --engine joinmarket --scenario scenarios/defaultJoinMarket.json --local-build --dry-run
 ./run-all.sh local --build-only
 ```
 
