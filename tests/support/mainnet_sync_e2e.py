@@ -246,13 +246,14 @@ def check_restored(work: Path, token: str, mode: str, target: int) -> dict:
 
 
 def check_refused(work: Path, token: str) -> dict:
-    """The fourth run found only part of the working dataset and refused it before Core started."""
+    """The fourth run found Core's chainstate gone and refused the rest before Core started."""
     restore = read_json(work / "data/sync/restore.json")
     producer = read_json(work / "data/sync/producer.json")
     assert restore["run_id"] == producer["run_id"] == f"local-sync-{token}-4"
     assert restore["action"] == "skipped-not-empty", restore
     assert producer["state"] == "failed", producer
-    assert not (work / "index/config.json").exists(), "A partial dataset must never be refilled"
+    assert (work / "index/config.json").exists(), "The index that stayed must stay"
+    assert not list((work / "data/bitcoin").glob("**/chainstate")), "Core must never be refilled alone"
     assert not (work / "data/sync/done.json").exists()
     assert not (work / "data/.sync-active").exists()
     return {"partial_dataset_refused": True}

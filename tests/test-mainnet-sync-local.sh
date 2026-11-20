@@ -297,9 +297,12 @@ run_generation "local-sync-$token-3" "$restore_target"
 cp "$work/data/sync/restore.json" "$work/third-restore.json"
 s5 ls 's3://local-mainnet-sync/blocks/*' >"$work/blocks-after-restore.txt"
 "$python" "$repo/tests/support/mainnet_sync_e2e.py" restored "$work" "$token" "$mode" "$restore_target"
-# Only part of the dataset is gone: job 0 leaves it alone and the producer refuses it.
-rm -rf "$work/index"
-refused_generation "local-sync-$token-4" "$restore_target" "The working dataset is incomplete (missing: BlockSci index)"
+# Only Core's chainstate is gone: job 0 refills a lone Scanner or index but never Core,
+# so it leaves the dataset alone and the producer refuses it.
+chain_dir="$work/data/bitcoin"
+[[ "$mode" != regtest ]] || chain_dir+=/regtest
+rm -rf "$chain_dir/chainstate"
+refused_generation "local-sync-$token-4" "$restore_target" "The working dataset is incomplete (missing: Core chainstate)"
 "$python" "$repo/tests/support/mainnet_sync_e2e.py" refused "$work" "$token"
 # The production chain ends by clearing the dataset; only this run keeps that job.
 rm -rf "$work/data" "$work/index"
