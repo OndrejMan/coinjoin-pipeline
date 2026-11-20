@@ -196,8 +196,13 @@ def run_labels(run_id: str, owner: str | None = None) -> dict[str, str]:
 
 
 def run_selector(run_id: str, owner: str | None = None) -> str:
-    """A selector for exactly the objects ``run_labels`` marks: another owner's never match."""
-    return ",".join(f"{key}={value}" for key, value in run_labels(run_id, owner).items())
+    """A selector for exactly the objects ``run_labels`` marks: another owner's never match.
+
+    Without an owner it requires the label to be absent, so a run launched without
+    ``--owner`` never selects an owner's objects that carry the same run ID.
+    """
+    terms = [f"{key}={value}" for key, value in run_labels(run_id, owner).items()]
+    return ",".join(terms if owner else [*terms, f"!{OWNER_LABEL}"])
 
 
 def s3_emulation_job_name(run_id: str) -> str:

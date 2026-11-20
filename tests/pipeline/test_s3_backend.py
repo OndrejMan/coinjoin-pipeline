@@ -1038,7 +1038,7 @@ def test_apply_s3_resources_rolls_back_when_owner_patch_fails(
     delete_run.assert_called_once_with(
         tmp_path / "kubeconfig",
         "coinjoin",
-        "app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1",
+        "app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1,!coinjoin.owner",
         temporary_secret=False,
     )
 
@@ -1068,7 +1068,7 @@ def test_apply_s3_resources_rolls_back_when_initial_apply_fails(
     delete_run.assert_called_once_with(
         tmp_path / "kubeconfig",
         "coinjoin",
-        "app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1",
+        "app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1,!coinjoin.owner",
         temporary_secret=False,
     )
 

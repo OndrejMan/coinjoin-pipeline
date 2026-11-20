@@ -102,7 +102,7 @@ def test_the_secret_is_deleted_by_the_run_labels_not_by_name(tmp_path: Path) -> 
     command = run.call_args.args[0]
     assert command[5:7] == ["delete", "secret"]
     selector = command[command.index("--selector") + 1]
-    assert selector == "app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1"
+    assert selector == "app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1,!coinjoin.owner"
     assert s3_emulation_job_name("run-1") not in command
 
 
@@ -169,7 +169,10 @@ def test_a_failed_apply_also_removes_the_temporary_secret(tmp_path: Path) -> Non
         apply_s3_emulation_resources(manifest, tmp_path / "kubeconfig", temporary_secret=True)
     command = run.call_args_list[1].args[0]
     assert command[5] == "delete" and command[6].split(",")[-1] == "secret"
-    assert command[command.index("--selector") + 1] == "app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1"
+    assert (
+        command[command.index("--selector") + 1]
+        == "app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1,!coinjoin.owner"
+    )
 
 
 def test_emulation_without_a_secret_name_creates_one_for_the_run(tmp_path: Path) -> None:
@@ -396,3 +399,16 @@ def test_without_a_plan_the_job_has_no_annotation(tmp_path: Path) -> None:
 def test_a_malformed_planned_quota_is_refused(tmp_path: Path, planned: str, message: str) -> None:
     with pytest.raises(ValueError, match=f"--planned-quota: .*{message}"):
         resolve_configuration(emulation_args(tmp_path, planned_quota=planned))
+
+
+def test_an_interrupted_wait_leaves_the_secret_to_the_job(tmp_path: Path) -> None:
+    args = emulation_args(tmp_path)
+    access = S3Access("https://s3.example.invalid", "/credentials", "coinjoin")
+    with (
+        mock.patch.object(s3_workflow, "wait_for_s3_marker", side_effect=KeyboardInterrupt),
+        mock.patch.object(s3_workflow, "kubernetes_job_probe"),
+        mock.patch.object(s3_workflow, "delete_temporary_s3_secret") as delete,
+        pytest.raises(KeyboardInterrupt),
+    ):
+        s3_workflow.wait_for_emulation_upload(args, "s3://bucket/runs/run-1", access)
+    delete.assert_not_called()

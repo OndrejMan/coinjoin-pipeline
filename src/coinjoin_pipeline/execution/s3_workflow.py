@@ -120,16 +120,22 @@ def run_s3_full_run(args: PipelineConfiguration) -> None:
 def wait_for_emulation_upload(args: PipelineConfiguration, run_prefix: str, access: S3Access) -> None:
     """Wait for the uploader's marker; a failure collects diagnostics and deletes the Job.
 
-    The upload marker ends the Job's use of its S3 key, so a temporary Secret goes then,
-    whatever the outcome, instead of waiting for the finished Job to expire.
+    The upload marker, or its failure or timeout, ends the Job's use of its S3 key, so a
+    temporary Secret goes then instead of when the finished Job expires. An interrupted
+    frontend leaves it: the Job may still be waiting for its pod, which a ``--resume-run``
+    then needs to start, and the Job's deletion removes the Secret in any case.
     """
     kubeconfig_path = resolve_kubeconfig(args.kubernetes.kubeconfig)
     run_id = required(args.run_id, "--run-id")
+    temporary = args.artifacts.secret_name is None
     try:
         _wait_for_emulation_upload(args, run_prefix, access, kubeconfig_path, run_id)
-    finally:
-        if args.artifacts.secret_name is None:
+    except ArtifactTransportError:
+        if temporary:
             delete_temporary_s3_secret(kubeconfig_path, args.kubernetes.namespace, run_id, args.kubernetes.owner)
+        raise
+    if temporary:
+        delete_temporary_s3_secret(kubeconfig_path, args.kubernetes.namespace, run_id, args.kubernetes.owner)
 
 
 def _wait_for_emulation_upload(
