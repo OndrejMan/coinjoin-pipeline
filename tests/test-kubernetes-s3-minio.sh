@@ -105,6 +105,15 @@ S3_PROFILE="coinjoin"
 MINIO_ROOT_USER="e2e-access-key"
 MINIO_ROOT_PASSWORD="e2e-secret-key-${RUN_TOKEN}"
 CREDENTIALS_FILE="${WORK_ROOT}/s3-credentials"
+# The run is launched as the Lab launches it: with an owner and a planned quota on its Job.
+E2E_OWNER="e2e-owner"
+E2E_PLANNED_QUOTA='{"requests.cpu":"4","requests.memory":"8589934592","pods":"20"}'
+OUR_SELECTOR="app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=${RUN_ID},coinjoin.owner=${E2E_OWNER}"
+# A Secret of another owner under the same run ID, planted while the run is on: the race that
+# the occupied-run-ID preflight cannot catch. The run's cleanup must leave it alone.
+FOREIGN_SECRET="e2e-foreign-${RESOURCE_ID}"
+OBSERVED_DIR="${WORK_ROOT}/observed"
+OBSERVER_PID=""
 
 s5() {
   s5cmd --credentials-file "${CREDENTIALS_FILE}" --profile "${S3_PROFILE}" \
@@ -145,6 +154,12 @@ dump_kubernetes_diagnostics() {
     fi
     echo "===== bucket contents ====="
     s5 ls "${ARTIFACT_URI}/${RUN_ID}/*" || true
+    # The bucket disappears with MinIO at exit, and with it the analyzers' own logs.
+    local stage
+    for stage in coinjoin-analysis blocksci unified-report; do
+      echo "===== last 150 lines of logs/${stage}.pbs.log ====="
+      s5 cat "${ARTIFACT_URI}/${RUN_ID}/logs/${stage}.pbs.log" 2>/dev/null | tail -n 150 || true
+    done
     echo "===== PBS job history ====="
     qstat -x 2>/dev/null || true
   } >"${KUBERNETES_DIAGNOSTICS_FILE}" 2>&1
@@ -165,6 +180,7 @@ archive_failure_artifacts() {
 cleanup() {
   local status=$?
   trap - EXIT
+  [[ -z "${OBSERVER_PID}" ]] || kill "${OBSERVER_PID}" 2>/dev/null || true
   if (( status != 0 )); then
     dump_kubernetes_diagnostics || true
     archive_failure_artifacts || true
@@ -340,6 +356,48 @@ if [[ -n "${COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT:-}" ]]; then
   EMULATION_JOB_ARGS+=(--btc-node-initial-block-count "${COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT}")
 fi
 
+# Records the run's objects while it is on, each once it is complete: the Job, the temporary
+# Secret once the Job owns it, and the emulator's pods. Then it plants the foreign Secret.
+kubernetes_get() {
+  kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" get "$@" -o json 2>/dev/null
+}
+capture_once() {  # <file> <python condition on the list "items"> <kubectl get arguments...>
+  local file="$1" condition="$2"
+  shift 2
+  [[ -s "${file}" ]] && return 0
+  kubernetes_get "$@" >"${file}.tmp" || return 1
+  if python3 -c "import json, sys; items = json.load(open(sys.argv[1]))['items']; sys.exit(0 if (${condition}) else 1)" \
+    "${file}.tmp"; then
+    mv "${file}.tmp" "${file}"
+  else
+    rm -f "${file}.tmp"
+    return 1
+  fi
+}
+observe_run_objects() {
+  mkdir -p "${OBSERVED_DIR}"
+  local deadline=$((SECONDS + 5400))
+  while (( SECONDS < deadline )); do
+    capture_once "${OBSERVED_DIR}/job.json" "items" job -l "${OUR_SELECTOR}" || true
+    capture_once "${OBSERVED_DIR}/secret.json" "items and items[0]['metadata'].get('ownerReferences')" \
+      secret -l "${OUR_SELECTOR}" || true
+    capture_once "${OBSERVED_DIR}/emulator-pods.json" "len(items) >= 2" \
+      pod -l "app.kubernetes.io/managed-by=coinjoin-emulator,coinjoin.run-id=${RUN_ID}" || true
+    if [[ -s "${OBSERVED_DIR}/secret.json" && ! -e "${OBSERVED_DIR}/foreign-planted" ]]; then
+      kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" create secret generic "${FOREIGN_SECRET}" \
+        --from-literal=owner=someone-else >/dev/null \
+        && kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" label secret "${FOREIGN_SECRET}" \
+          app.kubernetes.io/name=coinjoin-s3 "coinjoin.run-id=${RUN_ID}" coinjoin.owner=someone-else >/dev/null \
+        && touch "${OBSERVED_DIR}/foreign-planted"
+    fi
+    [[ -s "${OBSERVED_DIR}/job.json" && -s "${OBSERVED_DIR}/emulator-pods.json" \
+      && -e "${OBSERVED_DIR}/foreign-planted" ]] && return 0
+    sleep 5
+  done
+}
+observe_run_objects &
+OBSERVER_PID=$!
+
 echo "Running the S3-compatible full-run for run ${RUN_ID}..."
 set +e
 (
@@ -361,6 +419,8 @@ set +e
     --s3-credentials-file "${CREDENTIALS_FILE}" \
     --s3-profile "${S3_PROFILE}" \
     --uploader-image "${UPLOADER_IMAGE}" \
+    --owner "${E2E_OWNER}" \
+    --planned-quota "${E2E_PLANNED_QUOTA}" \
     "${EMULATION_JOB_ARGS[@]}" \
     --analysis-pbs \
     --blocksci-pbs \
@@ -376,12 +436,114 @@ PIPELINE_STATUS=${PIPESTATUS[0]}
 set -e
 (( PIPELINE_STATUS == 0 )) || exit "${PIPELINE_STATUS}"
 
-leftover="$(kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" get secret \
-  -l "coinjoin.run-id=${RUN_ID}" -o name)"
+wait "${OBSERVER_PID}" 2>/dev/null || true
+OBSERVER_PID=""
+
+echo "Verifying the run's Kubernetes objects..."
+leftover="$(kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" get secret -l "${OUR_SELECTOR}" -o name)"
 [[ -z "${leftover}" ]] || {
   echo "FAIL: the run's temporary S3 Secret outlived the upload: ${leftover}" >&2
   exit 1
 }
+[[ -e "${OBSERVED_DIR}/foreign-planted" ]] || {
+  echo "FAIL: the observer never saw the run's Job and owned Secret, so no foreign Secret was planted" >&2
+  exit 1
+}
+kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" get secret "${FOREIGN_SECRET}" -o name >/dev/null || {
+  echo "FAIL: the run's cleanup deleted another owner's Secret that carries the same run ID" >&2
+  exit 1
+}
+# The published emulator gains the owner label with its next release; check it where it exists.
+EMULATOR_LABELS_OWNER=0
+if docker run --rm --entrypoint grep "${COINJOIN_EMULATOR_SOURCE_IMAGE}" -q COINJOIN_RUN_OWNER \
+  /app/manager/driver/kubernetes.py; then
+  EMULATOR_LABELS_OWNER=1
+else
+  echo "NOTE: ${COINJOIN_EMULATOR_SOURCE_IMAGE} predates the owner label; its pods are not checked for it"
+fi
+python3 - "${OBSERVED_DIR}" "${E2E_OWNER}" "${E2E_PLANNED_QUOTA}" "${EMULATOR_LABELS_OWNER}" <<'OBSERVED' || exit 1
+import json
+import pathlib
+import sys
+
+observed, owner, planned = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+emulator_labels = sys.argv[4] == "1"
+
+
+def items(name):
+    path = observed / f"{name}.json"
+    if not path.is_file():
+        sys.exit(f"FAIL: the observer recorded no {name} of the run")
+    return json.loads(path.read_text())["items"]
+
+
+def check(condition, message):
+    if not condition:
+        sys.exit(f"FAIL: {message}")
+
+
+job = items("job")[0]
+meta = job["metadata"]
+check(meta["labels"].get("coinjoin.owner") == owner, f"Job labels {meta['labels']}")
+annotation = (meta.get("annotations") or {}).get("coinjoin.io/planned-quota")
+check(annotation and json.loads(annotation) == json.loads(planned), f"planned-quota annotation {annotation!r}")
+template = job["spec"]["template"]
+check(template["metadata"]["labels"].get("coinjoin.owner") == owner, "the Job's pod lacks the owner label")
+controller = next(c for c in template["spec"]["containers"] if c["name"] == "controller")
+env = {e["name"]: e.get("value") for e in controller.get("env", [])}
+check(env.get("COINJOIN_RUN_OWNER") == owner, "the controller does not get COINJOIN_RUN_OWNER")
+
+secret = items("secret")[0]
+reference = secret["metadata"]["ownerReferences"][0]
+check((reference["kind"], reference["name"]) == ("Job", meta["name"]), f"Secret owner {reference}")
+annotations = secret["metadata"].get("annotations") or {}
+check("kubectl.kubernetes.io/last-applied-configuration" not in annotations, "the Secret keeps a copy of its key")
+
+if emulator_labels:
+    pods = items("emulator-pods")
+    unlabelled = [p["metadata"]["name"] for p in pods if p["metadata"]["labels"].get("coinjoin.owner") != owner]
+    check(not unlabelled, f"emulator pods without the owner label: {unlabelled}")
+print("The run's Job, Secret and pods carry the owner, the plan and the ownership as expected")
+OBSERVED
+
+echo "Verifying that a second launch under the same run ID is refused before it creates anything..."
+set +e
+(
+  cd "${PROJECT_DIR}"
+  # A second frontend, as another Lab would be: its own runs root has no record of this run,
+  # so only the namespace can tell that the run ID is taken.
+  EMULATION_LOGS_DIR="${WORK_ROOT}/second-frontend-runs" \
+    PYTHONPATH="${PROJECT_DIR}/src:${PROJECT_DIR}/pipeline${PYTHONPATH:+:${PYTHONPATH}}" \
+    python3 -m coinjoin_pipeline.cli emulate \
+    --engine "${ENGINE}" \
+    --scenario "${SCENARIO}" \
+    --driver kubernetes \
+    --namespace "${NAMESPACE}" \
+    --reuse-namespace \
+    --kubeconfig "${HOST_KUBECONFIG}" \
+    --image-prefix "${IMAGE_PREFIX}" \
+    --artifact-backend s3 \
+    --artifact-uri "${ARTIFACT_URI}" \
+    --run-id "${RUN_ID}" \
+    --s3-endpoint-url "${S3_ENDPOINT_URL}" \
+    --s3-credentials-file "${CREDENTIALS_FILE}" \
+    --s3-profile "${S3_PROFILE}" \
+    --uploader-image "${UPLOADER_IMAGE}" \
+    --owner "${E2E_OWNER}"
+) >"${WORK_ROOT}/second-launch.log" 2>&1
+SECOND_STATUS=$?
+set -e
+if (( SECOND_STATUS == 0 )) \
+  || ! grep -q "run ID ${RUN_ID} is already in use in namespace ${NAMESPACE}" "${WORK_ROOT}/second-launch.log"; then
+  cat "${WORK_ROOT}/second-launch.log" >&2
+  echo "FAIL: a second launch under run ID ${RUN_ID} was not refused by the occupied-run-ID preflight" >&2
+  exit 1
+fi
+[[ -z "$(kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" get secret -l "${OUR_SELECTOR}" -o name)" ]] || {
+  echo "FAIL: the refused launch still created a temporary S3 Secret" >&2
+  exit 1
+}
+kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" delete secret "${FOREIGN_SECRET}" >/dev/null
 
 echo "Verifying completion markers and results in the bucket..."
 for marker in .k8s/upload.done .pbs/coinjoin-analysis.done .pbs/blocksci.done .pbs/unified-report.done; do
