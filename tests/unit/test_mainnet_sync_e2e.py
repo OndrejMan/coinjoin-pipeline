@@ -297,14 +297,19 @@ def test_restore_evidence_requires_a_restored_dataset_without_archiving_blocks_a
 def test_refusal_evidence_requires_an_untouched_partial_dataset(tmp_path):
     save(tmp_path / "data/sync/restore.json", {"run_id": "local-sync-token-4", "action": "skipped-not-empty"})
     save(tmp_path / "data/sync/producer.json", {"run_id": "local-sync-token-4", "state": "failed"})
-    assert support.check_refused(tmp_path, "token") == {"partial_dataset_refused": True}
     save(tmp_path / "index/config.json", {})
-    with pytest.raises(AssertionError, match="never be refilled"):
+    assert support.check_refused(tmp_path, "token") == {"partial_dataset_refused": True}
+    (tmp_path / "data/bitcoin/regtest/chainstate").mkdir(parents=True)
+    with pytest.raises(AssertionError, match="never be refilled alone"):
+        support.check_refused(tmp_path, "token")
+    (tmp_path / "data/bitcoin/regtest/chainstate").rmdir()
+    (tmp_path / "index/config.json").unlink()
+    with pytest.raises(AssertionError, match="index that stayed must stay"):
         support.check_refused(tmp_path, "token")
 
 
-def test_e2e_empties_the_dataset_and_then_removes_only_the_index():
+def test_e2e_empties_the_dataset_and_then_removes_only_core_chainstate():
     script = (ROOT / "tests/test-mainnet-sync-local.sh").read_text()
-    restore, refuse = script.index('rm -rf "$work/data" "$work/index"'), script.index('rm -rf "$work/index"\nrefused')
+    restore, refuse = script.index('rm -rf "$work/data" "$work/index"'), script.index('rm -rf "$chain_dir/chainstate"\nrefused')
     assert script.index("mainnet_sync_e2e.py\" final") < restore < refuse
     assert 'refused_generation "local-sync-$token-4"' in script
