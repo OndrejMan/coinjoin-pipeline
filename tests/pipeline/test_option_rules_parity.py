@@ -44,6 +44,8 @@ EMULATION_OVERRIDES = [
     "201",
     "--kubernetes-image-pull-policy",
     "IfNotPresent",
+    "--owner",
+    "xman",
 ]
 # A mainnet analysis that only reads the published index of another run.
 MAINNET_SCAN = str(Path(__file__).resolve().parents[2] / "scripts" / "metacentrum_mainnet_coinjoin_scan.py")

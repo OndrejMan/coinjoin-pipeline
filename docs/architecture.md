@@ -209,7 +209,9 @@ submitted. Neither waits; only `full-run` does.
    (`kubectl create` on stdin, so no `last-applied` copy; an existing Secret of that
    name is an error, never replaced), makes the Job its owner too, and deletes it by
    its labels once `wait_for_emulation_upload` ends, whatever the outcome.
-   With `--s3-secret-name` that Secret must exist and stays. The Job's pod has three containers
+   With `--s3-secret-name` that Secret must exist and stays. `--owner` labels all of
+   these objects and, through `COINJOIN_RUN_OWNER`, the emulator's pods with
+   `coinjoin.owner`; a failed apply deletes by the run's labels, owner included. The Job's pod has three containers
    over one `emptyDir`:
    - `prefix-preflight` (init, uploader image) refuses a run prefix that holds
      anything besides the staged exporters and the launch record at its root, and

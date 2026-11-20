@@ -264,7 +264,10 @@ The kubeconfig then needs `create`, `list`, `patch` and `delete` on `secrets`. A
 of that name that already exists is never replaced, and the deletion selects the run's
 labels, not the name alone. Before anything is created the frontend also refuses a run
 ID that already labels a Job, pod or temporary Secret in the namespace
-(`coinjoin.run-id=<id>`), the Kubernetes counterpart of the empty-run-prefix check. A standalone
+(`coinjoin.run-id=<id>`), the Kubernetes counterpart of the empty-run-prefix check.
+`--owner <login>` (YAML `kubernetes.owner`) adds a `coinjoin.owner` label to the Job, its
+support objects, the Secret and the emulator's pods, so a namespace shared by several
+people shows whose run each object belongs to; a rollback then selects that owner too. A standalone
 `emulate` does not wait for the upload, so its Secret lives until the finished Job
 expires an hour later.
 

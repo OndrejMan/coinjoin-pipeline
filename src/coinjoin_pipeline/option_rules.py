@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -24,6 +25,9 @@ PERSISTENT_INDEX_TASKS = frozenset({"parse", "update", "backup"}) | READ_ONLY_CA
 MAINNET_ONLY_PBS_GROUPS = tuple(f"pbs.{stage}." for stage in MAINNET_SYNC_RESOURCES if stage != "blocksci")
 # The jobs that only maintain the index; their state can live at one fixed S3 prefix.
 INDEX_STATE_TASKS = ("parse", "update", "backup")
+
+# A label value: at most 63 characters that start and end alphanumeric.
+KUBERNETES_LABEL_VALUE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,61}[A-Za-z0-9])?")
 
 
 def _supplied(config: PipelineConfiguration, path: str, value: object) -> bool:
@@ -494,9 +498,13 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
             config.kubernetes.btc_node_initial_block_count,
         ),
         ("--kubernetes-image-pull-policy", "kubernetes.image_pull_policy", config.kubernetes.image_pull_policy),
+        ("--owner", "kubernetes.owner", config.kubernetes.owner),
     ):
         if _supplied(config, path, value) and not s3_emulation:
             errors.append(f"{flag} applies only to the S3 emulation Job (--driver kubernetes --artifact-backend s3)")
+    owner = config.kubernetes.owner
+    if owner is not None and not KUBERNETES_LABEL_VALUE.fullmatch(owner):
+        errors.append("--owner must be a Kubernetes label value: 1-63 letters, digits, '-', '_' or '.'")
     if config.resume_run and not s3_backend:
         errors.append("--resume-run requires --artifact-backend s3")
     if config.resume_run and not _supplied(config, "run_id", config.run_id):

@@ -29,6 +29,8 @@ S3_JOB_DEADLINE_GRACE_SECONDS = 60
 # Every S3 emulation Job carries both labels; the emulator labels its own pods with the run ID.
 S3_EMULATION_APP_LABEL = "coinjoin-s3"
 RUN_ID_LABEL = "coinjoin.run-id"
+# Who launched the run (--owner); in a shared namespace it tells two people's runs apart.
+OWNER_LABEL = "coinjoin.owner"
 S3_JOB_OWNED_RESOURCE_TYPES = (
     "serviceaccount",
     "configmap",
@@ -184,6 +186,19 @@ def require_unused_run_id(kubeconfig_path: Path, namespace: str, run_id: str, *,
         )
 
 
+def run_labels(run_id: str, owner: str | None = None) -> dict[str, str]:
+    """The labels of every object of one S3 emulation run, its owner's included when known."""
+    labels = {"app.kubernetes.io/name": S3_EMULATION_APP_LABEL, RUN_ID_LABEL: run_id}
+    if owner:
+        labels[OWNER_LABEL] = owner
+    return labels
+
+
+def run_selector(run_id: str, owner: str | None = None) -> str:
+    """A selector for exactly the objects ``run_labels`` marks: another owner's never match."""
+    return ",".join(f"{key}={value}" for key, value in run_labels(run_id, owner).items())
+
+
 def s3_emulation_job_name(run_id: str) -> str:
     """Derive a DNS-safe Job name that stays unique per run id.
 
@@ -323,11 +338,31 @@ def delete_s3_emulation_job(kubeconfig_path: Path, namespace: str, job_name: str
     _delete(kubeconfig_path, namespace, "job", job_name)
 
 
-def delete_s3_emulation_support_resources(kubeconfig_path: Path, namespace: str, resource_name: str) -> None:
-    """Best-effort rollback when owner references could not be installed."""
-    for resource_type in S3_JOB_OWNED_RESOURCE_TYPES:
-        if not _delete(kubeconfig_path, namespace, resource_type, resource_name):
-            return
+def delete_s3_emulation_run_resources(
+    kubeconfig_path: Path, namespace: str, selector: str, *, temporary_secret: bool = False
+) -> None:
+    """Best-effort rollback of a run's Job and support objects, selected by the run's labels.
+
+    A selector rather than names: an object of the same name that another owner's run made
+    does not carry this run's labels and is left alone.
+    """
+    kinds = ",".join(("job", *S3_JOB_OWNED_RESOURCE_TYPES, *(("secret",) if temporary_secret else ())))
+    try:
+        result = kubectl(
+            kubeconfig_path,
+            "delete",
+            kinds,
+            "--selector",
+            selector,
+            "--ignore-not-found",
+            "--wait=false",
+            namespace=namespace,
+        )
+    except FileNotFoundError:
+        print(f"[WARN] kubectl unavailable; could not delete the run's resources ({selector})", file=sys.stderr)
+        return
+    if result.returncode:
+        print(f"[WARN] failed to delete the run's resources ({selector}): {_output(result)}", file=sys.stderr)
 
 
 def _owned_resource_types(temporary_secret: bool) -> tuple[str, ...]:
@@ -335,7 +370,12 @@ def _owned_resource_types(temporary_secret: bool) -> tuple[str, ...]:
 
 
 def create_temporary_s3_secret(
-    kubeconfig_path: Path, namespace: str, run_id: str, access_key_id: str, secret_access_key: str
+    kubeconfig_path: Path,
+    namespace: str,
+    run_id: str,
+    access_key_id: str,
+    secret_access_key: str,
+    owner: str | None = None,
 ) -> str:
     """Create the run's own S3 credentials Secret, named like its Job, and return the name.
 
@@ -357,7 +397,7 @@ def create_temporary_s3_secret(
             "metadata": {
                 "name": name,
                 "namespace": namespace,
-                "labels": {"app.kubernetes.io/name": S3_EMULATION_APP_LABEL, RUN_ID_LABEL: run_id},
+                "labels": run_labels(run_id, owner),
             },
             "data": encoded,
         }
@@ -377,18 +417,13 @@ def create_temporary_s3_secret(
     return name
 
 
-def temporary_secret_selector(run_id: str) -> str:
-    """The labels only this pipeline's temporary Secret of ``run_id`` carries."""
-    return f"app.kubernetes.io/name={S3_EMULATION_APP_LABEL},{RUN_ID_LABEL}={run_id}"
-
-
-def delete_temporary_s3_secret(kubeconfig_path: Path, namespace: str, run_id: str) -> None:
+def delete_temporary_s3_secret(kubeconfig_path: Path, namespace: str, run_id: str, owner: str | None = None) -> None:
     """Best-effort removal of the run's temporary Secret; the Job's deletion removes it too.
 
     It selects by the run's labels, not by name alone, so a Secret of the same name that
     another run or user made is never removed.
     """
-    selector = temporary_secret_selector(run_id)
+    selector = run_selector(run_id, owner)
     try:
         result = kubectl(
             kubeconfig_path,
@@ -476,10 +511,11 @@ def render_s3_emulation_resources(
     btc_node_image: str | None = None,
     kubernetes_image_pull_policy: str | None = None,
     btc_node_initial_block_count: str | None = None,
+    owner: str | None = None,
 ) -> str:
     """Render a kubectl-compatible JSON resource list for in-cluster emulation."""
     name = s3_emulation_job_name(run_id)
-    labels = {"app.kubernetes.io/name": S3_EMULATION_APP_LABEL, RUN_ID_LABEL: run_id}
+    labels = run_labels(run_id, owner)
     btc_node_image_arg = ' --btc-node-image "$BTC_NODE_IMAGE"' if btc_node_image else ""
     controller = (
         'python manager.py --driver kubernetes --in-cluster --engine "$ENGINE" run '
@@ -514,6 +550,8 @@ def render_s3_emulation_resources(
         ("BTC_NODE_IMAGE", btc_node_image),
         ("KUBERNETES_IMAGE_PULL_POLICY", kubernetes_image_pull_policy),
         ("COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT", btc_node_initial_block_count),
+        # The emulator labels its pods and services with it (coinjoin.owner).
+        ("COINJOIN_RUN_OWNER", owner),
     ):
         if value:
             env.append(_env(variable, value))
@@ -539,13 +577,13 @@ def render_s3_emulation_resources(
         {
             "apiVersion": "rbac.authorization.k8s.io/v1",
             "kind": "Role",
-            "metadata": {"name": name, "namespace": namespace},
+            "metadata": metadata,
             "rules": list(S3_EMULATION_ROLE_RULES),
         },
         {
             "apiVersion": "rbac.authorization.k8s.io/v1",
             "kind": "RoleBinding",
-            "metadata": {"name": name, "namespace": namespace},
+            "metadata": metadata,
             "subjects": [{"kind": "ServiceAccount", "name": name, "namespace": namespace}],
             "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": name},
         },
@@ -623,15 +661,14 @@ def apply_s3_emulation_resources(manifest: str, kubeconfig_path: Path, *, tempor
     namespace = metadata.get("namespace")
     if not job_name or not namespace:
         raise RuntimeError("S3 Kubernetes Job must declare metadata.name and namespace")
-    run_id = (metadata.get("labels") or {}).get(RUN_ID_LABEL)
-    if temporary_secret and not run_id:
-        raise RuntimeError(f"S3 Kubernetes Job must carry the {RUN_ID_LABEL} label of its temporary Secret")
+    labels = metadata.get("labels") or {}
+    run_id = labels.get(RUN_ID_LABEL)
+    if not run_id:
+        raise RuntimeError(f"S3 Kubernetes Job must carry the {RUN_ID_LABEL} label")
+    selector = run_selector(run_id, labels.get(OWNER_LABEL))
 
     def roll_back(message: str) -> RuntimeError:
-        delete_s3_emulation_job(kubeconfig_path, namespace, job_name)
-        delete_s3_emulation_support_resources(kubeconfig_path, namespace, job_name)
-        if temporary_secret and run_id:
-            delete_temporary_s3_secret(kubeconfig_path, namespace, run_id)
+        delete_s3_emulation_run_resources(kubeconfig_path, namespace, selector, temporary_secret=temporary_secret)
         return RuntimeError(message)
 
     # The manifest orders the support resources before the Job, so a partial

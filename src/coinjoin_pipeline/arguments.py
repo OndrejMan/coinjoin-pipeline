@@ -140,6 +140,10 @@ HELP = {
     "kubernetes.btc_node_image": "Bitcoin node image of the S3 emulation",
     "kubernetes.btc_node_initial_block_count": ("blocks the S3 emulation's Bitcoin node mines before the run"),
     "kubernetes.image_pull_policy": ("imagePullPolicy of the S3 emulation's pods"),
+    "kubernetes.owner": (
+        "login of whoever launches the run, set as the coinjoin.owner label of the S3 emulation's "
+        "Job, Secret and pods so a shared namespace shows whose they are"
+    ),
     "artifacts.backend": "where run artifacts are kept between stages",
     "artifacts.uri": "S3 run root, for example s3://bucket/runs",
     "artifacts.endpoint_url": "S3-compatible HTTP(S) endpoint URL",

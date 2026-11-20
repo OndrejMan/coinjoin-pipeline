@@ -129,7 +129,7 @@ def wait_for_emulation_upload(args: PipelineConfiguration, run_prefix: str, acce
         _wait_for_emulation_upload(args, run_prefix, access, kubeconfig_path, run_id)
     finally:
         if args.artifacts.secret_name is None:
-            delete_temporary_s3_secret(kubeconfig_path, args.kubernetes.namespace, run_id)
+            delete_temporary_s3_secret(kubeconfig_path, args.kubernetes.namespace, run_id, args.kubernetes.owner)
 
 
 def _wait_for_emulation_upload(

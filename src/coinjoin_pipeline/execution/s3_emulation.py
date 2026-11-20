@@ -67,6 +67,7 @@ def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
         btc_node_image=kubernetes.btc_node_image,
         kubernetes_image_pull_policy=kubernetes.image_pull_policy,
         btc_node_initial_block_count=_text(kubernetes.btc_node_initial_block_count),
+        owner=kubernetes.owner,
     )
     credentials_file = required(args.artifacts.credentials_file, "--s3-credentials-file")
     profile = required(args.artifacts.profile, "--s3-profile")
@@ -80,7 +81,9 @@ def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
         return
     namespace = args.kubernetes.namespace
     if temporary_secret:
-        create_temporary_s3_secret(kubeconfig_path, namespace, run_id, *s3_key_pair(credentials_file, profile))
+        create_temporary_s3_secret(
+            kubeconfig_path, namespace, run_id, *s3_key_pair(credentials_file, profile), owner=kubernetes.owner
+        )
     # A failed apply rolls the temporary Secret back with the Job's other resources.
     apply_s3_emulation_resources(manifest, kubeconfig_path, temporary_secret=temporary_secret)
     print(f"[kubernetes] Submitted S3-compatible emulation job for run {args.run_id}")

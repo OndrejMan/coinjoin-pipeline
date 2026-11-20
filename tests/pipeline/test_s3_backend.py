@@ -1030,15 +1030,17 @@ def test_apply_s3_resources_rolls_back_when_owner_patch_fails(
             "coinjoin_pipeline.execution.kubernetes.subprocess.run",
             side_effect=[completed, uid_result, patch_failure],
         ),
-        mock.patch("coinjoin_pipeline.execution.kubernetes.delete_s3_emulation_job") as delete_job,
-        mock.patch("coinjoin_pipeline.execution.kubernetes.delete_s3_emulation_support_resources") as delete_support,
+        mock.patch("coinjoin_pipeline.execution.kubernetes.delete_s3_emulation_run_resources") as delete_run,
         pytest.raises(RuntimeError, match="could not attach Job ownership"),
     ):
         apply_s3_emulation_resources(manifest, tmp_path / "kubeconfig")
 
-    resource_name = s3_emulation_job_name("run-1")
-    delete_job.assert_called_once_with(tmp_path / "kubeconfig", "coinjoin", resource_name)
-    delete_support.assert_called_once_with(tmp_path / "kubeconfig", "coinjoin", resource_name)
+    delete_run.assert_called_once_with(
+        tmp_path / "kubeconfig",
+        "coinjoin",
+        "app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1",
+        temporary_secret=False,
+    )
 
 
 def test_apply_s3_resources_rolls_back_when_initial_apply_fails(
@@ -1058,15 +1060,17 @@ def test_apply_s3_resources_rolls_back_when_initial_apply_fails(
             "coinjoin_pipeline.execution.kubernetes.subprocess.run",
             side_effect=[apply_failure],
         ),
-        mock.patch("coinjoin_pipeline.execution.kubernetes.delete_s3_emulation_job") as delete_job,
-        mock.patch("coinjoin_pipeline.execution.kubernetes.delete_s3_emulation_support_resources") as delete_support,
+        mock.patch("coinjoin_pipeline.execution.kubernetes.delete_s3_emulation_run_resources") as delete_run,
         pytest.raises(RuntimeError, match="kubectl apply failed with exit 1"),
     ):
         apply_s3_emulation_resources(manifest, tmp_path / "kubeconfig")
 
-    resource_name = s3_emulation_job_name("run-1")
-    delete_job.assert_called_once_with(tmp_path / "kubeconfig", "coinjoin", resource_name)
-    delete_support.assert_called_once_with(tmp_path / "kubeconfig", "coinjoin", resource_name)
+    delete_run.assert_called_once_with(
+        tmp_path / "kubeconfig",
+        "coinjoin",
+        "app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1",
+        temporary_secret=False,
+    )
 
 
 def test_kubernetes_manifest_reuses_existing_namespace() -> None:

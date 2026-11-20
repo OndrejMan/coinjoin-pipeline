@@ -9,6 +9,8 @@ from unittest import mock
 import pytest
 from config_support import configuration
 
+from coinjoin_pipeline.context import resolve_configuration
+
 from coinjoin_pipeline.execution import kubernetes, s3_emulation, s3_workflow
 from coinjoin_pipeline.execution.kubernetes import (
     S3_JOB_OWNED_RESOURCE_TYPES,
@@ -165,9 +167,9 @@ def test_a_failed_apply_also_removes_the_temporary_secret(tmp_path: Path) -> Non
         pytest.raises(RuntimeError, match="kubectl apply failed"),
     ):
         apply_s3_emulation_resources(manifest, tmp_path / "kubeconfig", temporary_secret=True)
-    deleted = [call.args[0][5:7] for call in run.call_args_list[1:]]
-    assert deleted[-1] == ["delete", "secret"]
-    assert "--selector" in run.call_args_list[-1].args[0]
+    command = run.call_args_list[1].args[0]
+    assert command[5] == "delete" and command[6].split(",")[-1] == "secret"
+    assert command[command.index("--selector") + 1] == "app.kubernetes.io/name=coinjoin-s3,coinjoin.run-id=run-1"
 
 
 def test_emulation_without_a_secret_name_creates_one_for_the_run(tmp_path: Path) -> None:
@@ -179,7 +181,7 @@ def test_emulation_without_a_secret_name_creates_one_for_the_run(tmp_path: Path)
     ):
         s3_emulation.run_s3_kubernetes_emulation(args)
 
-    create.assert_called_once_with(Path(args.kubernetes.kubeconfig), "shared-ns", "run-1", KEY_ID, SECRET)
+    create.assert_called_once_with(Path(args.kubernetes.kubeconfig), "shared-ns", "run-1", KEY_ID, SECRET, owner=None)
     manifest, _ = apply.call_args.args
     assert apply.call_args.kwargs == {"temporary_secret": True}
     job = next(item for item in json.loads(manifest)["items"] if item["kind"] == "Job")
@@ -236,7 +238,7 @@ def test_the_upload_marker_ends_the_temporary_secret(tmp_path: Path, fails: bool
                 s3_workflow.wait_for_emulation_upload(args, "s3://bucket/runs/run-1", access)
         else:
             s3_workflow.wait_for_emulation_upload(args, "s3://bucket/runs/run-1", access)
-    delete.assert_called_once_with(Path(args.kubernetes.kubeconfig), "shared-ns", "run-1")
+    delete.assert_called_once_with(Path(args.kubernetes.kubeconfig), "shared-ns", "run-1", None)
 
 
 def test_a_named_secret_outlives_the_run(tmp_path: Path) -> None:
@@ -278,3 +280,63 @@ def test_preflight_of_a_named_secret_requires_that_it_exists() -> None:
     permissions, reads = _checked_permissions("coinjoin-s3-credentials")
     assert ("create", "secrets") not in permissions
     assert ("get", "secret", "coinjoin-s3-credentials") in reads
+
+
+def test_the_owner_labels_every_object_of_the_run(tmp_path: Path) -> None:
+    manifest = json.loads(
+        render_s3_emulation_resources(
+            namespace="shared-ns",
+            run_id="run-1",
+            scenario_json="{}",
+            engine="wasabi",
+            image_prefix="ghcr.io/ondrejman/",
+            emulator_image="emulator:test",
+            uploader_image="uploader:test",
+            artifact_uri="s3://bucket/runs",
+            endpoint_url="https://s3.example.invalid",
+            secret_name=s3_emulation_job_name("run-1"),
+            owner="alice",
+        )
+    )
+    for item in manifest["items"]:
+        assert item["metadata"]["labels"]["coinjoin.owner"] == "alice", item["kind"]
+    job = next(item for item in manifest["items"] if item["kind"] == "Job")
+    assert job["spec"]["template"]["metadata"]["labels"]["coinjoin.owner"] == "alice"
+    controller = next(c for c in job["spec"]["template"]["spec"]["containers"] if c["name"] == "controller")
+    assert {"name": "COINJOIN_RUN_OWNER", "value": "alice"} in controller["env"]
+
+    with mock.patch.object(kubernetes.subprocess, "run", return_value=OK) as run:
+        create_temporary_s3_secret(tmp_path / "kubeconfig", "shared-ns", "run-1", KEY_ID, SECRET, owner="alice")
+        delete_temporary_s3_secret(tmp_path / "kubeconfig", "shared-ns", "run-1", "alice")
+    secret = json.loads(run.call_args_list[0].kwargs["input"])
+    assert secret["metadata"]["labels"]["coinjoin.owner"] == "alice"
+    command = run.call_args_list[1].args[0]
+    assert command[command.index("--selector") + 1].endswith(",coinjoin.owner=alice")
+
+
+def test_a_rollback_selects_the_owner_of_the_job(tmp_path: Path) -> None:
+    metadata = {
+        "name": s3_emulation_job_name("run-1"),
+        "namespace": "shared-ns",
+        "labels": {"coinjoin.run-id": "run-1", "coinjoin.owner": "alice"},
+    }
+    failure = subprocess.CompletedProcess([], 1, "", "quota exceeded")
+    with (
+        mock.patch.object(kubernetes.subprocess, "run", side_effect=[failure, OK]) as run,
+        pytest.raises(RuntimeError, match="kubectl apply failed"),
+    ):
+        apply_s3_emulation_resources(json.dumps({"items": [{"kind": "Job", "metadata": metadata}]}), tmp_path / "k")
+    command = run.call_args_list[1].args[0]
+    assert command[command.index("--selector") + 1].endswith("coinjoin.run-id=run-1,coinjoin.owner=alice")
+    assert "secret" not in command[6].split(",")
+
+
+@pytest.mark.parametrize("owner", ["xman", "a.b_c-1"])
+def test_an_owner_label_value_is_accepted(tmp_path: Path, owner: str) -> None:
+    assert emulation_args(tmp_path, owner=owner).kubernetes.owner == owner
+
+
+@pytest.mark.parametrize("owner", ["xman@META", "-x", "a" * 64])
+def test_an_owner_that_is_no_label_value_is_refused(tmp_path: Path, owner: str) -> None:
+    with pytest.raises(ValueError, match="--owner must be a Kubernetes label value"):
+        resolve_configuration(emulation_args(tmp_path, owner=owner))

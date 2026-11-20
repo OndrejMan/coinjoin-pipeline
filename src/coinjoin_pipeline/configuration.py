@@ -93,6 +93,8 @@ class KubernetesConfiguration(ConfigurationModel):
     btc_node_image: str | None = option(None, name="btc_node_image")
     btc_node_initial_block_count: int | None = option(None, name="btc_node_initial_block_count", minimum=0)
     image_pull_policy: ImagePullPolicy | None = option(None, name="kubernetes_image_pull_policy")
+    # Who launched the run, as the coinjoin.owner label of its Kubernetes objects.
+    owner: str | None = option(None, name="owner")
 
 
 @dataclass(frozen=True, slots=True)
