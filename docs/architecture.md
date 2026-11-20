@@ -508,8 +508,8 @@ The pipeline itself is published as
 `mainnet-sync` is the second consumer of the PBS layer and shares no data with
 the emulation runs. `mainnet_sync.submit_sync` submits up to six jobs, each
 `afterok` the previous one: `mainnet-restore`, `-producer` (Bitcoin Core and
-Dumplings), `-blocksci`, `-checkpoint`, `-pack` and, unless `mainnet.clear_after_sync` is
-off, `-clear`.
+Dumplings), `-blocksci`, `-checkpoint`, `-pack` and, only with `mainnet.clear_after_sync: true`,
+`-clear`.
 They ship `MAINNET_RUNTIME_MODULES` the same way as the S3 stages, work in place
 on one multijob scratch, and keep single backups in S3 in the format of
 `s5client.py`. Submission records every job ID at once and rolls back a partial

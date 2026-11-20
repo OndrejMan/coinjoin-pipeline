@@ -148,7 +148,7 @@ def test_jobs_are_chained_in_order(config, monkeypatch):
     monkeypatch.setattr(
         mainnet_sync, "submit_pbs_job", lambda job, _dry: calls.append(job) or f"{100 + len(calls)}.local"
     )
-    mainnet_sync.submit_sync(config)
+    mainnet_sync.submit_sync(replace(config, mainnet=replace(config.mainnet, clear_after_sync=True)))
     assert [job.stage for job in calls] == [f"mainnet-{stage}" for stage in mainnet_sync.SYNC_STAGES]
     assert [job.dependencies for job in calls] == [
         (),
@@ -1118,12 +1118,14 @@ def test_a_failed_storage_report_is_not_a_job_failure(worker, monkeypatch):
     worker.report_storage()
 
 
-def test_the_clear_job_can_be_turned_off(config, monkeypatch):
+def test_the_clear_job_runs_only_when_turned_on(config, monkeypatch):
     calls = []
     monkeypatch.setattr(mainnet_sync, "submit_pbs_job", lambda job, _dry: calls.append(job) or "1.local")
-    kept = replace(config, mainnet=replace(config.mainnet, clear_after_sync=False))
-    mainnet_sync.submit_sync(kept)
+    mainnet_sync.submit_sync(config)
     assert "mainnet-clear" not in [job.stage for job in calls]
+    calls.clear()
+    mainnet_sync.submit_sync(replace(config, mainnet=replace(config.mainnet, clear_after_sync=True)))
+    assert [job.stage for job in calls][-1] == "mainnet-clear"
 
 
 def synchronize(worker, *stages):

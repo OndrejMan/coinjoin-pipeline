@@ -353,7 +353,7 @@ not the `done`/`failed` lines above. The jobs are chained with `afterok`:
 restore (fills an empty working dataset from S3, otherwise ends at once), producer,
 blocksci (updates the index, no backups), checkpoint (index backup, pruning,
 Core checkpoint, `done.json`), pack (compresses pruned block files in S3) and,
-unless `mainnet.clear_after_sync` is off, clear (empties the working dataset).
+only with `mainnet.clear_after_sync: true`, clear (empties the working dataset).
 `MAINNET_SYNC_RESOURCES` in `pbs/defaults.py` is the one list of these jobs. Nothing in
 the frontend waits for them; scenario-lab reads them.
 

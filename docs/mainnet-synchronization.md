@@ -170,8 +170,8 @@ takes the dataset lock and the index write lock and refuses a dataset whose `don
 belongs to another run. It first moves everything aside into `.clear-<run-id>/`, so a
 failure does not leave a partial dataset; the next restore job removes the leftovers. Only
 the `sync/` directory stays. When `mainnet-pack` fails, `mainnet-clear` does not start and
-the data stays until the next synchronization. The next run restores it from S3. It is
-switched off with `mainnet.clear_after_sync: false`.
+the data stays until the next synchronization. The next run restores it from S3. It runs
+only with `mainnet.clear_after_sync: true`; by default the data stays on the multijob.
 
 Because the multijob is empty between synchronizations, the jobs that read the index
 (`script`, `external`, `notebook`) do not read it from `blocksci.index_dir`. With
@@ -195,9 +195,9 @@ Lab.
 
 The third option is to read the synchronization folder directly, without a download: the
 synchronization's `blocksci.index_dir` and `blocksci.dumplings_dir` on its
-`dumplings/Scanner`. The data is there only after a synchronization with
-`mainnet.clear_after_sync: false` (in the Lab, "Empty the multijob after the
-synchronization" switched off); otherwise the job fails. The notebook holds the index under
+`dumplings/Scanner`. The data is there only after a synchronization without
+`mainnet.clear_after_sync: true` (in the Lab, "Empty the multijob after the
+synchronization" left off, the default); otherwise the job fails. The notebook holds the index under
 the shared lock, so another BlockSci job or `mainnet-clear` fails while the notebook runs.
 The Scanner has no lock: a running `mainnet-producer` changes it under the notebook.
 

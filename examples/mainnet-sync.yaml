@@ -25,10 +25,10 @@ mainnet:
 blocksci:
   index_dir: /scratch/multijob-brno/<login>/blocksci-mainnet
   index_backup_uri: s3://your-bucket/bitcoin-mainnet/blocksci-index
-# Six chained jobs: restore (fills an empty working dataset from S3, otherwise ends at
+# Five chained jobs: restore (fills an empty working dataset from S3, otherwise ends at
 # once), producer, blocksci, checkpoint (index backup, pruning and Core checkpoint) and
-# pack (compresses pruned block files in S3; the synchronization is done before it starts)
-# and clear (empties the working dataset; set mainnet.clear_after_sync: false to keep it).
+# pack (compresses pruned block files in S3; the synchronization is done before it starts).
+# mainnet.clear_after_sync: true adds a sixth, clear, which empties the working dataset.
 pbs:
   restore:
     ncpus: 2
