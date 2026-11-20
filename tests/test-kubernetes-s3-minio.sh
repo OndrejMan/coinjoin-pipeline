@@ -396,6 +396,15 @@ for marker in .k8s/upload.failed .pbs/coinjoin-analysis.failed .pbs/blocksci.fai
     exit 1
   fi
 done
+# The uploader leaves out emulation_logs.zip, a copy of coinjoin_emulator_data, and nothing else.
+s5 ls "${ARTIFACT_URI}/${RUN_ID}/coinjoin_emulator_data/scenario.json" >/dev/null || {
+  echo "FAIL: coinjoin_emulator_data/scenario.json was not uploaded" >&2
+  exit 1
+}
+if s5 ls "${ARTIFACT_URI}/${RUN_ID}/coinjoin_emulator_data/emulation_logs.zip" >/dev/null 2>&1; then
+  echo "FAIL: the uploader uploaded coinjoin_emulator_data/emulation_logs.zip" >&2
+  exit 1
+fi
 # The frontend's launch record: uploaded before the Job, and again with the outcome.
 s5 cat "${ARTIFACT_URI}/${RUN_ID}/research_manifest.json" | python3 -c '
 import json, sys
