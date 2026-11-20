@@ -46,6 +46,8 @@ EMULATION_OVERRIDES = [
     "IfNotPresent",
     "--owner",
     "xman",
+    "--planned-quota",
+    '{"requests.cpu": "1.5"}',
 ]
 # A mainnet analysis that only reads the published index of another run.
 MAINNET_SCAN = str(Path(__file__).resolve().parents[2] / "scripts" / "metacentrum_mainnet_coinjoin_scan.py")

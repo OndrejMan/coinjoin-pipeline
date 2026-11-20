@@ -340,3 +340,59 @@ def test_an_owner_label_value_is_accepted(tmp_path: Path, owner: str) -> None:
 def test_an_owner_that_is_no_label_value_is_refused(tmp_path: Path, owner: str) -> None:
     with pytest.raises(ValueError, match="--owner must be a Kubernetes label value"):
         resolve_configuration(emulation_args(tmp_path, owner=owner))
+
+
+PLANNED = '{"requests.memory": "17179869184", "requests.cpu": "15.65", "pods": "33"}'
+
+
+def test_the_job_carries_the_planned_quota_for_other_queues() -> None:
+    manifest = json.loads(
+        render_s3_emulation_resources(
+            namespace="shared-ns",
+            run_id="run-1",
+            scenario_json="{}",
+            engine="wasabi",
+            image_prefix="ghcr.io/ondrejman/",
+            emulator_image="emulator:test",
+            uploader_image="uploader:test",
+            artifact_uri="s3://bucket/runs",
+            endpoint_url="https://s3.example.invalid",
+            secret_name=s3_emulation_job_name("run-1"),
+            planned_quota=PLANNED,
+        )
+    )
+    job = next(item for item in manifest["items"] if item["kind"] == "Job")
+    assert json.loads(job["metadata"]["annotations"]["coinjoin.io/planned-quota"]) == {
+        "requests.cpu": "15.65",
+        "requests.memory": "17179869184",
+        "pods": "33",
+    }
+    others = [item for item in manifest["items"] if item["kind"] != "Job"]
+    assert all("annotations" not in item["metadata"] for item in others)
+
+
+def test_without_a_plan_the_job_has_no_annotation(tmp_path: Path) -> None:
+    args = emulation_args(tmp_path)
+    with (
+        mock.patch.object(s3_emulation, "resolve_uploader_image", return_value="uploader:test"),
+        mock.patch.object(s3_emulation, "create_temporary_s3_secret"),
+        mock.patch.object(s3_emulation, "apply_s3_emulation_resources") as apply,
+    ):
+        s3_emulation.run_s3_kubernetes_emulation(args)
+    job = next(item for item in json.loads(apply.call_args.args[0])["items"] if item["kind"] == "Job")
+    assert "annotations" not in job["metadata"]
+
+
+@pytest.mark.parametrize(
+    ("planned", "message"),
+    [
+        ("not json", "not JSON"),
+        ("[]", "non-empty JSON object"),
+        ('{"cpu": "1"}', "unknown resources cpu"),
+        ('{"requests.cpu": 2}', "quantity string"),
+        ('{"requests.cpu": "-1"}', "quantity string"),
+    ],
+)
+def test_a_malformed_planned_quota_is_refused(tmp_path: Path, planned: str, message: str) -> None:
+    with pytest.raises(ValueError, match=f"--planned-quota: .*{message}"):
+        resolve_configuration(emulation_args(tmp_path, planned_quota=planned))

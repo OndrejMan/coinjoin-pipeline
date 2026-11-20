@@ -16,6 +16,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from coinjoin_pipeline.execution.planned_quota import PLANNED_QUOTA_ANNOTATION, planned_quota_annotation
 from coinjoin_pipeline.execution.probes import PROBE_QUEUED, PROBE_RUNNING, PROBE_TERMINAL, PROBE_UNKNOWN
 from coinjoin_pipeline.paths import EXECUTION_ROOT, REQUIRED_EXPORTERS
 
@@ -512,6 +513,7 @@ def render_s3_emulation_resources(
     kubernetes_image_pull_policy: str | None = None,
     btc_node_initial_block_count: str | None = None,
     owner: str | None = None,
+    planned_quota: str | None = None,
 ) -> str:
     """Render a kubectl-compatible JSON resource list for in-cluster emulation."""
     name = s3_emulation_job_name(run_id)
@@ -571,6 +573,11 @@ def render_s3_emulation_resources(
     ]
     small = (S3_UPLOADER_RESOURCE_REQUESTS, S3_UPLOADER_RESOURCE_LIMITS)
     metadata = {"name": name, "namespace": namespace, "labels": labels}
+    job_metadata = (
+        {**metadata, "annotations": {PLANNED_QUOTA_ANNOTATION: planned_quota_annotation(planned_quota)}}
+        if planned_quota
+        else metadata
+    )
     resources: list[dict] = [
         {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": metadata},
         {"apiVersion": "v1", "kind": "ConfigMap", "metadata": metadata, "data": {"scenario.json": scenario_json}},
@@ -590,7 +597,7 @@ def render_s3_emulation_resources(
         {
             "apiVersion": "batch/v1",
             "kind": "Job",
-            "metadata": metadata,
+            "metadata": job_metadata,
             "spec": {
                 "backoffLimit": 0,
                 "activeDeadlineSeconds": (

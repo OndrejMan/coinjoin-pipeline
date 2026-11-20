@@ -140,6 +140,12 @@ HELP = {
     "kubernetes.btc_node_image": "Bitcoin node image of the S3 emulation",
     "kubernetes.btc_node_initial_block_count": ("blocks the S3 emulation's Bitcoin node mines before the run"),
     "kubernetes.image_pull_policy": ("imagePullPolicy of the S3 emulation's pods"),
+    "kubernetes.planned_quota": (
+        "JSON object of the run's peak ResourceQuota use, e.g. "
+        '\'{"requests.cpu": "21.7", "requests.memory": "68719476736"}\'; the S3 emulation Job '
+        "carries it as the coinjoin.io/planned-quota annotation so a queue can reserve the space "
+        "before the emulator has created every pod"
+    ),
     "kubernetes.owner": (
         "login of whoever launches the run, set as the coinjoin.owner label of the S3 emulation's "
         "Job, Secret and pods so a shared namespace shows whose they are"

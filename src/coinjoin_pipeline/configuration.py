@@ -95,6 +95,8 @@ class KubernetesConfiguration(ConfigurationModel):
     image_pull_policy: ImagePullPolicy | None = option(None, name="kubernetes_image_pull_policy")
     # Who launched the run, as the coinjoin.owner label of its Kubernetes objects.
     owner: str | None = option(None, name="owner")
+    # The run's peak quota as JSON, kept on the Job so any Lab reserves it before the pods exist.
+    planned_quota: str | None = option(None, name="planned_quota")
 
 
 @dataclass(frozen=True, slots=True)

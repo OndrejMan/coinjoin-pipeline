@@ -68,6 +68,7 @@ def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
         kubernetes_image_pull_policy=kubernetes.image_pull_policy,
         btc_node_initial_block_count=_text(kubernetes.btc_node_initial_block_count),
         owner=kubernetes.owner,
+        planned_quota=kubernetes.planned_quota,
     )
     credentials_file = required(args.artifacts.credentials_file, "--s3-credentials-file")
     profile = required(args.artifacts.profile, "--s3-profile")

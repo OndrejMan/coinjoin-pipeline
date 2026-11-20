@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from exporters.verify_chain import is_block_hash
 
 from .configuration import cli_flag, config_value, option_specs
+from .execution.planned_quota import planned_quota_annotation
 from .execution.pbs.defaults import MAINNET_SYNC_RESOURCES
 from .execution.pbs.validation import SHARED_STORAGE_ROOTS, kept_between_jobs, multijob_location
 from .execution.stages import runs_unified_report
@@ -499,9 +500,15 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
         ),
         ("--kubernetes-image-pull-policy", "kubernetes.image_pull_policy", config.kubernetes.image_pull_policy),
         ("--owner", "kubernetes.owner", config.kubernetes.owner),
+        ("--planned-quota", "kubernetes.planned_quota", config.kubernetes.planned_quota),
     ):
         if _supplied(config, path, value) and not s3_emulation:
             errors.append(f"{flag} applies only to the S3 emulation Job (--driver kubernetes --artifact-backend s3)")
+    if config.kubernetes.planned_quota is not None:
+        try:
+            planned_quota_annotation(config.kubernetes.planned_quota)
+        except ValueError as error:
+            errors.append(f"--planned-quota: {error}")
     owner = config.kubernetes.owner
     if owner is not None and not KUBERNETES_LABEL_VALUE.fullmatch(owner):
         errors.append("--owner must be a Kubernetes label value: 1-63 letters, digits, '-', '_' or '.'")
