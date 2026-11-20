@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import os
@@ -14,7 +15,10 @@ from pathlib import Path
 import pytest
 
 from job_scripts import embedded_file
+from coinjoin_pipeline.execution.pbs import explorer_output
+from coinjoin_pipeline.execution.pbs.scripts import PBSError
 from coinjoin_pipeline.execution.pbs.templates_s3 import (
+    EXPLORER_ASSETS,
     render_blocksci_s3_pbs,
     render_coinjoin_analysis_dumplings_s3_pbs,
     render_coinjoin_analysis_s3_pbs,
@@ -81,6 +85,30 @@ if [ "${*: -1}" = "/opt/coinjoin-analysis/data/wasabi2/false_cjtxs.json" ]; then
   printf '{"curated": true}\\n'
   exit 0
 fi
+case "$*" in
+  *WHIRLPOOL_FUNDING_TXS*)
+    printf '["whirlpool_5M"]\n'
+    exit 0 ;;
+  *"cp -r /opt/coinjoin-analysis/data /work/curated"*)
+    for protocol in wasabi1 wasabi2 whirlpool joinmarket; do
+      mkdir -p "$work/curated/$protocol"
+      printf '{"curated": []}\n' > "$work/curated/$protocol/false_cjtxs.json"
+    done
+    printf '{}\n' > "$work/curated/wasabi2/txid_coord.json"
+    exit 0 ;;
+  *"export_static"*)
+    case "$*" in *explorer-html-fins*) html="$work/explorer-html-fins" ;; *) html="$work/explorer-html" ;; esac
+    mkdir -p "$html"
+    ls "$work/explorer-staging" > "$SINGULARITY_CALLS.staging"
+    cat "$work/explorer-staging"/*/cj_selection.json > "$SINGULARITY_CALLS.${html##*/}.selections" 2>/dev/null || true
+    printf '<html>all</html>\n' > "$html/coinjoin-explorer-offline_all.html"
+    printf '<html>pool</html>\n' > "$html/coinjoin-explorer-offline__wasabi2_opencoordinator.html"
+    exit 0 ;;
+  *"--action split_coordinators"*)
+    month="$work/dumplings/Scanner/wasabi2_opencoordinator/2025-03-01 00-00-00--2025-04-01 00-00-00_unknown-static-100-1utxo"
+    mkdir -p "$month"
+    printf '%s\n' "${FAKE_EXPLORER_MONTH:?}" > "$month/coinjoin_tx_info.json" ;;
+esac
 if [ -n "${work:-}" ]; then
   ls "$work/dumplings/Scanner" > "$SINGULARITY_CALLS.scanner"
   mkdir -p "$work/dumplings/Scanner/wasabi2"
@@ -257,19 +285,48 @@ def test_analysis_job_that_writes_no_baseline_fails(job: dict[str, Path]) -> Non
 DUMPLINGS = "s3://bucket/dumplings"
 
 
-def dumplings_script(job: dict[str, Path]) -> str:
+EXPLORER = "s3://bucket/explorer"
+MONTH = "2025-03-01 00-00-00--2025-04-01 00-00-00_unknown-static-100-1utxo"
+
+
+def dumplings_script(job: dict[str, Path], explorer_uri: str | None = None, explorer_source: Path | None = None) -> str:
     target = S3Target(
         artifact_uri="s3://bucket/runs",
         run_id="run-1",
         access=S3Access(endpoint_url="https://s3.example.org", credentials_file=str(job["credentials"]), profile="coinjoin"),
     )
     return render_coinjoin_analysis_dumplings_s3_pbs(
-        target, "docker://coinjoin:1", dumplings_uri=DUMPLINGS, coinjoin_type="wasabi2"
+        target,
+        "docker://coinjoin:1",
+        dumplings_uri=DUMPLINGS,
+        coinjoin_type="wasabi2",
+        explorer_uri=explorer_uri,
+        explorer_source=explorer_source,
     )
 
 
-def publish_dumplings(job: dict[str, Path], *, manifest_sizes: dict[str, int] | None = None) -> None:
-    files = {"Wasabi2CoinJoins.txt": "cj\n", "Wasabi2CoinJoins.txt.json": "stale cache"}
+def explorer_month(*coinjoins: str) -> str:
+    return json.dumps({"coinjoins": {
+        txid: {
+            "broadcast_time": f"2025-03-0{index + 1} 10:00:00.000",
+            "inputs": {"0": {"value": 100, "mix_event_type": "MIX_ENTER"}},
+            "outputs": {"0": {"value": 40, "mix_event_type": "MIX_LEAVE", "burn_time": 60.0}},
+        }
+        for index, txid in enumerate(coinjoins)
+    }})
+
+
+def explorer_remote(job: dict[str, Path], relative: str) -> Path:
+    return job["s3"] / EXPLORER.removeprefix("s3://") / relative
+
+
+ALL_PROTOCOLS = {name: "cj\n" for name in ("WasabiCoinJoins.txt", "SamouraiCoinJoins.txt", "OtherCoinJoins.txt")}
+
+
+def publish_dumplings(
+    job: dict[str, Path], *, manifest_sizes: dict[str, int] | None = None, extra: dict[str, str] | None = None
+) -> None:
+    files = {"Wasabi2CoinJoins.txt": "cj\n", "Wasabi2CoinJoins.txt.json": "stale cache", **(extra or {})}
     root = job["s3"] / DUMPLINGS.removeprefix("s3://")
     for name, content in files.items():
         (root / "Scanner").mkdir(parents=True, exist_ok=True)
@@ -319,6 +376,92 @@ def test_dumplings_baseline_refuses_a_copy_that_differs_from_its_manifest(job: d
     assert "does not match its manifest" in output
     assert remote(job, ".pbs/coinjoin-analysis.failed").is_file()
     assert not (job["scratch"].parent / "singularity.calls").exists()
+
+
+def test_explorer_mode_parses_every_protocol_and_uploads_only_changed_files(job: dict[str, Path]) -> None:
+    publish_dumplings(job, extra=ALL_PROTOCOLS)
+    stale = explorer_remote(job, "data/gone/old.json.gz")
+    stale.parent.mkdir(parents=True)
+    stale.write_text("from an earlier coordinator split")
+    process = start(job, dumplings_script(job, EXPLORER), FAKE_EXPLORER_MONTH=explorer_month("a", "b"))
+    output, _ = process.communicate(timeout=60)
+
+    assert process.returncode == 0, output
+    calls = (job["scratch"].parent / "singularity.calls").read_text()
+    steps = [f"--cjtype {cjtype} --action {action}" for cjtype, action in explorer_output.PARSE_STEPS]
+    assert [step for step in steps if step in calls] == steps
+    # Only pools whose funding coinjoins exist are split, or parse_dumplings fails on the others.
+    pools = "--env_vars \"MIX_IDS=['whirlpool_5M']\""
+    assert f"--cjtype sw --action process_dumplings --target-path /work/dumplings {pools}" in calls
+    manifest = json.loads(explorer_remote(job, "manifest.json").read_text())
+    assert manifest["height"] == 900 and manifest["coordinators"] == ["wasabi2_opencoordinator"]
+    assert manifest["deleted"] == 1 and not stale.exists()
+    assert f"data/wasabi2_opencoordinator/{MONTH}/coinjoin_tx_info.json.gz" in manifest["files"]
+    spend = json.loads(gzip.decompress(explorer_remote(job, "curves/wasabi2_opencoordinator.spend.json.gz").read_bytes()))
+    # a's output is spent before b, b's after the last coinjoin, so it stays on the last sample.
+    assert spend["publicCurve"]["values"] == [0, 100, 120]
+    # The baseline for the BlockSci comparison is still the run's own output.
+    assert remote(job, "coinjoin-analysis_data/coinjoin_tx_info.json").is_file()
+    assert remote(job, "coinjoin-analysis_data/explorer-manifest.json").is_file()
+
+    process = start(job, dumplings_script(job, EXPLORER), FAKE_EXPLORER_MONTH=explorer_month("a", "b"))
+    output, _ = process.communicate(timeout=60)
+    assert process.returncode == 0, output
+    assert json.loads(explorer_remote(job, "manifest.json").read_text())["uploaded"] == 0
+
+    process = start(job, dumplings_script(job, EXPLORER), FAKE_EXPLORER_MONTH=explorer_month("a", "b", "c"))
+    output, _ = process.communicate(timeout=60)
+    assert process.returncode == 0, output
+    # The month and both curves changed; the baseline file stays the same.
+    assert json.loads(explorer_remote(job, "manifest.json").read_text())["uploaded"] == 3
+
+
+def test_explorer_mode_skips_protocols_the_dumplings_copy_has_no_coinjoins_of(job: dict[str, Path]) -> None:
+    publish_dumplings(job)
+    process = start(job, dumplings_script(job, EXPLORER), FAKE_EXPLORER_MONTH=explorer_month("a"))
+    output, _ = process.communicate(timeout=60)
+
+    assert process.returncode == 0, output
+    calls = (job["scratch"].parent / "singularity.calls").read_text()
+    assert "--cjtype ww1" not in calls and "--cjtype sw" not in calls and "--cjtype jm" not in calls
+    assert "no sw coinjoins in this Dumplings copy" in output
+
+
+def test_explorer_page_is_rendered_from_the_shipped_explorer(job: dict[str, Path], tmp_path: Path) -> None:
+    source = tmp_path / "cj_browser"
+    for name in EXPLORER_ASSETS:
+        (source / name).parent.mkdir(parents=True, exist_ok=True)
+        (source / name).write_text(f"# {name}\n")
+    publish_dumplings(job)
+    script = dumplings_script(job, EXPLORER, source)
+    assert embedded_file(script, "explorer/coinjoin-analysis/src/cj_browser/static/app.js") == "# static/app.js"
+    assert "class FileLock" in embedded_file(script, "explorer/stubs/filelock.py")
+    process = start(job, script, FAKE_EXPLORER_MONTH=explorer_month("a"))
+    output, _ = process.communicate(timeout=60)
+
+    assert process.returncode == 0, output
+    assert (job["scratch"].parent / "singularity.calls.staging").read_text().split() == ["wasabi2_opencoordinator"]
+    files = json.loads(explorer_remote(job, "manifest.json").read_text())["files"]
+    page = "html/coinjoin-explorer-offline__wasabi2_opencoordinator.html.gz"
+    assert page in files and "html/coinjoin-explorer-offline_all.html.gz" not in files
+    assert "html-fins/coinjoin-explorer-offline__wasabi2_opencoordinator.html.gz" in files
+    # The clean page is exported before any window is written; the second one sees them.
+    calls = job["scratch"].parent / "singularity.calls"
+    assert not Path(f"{calls}.explorer-html.selections").read_text().strip()
+    assert json.loads(Path(f"{calls}.explorer-html-fins.selections").read_text()) == []
+    manifest = json.loads(explorer_remote(job, "manifest.json").read_text())
+    assert manifest["fin_windows"]["algorithm"] == "trough-or-jump-rise-zone-v3"
+    assert gzip.decompress(explorer_remote(job, page).read_bytes()) == b"<html>pool</html>\n"
+
+
+def test_explorer_page_needs_the_whole_explorer(job: dict[str, Path], tmp_path: Path) -> None:
+    with pytest.raises(PBSError, match="lacks"):
+        dumplings_script(job, EXPLORER, tmp_path)
+
+
+def test_explorer_output_may_not_lie_inside_the_dumplings_copy(job: dict[str, Path]) -> None:
+    with pytest.raises(PBSError, match="inside the Dumplings copy"):
+        dumplings_script(job, DUMPLINGS + "/explorer")
 
 
 def mappings_script(job: dict[str, Path]) -> str:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from dataclasses import dataclass, field
 
 from exporters.artifact_paths import BASELINE_FILE, BLOCKSCI_PARSE_DIR
@@ -131,7 +133,11 @@ class S3StageRunner:
         elif self.args.dumplings_uri:
             # Mainnet: the baseline comes from the latest Dumplings snapshot, not an emulation.
             script = render_coinjoin_analysis_dumplings_s3_pbs(
-                **common, dumplings_uri=self.args.dumplings_uri, coinjoin_type=self.args.coinjoin_type
+                **common,
+                dumplings_uri=self.args.dumplings_uri,
+                coinjoin_type=self.args.coinjoin_type,
+                explorer_uri=self.args.explorer_uri,
+                explorer_source=Path(self.args.explorer_source).expanduser() if self.args.explorer_source else None,
             )
         else:
             script = render_coinjoin_analysis_s3_pbs(**common, command=coinjoin_analysis_pbs_command("collect_docker"))

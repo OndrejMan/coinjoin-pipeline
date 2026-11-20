@@ -335,6 +335,10 @@ class PipelineConfiguration(ConfigurationModel):
     analysis_action: AnalysisAction = option("collect_docker", name="analysis_action", actions=("coinjoin-analysis",))
     # Mainnet baseline: the S3 prefix holding the Dumplings Scanner/ copy and its manifest.json.
     dumplings_uri: str | None = option(None, name="dumplings_uri")
+    # With the baseline: the fixed prefix of the CoinJoin Explorer data the job brings up to date.
+    explorer_uri: str | None = option(None, name="explorer_uri")
+    # CoinJoin Explorer's cj_browser directory on this host; the job then also renders its offline page.
+    explorer_source: str | None = option(None, name="explorer_source")
     emulation_timeout: int = option(21600, name="emulation_timeout", minimum=1)
     kubernetes: KubernetesConfiguration = field(default_factory=KubernetesConfiguration)
     artifacts: ArtifactConfiguration = field(default_factory=ArtifactConfiguration)

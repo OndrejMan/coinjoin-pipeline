@@ -125,6 +125,10 @@ HELP = {
     "yes": "confirm the destructive clean action",
     "analysis_action": "collect_docker collects the emulator logs first; analyze_only needs an existing baseline",
     "dumplings_uri": "S3 prefix holding the Dumplings Scanner/ copy and its manifest.json, used as the mainnet baseline",
+    "explorer_uri": (
+        "with --dumplings-uri: parse every protocol and update the CoinJoin Explorer data under this fixed S3 prefix"
+    ),
+    "explorer_source": "CoinJoin Explorer's cj_browser directory; with --explorer-uri the job also renders its page",
     "emulation_timeout": "seconds to wait for the emulation before giving up",
     "stage_exporters": "always upload the exporters into the S3 run prefix, even when no PBS stage needs them",
     "kubernetes.namespace": "namespace of the run's Kubernetes resources",

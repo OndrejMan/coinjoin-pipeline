@@ -11,6 +11,8 @@
       "credentials": "/storage/brno2/home/<login>/.aws/credentials",
       "dumplings_uri": "s3://your-bucket/bitcoin-mainnet/dumplings",
       "endpoint": "https://s3.cl4.du.cesnet.cz",
+      "explorer_page": false,
+      "explorer_uri": null,
       "false_cjtxs": "joinmarket",
       "image": "docker://ghcr.io/ondrejman/coinjoin-analysis:latest",
       "image_name": "docker://ghcr.io/ondrejman/coinjoin-analysis:latest",
@@ -43,7 +45,9 @@
       "coinjoin_pipeline/execution/pbs/blocksci_index.py",
       "coinjoin_pipeline/execution/pbs/blocksci_jobs.py",
       "coinjoin_pipeline/execution/pbs/blocksci_analysis_jobs.py",
-      "coinjoin_pipeline/execution/pbs/stage_runtime.py"
+      "coinjoin_pipeline/execution/pbs/stage_runtime.py",
+      "coinjoin_pipeline/execution/pbs/explorer_output.py",
+      "coinjoin_pipeline/execution/pbs/fin_windows.py"
     ]
   }
 }

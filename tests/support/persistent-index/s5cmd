@@ -15,6 +15,12 @@ copy() {
     source=$(local_path "$1")
     destination=$(local_path "$2")
     case "$2" in */) mkdir -p "$destination" ;; *) mkdir -p "$(dirname "$destination")" ;; esac
+    if [[ "$source" != *'*'* ]]; then
+        # A plain key may hold spaces; only a wildcard is expanded below.
+        [ -e "$source" ] || [ "$3" = sync ] || { echo "fake s5cmd: no object matches $1" >&2; exit 1; }
+        [ -e "$source" ] && cp -r "$source" "$destination"
+        return 0
+    fi
     shopt -s nullglob dotglob
     # Unquoted on purpose: a trailing * in the source is a wildcard, as in s5cmd.
     for item in $source; do

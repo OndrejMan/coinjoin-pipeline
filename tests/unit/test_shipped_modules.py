@@ -8,7 +8,7 @@ from pathlib import Path
 
 from coinjoin_pipeline.execution.mainnet_sync import MAINNET_RUNTIME_MODULES
 from coinjoin_pipeline.execution.pbs.scripts import STAGE_RUNTIME_MODULES
-from coinjoin_pipeline.execution.pbs.templates_s3 import BLOCK_ARCHIVE, NOTEBOOK_SERVER
+from coinjoin_pipeline.execution.pbs.templates_s3 import BLOCK_ARCHIVE, EXPLORER_OUTPUT, FIN_WINDOWS, NOTEBOOK_SERVER
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -26,7 +26,7 @@ def linted_for_python_38(path: str, targets: set[str]) -> bool:
 
 
 def test_every_shipped_module_is_linted_for_python_38() -> None:
-    shipped = (*STAGE_RUNTIME_MODULES, BLOCK_ARCHIVE, NOTEBOOK_SERVER, *MAINNET_RUNTIME_MODULES)
+    shipped = (*STAGE_RUNTIME_MODULES, BLOCK_ARCHIVE, NOTEBOOK_SERVER, EXPLORER_OUTPUT, FIN_WINDOWS, *MAINNET_RUNTIME_MODULES)
     targets = py38_targets()
     unchecked = {
         relative

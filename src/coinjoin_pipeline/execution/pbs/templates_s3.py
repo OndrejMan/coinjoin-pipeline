@@ -88,6 +88,9 @@ EXECUTION_DIR = Path(__file__).parent.parent
 # Standalone helpers some jobs ship besides the worker.
 BLOCK_ARCHIVE = EXECUTION_DIR / "block_archive.py"
 NOTEBOOK_SERVER = Path(__file__).parent / "templates/blocksci_notebook.py"
+# Only the Dumplings baseline imports it; every other job script stays smaller.
+EXPLORER_OUTPUT = Path(__file__).with_name("explorer_output.py")
+FIN_WINDOWS = Path(__file__).with_name("fin_windows.py")
 BLOCKSCI = DEFAULT_RESOURCES["blocksci"]
 # The fields one job adds to the common StageSettings; its job function reads them.
 JobSettings = Union[
@@ -155,6 +158,44 @@ DUMPLINGS_PROTOCOLS = {
 }
 
 
+# CoinJoin Explorer's files its static export needs; scenario-lab's renderer ships the same set.
+EXPLORER_ASSETS = (
+    "__init__.py",
+    "model.py",
+    "server.py",
+    "export_browser_static.py",
+    "static/index.html",
+    "static/app.js",
+    "static/style.css",
+    "static/service-worker.js",
+)
+# The export imports server.py, which imports filelock; only the live server takes locks.
+FILELOCK_STUB = '''"""Stand-in for filelock: CoinJoin Explorer's static export never takes a lock."""
+
+
+class Timeout(Exception):
+    pass
+
+
+class FileLock:
+    def __init__(self, *_args, **_kwargs):
+        raise RuntimeError("file locks are not available in the explorer job")
+'''
+
+
+def explorer_files(source: Path) -> dict[str, str]:
+    """Explorer's sources at the layout its export expects (cj_browser below coinjoin-analysis/src)."""
+    missing = [name for name in EXPLORER_ASSETS if not (source / name).is_file()]
+    if missing:
+        raise PBSError(f"CoinJoin Explorer source {source} lacks {', '.join(missing)}")
+    files = {
+        f"explorer/coinjoin-analysis/src/cj_browser/{name}": (source / name).read_text(encoding="utf-8")
+        for name in EXPLORER_ASSETS
+    }
+    files["explorer/stubs/filelock.py"] = FILELOCK_STUB
+    return files
+
+
 def render_coinjoin_analysis_dumplings_s3_pbs(
     target: S3Target,
     image: str,
@@ -162,15 +203,24 @@ def render_coinjoin_analysis_dumplings_s3_pbs(
     dumplings_uri: str,
     coinjoin_type: str,
     resources: PBSResources = DEFAULT_RESOURCES["analysis"],
+    explorer_uri: str | None = None,
+    explorer_source: Path | None = None,
 ) -> str:
     """Render the mainnet baseline: coinjoin-analysis over the published Dumplings copy.
 
     ``<dumplings_uri>/Scanner/`` is the copy mainnet-sync keeps incrementally and
     ``manifest.json`` (written last) its height and file sizes. The run gets
     ``coinjoin_tx_info.json``, the image's curated ``false_cjtxs.json`` and the manifest as
-    ``dumplings-snapshot.json`` for the external comparison.
+    ``dumplings-snapshot.json`` for the external comparison. With ``explorer_uri`` the job
+    parses every protocol and updates the CoinJoin Explorer data under that fixed prefix;
+    ``explorer_source`` (Explorer's ``cj_browser`` directory) adds the rendered offline page.
     """
     uri = validated_s3_uri(dumplings_uri, "Dumplings snapshot URI")
+    explorer = None if explorer_uri is None else validated_s3_uri(explorer_uri, "Explorer data URI")
+    if explorer is not None and (explorer.rstrip("/") + "/").startswith(uri.rstrip("/") + "/"):
+        raise PBSError("The explorer data must not lie inside the Dumplings copy")
+    if explorer_source is not None and explorer is None:
+        raise PBSError("The Explorer page needs an explorer data URI")
     if coinjoin_type not in DUMPLINGS_PROTOCOLS:
         raise PBSError(f"Dumplings baselines cover wasabi2 and joinmarket, not {coinjoin_type}")
     cjtype, mix_id, false_cjtxs = DUMPLINGS_PROTOCOLS[coinjoin_type]
@@ -186,8 +236,12 @@ def render_coinjoin_analysis_dumplings_s3_pbs(
             "snapshot_file": DUMPLINGS_SNAPSHOT_FILE,
             "command": f"python -m cj_process.parse_dumplings --cjtype {cjtype} --action process_dumplings "
             "--target-path /work/dumplings",
+            "explorer_uri": explorer,
+            "explorer_page": explorer_source is not None,
         },
         job="dumplings-baseline",
+        extra_files=(EXPLORER_OUTPUT, FIN_WINDOWS),
+        named_files=explorer_files(explorer_source) if explorer_source is not None else None,
     )
 
 
@@ -472,6 +526,7 @@ def render_python_stage(
     job: str | None = None,
     multijob: str | None = None,
     extra_files: tuple[Path, ...] = (),
+    named_files: dict[str, str] | None = None,
 ) -> str:
     """The job script: write the worker's modules and settings.json to scratch and run ``stage_runtime``.
 
@@ -503,6 +558,7 @@ def render_python_stage(
         "settings.json": json.dumps({**common, **settings, **image_settings}, indent=2),
         "run.py": launcher("coinjoin_pipeline.execution.pbs.stage_runtime"),
         **package_files(*STAGE_RUNTIME_MODULES, *extra_files),
+        **(named_files or {}),
     }
     return "\n".join(
         (

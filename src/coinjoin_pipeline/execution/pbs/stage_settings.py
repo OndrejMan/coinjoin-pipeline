@@ -147,6 +147,10 @@ class DumplingsBaselineSettings(CommandSettings):
     false_cjtxs: str
     # Run-relative path of the manifest copy the external comparison reads.
     snapshot_file: str
+    # Fixed prefix of the CoinJoin Explorer data: set, every protocol is parsed and uploaded there.
+    explorer_uri: str | None
+    # The job ships CoinJoin Explorer and renders its offline page into the explorer data.
+    explorer_page: bool
 
 
 class MappingsSettings(TypedDict):

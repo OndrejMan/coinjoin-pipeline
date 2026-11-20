@@ -230,6 +230,38 @@ records hold the position in the block, not the height) and compares only the
 baseline inside the window; `coverage` in the report counts the rest.
 `tests/test-dumplings-baseline-local.sh` runs the rendered baseline job locally.
 
+With `explorer_uri` the same job also keeps the CoinJoin Explorer data of the
+whole chain under that fixed prefix (`analyzer_jobs.explore`, data side in
+`pbs/explorer_output.py`, shipped only with this job). It copies the image's
+curated `false_cjtxs.json`, `fee_rates.json` and the Wasabi 2 coordinator seed
+(`data/wasabi2/txid_coord.json` → `Scanner/wasabi2_others/`), then runs
+`parse_dumplings` for `ww1`, `sw`, `jm` and `ww2` (`process_dumplings`), and
+`detect_coordinators` and `split_coordinators` for `ww2`, in that order: the
+Wasabi 2 step corrects inputs that came from Wasabi 1. A protocol whose Dumplings
+file is missing or empty is skipped. Whirlpool gets `--env_vars
+"MIX_IDS=[...]"` with only the pools whose funding coinjoins the Scanner holds,
+because `whirlpool_extract_pool` fails on a pool that started later (Ashigaru,
+2025). The upload holds, per coordinator, the monthly
+`data/<coordinator>/<month>/coinjoin_tx_info.json.gz` and `false_cjtxs.json`,
+the fin-detector curves `curves/<coordinator>.{created,spend}.json.gz`
+(`fin-liquidity-1.0`, block times instead of heights, ordered by block time:
+`relative_order` is the remix depth, not time), `baseline/<protocol>/` for the
+comparison and, with `explorer_source` (CoinJoin Explorer's `cj_browser`
+directory, shipped with the job with a `filelock` stand-in), one rendered page
+per coordinator `html/coinjoin-explorer-offline__<coordinator>.html.gz`, and the same
+page again in `html-fins/` with scenario-lab's fin detector (`pbs/fin_windows.py`, a port
+checked window for window against `src/domain/fin-detector.ts`) baked in as Explorer's own
+saved selections: the job writes `<coordinator>/cj_selection.json` in the staged copy before
+the second export, for the settings fixed in `explorer_output.FIN_SETTINGS` (created and spend
+curve, 0.5 BTC + 15 %, strongest jump). Explorer's code stays unchanged. Gzip
+headers carry no name or time, so equal content gives equal bytes; only files
+whose SHA-256 differs from the previous `manifest.json` (schema
+`mainnet-explorer-1.0`) are uploaded, removed ones are deleted. The manifest is
+removed first and written last, with the Dumplings height, the run ID, the image
+and every file's size and SHA-256. Measured on vm207 over the Dumplings copy of
+2023-11 (height 816 576): Wasabi 1 13 min and 21 GB, Whirlpool 21 min and 19 GB,
+JoinMarket 3 min and 10 GB, Wasabi 2 over 24 GB (killed at that limit).
+
 For parse-only `pbs-from-s3` submissions, the producer may replace emulator
 inputs with exactly one source. An external Bitcoin source is either a coin
 directory under `/storage` containing `blocks/`, or a

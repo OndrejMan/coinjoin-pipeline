@@ -345,9 +345,11 @@ def _cache_source_errors(config: PipelineConfiguration) -> list[str]:
 
 
 def _dumplings_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
-    if not config.dumplings_uri:
-        return []
     errors: list[str] = []
+    if config.explorer_source and not config.explorer_uri:
+        errors.append("--explorer-source requires --explorer-uri")
+    if not config.dumplings_uri:
+        return [*errors, *(["--explorer-uri requires --dumplings-uri"] if config.explorer_uri else [])]
     if config.action != "pbs-from-s3" or not stages.analysis:
         errors.append("--dumplings-uri requires pbs-from-s3 --analysis-pbs")
     if stages.mappings:
