@@ -45,9 +45,17 @@ class BlocksciChain(Blockchain, Protocol):
 
     def address_from_string(self, address: str) -> object: ...
 
-    def classify_coinjoin_mix_events(self, coinjoin_txes: list[object]) -> dict[object, dict[str, list[str]]]: ...
+    def classify_coinjoin_mix_events(
+        self, coinjoin_txes: list[object]
+    ) -> dict[object, dict[str, list[BlocksciMixEvent]]]: ...
 
     def __getitem__(self, height: int) -> BlocksciBlock: ...
+
+
+class BlocksciMixEvent(Protocol):
+    """``blocksci.MixEventType``; its name is coinjoin-analysis' MIX_EVENT_TYPE value."""
+
+    name: str
 
 
 class BlocksciBlock(Protocol):
@@ -373,7 +381,7 @@ def export_blocksci_mix_events(
     except Exception as exc:
         return None, f"BlockSci liquidity event classification failed: {exc}"
     return {
-        txid: {"inputs": list(events["inputs"]), "outputs": list(events["outputs"])}
+        txid: {side: [event.name for event in events[side]] for side in ("inputs", "outputs")}
         for tx, events in classified.items()
         if (txid := to_json_text(safe_attr(tx, "hash")))
     }, None

@@ -381,3 +381,37 @@ def test_first_wasabi2_block_is_required(tmp_path):
     config.write_text(json.dumps({"chainConfig": {}, "FirstWasabi2Block": 5}), encoding="utf-8")
     with pytest.raises(ValueError, match="chainConfig.coinJoinConfiguration.FirstWasabi2Block"):
         load_first_wasabi2_block(config)
+
+
+def test_mix_events_are_exported_by_event_name(tmp_path):
+    """BlockSci returns MixEventType values; the report keeps coinjoin-analysis' names."""
+    from exporters.blocksci_export import detector
+
+    event = types.SimpleNamespace
+
+    class FakeTx:
+        hash = "aa" * 32
+
+    tx = FakeTx()
+
+    class FakeChain:
+        def __init__(self, _config):
+            pass
+
+        def tx_with_hash(self, txid):
+            return tx
+
+        def classify_coinjoin_mix_events(self, coinjoin_txes):
+            assert coinjoin_txes == [tx]
+            return {
+                tx: {
+                    "inputs": [event(name="MIX_ENTER")],
+                    "outputs": [event(name="MIX_REMIX"), event(name="MIX_STAY")],
+                }
+            }
+
+    with mock.patch.object(detector, "blocksci", types.SimpleNamespace(Blockchain=FakeChain)):
+        events, error = detector.export_blocksci_mix_events(tmp_path / "config.json", ["aa" * 32])
+
+    assert error is None
+    assert events == {"aa" * 32: {"inputs": ["MIX_ENTER"], "outputs": ["MIX_REMIX", "MIX_STAY"]}}
