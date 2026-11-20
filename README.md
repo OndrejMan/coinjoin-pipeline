@@ -255,13 +255,26 @@ Those two `aws_*` names are credentials-file fields consumed by `s5cmd`, not
 supported environment-variable configuration. The pipeline never accepts
 credential values through CLI arguments.
 
-Provision the Kubernetes Secret separately:
+The emulation Job reads the same key from a Kubernetes Secret. By default the
+frontend creates one per run: a Secret named like the run's Job, made from the
+`--s3-profile` of `--s3-credentials-file` and owned by the Job. It is deleted as soon
+as `full-run` sees the upload marker (or the upload fails), and with the Job in any
+case, so a namespace shared with other users holds the key only while a run needs it.
+The kubeconfig then needs `create`, `list`, `patch` and `delete` on `secrets`. A Secret
+of that name that already exists is never replaced, and the deletion selects the run's
+labels, not the name alone. Before anything is created the frontend also refuses a run
+ID that already labels a Job, pod or temporary Secret in the namespace
+(`coinjoin.run-id=<id>`), the Kubernetes counterpart of the empty-run-prefix check. A standalone
+`emulate` does not wait for the upload, so its Secret lives until the finished Job
+expires an hour later.
+
+To use a Secret that is kept in the namespace instead, create it once and pass
+`--s3-secret-name`:
 
 ```bash
 kubectl create secret generic coinjoin-s3-credentials \
   --from-literal=S3_ACCESS_KEY_ID='<access-key>' \
-  --from-literal=S3_SECRET_ACCESS_KEY='<secret-key>' \
-  --from-literal=S3_DEFAULT_REGION='us-east-1'
+  --from-literal=S3_SECRET_ACCESS_KEY='<secret-key>'
 ```
 
 ### Single-command full run
@@ -276,8 +289,7 @@ only part of the chain. Without coinjoin-analysis there is no baseline, so Block
 publishes its results without the unified report and `--mappings-pbs` is refused;
 without either analyzer the run ends at the emulation upload and never calls `qsub`.
 Requirements: kubeconfig + `qsub` + `s5cmd` on
-the frontend, and a pre-created namespace with the
-Secret (`--reuse-namespace` is required). Run it inside `screen`/`tmux` —
+the frontend, and a pre-created namespace (`--reuse-namespace` is required). Run it inside `screen`/`tmux` —
 the process blocks for the whole emulation and analysis.
 
 ```bash
@@ -289,7 +301,6 @@ coinjoin-pipeline full-run \
   --artifact-backend s3 \
   --artifact-uri s3://coinjoin-thesis/runs \
   --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
-  --s3-secret-name coinjoin-s3-credentials \
   --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
   --s3-profile coinjoin \
   --run-id '<id>' \
@@ -449,7 +460,6 @@ coinjoin-pipeline emulate \
   --artifact-backend s3 \
   --artifact-uri s3://coinjoin-thesis/runs \
   --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
-  --s3-secret-name coinjoin-s3-credentials \
   --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
   --s3-profile coinjoin \
   --run-id '<id>' \

@@ -10,8 +10,12 @@ from pathlib import Path
 from exporters.artifact_paths import STAGED_EXPORTERS_DIR
 from exporters.common import tree_sha256
 
-from coinjoin_pipeline.configuration import PipelineConfiguration, required
-from coinjoin_pipeline.execution.kubernetes import kubernetes_s3_auth_preflight, resolve_kubeconfig
+from coinjoin_pipeline.configuration import PipelineConfiguration
+from coinjoin_pipeline.execution.kubernetes import (
+    kubernetes_s3_auth_preflight,
+    require_unused_run_id,
+    resolve_kubeconfig,
+)
 from coinjoin_pipeline.execution.s3_run_manifest import publish_run_manifest
 from coinjoin_pipeline.paths import EXPORTERS_ROOT, REQUIRED_EXPORTERS
 from coinjoin_pipeline.storage.s3 import (
@@ -142,19 +146,27 @@ def stage_kubernetes_s3_run(args: PipelineConfiguration) -> None:
     """Prepare the S3 run prefix before any Kubernetes Job is created.
 
     Shared by ``full-run --artifact-backend s3`` and the standalone ``emulate``
-    S3 branch. Both preflights run before the upload on purpose: a failed auth
-    check must not leave staged exporters behind under a run id that then needs
-    cleaning up. The launch record follows the exporters; the in-cluster prefix
+    S3 branch. The preflights (S3 access, Kubernetes permissions, and a run ID that
+    no Job, pod or temporary Secret in the namespace carries yet) run before the
+    upload on purpose: a failed check must not leave staged exporters behind under
+    a run id that then needs cleaning up. The launch record follows the exporters; the in-cluster prefix
     preflight expects exactly these two in an otherwise empty prefix.
     """
     target = S3Target.from_args(args)
     access = target.access
     s3_access_preflight(access, target.artifact_uri)
+    kubeconfig_path = resolve_kubeconfig(args.kubernetes.kubeconfig)
     kubernetes_s3_auth_preflight(
-        resolve_kubeconfig(args.kubernetes.kubeconfig),
+        kubeconfig_path,
         args.kubernetes.namespace,
         args.kubernetes.reuse_namespace,
-        required(args.artifacts.secret_name, "--s3-secret-name"),
+        args.artifacts.secret_name,
+    )
+    require_unused_run_id(
+        kubeconfig_path,
+        args.kubernetes.namespace,
+        target.run_id,
+        secrets=args.artifacts.secret_name is None,
     )
     ensure_empty_run_prefix(access, target.artifact_uri, target.run_id)
     print(f"[stage] Uploading exporters from {EXPORTERS_ROOT}")

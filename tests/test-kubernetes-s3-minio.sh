@@ -102,7 +102,6 @@ RUN_ID="e2e-$(TZ=Europe/Prague date +%Y%m%dt%H%M%S%Z)-$$"
 BUCKET="coinjoin-e2e"
 ARTIFACT_URI="s3://${BUCKET}/runs"
 S3_PROFILE="coinjoin"
-S3_SECRET_NAME="coinjoin-s3-credentials"
 MINIO_ROOT_USER="e2e-access-key"
 MINIO_ROOT_PASSWORD="e2e-secret-key-${RUN_TOKEN}"
 CREDENTIALS_FILE="${WORK_ROOT}/s3-credentials"
@@ -316,11 +315,9 @@ k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
 local_images_import "${CLUSTER_NAME}"
 kubectl --kubeconfig "${HOST_KUBECONFIG}" wait node --all --for=condition=Ready --timeout=240s
 
+# No Secret is provisioned: without --s3-secret-name the frontend creates the run's
+# own from the credentials file and deletes it after the upload, as on MetaCentrum.
 kubectl --kubeconfig "${HOST_KUBECONFIG}" create namespace "${NAMESPACE}"
-kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" create secret generic "${S3_SECRET_NAME}" \
-  --from-literal=S3_ACCESS_KEY_ID="${MINIO_ROOT_USER}" \
-  --from-literal=S3_SECRET_ACCESS_KEY="${MINIO_ROOT_PASSWORD}" \
-  --from-literal=S3_DEFAULT_REGION='us-east-1'
 
 export PBS_CONTAINER_NAME PBS_WORKDIR_HOST="${WORK_ROOT}" PBS_WORKDIR_CONTAINER="${WORK_ROOT}"
 "${PBS_HELPER}" start
@@ -361,7 +358,6 @@ set +e
     --artifact-uri "${ARTIFACT_URI}" \
     --run-id "${RUN_ID}" \
     --s3-endpoint-url "${S3_ENDPOINT_URL}" \
-    --s3-secret-name "${S3_SECRET_NAME}" \
     --s3-credentials-file "${CREDENTIALS_FILE}" \
     --s3-profile "${S3_PROFILE}" \
     --uploader-image "${UPLOADER_IMAGE}" \
@@ -379,6 +375,13 @@ set +e
 PIPELINE_STATUS=${PIPESTATUS[0]}
 set -e
 (( PIPELINE_STATUS == 0 )) || exit "${PIPELINE_STATUS}"
+
+leftover="$(kubectl --kubeconfig "${HOST_KUBECONFIG}" -n "${NAMESPACE}" get secret \
+  -l "coinjoin.run-id=${RUN_ID}" -o name)"
+[[ -z "${leftover}" ]] || {
+  echo "FAIL: the run's temporary S3 Secret outlived the upload: ${leftover}" >&2
+  exit 1
+}
 
 echo "Verifying completion markers and results in the bucket..."
 for marker in .k8s/upload.done .pbs/coinjoin-analysis.done .pbs/blocksci.done .pbs/unified-report.done; do

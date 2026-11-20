@@ -194,16 +194,22 @@ submitted. Neither waits; only `full-run` does.
    their current digests. When any analyzer runs, a missing `qsub` stops the run
    here, before anything is created.
 2. **Stage** (`s3_staging.stage_kubernetes_s3_run`). In this order: the S3 access
-   preflight, the Kubernetes permission and Secret preflight, the check that the
-   run prefix is empty, and only then the upload of `pipeline/exporters/` to
+   preflight, the Kubernetes permission and Secret preflight, the check that no
+   Job, pod or temporary Secret in the namespace carries the run ID yet
+   (`require_unused_run_id`), the check that the run prefix is empty, and only then the upload of `pipeline/exporters/` to
    `<run prefix>/.pipeline/exporters/`, followed by the launch record
    `research_manifest.json`. A failed preflight therefore leaves nothing behind
    under the run ID.
 3. **Emulate** (`s3_emulation.py`, `kubernetes.render_s3_emulation_resources`).
    One `kubectl apply` creates a ServiceAccount, a ConfigMap with the scenario, a
    Role, a RoleBinding and the Job; the Job is then made the owner of the other
-   four, so deleting it removes them. The namespace and the credentials Secret
-   must already exist (`--reuse-namespace`). The Job's pod has three containers
+   four, so deleting it removes them. The namespace must already exist
+   (`--reuse-namespace`). Without `--s3-secret-name` the frontend first creates the
+   run's own credentials Secret, named like the Job, from its credentials file
+   (`kubectl create` on stdin, so no `last-applied` copy; an existing Secret of that
+   name is an error, never replaced), makes the Job its owner too, and deletes it by
+   its labels once `wait_for_emulation_upload` ends, whatever the outcome.
+   With `--s3-secret-name` that Secret must exist and stays. The Job's pod has three containers
    over one `emptyDir`:
    - `prefix-preflight` (init, uploader image) refuses a run prefix that holds
      anything besides the staged exporters and the launch record at its root, and

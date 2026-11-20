@@ -7,6 +7,7 @@ Marker waiting lives in ``execution/s3_markers.py`` and exporter staging in
 from __future__ import annotations
 
 import argparse
+import configparser
 import os
 import re
 import shlex
@@ -119,6 +120,20 @@ def validate_credentials_file(path: str) -> str:
     if not Path(path).is_absolute():
         raise ValueError("S3 credentials file must be an absolute path")
     return path
+
+
+def s3_key_pair(credentials_file: str, profile: str) -> tuple[str, str]:
+    """The access key ID and secret of one profile of an s5cmd/AWS credentials file."""
+    config = configparser.ConfigParser(interpolation=None)
+    if not config.read(credentials_file):
+        raise ArtifactTransportError(f"S3 credentials file not found: {credentials_file}")
+    if not config.has_section(profile):
+        raise ArtifactTransportError(f"S3 credentials file {credentials_file} has no profile {profile}")
+    section = config[profile]
+    key_id, secret = section.get("aws_access_key_id", "").strip(), section.get("aws_secret_access_key", "").strip()
+    if not key_id or not secret:
+        raise ArtifactTransportError(f"S3 profile {profile} in {credentials_file} lacks an access key or its secret")
+    return key_id, secret
 
 
 def validate_s3_profile(profile: str) -> str:

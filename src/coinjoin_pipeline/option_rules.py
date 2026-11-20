@@ -429,14 +429,16 @@ def _external_baseline_errors(config: PipelineConfiguration, stages: _PbsStages)
     return errors
 
 
-def _missing_s3_options(config: PipelineConfiguration, *, with_secret: bool) -> list[str]:
-    """CLI flags of the S3 settings an S3 run lacks, in their documented order."""
+def _missing_s3_options(config: PipelineConfiguration) -> list[str]:
+    """CLI flags of the S3 settings an S3 run lacks, in their documented order.
+
+    ``--s3-secret-name`` is optional: without it the emulation gets a temporary Secret.
+    """
     artifacts = config.artifacts
     required = (
         ("--run-id", config.run_id),
         ("--artifact-uri", artifacts.uri),
         ("--s3-endpoint-url", artifacts.endpoint_url),
-        *((("--s3-secret-name", artifacts.secret_name),) if with_secret else ()),
         ("--s3-credentials-file", artifacts.credentials_file),
         ("--s3-profile", artifacts.profile),
     )
@@ -448,7 +450,7 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
     action = config.action
     s3_backend = config.artifacts.backend == "s3"
     if action == "pbs-from-s3":
-        errors.extend(f"pbs-from-s3 requires {flag}" for flag in _missing_s3_options(config, with_secret=False))
+        errors.extend(f"pbs-from-s3 requires {flag}" for flag in _missing_s3_options(config))
         if not any((stages.analysis, stages.blocksci, stages.mappings)):
             errors.append("pbs-from-s3 requires --analysis-pbs, --blocksci-pbs, or --mappings-pbs")
     if (
@@ -468,7 +470,7 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
         )
     if s3_backend and action in ("full-run", "emulate"):
         mode = "full-run --artifact-backend s3" if action == "full-run" else "Kubernetes S3-compatible mode"
-        errors.extend(f"{mode} requires {flag}" for flag in _missing_s3_options(config, with_secret=True))
+        errors.extend(f"{mode} requires {flag}" for flag in _missing_s3_options(config))
         if config.driver != "kubernetes":
             errors.append(
                 f"{'full-run ' if action == 'full-run' else ''}--artifact-backend s3 requires --driver kubernetes"
@@ -476,7 +478,7 @@ def _s3_errors(config: PipelineConfiguration, stages: _PbsStages) -> list[str]:
         if not _supplied(config, "kubernetes.reuse_namespace", config.kubernetes.reuse_namespace):
             errors.append(
                 "Kubernetes S3-compatible mode requires --reuse-namespace because "
-                "the credentials Secret must exist before the Job is created"
+                "the namespace must exist before the Job is created"
             )
     s3_emulation = s3_backend and action in ("full-run", "emulate") and config.driver == "kubernetes"
     for flag, path, value in (

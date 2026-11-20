@@ -143,7 +143,10 @@ HELP = {
     "artifacts.backend": "where run artifacts are kept between stages",
     "artifacts.uri": "S3 run root, for example s3://bucket/runs",
     "artifacts.endpoint_url": "S3-compatible HTTP(S) endpoint URL",
-    "artifacts.secret_name": "Kubernetes Secret with the S3 credentials of the emulation Job",
+    "artifacts.secret_name": (
+        "existing Kubernetes Secret with the S3 credentials of the emulation Job; without it the "
+        "frontend creates a temporary Secret per run from --s3-credentials-file and deletes it after the upload"
+    ),
     "artifacts.credentials_file": "absolute path of the s5cmd credentials file on the frontend",
     "artifacts.profile": "profile name inside the credentials file",
     "images.version": "release tag of every component image; `cjp version` prints the CLI version",

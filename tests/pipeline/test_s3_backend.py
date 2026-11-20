@@ -700,6 +700,8 @@ def test_s3_emulation_forwards_timeout_to_uploader_manifest(
         artifact_uri="s3://bucket/runs",
         s3_endpoint_url="https://s3.example.invalid",
         s3_secret_name="coinjoin-s3",
+        s3_credentials_file="/storage/user/.aws/credentials",
+        s3_profile="coinjoin",
         emulation_timeout=123,
         reuse_namespace=True,
         uploader_image="uploader:test",

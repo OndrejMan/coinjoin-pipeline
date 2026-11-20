@@ -6,6 +6,7 @@ kubectl helpers and the preflight that the shared-storage Kubernetes path uses t
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -119,9 +120,13 @@ def kubernetes_s3_auth_preflight(
     kubeconfig_path: Path,
     namespace: str,
     reuse_namespace: bool,
-    secret_name: str,
+    secret_name: str | None,
 ) -> None:
-    """Validate permissions and prerequisites for the S3-compatible emulation Job."""
+    """Validate permissions and prerequisites for the S3-compatible emulation Job.
+
+    With ``secret_name`` the Secret must already exist; without it the frontend creates a
+    temporary one per run, so it needs the right to create, own and delete Secrets.
+    """
     if not reuse_namespace:
         raise RuntimeError(
             "Kubernetes S3-compatible mode requires an existing namespace and Secret; pass --reuse-namespace"
@@ -143,14 +148,40 @@ def kubernetes_s3_auth_preflight(
             *(("delete", resource) for resource in owned),
             ("get", "jobs.batch"),
             ("delete", "jobs.batch"),
+            ("list", "jobs.batch"),
+            ("list", "pods"),
+            *(
+                (("create", "secrets"), ("list", "secrets"), ("patch", "secrets"), ("delete", "secrets"))
+                if secret_name is None
+                else ()
+            ),
         ),
         namespace,
     )
     _preflight(kubeconfig_path, "get", "namespace", namespace)
-    # A missing Secret would leave the Job pod in CreateContainerConfigError
-    # until the emulation timeout, so check it up front.
-    _preflight(kubeconfig_path, "get", "secret", secret_name, namespace=namespace)
+    if secret_name is not None:
+        # A missing Secret would leave the Job pod in CreateContainerConfigError
+        # until the emulation timeout, so check it up front.
+        _preflight(kubeconfig_path, "get", "secret", secret_name, namespace=namespace)
     print(f"[kubernetes] S3-compatible auth preflight OK for namespace={namespace}")
+
+
+def require_unused_run_id(kubeconfig_path: Path, namespace: str, run_id: str, *, secrets: bool) -> None:
+    """Refuse a run ID that already labels a Job, pod or (temporary) Secret in the namespace.
+
+    The Kubernetes counterpart of the empty-run-prefix check in S3: a second run under the
+    same ID would share its Job, Secret and emulator pods with the first one, and both the
+    cleanup and the Lab's overview select by this label. It runs before anything is created.
+    """
+    kinds = "jobs.batch,pods" + (",secrets" if secrets else "")
+    found = _preflight(
+        kubeconfig_path, "get", kinds, "--selector", f"{RUN_ID_LABEL}={run_id}", "-o", "name", namespace=namespace
+    )
+    taken = [line.strip() for line in found.splitlines() if line.strip()]
+    if taken:
+        raise ValueError(
+            f"run ID {run_id} is already in use in namespace {namespace} ({', '.join(taken)}); choose another run ID"
+        )
 
 
 def s3_emulation_job_name(run_id: str) -> str:
@@ -297,6 +328,85 @@ def delete_s3_emulation_support_resources(kubeconfig_path: Path, namespace: str,
     for resource_type in S3_JOB_OWNED_RESOURCE_TYPES:
         if not _delete(kubeconfig_path, namespace, resource_type, resource_name):
             return
+
+
+def _owned_resource_types(temporary_secret: bool) -> tuple[str, ...]:
+    return (*S3_JOB_OWNED_RESOURCE_TYPES, "secret") if temporary_secret else S3_JOB_OWNED_RESOURCE_TYPES
+
+
+def create_temporary_s3_secret(
+    kubeconfig_path: Path, namespace: str, run_id: str, access_key_id: str, secret_access_key: str
+) -> str:
+    """Create the run's own S3 credentials Secret, named like its Job, and return the name.
+
+    The values go to kubectl on stdin, never on its command line, and ``create`` (unlike
+    ``apply``) keeps no copy of them in an annotation. An existing Secret of that name is
+    never replaced: it may belong to another run or user. The Job owns the Secret once it
+    exists; ``delete_temporary_s3_secret`` removes it as soon as the upload is over.
+    """
+    name = s3_emulation_job_name(run_id)
+    encoded = {
+        key: base64.b64encode(value.encode("utf-8")).decode("ascii")
+        for key, value in (("S3_ACCESS_KEY_ID", access_key_id), ("S3_SECRET_ACCESS_KEY", secret_access_key))
+    }
+    manifest = json.dumps(
+        {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "type": "Opaque",
+            "metadata": {
+                "name": name,
+                "namespace": namespace,
+                "labels": {"app.kubernetes.io/name": S3_EMULATION_APP_LABEL, RUN_ID_LABEL: run_id},
+            },
+            "data": encoded,
+        }
+    )
+    try:
+        created = kubectl(kubeconfig_path, "create", "-f", "-", namespace=namespace, input_text=manifest)
+    except FileNotFoundError as error:
+        raise RuntimeError("kubectl is required to create the temporary S3 Secret") from error
+    if created.returncode and "AlreadyExists" in _output(created):
+        raise RuntimeError(
+            f"Secret {name} already exists in namespace {namespace}; it is not this run's, "
+            "so it is left alone. Choose another run ID"
+        )
+    if created.returncode:
+        raise RuntimeError(f"could not create the temporary S3 Secret {name}: {_output(created)}")
+    print(f"[kubernetes] Created temporary S3 Secret {name}; it is deleted after the upload")
+    return name
+
+
+def temporary_secret_selector(run_id: str) -> str:
+    """The labels only this pipeline's temporary Secret of ``run_id`` carries."""
+    return f"app.kubernetes.io/name={S3_EMULATION_APP_LABEL},{RUN_ID_LABEL}={run_id}"
+
+
+def delete_temporary_s3_secret(kubeconfig_path: Path, namespace: str, run_id: str) -> None:
+    """Best-effort removal of the run's temporary Secret; the Job's deletion removes it too.
+
+    It selects by the run's labels, not by name alone, so a Secret of the same name that
+    another run or user made is never removed.
+    """
+    selector = temporary_secret_selector(run_id)
+    try:
+        result = kubectl(
+            kubeconfig_path,
+            "delete",
+            "secret",
+            "--selector",
+            selector,
+            "--ignore-not-found",
+            "--wait=false",
+            namespace=namespace,
+        )
+    except FileNotFoundError:
+        print(f"[WARN] kubectl unavailable; could not delete the temporary S3 Secret ({selector})", file=sys.stderr)
+        return
+    if result.returncode:
+        print(f"[WARN] failed to delete the temporary S3 Secret ({selector}): {_output(result)}", file=sys.stderr)
+    else:
+        print(f"[kubernetes] Deleted temporary S3 Secret of run {run_id}")
 
 
 # What the controller needs to create, watch and exec into the emulation pods.
@@ -493,15 +603,16 @@ def render_s3_emulation_resources(
             },
         },
     ]
-    # No Namespace: S3 mode requires --reuse-namespace, since its Secret must already exist there.
+    # No Namespace: S3 mode requires --reuse-namespace; the namespace must already exist.
     return json.dumps({"apiVersion": "v1", "kind": "List", "items": resources}, indent=2)
 
 
-def apply_s3_emulation_resources(manifest: str, kubeconfig_path: Path) -> None:
+def apply_s3_emulation_resources(manifest: str, kubeconfig_path: Path, *, temporary_secret: bool = False) -> None:
     """Apply the resource list, then make the Job the owner of its support objects.
 
-    Owner references let Kubernetes collect the ServiceAccount, ConfigMap, Role
-    and RoleBinding with the Job; until they are in place a failure removes them here.
+    Owner references let Kubernetes collect the ServiceAccount, ConfigMap, Role,
+    RoleBinding and a temporary S3 Secret with the Job; until they are in place a
+    failure removes them here.
     """
     payload = json.loads(manifest)
     jobs = [item for item in payload.get("items", []) if item.get("kind") == "Job"]
@@ -512,10 +623,15 @@ def apply_s3_emulation_resources(manifest: str, kubeconfig_path: Path) -> None:
     namespace = metadata.get("namespace")
     if not job_name or not namespace:
         raise RuntimeError("S3 Kubernetes Job must declare metadata.name and namespace")
+    run_id = (metadata.get("labels") or {}).get(RUN_ID_LABEL)
+    if temporary_secret and not run_id:
+        raise RuntimeError(f"S3 Kubernetes Job must carry the {RUN_ID_LABEL} label of its temporary Secret")
 
     def roll_back(message: str) -> RuntimeError:
         delete_s3_emulation_job(kubeconfig_path, namespace, job_name)
         delete_s3_emulation_support_resources(kubeconfig_path, namespace, job_name)
+        if temporary_secret and run_id:
+            delete_temporary_s3_secret(kubeconfig_path, namespace, run_id)
         return RuntimeError(message)
 
     # The manifest orders the support resources before the Job, so a partial
@@ -533,7 +649,7 @@ def apply_s3_emulation_resources(manifest: str, kubeconfig_path: Path) -> None:
     owner_patch = json.dumps(
         {"metadata": {"ownerReferences": [{**owner, "controller": True, "blockOwnerDeletion": False}]}}
     )
-    for resource_type in S3_JOB_OWNED_RESOURCE_TYPES:
+    for resource_type in _owned_resource_types(temporary_secret):
         patched = kubectl(
             kubeconfig_path, "patch", resource_type, job_name, "--type=merge", "-p", owner_patch, namespace=namespace
         )

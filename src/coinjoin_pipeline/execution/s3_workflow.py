@@ -7,6 +7,7 @@ cancellation policy, and derives all three from the stage graph in ``stages``.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from exporters.artifact_paths import (
     BLOCKSCI_ANALYSIS_DIR,
@@ -22,6 +23,7 @@ from coinjoin_pipeline.execution.kubernetes import (
     S3_JOB_START_TIMEOUT_SECONDS,
     collect_s3_emulation_diagnostics,
     delete_s3_emulation_job,
+    delete_temporary_s3_secret,
     kubernetes_job_probe,
     resolve_kubeconfig,
     s3_emulation_job_name,
@@ -116,9 +118,24 @@ def run_s3_full_run(args: PipelineConfiguration) -> None:
 
 
 def wait_for_emulation_upload(args: PipelineConfiguration, run_prefix: str, access: S3Access) -> None:
-    """Wait for the uploader's marker; a failure collects diagnostics and deletes the Job."""
+    """Wait for the uploader's marker; a failure collects diagnostics and deletes the Job.
+
+    The upload marker ends the Job's use of its S3 key, so a temporary Secret goes then,
+    whatever the outcome, instead of waiting for the finished Job to expire.
+    """
     kubeconfig_path = resolve_kubeconfig(args.kubernetes.kubeconfig)
-    job_name = s3_emulation_job_name(required(args.run_id, "--run-id"))
+    run_id = required(args.run_id, "--run-id")
+    try:
+        _wait_for_emulation_upload(args, run_prefix, access, kubeconfig_path, run_id)
+    finally:
+        if args.artifacts.secret_name is None:
+            delete_temporary_s3_secret(kubeconfig_path, args.kubernetes.namespace, run_id)
+
+
+def _wait_for_emulation_upload(
+    args: PipelineConfiguration, run_prefix: str, access: S3Access, kubeconfig_path: Path, run_id: str
+) -> None:
+    job_name = s3_emulation_job_name(run_id)
     print(f"[full-run] Waiting for emulation upload marker {upload_marker_uri(run_prefix, 'done')}")
     try:
         wait_for_s3_marker(

@@ -8,12 +8,15 @@ from coinjoin_pipeline.configuration import PipelineConfiguration, required
 from coinjoin_pipeline.execution.scenarios import scenario_source_path
 from coinjoin_pipeline.execution.kubernetes import (
     apply_s3_emulation_resources,
+    create_temporary_s3_secret,
     render_s3_emulation_resources,
     resolve_kubeconfig,
+    s3_emulation_job_name,
 )
 from coinjoin_pipeline.images import resolve_uploader_image
 from coinjoin_pipeline.paths import scenarios_dir
 from coinjoin_pipeline.registry import pinned_reference
+from coinjoin_pipeline.storage.s3 import s3_key_pair
 
 
 def pin_emulation_images(args: PipelineConfiguration) -> PipelineConfiguration:
@@ -45,9 +48,12 @@ def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
     kubeconfig_path = resolve_kubeconfig(kubernetes.kubeconfig)
     if not args.dry_run and not kubeconfig_path.is_file():
         raise RuntimeError(f"Kubeconfig not found: {kubeconfig_path}")
+    run_id = required(args.run_id, "--run-id")
+    # Without a named Secret the run gets its own, made from the frontend's credentials file.
+    temporary_secret = args.artifacts.secret_name is None
     manifest = render_s3_emulation_resources(
         namespace=args.kubernetes.namespace,
-        run_id=required(args.run_id, "--run-id"),
+        run_id=run_id,
         scenario_json=scenario_path.read_text(encoding="utf-8"),
         engine=args.engine,
         image_prefix=args.kubernetes.image_prefix,
@@ -55,15 +61,26 @@ def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
         uploader_image=resolve_uploader_image(args),
         artifact_uri=required(args.artifacts.uri, "--artifact-uri"),
         endpoint_url=required(args.artifacts.endpoint_url, "--s3-endpoint-url"),
-        secret_name=required(args.artifacts.secret_name, "--s3-secret-name"),
+        secret_name=args.artifacts.secret_name or s3_emulation_job_name(run_id),
         emulation_timeout_seconds=args.emulation_timeout,
         distributor_startup_timeout=_text(kubernetes.distributor_startup_timeout),
         btc_node_image=kubernetes.btc_node_image,
         kubernetes_image_pull_policy=kubernetes.image_pull_policy,
         btc_node_initial_block_count=_text(kubernetes.btc_node_initial_block_count),
     )
+    credentials_file = required(args.artifacts.credentials_file, "--s3-credentials-file")
+    profile = required(args.artifacts.profile, "--s3-profile")
     if args.dry_run:
+        if temporary_secret:
+            print(
+                f"[dry-run] Would create the temporary Secret {s3_emulation_job_name(run_id)} from "
+                f"{credentials_file} (profile {profile}) and delete it after the upload"
+            )
         print(f"[dry-run] Kubernetes S3-compatible resources:\n{manifest}")
         return
-    apply_s3_emulation_resources(manifest, kubeconfig_path)
+    namespace = args.kubernetes.namespace
+    if temporary_secret:
+        create_temporary_s3_secret(kubeconfig_path, namespace, run_id, *s3_key_pair(credentials_file, profile))
+    # A failed apply rolls the temporary Secret back with the Job's other resources.
+    apply_s3_emulation_resources(manifest, kubeconfig_path, temporary_secret=temporary_secret)
     print(f"[kubernetes] Submitted S3-compatible emulation job for run {args.run_id}")
