@@ -8,6 +8,7 @@ its size checked, and manifest.json, written last, makes it valid again.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -25,6 +26,7 @@ from pathlib import Path
 from exporters.artifact_paths import INDEX_MANIFEST_COPY
 
 from coinjoin_pipeline.execution.mainnet_worker import (
+    CHUNK,
     RESUME_CHECKPOINT,
     SIGNATURE_KEYS,
     JsonObject,
@@ -48,6 +50,10 @@ from coinjoin_pipeline.storage.s5client import S5Error, stream_sha256
 
 
 BLOCK_FILE = re.compile(r"blk[0-9]{5}\.dat")
+ARCHIVE_MARKER = re.compile(r"(blk[0-9]{5}\.dat)\.json")
+# Core writes undo data (rev*.dat) for every block it connects again: about a tenth of the
+# block files. The share is rounded up so the reindex does not fill the multijob.
+UNDO_SHARE = 6
 # The archive is read rarely and packed once, so the level favours size over time.
 PACK_LEVEL = 19
 PACK_RESERVE_SECONDS = 1800  # at most a quarter of the walltime, for short test budgets
@@ -110,10 +116,7 @@ def restore_missing(worker: Worker, backups: dict[str, str]) -> JsonObject | Non
     """
     if not worker.datadir.exists():
         return None
-    absent = {
-        "dumplings": not worker.dumps.exists(),
-        "index": not any((worker.index / name).exists() for name in INDEX_MEMBERS),
-    }
+    absent = missing_parts(worker)
     manifests = {
         name: worker.storage.cat_json(backups[name], timeout=120)
         for name, missing in absent.items()
@@ -172,6 +175,183 @@ def restore_missing(worker: Worker, backups: dict[str, str]) -> JsonObject | Non
     }
 
 
+def missing_parts(worker: Worker) -> dict[str, bool]:
+    """Which of the parts built from the blocks, Dumplings and the index, are absent."""
+    return {
+        "dumplings": not worker.dumps.exists(),
+        "index": not any((worker.index / name).exists() for name in INDEX_MEMBERS),
+    }
+
+
+def archived_files(worker: Worker, state: Path) -> dict[str, JsonObject]:
+    """The archiver's marker of every block file it uploaded, by file name."""
+    prefix = worker.c["blocks_uri"].rstrip("/") + "/"
+    markers = {}
+    for path in sorted(state.glob("blk*.dat.json")):
+        match = ARCHIVE_MARKER.fullmatch(path.name)
+        if match is None:
+            continue
+        marker, name = read_json(path), match.group(1)
+        if (
+            marker.get("file") != name
+            or marker.get("destination") != prefix + name
+            or not is_count(marker.get("size"))
+            or not is_count(marker.get("mtime_ns"))
+            or not is_sha256(marker.get("sha256"))
+        ):
+            raise ValueError("Invalid block archive marker " + path.name)
+        markers[name] = marker
+    return markers
+
+
+def pruned_files(worker: Worker, blocks: Path, state: Path) -> list[str]:
+    """The archived block files absent from ``blocks``, once the history is complete with them.
+
+    Core keeps the newest files, the archive holds every older one: together they must be
+    blk00000.dat onwards without a gap, or Core cannot rebuild its chain from them.
+    """
+    markers = archived_files(worker, state)
+    present = {path.name for path in blocks.glob("blk*.dat")}
+    numbers = sorted(int(name[3:8]) for name in present | markers.keys())
+    if numbers != list(range(len(numbers))):
+        raise ValueError("The block archive and Core's block files leave gaps; the history cannot be rebuilt")
+    return sorted(markers.keys() - present)
+
+
+def archive_objects(worker: Worker, names: list[str]) -> set[str]:
+    """The block archive's object names, once every one of ``names`` is there raw or packed."""
+    listed = worker.storage.listing(worker.c["blocks_uri"].rstrip("/") + "/*", timeout=None)
+    objects = {str(entry["key"]).rsplit("/", 1)[-1] for entry in listed}
+    absent = [name for name in names if name not in objects and name + ".zst" not in objects]
+    if absent:
+        raise ValueError(
+            f"The block archive lacks {absent[0]}" + (f" and {len(absent) - 1} more" if absent[1:] else "")
+        )
+    return objects
+
+
+def fetch_block_file(worker: Worker, marker: JsonObject, objects: set[str], staging: Path) -> int:
+    """Download one archived block file, raw or packed, check it and give it back its mtime.
+
+    The archiver recognises a file it uploaded by size and mtime; restoring the mtime keeps
+    it from uploading the whole history again.
+    """
+    name = str(marker["file"])
+    uri = worker.c["blocks_uri"].rstrip("/") + "/" + name
+    target = staging / name
+    digest = hashlib.sha256()
+    if name in objects:
+        worker.storage.copy(uri, str(target))
+        with target.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(CHUNK), b""):
+                digest.update(chunk)
+    elif name + ".zst" in objects:
+        with worker.storage.unpacked(uri + ".zst") as stream, target.open("wb") as output:
+            for chunk in iter(lambda: stream.read(CHUNK), b""):
+                digest.update(chunk)
+                output.write(chunk)
+    else:
+        raise ValueError("The block archive lacks " + name)
+    if digest.hexdigest() != marker["sha256"] or target.stat().st_size != marker["size"]:
+        raise ValueError("Archived " + name + " does not match its marker")
+    os.utime(target, ns=(int(marker["mtime_ns"]), int(marker["mtime_ns"])))
+    target.rename(worker.core_dir / "blocks" / name)
+    return int(marker["size"])
+
+
+def restore_archived_blocks(worker: Worker) -> JsonObject | None:
+    """Bring the pruned block files back from the block archive, so Dumplings and BlockSci
+    can scan the whole history again when their backups were deleted.
+
+    Each file takes its place as soon as it checks out, so a killed job loses only the
+    files in flight. The reindex marker is written first: the producer then rebuilds
+    Core's block index, which still records these files as pruned.
+    """
+    blocks = worker.core_dir / "blocks"
+    if not blocks.is_dir():
+        return None
+    missing = pruned_files(worker, blocks, worker.archive_state)
+    if not missing:
+        return None
+    markers = archived_files(worker, worker.archive_state)
+    needed = sum(int(markers[name]["size"]) for name in missing)
+    free = shutil.disk_usage(blocks).free
+    if free < needed + needed // UNDO_SHARE:
+        raise ValueError(
+            f"Restoring {len(missing)} block files needs {needed + needed // UNDO_SHARE} bytes "
+            f"with Core's undo data; the multijob has {free} free"
+        )
+    objects = archive_objects(worker, missing)
+    atomic_json(worker.reindex_marker, {"run_id": worker.run_id, "files": len(missing), "bytes": needed})
+    started = time.monotonic()
+    staging = worker.root / f".restore-{worker.run_id}" / "blocks"
+    staging.mkdir(parents=True)
+    lock = threading.Lock()
+    done = [0]
+    worker.progress("restore-blocks", 0, len(missing))
+
+    def fetch(name: str) -> int:
+        size = fetch_block_file(worker, markers[name], objects, staging)
+        with lock:
+            done[0] += 1
+            if done[0] % 20 == 0:
+                worker.progress("restore-blocks", done[0], len(missing))
+        return size
+
+    try:
+        # Downloads wait on the network more than on zstd, so two per CPU.
+        with ThreadPoolExecutor(2 * worker.c["pbs_resources"]["ncpus"]) as pool:
+            restored = sum(pool.map(fetch, missing))
+    finally:
+        shutil.rmtree(staging.parent, ignore_errors=True)
+    seconds = time.monotonic() - started
+    return {
+        "source": worker.c["blocks_uri"],
+        "files": len(missing),
+        "bytes": restored,
+        "seconds": round(seconds, 1),
+        "mb_per_s": megabytes_per_second(restored, seconds),
+    }
+
+
+def finish_rebuild(worker: Worker, blocks: JsonObject | None, refilled: JsonObject | None, **core: object) -> None:
+    """Record a restore that left Dumplings or the index to be built again from the blocks."""
+    refilled = refilled or {}
+    finish_restore(
+        worker,
+        "rebuilt-from-archive",
+        backups={**refilled.get("backups", {}), **({"core": core["backup"]} if core else {})},
+        parts={**({"core": core["part"]} if core else {}), **refilled.get("parts", {})},
+        blocks=blocks or {"files": 0},
+        rebuilt=sorted(name for name, missing in missing_parts(worker).items() if missing),
+        host=socket.gethostname(),
+    )
+
+
+def restore_core_checkpoint(worker: Worker, backup: str, manifest: JsonObject) -> JsonObject:
+    """Put the Core checkpoint alone into an empty dataset whose other backups were deleted.
+
+    Only when its block files and the archive together hold the whole history, so Core
+    keeps the very files the archive was made from and nothing is downloaded again.
+    """
+    staging = worker.root / f".restore-{worker.run_id}"
+    blocks = staging / "core" / worker.core_dir.relative_to(worker.root) / "blocks"
+    try:
+        staging.mkdir(parents=True)
+        part = measured(
+            "core",
+            lambda: worker.storage.restore_backup(backup, staging / "core"),
+            manifest["archive_size"],
+            staging / "core",
+        )
+        archive_objects(worker, pruned_files(worker, blocks, staging / "core/archive-state"))
+        for entry in (staging / "core").iterdir():
+            entry.rename(worker.root / entry.name)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    return part
+
+
 def restore(worker: Worker) -> None:
     """Job 0: fill an empty working dataset from the S3 backups, or the part deleted from it.
 
@@ -200,6 +380,11 @@ def restore(worker: Worker) -> None:
     }
     if present and not unfinished:
         refilled = restore_missing(worker, backups)
+        if any(missing_parts(worker).values()):
+            blocks = restore_archived_blocks(worker)
+            if blocks is not None:
+                finish_rebuild(worker, blocks, refilled)
+                return
         if refilled:
             finish_restore(worker, "restored-missing", **refilled)
         else:
@@ -223,7 +408,19 @@ def restore(worker: Worker) -> None:
         finish_restore(worker, "skipped-no-backup")
         return
     if missing:
-        raise ValueError("S3 lacks the backups " + ", ".join(missing) + "; the working dataset cannot be restored")
+        if unfinished or "core" in missing:
+            raise ValueError("S3 lacks the backups " + ", ".join(missing) + "; the working dataset cannot be restored")
+        # Dumplings or the index backup was deleted on purpose, to scan again: Core comes back
+        # with the archived block files, the deleted part is built again from them.
+        try:
+            core = restore_core_checkpoint(worker, backups["core"], found["core"])
+        except ValueError as error:
+            raise ValueError(
+                "S3 lacks the backups " + ", ".join(missing) + f" and the block archive cannot replace them: {error}"
+            ) from error
+        refilled = restore_missing(worker, backups)
+        finish_rebuild(worker, restore_archived_blocks(worker), refilled, backup=backups["core"], part=core)
+        return
     core, index, dumplings = found["core"], found["index"], found["dumplings"]
     mismatches = [
         label
@@ -305,8 +502,9 @@ def restore(worker: Worker) -> None:
 def require_complete_dataset(worker: Worker) -> None:
     """Refuse a partly lost working dataset before Core starts.
 
-    The restore job fills only an empty dataset. An unfinished first synchronization
-    (unpruned blocks, no index yet) continues; anything else that is missing is an error.
+    The restore job fills only an empty dataset or the parts deleted beside Core. An
+    unfinished first synchronization (unpruned blocks, no index yet) continues, and so does
+    a dataset whose pruned blocks came back from the archive; anything else missing is an error.
     """
     present = {
         "Core chainstate": (worker.core_dir / "chainstate").is_dir(),
@@ -324,8 +522,11 @@ def require_complete_dataset(worker: Worker) -> None:
             raise ValueError("The working dataset is empty but this synchronization's restore job did not check S3")
         return
     missing = [name for name, found in present.items() if not found]
-    unfinished_first = not present["BlockSci index"] and (worker.core_dir / "blocks/blk00000.dat").is_file()
-    if missing and not unfinished_first:
+    # With every block file on disk, an unfinished first synchronization or a restore from
+    # the block archive, the producer and BlockSci build a missing Scanner or index again.
+    history = (worker.core_dir / "blocks/blk00000.dat").is_file()
+    rebuildable = {"Dumplings Scanner", "BlockSci index"}
+    if missing and not (history and (not present["BlockSci index"] or set(missing) <= rebuildable)):
         raise ValueError(
             "The working dataset is incomplete (missing: " + ", ".join(missing) + "). Remove "
             f"{worker.root} and {worker.index} entirely; the next synchronization restores both from S3."
@@ -337,6 +538,11 @@ def producer(worker: Worker) -> None:
     worker.acquire_dataset()
     require_complete_dataset(worker)
     atomic_json(worker.root / "current-ready.json", {"run_id": worker.run_id, "state": "preparing"})
+    if worker.reindex_marker.exists():
+        # Block files back from the archive; Core's block index still has them as pruned.
+        worker.progress("core-reindex")
+        worker.reindex_core()
+        worker.reindex_marker.unlink()
     worker.progress("core-startup")
     worker.start_core(False)
     info = worker.synchronize_core()

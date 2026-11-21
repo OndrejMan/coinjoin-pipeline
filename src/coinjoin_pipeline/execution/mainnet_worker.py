@@ -225,6 +225,8 @@ class Worker:
         self.scan_start = settings.get("scan_start_height") or (1 if self.chain == "regtest" else 336861)
         self.dumps = self.root / "dumplings"
         self.archive_state = self.root / "archive-state"
+        # Left by a restore that brought pruned block files back; the producer reindexes Core.
+        self.reindex_marker = self.root / "core-reindex.json"
         self.index = Path(settings["index_dir"])
         self.run_id = settings["run_id"]
         # One synchronization's state: each run replaces the previous one, only its logs stay.
@@ -425,7 +427,8 @@ class Worker:
             raise ValueError(f"Core {method} did not return an object")
         return value
 
-    def start_core(self, offline: bool, dbcache_mb: int | None = None) -> JsonObject:
+    def core_command(self, offline: bool, dbcache_mb: int | None = None, extra: Sequence[str] = ()) -> list[str]:
+        """bitcoind for this dataset on a fresh local RPC port, after the dataset checks."""
         self.core_dir.mkdir(parents=True, exist_ok=True)
         xor = self.core_dir / "blocks/xor.dat"
         if xor.exists() and any(xor.read_bytes()):
@@ -436,7 +439,7 @@ class Worker:
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             self.port = sock.getsockname()[1]
-        command = self.container_command(
+        return self.container_command(
             self.c["core_image"],
             "bitcoind",
             f"-datadir={self.datadir}",
@@ -455,11 +458,18 @@ class Worker:
             f"-rpcport={self.port}",
             f"-dbcache={dbcache_mb or self.c['dbcache_mb']}",
             f"-networkactive={0 if offline or self.chain == 'regtest' else 1}",
+            *extra,
         )
+
+    def launch_core(self, command: list[str]) -> subprocess.Popen:
         self.logs.mkdir(parents=True, exist_ok=True)
         with (self.logs / f"core-{self.stage}.log").open("ab") as log:
             self.core = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-        while self.core.poll() is None:
+        return self.core
+
+    def start_core(self, offline: bool, dbcache_mb: int | None = None) -> JsonObject:
+        core = self.launch_core(self.core_command(offline, dbcache_mb))
+        while core.poll() is None:
             try:
                 info = self.rpc_info("getblockchaininfo")
                 if info.get("chain") != self.chain or info.get("automatic_pruning") is not False:
@@ -471,6 +481,25 @@ class Worker:
                 self.progress("core-startup")
                 time.sleep(self.c["poll_seconds"])
         raise RuntimeError(f"Core failed to start: {last_line(self.logs / f'core-{self.stage}.log')}")
+
+    def reindex_core(self) -> None:
+        """Rebuild Core's block index and chainstate offline from the block files on disk.
+
+        Block files restored from the archive are unknown to the block index of a pruned
+        Core. With -stopafterblockimport Core exits by itself once every file is imported
+        and the chain connected, so a clean exit marks the end of the reindex.
+        """
+        core = self.launch_core(self.core_command(True, extra=("-reindex", "-stopafterblockimport")))
+        while core.poll() is None:
+            try:
+                info = self.rpc_info("getblockchaininfo")
+                self.progress("core-reindex", info.get("blocks"), info.get("headers"), height=info.get("blocks"))
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError):
+                self.progress("core-reindex")
+            time.sleep(self.c["poll_seconds"])
+        self.core = None
+        if core.returncode != 0:
+            raise RuntimeError(f"Core reindex failed: {last_line(self.logs / f'core-{self.stage}.log')}")
 
     def stop_core(self, *, require_clean_exit: bool = True) -> None:
         if self.core is None:

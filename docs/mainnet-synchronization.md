@@ -59,11 +59,15 @@ do not count).
   `restored-missing`. The index must continue from the block files that are here: its
   `files.txt` and the parser cursor `resume_file_*` are checked against them before
   anything takes its place. The Scanner is checked against its manifest; the producer
-  then checks its chain anchor and that Core still has the blocks after its height. A
-  missing part without a backup stays missing (an unfinished first synchronization).
+  then checks its chain anchor and that Core still has the blocks after its height.
+- **Core exists, a part is missing and has no backup either:** the Lab deleted the backup
+  too, to scan the whole history again. The job takes the pruned block files back from
+  `blocks_uri` (see "Rebuilding from the block archive" below), writes
+  `rebuilt-from-archive` and the part is built again. Without archive markers of pruned
+  files the part stays missing (an unfinished first synchronization).
 - **Core is missing, but something else exists:** `skipped-not-empty`, and the producer
-  refuses the dataset. Core is never restored alone, because blocks downloaded again lie
-  elsewhere in the `blk*.dat` files than the index expects.
+  refuses the dataset. Core is never restored alone beside a Scanner or index, because
+  blocks downloaded again lie elsewhere in the `blk*.dat` files than the index expects.
 - **Something exists, but the index has `.writing`:** a BlockSci job failed in the middle
   of writing, so nothing can continue. If the backup manifests in S3 pass the same checks
   as below, it deletes the whole working dataset and restores it from S3; the work of the
@@ -82,6 +86,34 @@ do not count).
   It then downloads all three into `.restore-<run-id>/`, checking SHA-256 and size,
   and only then moves them into place. It checks `files.txt` and the parser cursor
   against the restored blocks and writes `restored`.
+
+- **Nothing exists and S3 has the Core checkpoint, but not the Dumplings or index
+  backup:** the Lab deleted them to scan again. The job restores the Core checkpoint alone,
+  but only after its `archive-state/` and the block files in it make up the whole history
+  without a gap and every pruned file is in `blocks_uri`; otherwise it fails and the
+  dataset stays empty. A backup that is still there is restored as beside Core above, the
+  deleted part is rebuilt from the archive, and the job writes `rebuilt-from-archive`.
+
+### Rebuilding from the block archive
+
+The archiver's marker of every uploaded file (`archive-state/blkNNNNN.dat.json`) gives its
+size, SHA-256 and mtime. The restore job downloads each pruned file, raw or as the `.zst`
+the pack job left, checks size and SHA-256 and gives it back its mtime, so the archiver
+recognises it and uploads nothing again; the archiver's pruning check accepts the packed
+object as the archived copy. Each file takes its place once it checks out, so a killed job
+loses only the files in flight. The multijob must have room for the files and Core's undo
+data (a sixth more). Before the first file it writes `<root>/core-reindex.json`.
+
+With that marker the producer first runs Core offline with `-reindex
+-stopafterblockimport`: Core rebuilds its block index and chainstate from the files and
+exits by itself, and only a clean exit removes the marker. Then it continues as usual.
+With every block file on disk `require_complete_dataset` accepts a missing Scanner or
+index: Dumplings scans from `scan_start_height` and the BlockSci job parses the whole
+history (`generate-config`). The checkpoint backs both up and prunes again; the pack job
+finds nothing new. One step of the whole mainnet does not fit the default walltimes
+(reindex, a full Dumplings scan and a full parse): a producer killed after the reindex
+continues the scan in the next synchronization, and the parse takes the BlockSci job's
+resources (`MAINNET_SYNC_RESOURCES`).
 
 `mainnet-producer` first checks that the dataset is complete: Core chainstate and blocks,
 `archive-state/`, the Scanner height and the index's `config.json`.
