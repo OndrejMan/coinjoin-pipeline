@@ -254,6 +254,9 @@ HELP = {
     "mainnet.reorg_reserve": "blocks below the frozen tip that pruning keeps, so a reorganization can be undone",
     "mainnet.poll_seconds": "seconds between progress checks of the running jobs",
     "mainnet.clear_after_sync": "empty the dataset after the last job; the next restore job refills it from S3",
+    "mainnet.explorer_run_id": (
+        "run ID of a Dumplings baseline after the checkpoint that updates the CoinJoin Explorer data at explorer_uri"
+    ),
     "mainnet.notebook_root": "notebook data kept beside the dataset, measured in the storage report",
     "coinjoin_analysis.program": (
         "coinjoin-analysis program to run alone: locally with coinjoin-analysis, on PBS with pbs-from-s3"

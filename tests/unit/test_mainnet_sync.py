@@ -1118,6 +1118,93 @@ def test_a_failed_storage_report_is_not_a_job_failure(worker, monkeypatch):
     worker.report_storage()
 
 
+def explorer_config(tmp_path, **overrides):
+    """The synchronization of the config fixture with the Lab's CoinJoin Explorer baseline."""
+    mapping = {
+        "action": "mainnet-sync",
+        "run_id": "mainnet-sync-local-1",
+        "runs_root": str(tmp_path / "runs"),
+        "explorer_uri": "s3://local/explorer",
+        "artifacts": {
+            "uri": "s3://local/runs",
+            "endpoint_url": "http://127.0.0.1:9000",
+            "credentials_file": str(tmp_path / "credentials"),
+            "profile": "local",
+        },
+        "mainnet": {
+            "root": str(tmp_path / "core"),
+            "state_uri": "s3://local/sync",
+            "backup_uri": "s3://local/core",
+            "blocks_uri": "s3://local/blocks",
+            "dumplings_uri": "s3://local/dumps",
+            "explorer_run_id": "mainnet-baseline-explorer-202611210100",
+        },
+        "blocksci": {"index_dir": str(tmp_path / "index"), "index_backup_uri": "s3://local/index"},
+        "pbs": {"analysis": {"ncpus": 2, "mem": "96gb", "scratch": "200gb", "walltime": "08:00:00"}},
+    }
+    for path, value in overrides.items():
+        *parents, name = path.split(".")
+        group = mapping
+        for parent in parents:
+            group = group[parent]
+        if value is None:
+            group.pop(name)
+        else:
+            group[name] = value
+    return resolve_run_images(resolve_configuration(PipelineConfiguration.from_mapping(mapping)))[0]
+
+
+def test_the_explorer_baseline_waits_only_for_the_checkpoint(tmp_path, monkeypatch):
+    calls, cleared, uploaded = [], [], []
+    monkeypatch.setattr(
+        mainnet_sync, "submit_pbs_job", lambda job, _dry: calls.append(job) or f"{100 + len(calls)}.local"
+    )
+    monkeypatch.setattr(mainnet_sync, "clear_s3_stage_markers", lambda _a, prefix, stage: cleared.append((prefix, stage)))
+    monkeypatch.setattr(mainnet_sync, "upload_s3_job_id", lambda _a, prefix, stage, _p: uploaded.append((prefix, stage)))
+    config = explorer_config(tmp_path)
+    assert mainnet_sync.configuration_errors(config) == []
+    mainnet_sync.submit_sync(config)
+    stages = [job.stage for job in calls]
+    # The chain stays as it was; the Explorer job comes last and depends on the checkpoint alone.
+    assert stages == ["mainnet-restore", "mainnet-producer", "mainnet-blocksci", "mainnet-checkpoint", "mainnet-pack",
+                      "coinjoin-analysis"]
+    assert calls[4].dependencies == ("104.local",) and calls[5].dependencies == ("104.local",)
+    prefix = "s3://local/runs/mainnet-baseline-explorer-202611210100"
+    assert cleared == uploaded == [(prefix, "coinjoin-analysis")]
+    script = calls[5].script
+    assert "s3://local/dumps" in script and "s3://local/explorer" in script
+    assert "select=1:ncpus=2:mem=96gb" in script
+    run_dir = config.runs_path / "mainnet-baseline-explorer-202611210100"
+    assert (run_dir / ".pbs/coinjoin-analysis.jobid").read_text().strip() == "106.local"
+
+
+def test_without_an_explorer_run_id_the_explorer_settings_are_refused(tmp_path):
+    config = explorer_config(tmp_path)
+    errors = mainnet_sync.configuration_errors(replace(config, mainnet=replace(config.mainnet, explorer_run_id=None)))
+    assert "explorer_uri is not used by mainnet-sync" in errors
+    assert "artifacts.uri is not used by mainnet-sync" in errors
+    assert any(message.startswith("pbs.analysis.") for message in errors)
+
+
+def test_the_explorer_baseline_needs_its_data_and_marker_prefixes(tmp_path):
+    config = explorer_config(tmp_path)
+    missing = replace(config, explorer_uri=None, artifacts=replace(config.artifacts, uri=None))
+    errors = mainnet_sync.configuration_errors(missing)
+    assert "mainnet.explorer_run_id requires explorer_uri" in errors
+    assert any(message.startswith("artifacts.uri:") for message in errors)
+    same = replace(config, mainnet=replace(config.mainnet, explorer_run_id="mainnet-sync-local-1"))
+    assert "mainnet.explorer_run_id must differ from the synchronization's run_id" in mainnet_sync.configuration_errors(same)
+
+
+def test_a_bad_explorer_setting_refuses_the_synchronization_before_any_job(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(mainnet_sync, "submit_pbs_job", lambda job, _dry: calls.append(job) or "1.local")
+    inside = explorer_config(tmp_path, explorer_uri="s3://local/dumps/explorer")
+    with pytest.raises(mainnet_sync.PBSError, match="inside the Dumplings copy"):
+        mainnet_sync.submit_sync(inside)
+    assert calls == []
+
+
 def test_the_clear_job_runs_only_when_turned_on(config, monkeypatch):
     calls = []
     monkeypatch.setattr(mainnet_sync, "submit_pbs_job", lambda job, _dry: calls.append(job) or "1.local")

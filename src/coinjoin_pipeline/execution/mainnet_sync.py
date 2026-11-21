@@ -11,7 +11,13 @@ from typing import TYPE_CHECKING, Callable
 from coinjoin_pipeline.configuration import required
 from coinjoin_pipeline.paths import EXPORTERS_ROOT
 from coinjoin_pipeline.run_ids import validate_run_id
-from coinjoin_pipeline.storage.s3 import validate_artifact_uri
+from coinjoin_pipeline.storage.s3 import (
+    S3Access,
+    S3Target,
+    clear_s3_stage_markers,
+    upload_s3_job_id,
+    validate_artifact_uri,
+)
 from .pbs.defaults import MAINNET_SYNC_RESOURCES, PBSResources
 from .pbs.scripts import (
     APPTAINER,
@@ -24,7 +30,8 @@ from .pbs.scripts import (
     runtime_source,
     write_files,
 )
-from .pbs.submission import PBSJobSpec, persist_pbs_job_id, submit_pbs_job
+from .pbs.submission import PBSJobSpec, pbs_job_id_path, persist_pbs_job_id, submit_pbs_job
+from .pbs.templates_s3 import render_coinjoin_analysis_dumplings_s3_pbs
 from .pbs.validation import PBSError, require_safe_image, require_safe_pbs_resources, walltime_to_seconds
 from .pbs_settings import pbs_image, stage_pbs_resources, with_singularity_scheme
 from .s3_markers import rollback_s3_pbs_submissions
@@ -75,14 +82,29 @@ MAINNET_SYNC_OPTIONS = frozenset(
         "pbs.blocksci_image",
     }
 )
+# Read only for the CoinJoin Explorer baseline (mainnet.explorer_run_id).
+EXPLORER_OPTIONS = frozenset(
+    {
+        "artifacts.uri",
+        "explorer_uri",
+        "explorer_source",
+        "images.coinjoin_analysis",
+        "pbs.coinjoin_analysis_image",
+    }
+)
+EXPLORER_STAGE = "coinjoin-analysis"
 
 
 def configuration_errors(config: PipelineConfiguration) -> list[str]:
     errors: list[str] = []
     stage_groups = tuple(f"pbs.{stage}." for stage in SYNC_STAGES)
+    explorer = config.mainnet.explorer_run_id is not None
+    allowed = MAINNET_SYNC_OPTIONS | (EXPLORER_OPTIONS if explorer else frozenset())
+    groups = (*stage_groups, "pbs.analysis.") if explorer else stage_groups
     for path in sorted(config.provided):
-        if path not in MAINNET_SYNC_OPTIONS and not path.startswith(("mainnet.", *stage_groups)):
+        if path not in allowed and not path.startswith(("mainnet.", *groups)):
             errors.append(f"{path} is not used by mainnet-sync")
+    errors.extend(_explorer_errors(config))
     errors.extend(_location_errors(config))
     errors.extend(_working_directory_errors(config))
     if any((config.stages.analysis, config.stages.blocksci, config.stages.mappings)):
@@ -97,6 +119,21 @@ def configuration_errors(config: PipelineConfiguration) -> list[str]:
         )
     for image in (config.mainnet.core_image, config.mainnet.dumplings_image):
         errors.extend(_failure(require_safe_image, image))
+    return errors
+
+
+def _explorer_errors(config: PipelineConfiguration) -> list[str]:
+    """The Explorer baseline writes its markers under artifacts.uri and its data under explorer_uri."""
+    run_id = config.mainnet.explorer_run_id
+    if run_id is None:
+        return []
+    errors = [f"mainnet.explorer_run_id: {message}" for message in _failure(validate_run_id, run_id)]
+    if run_id == config.run_id:
+        errors.append("mainnet.explorer_run_id must differ from the synchronization's run_id")
+    if not config.explorer_uri:
+        errors.append("mainnet.explorer_run_id requires explorer_uri")
+    errors.extend(f"artifacts.uri: {message}" for message in _failure(validate_artifact_uri, config.artifacts.uri))
+    errors.extend(_failure(require_safe_pbs_resources, stage_pbs_resources(config, "analysis")))
     return errors
 
 
@@ -293,6 +330,8 @@ def submit_sync(config: PipelineConfiguration) -> None:
     run_id = required(config.run_id, "run_id")
     stages = SYNC_STAGES if config.mainnet.clear_after_sync else SYNC_STAGES[:-1]
     scripts = {stage: render_sync(config, stage) for stage in stages}
+    # Rendered first, so a bad Explorer setting refuses the whole submission before any qsub.
+    explorer = explorer_job(config) if config.mainnet.explorer_run_id is not None else None
     submitted: list[tuple[str, str]] = []
     try:
         for stage, script in scripts.items():
@@ -301,8 +340,60 @@ def submit_sync(config: PipelineConfiguration) -> None:
             if job:
                 submitted.append((spec.stage, job))
                 persist_pbs_job_id(config.runs_path / run_id, spec.stage, job)
+        checkpoint = dict(submitted).get("mainnet-checkpoint")
+        if explorer is not None and (checkpoint or config.dry_run):
+            submit_explorer(config, *explorer, checkpoint, submitted)
     except BaseException as error:
         failed = rollback_s3_pbs_submissions(submitted)
         if failed:
             raise RuntimeError(f"Submission failed; could not cancel PBS jobs {[job for _, job in failed]}") from error
         raise
+
+
+def explorer_job(config: PipelineConfiguration) -> tuple[S3Target, str]:
+    """The Dumplings baseline that updates the CoinJoin Explorer data: its run and its script.
+
+    It is its own pbs-from-s3 run (markers under ``<artifacts.uri>/<explorer_run_id>``), so the
+    Lab follows it like a baseline it launched. It reads the Dumplings copy in S3, not the
+    multijob, so pack and clear run beside it, and its failure leaves the synchronization done.
+    """
+    target = S3Target(
+        artifact_uri=required(config.artifacts.uri, "artifacts.uri"),
+        run_id=required(config.mainnet.explorer_run_id, "mainnet.explorer_run_id"),
+        access=S3Access(
+            endpoint_url=required(config.artifacts.endpoint_url, "artifacts.endpoint_url"),
+            credentials_file=required(config.artifacts.credentials_file, "artifacts.credentials_file"),
+            profile=required(config.artifacts.profile, "artifacts.profile"),
+        ),
+    )
+    script = render_coinjoin_analysis_dumplings_s3_pbs(
+        target,
+        pbs_image(config, "coinjoin_analysis"),
+        dumplings_uri=required(config.mainnet.dumplings_uri, "mainnet.dumplings_uri"),
+        coinjoin_type="wasabi2",
+        resources=stage_pbs_resources(config, "analysis"),
+        explorer_uri=config.explorer_uri,
+        explorer_source=Path(config.explorer_source).expanduser() if config.explorer_source else None,
+    )
+    return target, script
+
+
+def submit_explorer(
+    config: PipelineConfiguration,
+    target: S3Target,
+    script: str,
+    checkpoint: str | None,
+    submitted: list[tuple[str, str]],
+) -> None:
+    """Submit the Explorer baseline afterok the checkpoint, which publishes the Dumplings copy."""
+    run_id = target.run_id
+    if config.dry_run:
+        print(f"[dry-run] Would clear stale .pbs/{EXPLORER_STAGE}.done|failed markers of {run_id}")
+    else:
+        clear_s3_stage_markers(target.access, target.run_prefix, EXPLORER_STAGE)
+    job = submit_pbs_job(PBSJobSpec(EXPLORER_STAGE, script, (checkpoint,) if checkpoint else ()), config.dry_run)
+    if job:
+        submitted.append((EXPLORER_STAGE, job))
+        run_dir = config.runs_path / run_id
+        persist_pbs_job_id(run_dir, EXPLORER_STAGE, job)
+        upload_s3_job_id(target.access, target.run_prefix, EXPLORER_STAGE, pbs_job_id_path(run_dir, EXPLORER_STAGE))
