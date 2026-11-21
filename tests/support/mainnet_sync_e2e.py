@@ -298,6 +298,34 @@ def check_cleared(work: Path, token: str) -> None:
     assert not any(name.startswith(".clear-") for name in left), left
 
 
+def check_rebuilt(work: Path, token: str, mode: str, target: int) -> dict:
+    """The sixth run found no Dumplings or index backup and built both from the block archive."""
+    fifth = read_json(work / "fifth-done.json")
+    restore = read_json(work / "data/sync/restore.json")
+    producer = read_json(work / "data/sync/producer.json")
+    done = read_json(work / "data/sync/done.json")
+    run = f"local-sync-{token}-6"
+    assert restore["run_id"] == done["run_id"] == run
+    assert restore["action"] == "rebuilt-from-archive", restore
+    assert restore["rebuilt"] == ["dumplings", "index"] and set(restore["parts"]) == {"core"}, restore
+    if requires_block_archive(work, mode):
+        assert restore["blocks"]["files"] > 0, restore
+    check_height(done, mode, target)
+    assert done["height"] == fifth["height"] and done["hash"] == fifth["hash"]
+    assert producer["state"] == "done" and not (work / "data/core-reindex.json").exists()
+    # A new scan from the first height and a new index of the whole history, at the same tip.
+    dumplings = read_json(work / "dumplings-manifest-rebuilt.json")
+    index = read_json(work / "index/manifest.json")
+    assert dumplings["run_id"] == index["run_id"] == run
+    assert dumplings["last_processed_height"] == index["exported_max_block"] == done["height"]
+    # The restored files kept their archive markers: nothing was uploaded again.
+    before, after = s3_listing(work / "blocks-before-rebuild.txt"), s3_listing(work / "blocks-after-rebuild.txt")
+    changed = sorted(key for key, value in before.items() if after.get(key) != value and key + ".zst" not in after)
+    assert before and not changed, f"Block files archived again after the rebuild: {changed}"
+    assert not (work / "data/.sync-active").exists()
+    return {"rebuilt_from_archive": restore["blocks"], "rebuilt_height": done["height"]}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
@@ -310,6 +338,7 @@ def main() -> None:
         "restored": ("work", "token", "mode", "target"),
         "refused": ("work", "token"),
         "cleared": ("work", "token"),
+        "rebuilt": ("work", "token", "mode", "target"),
         "diagnostics": ("work", "result", "mode", "status"),
     }.items():
         command = sub.add_parser(action)
@@ -334,6 +363,9 @@ def main() -> None:
     elif args.action == "restored":
         record(work, check_restored(work, args.token, args.mode, args.target))
         print(f"PASS: {args.mode} emptied working dataset restored from S3 and synchronized again")
+    elif args.action == "rebuilt":
+        record(work, check_rebuilt(work, args.token, args.mode, args.target))
+        print(f"PASS: {args.mode} Dumplings and BlockSci index rebuilt from the block archive")
     elif args.action == "refused":
         record(work, check_refused(work, args.token))
         print("PASS: a partial working dataset is refused before Core starts")

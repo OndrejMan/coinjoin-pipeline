@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Real Core + Dumplings + archive -> local OpenPBS/Apptainer -> BlockSci,
 # verified MinIO backups, pruning, incremental update and checkpoint recovery,
-# then the restore job refilling an emptied working dataset and refusing a partial one.
+# then the restore job refilling an emptied working dataset and refusing a partial one,
+# and Dumplings and the index built again from the block archive once their backups are gone.
 # regtest mines a fixture; mainnet downloads public Bitcoin P2P data near target_height.
 # Existing images only. Never contacts MetaCentrum or CESNET S3.
 set -euo pipefail
@@ -308,3 +309,13 @@ refused_generation "local-sync-$token-4" "$restore_target" "The working dataset 
 rm -rf "$work/data" "$work/index"
 MAINNET_TEST_CLEAR=1 run_generation "local-sync-$token-5" "$restore_target"
 "$python" "$repo/tests/support/mainnet_sync_e2e.py" cleared "$work" "$token"
+cp "$work/data/sync/done.json" "$work/fifth-done.json"
+# The Lab deleted the Dumplings and index backups to scan again: job 0 restores the Core
+# checkpoint and the pruned block files from the archive, and both are built again.
+s5 rm 's3://local-mainnet-sync/dumplings/*' >/dev/null
+s5 rm 's3://local-mainnet-sync/index/*' >/dev/null
+s5 ls 's3://local-mainnet-sync/blocks/*' >"$work/blocks-before-rebuild.txt"
+run_generation "local-sync-$token-6" "$restore_target"
+s5 ls 's3://local-mainnet-sync/blocks/*' >"$work/blocks-after-rebuild.txt"
+s5 cp s3://local-mainnet-sync/dumplings/manifest.json "$work/dumplings-manifest-rebuilt.json" >/dev/null
+"$python" "$repo/tests/support/mainnet_sync_e2e.py" rebuilt "$work" "$token" "$mode" "$restore_target"
