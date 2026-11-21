@@ -14,7 +14,7 @@ import yaml
 from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.context import resolve_configuration
 from coinjoin_pipeline.execution import mainnet_sync
-from coinjoin_pipeline.execution.mainnet_sync import configuration_errors
+from coinjoin_pipeline.execution.mainnet_sync_rules import configuration_errors
 
 ROOT = Path(__file__).resolve().parents[2]
 support = SimpleNamespace(**runpy.run_path(str(ROOT / "tests/support/mainnet_sync_e2e.py")))

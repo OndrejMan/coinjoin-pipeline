@@ -13,11 +13,12 @@ import pytest
 from coinjoin_pipeline.context import resolve_run_images
 from coinjoin_pipeline.configuration import ConfigurationError, PipelineConfiguration
 from coinjoin_pipeline.context import resolve_configuration
-from coinjoin_pipeline.execution import mainnet_jobs, mainnet_runtime, mainnet_sync, mainnet_worker, s3_markers
+from coinjoin_pipeline.execution import mainnet_jobs, mainnet_runtime, mainnet_sync, mainnet_sync_rules, mainnet_worker, s3_markers
 from coinjoin_pipeline.execution.pbs.index_store import IndexStore
 from job_scripts import embedded_file
 from coinjoin_pipeline.execution.pbs.blocksci_index import check_manifest
 from coinjoin_pipeline.execution.pbs.blocksci_jobs import check_source
+from coinjoin_pipeline.execution.pbs.validation import PBSError
 from coinjoin_pipeline.storage.s5client import S5Error
 from coinjoin_pipeline.execution.mainnet_jobs import require_ready
 from coinjoin_pipeline.execution.mainnet_worker import (
@@ -113,7 +114,7 @@ def test_shipped_worker_imports_only_the_shipped_package(config, tmp_path):
 
 
 def test_checkpoint_job_defaults_to_little_memory(config):
-    resources = {stage: mainnet_sync.resources(config, stage) for stage in mainnet_sync.SYNC_STAGES}
+    resources = {stage: mainnet_sync_rules.resources(config, stage) for stage in mainnet_sync.SYNC_STAGES}
     assert resources["blocksci"].mem == "160gb"
     assert resources["checkpoint"].mem == resources["restore"].mem == "4gb"
     assert resources["checkpoint"].ncpus == 4
@@ -121,7 +122,7 @@ def test_checkpoint_job_defaults_to_little_memory(config):
 
 def test_every_job_must_use_the_same_multijob(config):
     changed = replace(config, pbs=replace(config.pbs, checkpoint=replace(config.pbs.checkpoint, multijob="brno")))
-    assert "All jobs must request the same multijob location" in mainnet_sync.configuration_errors(changed)
+    assert "All jobs must request the same multijob location" in mainnet_sync_rules.configuration_errors(changed)
 
 
 def test_dependencies_are_persisted_and_rolled_back(config, monkeypatch):
@@ -209,14 +210,14 @@ def test_resume_requires_real_file_and_offset(tmp_path):
 
 def test_nested_working_directories_are_rejected(config):
     changed = replace(config, blocksci=replace(config.blocksci, index_dir=config.mainnet.root + "/index"))
-    assert any("nesting" in message for message in mainnet_sync.configuration_errors(changed))
+    assert any("nesting" in message for message in mainnet_sync_rules.configuration_errors(changed))
 
 
 def test_scan_start_override_is_restricted_to_regtest(config):
     changed = replace(config, mainnet=replace(config.mainnet, scan_start_height=1))
-    assert any("isolated regtest" in message for message in mainnet_sync.configuration_errors(changed))
+    assert any("isolated regtest" in message for message in mainnet_sync_rules.configuration_errors(changed))
     regtest = replace(changed, mainnet=replace(changed.mainnet, network="bitcoin_regtest"))
-    assert mainnet_sync.configuration_errors(regtest) == []
+    assert mainnet_sync_rules.configuration_errors(regtest) == []
 
 
 @pytest.mark.parametrize("value", [0, -1, 1.5, True, "200000"])
@@ -227,7 +228,7 @@ def test_invalid_sync_target_is_rejected(value):
 
 def test_sync_target_is_embedded_in_every_job(config):
     bounded = replace(config, mainnet=replace(config.mainnet, target_height=200000))
-    assert mainnet_sync.configuration_errors(bounded) == []
+    assert mainnet_sync_rules.configuration_errors(bounded) == []
     for stage in mainnet_sync.SYNC_STAGES:
         assert '"target_height": 200000' in mainnet_sync.render_sync(bounded, stage)
 
@@ -1162,7 +1163,7 @@ def test_the_explorer_baseline_waits_only_for_the_checkpoint(tmp_path, monkeypat
     monkeypatch.setattr(mainnet_sync, "clear_s3_stage_markers", lambda _a, prefix, stage: cleared.append((prefix, stage)))
     monkeypatch.setattr(mainnet_sync, "upload_s3_job_id", lambda _a, prefix, stage, _p: uploaded.append((prefix, stage)))
     config = explorer_config(tmp_path)
-    assert mainnet_sync.configuration_errors(config) == []
+    assert mainnet_sync_rules.configuration_errors(config) == []
     mainnet_sync.submit_sync(config)
     stages = [job.stage for job in calls]
     # The chain stays as it was; the Explorer job comes last and depends on the checkpoint alone.
@@ -1180,7 +1181,7 @@ def test_the_explorer_baseline_waits_only_for_the_checkpoint(tmp_path, monkeypat
 
 def test_without_an_explorer_run_id_the_explorer_settings_are_refused(tmp_path):
     config = explorer_config(tmp_path)
-    errors = mainnet_sync.configuration_errors(replace(config, mainnet=replace(config.mainnet, explorer_run_id=None)))
+    errors = mainnet_sync_rules.configuration_errors(replace(config, mainnet=replace(config.mainnet, explorer_run_id=None)))
     assert "explorer_uri is not used by mainnet-sync" in errors
     assert "artifacts.uri is not used by mainnet-sync" in errors
     assert any(message.startswith("pbs.analysis.") for message in errors)
@@ -1189,18 +1190,18 @@ def test_without_an_explorer_run_id_the_explorer_settings_are_refused(tmp_path):
 def test_the_explorer_baseline_needs_its_data_and_marker_prefixes(tmp_path):
     config = explorer_config(tmp_path)
     missing = replace(config, explorer_uri=None, artifacts=replace(config.artifacts, uri=None))
-    errors = mainnet_sync.configuration_errors(missing)
+    errors = mainnet_sync_rules.configuration_errors(missing)
     assert "mainnet.explorer_run_id requires explorer_uri" in errors
     assert any(message.startswith("artifacts.uri:") for message in errors)
     same = replace(config, mainnet=replace(config.mainnet, explorer_run_id="mainnet-sync-local-1"))
-    assert "mainnet.explorer_run_id must differ from the synchronization's run_id" in mainnet_sync.configuration_errors(same)
+    assert "mainnet.explorer_run_id must differ from the synchronization's run_id" in mainnet_sync_rules.configuration_errors(same)
 
 
 def test_a_bad_explorer_setting_refuses_the_synchronization_before_any_job(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(mainnet_sync, "submit_pbs_job", lambda job, _dry: calls.append(job) or "1.local")
     inside = explorer_config(tmp_path, explorer_uri="s3://local/dumps/explorer")
-    with pytest.raises(mainnet_sync.PBSError, match="inside the Dumplings copy"):
+    with pytest.raises(PBSError, match="inside the Dumplings copy"):
         mainnet_sync.submit_sync(inside)
     assert calls == []
 

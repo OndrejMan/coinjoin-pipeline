@@ -131,7 +131,8 @@ PBS, on the frontend:
 | PBS resources and image references | `execution/pbs/defaults.py` (`DEFAULT_RESOURCES`), `execution/pbs_settings.py` |
 | Values interpolated into a job script or its `#PBS` directives | `execution/pbs/validation.py` |
 | Standalone coinjoin-analysis commands: CLI arguments and input rules | `execution/coinjoin_tools.py` |
-| Mainnet synchronization: validation, rendering and submission of the six jobs | `execution/mainnet_sync.py` |
+| Mainnet synchronization: which settings a run accepts | `execution/mainnet_sync_rules.py` |
+| Mainnet synchronization: rendering and submission of the six jobs | `execution/mainnet_sync.py` |
 
 PBS, on the compute node (shipped modules, standard library only, Python 3.8):
 

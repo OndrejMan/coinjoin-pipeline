@@ -130,8 +130,7 @@ def _persistent_index_errors(config: PipelineConfiguration) -> list[str]:
 def cross_option_errors(config: PipelineConfiguration) -> list[str]:
     """Return every violated rule in order, retaining CLI spellings in diagnostics."""
     if config.action == "mainnet-sync":
-        # Deferred: mainnet_sync renders PBS scripts that import the configuration again.
-        from .execution.mainnet_sync import configuration_errors  # pylint: disable=cyclic-import
+        from .execution.mainnet_sync_rules import configuration_errors
 
         errors = configuration_errors(config)
     elif any(path.startswith(("mainnet.", *MAINNET_ONLY_PBS_GROUPS)) for path in config.provided):
