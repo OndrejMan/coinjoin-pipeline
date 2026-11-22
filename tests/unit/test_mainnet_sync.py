@@ -120,6 +120,23 @@ def test_checkpoint_job_defaults_to_little_memory(config):
     assert resources["checkpoint"].ncpus == 4
 
 
+@pytest.mark.parametrize(
+    ("cgroup", "stat", "content", "expected"),
+    [
+        ("0::/pbs/job.1\n", "pbs/job.1/memory.stat", "file 900\nanon 123\n", 123),
+        ("4:memory:/pbs/job.1\n3:cpu,cpuacct:/pbs/job.1\n", "memory/pbs/job.1/memory.stat", "rss 5\ntotal_rss 456\n", 456),
+        ("3:cpu:/pbs/job.1\n", "memory/pbs/job.1/memory.stat", "total_rss 1\n", None),
+        ("0::/pbs/job.1\n", "elsewhere/memory.stat", "anon 1\n", None),
+    ],
+)
+def test_blocksci_job_reads_anonymous_memory_without_page_cache(tmp_path, cgroup, stat, content, expected):
+    proc = tmp_path / "cgroup"
+    proc.write_text(cgroup)
+    (tmp_path / "sys" / stat).parent.mkdir(parents=True)
+    (tmp_path / "sys" / stat).write_text(content)
+    assert mainnet_jobs.cgroup_anon_bytes(proc, tmp_path / "sys") == expected
+
+
 def test_every_job_must_use_the_same_multijob(config):
     changed = replace(config, pbs=replace(config.pbs, checkpoint=replace(config.pbs.checkpoint, multijob="brno")))
     assert "All jobs must request the same multijob location" in mainnet_sync_rules.configuration_errors(changed)

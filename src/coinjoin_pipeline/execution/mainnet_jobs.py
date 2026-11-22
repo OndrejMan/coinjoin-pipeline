@@ -646,6 +646,37 @@ def parse_progress(worker: Worker) -> None:
     )
 
 
+def cgroup_anon_bytes(proc: Path = Path("/proc/self/cgroup"), root: Path = Path("/sys/fs/cgroup")) -> int | None:
+    """Anonymous memory of this job's cgroup, without the page cache that PBS's mem counts.
+
+    cgroup v1 names the memory controller on its own line; v2 has the single line ``0::``.
+    """
+    try:
+        lines = proc.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    paths: dict[str, str] = {}
+    for line in lines:
+        parts = line.split(":", 2)
+        if len(parts) == 3:
+            for controller in parts[1].split(",") if parts[1] else [""]:
+                paths[controller] = parts[2]
+    if "memory" in paths:
+        stat, key = root / "memory" / paths["memory"].lstrip("/") / "memory.stat", "total_rss"
+    elif "" in paths:
+        stat, key = root / paths[""].lstrip("/") / "memory.stat", "anon"
+    else:
+        return None
+    try:
+        for row in stat.read_text(encoding="utf-8").splitlines():
+            name, _, value = row.partition(" ")
+            if name == key:
+                return int(value)
+    except (OSError, ValueError):
+        return None
+    return None
+
+
 def blocksci(worker: Worker) -> None:
     worker.stage = "blocksci"
     worker.acquire_dataset()
@@ -707,10 +738,16 @@ def blocksci(worker: Worker) -> None:
         value["parser"]["maxBlockNum"] = height + 1
         atomic_json(config, value)
     (worker.index / RESUME_CHECKPOINT).unlink(missing_ok=True)
+    anon_peak = [0]
+
+    def poll() -> None:
+        parse_progress(worker)
+        anon_peak[0] = max(anon_peak[0], cgroup_anon_bytes() or 0)
+
     worker.run_command(
         worker.container_command(image, "blocksci_parser", config, "update", readonly=True, index_writable=True),
         "blocksci",
-        lambda: parse_progress(worker),
+        poll,
     )
     signature = resume_signature(worker.index, worker.core_dir / "blocks")
     output = worker.work / "verified.json"
@@ -747,7 +784,13 @@ def blocksci(worker: Worker) -> None:
         "external-bitcoin",
         worker.network,
         verified["exported_max_block"],
-        {**verified, "source_dir": str(worker.core_dir), "pbs_resources": worker.c["pbs_resources"], **signature},
+        {
+            **verified,
+            "source_dir": str(worker.core_dir),
+            "pbs_resources": worker.c["pbs_resources"],
+            "parser_anon_peak_bytes": anon_peak[0] or None,
+            **signature,
+        },
     )
     # The index is complete; its backup is the checkpoint job's, so a failed upload
     # leaves a usable working copy.
