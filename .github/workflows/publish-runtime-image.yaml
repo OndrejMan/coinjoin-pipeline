@@ -3,12 +3,10 @@ name: Publish Runtime Image
 # ghcr.io/ondrejman/coinjoin-pipeline-runtime: Python, the dependencies and the sources of
 # one commit (container/runtime.Dockerfile). cj-frontend starts FROM it, pinned by digest,
 # and receives a notification with the published digest. Dependabot is a fallback.
-# Only successful Tests push runs on main trigger automatic publication.
+# Tests calls this as its last job, after every test passes on a push to main; a manual
+# run publishes the dispatched ref as it is.
 on:
-  workflow_run:
-    workflows: [Tests]
-    types: [completed]
-    branches: [main]
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -21,9 +19,6 @@ concurrency:
 
 jobs:
   publish:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -32,8 +27,6 @@ jobs:
     steps:
       - name: Checkout the tested commit
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Revision
         id: revision

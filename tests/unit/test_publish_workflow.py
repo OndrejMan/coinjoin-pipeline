@@ -21,15 +21,22 @@ class PublishWorkflowTests(unittest.TestCase):
     def test_runtime_image_is_published_only_after_tests_pass_on_main(self) -> None:
         workflow = yaml.safe_load((WORKFLOWS / "publish-runtime-image.yaml").read_text(encoding="utf-8"))
         triggers = workflow[True]  # PyYAML reads the `on` key as a boolean.
-        self.assertEqual(triggers["workflow_run"], {"workflows": ["Tests"], "types": ["completed"], "branches": ["main"]})
+        self.assertEqual(set(triggers), {"workflow_call", "workflow_dispatch"})
         job = workflow["jobs"]["publish"]
-        self.assertIn("conclusion == 'success'", job["if"])
-        self.assertIn("event == 'push'", job["if"])
+        self.assertNotIn("if", job)
         checkout = job["steps"][0]
-        self.assertEqual(checkout["with"]["ref"], "${{ github.event.workflow_run.head_sha || github.sha }}")
+        self.assertNotIn("with", checkout)
         build = next(step for step in job["steps"] if step.get("id") == "build")
         self.assertEqual(build["with"]["file"], "container/runtime.Dockerfile")
         self.assertIn("REVISION=${{ steps.revision.outputs.sha }}", build["with"]["build-args"])
+
+        jobs = yaml.safe_load((WORKFLOWS / "tests.yaml").read_text(encoding="utf-8"))["jobs"]
+        caller = jobs.pop("publish-runtime-image")
+        self.assertEqual(caller["uses"], "./.github/workflows/publish-runtime-image.yaml")
+        self.assertEqual(caller["if"], "github.event_name == 'push'")
+        self.assertEqual(set(caller["needs"]), set(jobs))
+        self.assertEqual(caller["permissions"]["packages"], "write")
+        self.assertEqual(caller["secrets"], "inherit")
 
     def test_uploader_publish_is_manual_only(self) -> None:
         workflow = (WORKFLOWS / "publish-uploader-image.yaml").read_text(encoding="utf-8")

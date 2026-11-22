@@ -9,8 +9,9 @@ images that drive the pipeline, such as cj-frontend, start `FROM` it.
 
 ## Publishing
 
-`Publish Runtime Image` (`.github/workflows/publish-runtime-image.yaml`) runs after `Tests`
-passes for a push to `main` and publishes the tested commit as `:<commit>` and `:latest`.
+`Publish Runtime Image` (`.github/workflows/publish-runtime-image.yaml`) is the last job of
+`Tests`: after every test passes for a push to `main` it publishes the tested commit as
+`:<commit>` and `:latest`.
 Commits with `[skip ci]` get no image. cj-frontend pins the image by digest and Dependabot
 there opens a pull request for each new digest.
 

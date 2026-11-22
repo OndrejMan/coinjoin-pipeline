@@ -566,3 +566,28 @@ jobs:
           name: bitcoin-block-archive-s3-minio-results
           path: github-test-results/
           retention-days: 14
+
+  # The runtime image of a push to main is published only after every test above passes.
+  publish-runtime-image:
+    if: github.event_name == 'push'
+    needs:
+      - configuration-unit-tests
+      - podman-wrapper
+      - docker-overactive-local
+      - podman-overactive-local
+      - docker-joinmarket
+      - docker-parallel
+      - kubernetes-k3d
+      - pbs-apptainer-image
+      - mainnet-sync-bounded
+      - pbs-fixture-analysis
+      - kubernetes-pbs-wasabi
+      - kubernetes-pbs-joinmarket
+      - kubernetes-pbs-parallel
+      - kubernetes-s3-minio
+      - bitcoin-block-archive-s3-minio
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/publish-runtime-image.yaml
+    secrets: inherit
