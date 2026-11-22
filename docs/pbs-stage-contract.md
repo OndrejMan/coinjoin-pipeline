@@ -253,7 +253,11 @@ page again in `html-fins/` with scenario-lab's fin detector (`pbs/fin_windows.py
 checked window for window against `src/domain/fin-detector.ts`) baked in as Explorer's own
 saved selections: the job writes `<coordinator>/cj_selection.json` in the staged copy before
 the second export, for the settings fixed in `explorer_output.FIN_SETTINGS` (created and spend
-curve, 0.5 BTC + 15 %, strongest jump). Explorer's code stays unchanged. Gzip
+curve, 0.5 BTC + 15 %, strongest jump). Explorer's code stays unchanged. Beside the
+pages go Explorer's own static-site files of both exports: `all/catalog.json.gz`,
+`all-fins/catalog.json.gz` and each month once as `all/data/<coordinator>/<month>.json.gz`;
+scenario-lab shows them as one page of every coordinator that loads a month only when it is
+chosen, because the export's self-contained `_all` page (over 500 MB) opens in no browser. Gzip
 headers carry no name or time, so equal content gives equal bytes; only files
 whose SHA-256 differs from the previous `manifest.json` (schema
 `mainnet-explorer-1.0`) are uploaded, removed ones are deleted. The manifest is

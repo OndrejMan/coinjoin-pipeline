@@ -70,6 +70,8 @@ FIN_SETTINGS = (
 SELECTIONS_FILE = "cj_selection.json"
 CURVE_SCHEMA = "fin-liquidity-1.0"
 PAGE_PREFIX = "coinjoin-explorer-offline__"
+ALL_DIR = "all"
+ALL_FINS_DIR = "all-fins"
 MANIFEST_SCHEMA = "mainnet-explorer-1.0"
 
 
@@ -421,6 +423,15 @@ def build_output(scanner: Path, out: Path, height: int, html: Path | None, html_
         if directory is not None:
             for page in sorted(directory.glob(PAGE_PREFIX + "*.html")):
                 gzip_file(page, out / folder / (page.name + ".gz"))
+    # Explorer's static site of every coordinator: each month once and the catalog of each page
+    # variant. scenario-lab shows it as one page that loads a month only when it is chosen; a
+    # self-contained "_all" page holds every month (over 500 MB) and no browser opens it.
+    for directory, folder in ((html, ALL_DIR), (html_fins, ALL_FINS_DIR)):
+        if directory is not None and (directory / "data" / "catalog.json").is_file():
+            gzip_file(directory / "data" / "catalog.json", out / folder / "catalog.json.gz")
+    if html is not None:
+        for month in sorted((html / "data").glob("*/*.json")):
+            gzip_file(month, out / ALL_DIR / "data" / month.parent.name / (month.name + ".gz"))
 
 
 def files(root: Path) -> dict[str, dict]:

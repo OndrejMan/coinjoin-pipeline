@@ -107,6 +107,24 @@ def test_output_holds_months_curves_and_baselines(scanner: Path, tmp_path: Path)
     assert spend["provenance"]["height"] == 886000
 
 
+def test_output_holds_the_static_site_of_every_coordinator(scanner: Path, tmp_path: Path) -> None:
+    html, html_fins = tmp_path / "explorer-html", tmp_path / "explorer-html-fins"
+    for directory, selections in ((html, 0), (html_fins, 2)):
+        (directory / "data/wasabi2_opencoordinator/images").mkdir(parents=True)
+        (directory / "data/catalog.json").write_text(json.dumps({"selections": selections}))
+        (directory / f"data/wasabi2_opencoordinator/{MARCH}.json").write_text('{"v": 1}')
+        (directory / "data/wasabi2_opencoordinator/images/x.png").write_bytes(b"png")
+    out = tmp_path / "out"
+    explorer_output.build_output(scanner, out, 886000, html, html_fins)
+    names = set(explorer_output.files(out))
+    assert f"all/data/wasabi2_opencoordinator/{MARCH}.json.gz" in names
+    assert {"all/catalog.json.gz", "all-fins/catalog.json.gz"} <= names
+    # Each month once; the variants differ only in their catalog's saved selections.
+    assert not any(name.startswith("all-fins/data/") or name.endswith(".png.gz") for name in names)
+    fins = json.loads(gzip.decompress((out / "all-fins/catalog.json.gz").read_bytes()))
+    assert fins == {"selections": 2}
+
+
 def test_changes_upload_only_new_content() -> None:
     previous = {
         "schema_version": explorer_output.MANIFEST_SCHEMA,
