@@ -115,8 +115,9 @@ def test_shipped_worker_imports_only_the_shipped_package(config, tmp_path):
 
 def test_checkpoint_job_defaults_to_little_memory(config):
     resources = {stage: mainnet_sync_rules.resources(config, stage) for stage in mainnet_sync.SYNC_STAGES}
-    assert resources["blocksci"].mem == "160gb"
-    assert resources["checkpoint"].mem == resources["restore"].mem == "4gb"
+    assert resources["blocksci"].mem == "96gb"
+    assert resources["checkpoint"].mem == "4gb"
+    assert resources["restore"].mem == "2gb"
     assert resources["checkpoint"].ncpus == 4
 
 

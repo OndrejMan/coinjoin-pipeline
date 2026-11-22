@@ -37,12 +37,15 @@ DEFAULT_RESOURCES = {
 # list of the jobs derives from this one. The checkpoint job compresses with one zstd
 # thread per CPU but needs little memory. The Scenario Lab keeps the same values.
 MAINNET_SYNC_RESOURCES = {
-    "restore": PBSResources(2, "4gb", "20gb", "12:00:00"),
+    # A real restore peaked at 0.5 GB (job 25654654); download and unpack share the CPUs.
+    "restore": PBSResources(2, "2gb", "20gb", "12:00:00"),
     # Core and Dumplings share it: job 25654655 exceeded 8 GB with mainnet.dbcache_mb 4096,
     # so the cache stays at 4096 MB and the rest is Dumplings' headroom.
     "producer": PBSResources(2, "16gb", "20gb", "24:00:00"),
-    # Sized for a long catch-up of the whole index, not for a short update.
-    "blocksci": PBSResources(4, "160gb", "20gb", "24:00:00"),
+    # The parser kept one core busy (100k blocks in 6.2 h). PBS reported the whole 160 GB as
+    # used in every long catch-up because it counts the page cache of the mapped index; the
+    # job records its anonymous peak in the index manifest to size this further.
+    "blocksci": PBSResources(2, "96gb", "20gb", "24:00:00"),
     "checkpoint": PBSResources(4, "4gb", "20gb", "12:00:00"),
     # One file per CPU at zstd -19: slow, but each file needs well under 1 GB.
     "pack": PBSResources(4, "3gb", "20gb", "24:00:00"),

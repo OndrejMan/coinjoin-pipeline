@@ -32,7 +32,7 @@ blocksci:
 pbs:
   restore:
     ncpus: 2
-    mem: 4gb
+    mem: 2gb
     scratch: 20gb
     walltime: '12:00:00'
     multijob: brno
@@ -43,8 +43,8 @@ pbs:
     walltime: '24:00:00'
     multijob: brno
   blocksci:
-    ncpus: 4
-    mem: 160gb
+    ncpus: 2
+    mem: 96gb
     scratch: 20gb
     walltime: '24:00:00'
     multijob: brno
