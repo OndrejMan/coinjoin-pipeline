@@ -107,6 +107,8 @@ data (a sixth more). Before the first file it writes `<root>/core-reindex.json`.
 With that marker the producer first runs Core offline with `-reindex
 -stopafterblockimport`: Core rebuilds its block index and chainstate from the files and
 exits by itself, and only a clean exit removes the marker. Then it continues as usual.
+In prune mode `-reindex` deletes every block file after a gap in the numbering, so the
+producer refuses to reindex until the files run from `blk00000.dat` without one.
 With every block file on disk `require_complete_dataset` accepts a missing Scanner or
 index: Dumplings scans from `scan_start_height` and the BlockSci job parses the whole
 history (`generate-config`). The checkpoint backs both up and prunes again; the pack job

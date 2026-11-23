@@ -218,3 +218,14 @@ def test_reindex_runs_offline_until_core_exits_and_fails_on_an_unclean_exit(work
         worker.reindex_core()
     assert {"-reindex", "-stopafterblockimport", "-networkactive=0", "-prune=1"} <= set(commands[0])
     assert worker.core is None
+
+
+def test_reindex_refuses_a_gap_that_core_would_delete_everything_after(worker, monkeypatch):
+    blocks = worker.core_dir / "blocks"
+    blocks.mkdir(parents=True, exist_ok=True)
+    for name in ("blk00000.dat", "blk00002.dat", "blk00003.dat"):
+        (blocks / name).write_bytes(PAYLOAD)
+    monkeypatch.setattr(worker, "launch_core", lambda command: pytest.fail("Core must not start"))
+    with pytest.raises(ValueError, match="blk00001.dat is missing"):
+        worker.reindex_core()
+    assert sorted(path.name for path in blocks.glob("blk*.dat")) == ["blk00000.dat", "blk00002.dat", "blk00003.dat"]

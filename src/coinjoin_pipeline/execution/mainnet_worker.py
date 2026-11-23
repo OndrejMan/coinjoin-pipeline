@@ -488,7 +488,17 @@ class Worker:
         Block files restored from the archive are unknown to the block index of a pruned
         Core. With -stopafterblockimport Core exits by itself once every file is imported
         and the chain connected, so a clean exit marks the end of the reindex.
+
+        In prune mode -reindex first deletes every block file after a gap in the numbering
+        (CleanupBlockRevFiles in Core 29.1), unarchived ones included, so a gap stops it here.
         """
+        numbers = sorted(int(path.name[3:8]) for path in (self.core_dir / "blocks").glob("blk?????.dat"))
+        missing = next((index for index, number in enumerate(numbers) if number != index), None)
+        if missing is not None:
+            raise ValueError(
+                f"blk{missing:05d}.dat is missing, and Core's -reindex in prune mode would delete every "
+                "block file after it; restore the missing files from the block archive first"
+            )
         core = self.launch_core(self.core_command(True, extra=("-reindex", "-stopafterblockimport")))
         while core.poll() is None:
             try:
