@@ -13,6 +13,9 @@ import time
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+# Kernel of a notebook run at start; prepare() installs it.
+KERNEL = "blocksci"
+
 
 def available_port(preferred):
     """The preferred port when it is free, else any free one, so two notebook jobs can share a node."""
@@ -85,7 +88,53 @@ def prepare(root, settings):
         )
 
 
+def autorun_target(root, control):
+    """(notebook, exit on finish) the submitter asked to run at start (control/autorun.json), or None."""
+    request = control / "autorun.json"
+    if not request.is_file():
+        return None
+    content = json.loads(request.read_text())
+    name = content.get("name")
+    notebook = root / str(name)
+    if not isinstance(name, str) or notebook.parent != root or not notebook.is_file():
+        raise RuntimeError("The notebook to run at start is missing: " + str(name))
+    return notebook, content.get("exit") is True
+
+
+def run_file(path):
+    """Run one notebook or script headless; save a .autorun.ipynb copy after every cell. Exit status 0/1."""
+    os.chdir(path.parent)
+    if path.suffix == ".py":
+        return subprocess.call([sys.executable, path.name])
+    import nbformat  # pylint: disable=import-error,import-outside-toplevel
+    from nbclient import NotebookClient  # pylint: disable=import-error,import-outside-toplevel
+    from nbclient.exceptions import CellExecutionError  # pylint: disable=import-error,import-outside-toplevel
+
+    document = nbformat.read(str(path), as_version=4)
+    copy = path.with_name(path.stem + ".autorun.ipynb")
+    client = NotebookClient(
+        document, timeout=None, kernel_name=KERNEL, resources={"metadata": {"path": str(path.parent)}}
+    )
+    cells = [index for index, cell in enumerate(document.cells) if cell.cell_type == "code"]
+    client.reset_execution_trackers()
+    with client.setup_kernel():
+        for done, index in enumerate(cells, 1):
+            print("[blocksci-notebook] Autorun: cell " + str(done) + "/" + str(len(cells)), flush=True)
+            try:
+                client.execute_cell(document.cells[index], index)
+            except CellExecutionError as error:
+                nbformat.write(document, str(copy))
+                reason = (str(error).strip().splitlines() or ["?"])[-1]
+                print("[blocksci-notebook] Autorun failed in cell " + str(done) + ": " + reason, flush=True)
+                return 1
+            nbformat.write(document, str(copy))
+    print("[blocksci-notebook] Autorun finished: " + copy.name, flush=True)
+    return 0
+
+
 def main():
+    if sys.argv[1:2] == ["--run-file"]:
+        return run_file(Path(sys.argv[2]))
     run_id, port = os.environ["PBS_RUN_ID"], available_port(int(sys.argv[1]))
     root, control = Path("/mnt/notebooks"), Path("/mnt/notebook-control")
     os.umask(0o077)
@@ -103,6 +152,8 @@ def main():
         raise RuntimeError("The BlockSci image is missing the prebuilt JupyterLab web assets")
     base = "/jupyter/" + run_id + "/"
     prepare(root, root / ".jupyter" / "app")
+    autorun = autorun_target(root, control)
+    runner = None
     # The finally block also handles readiness failures and signals.
     process = subprocess.Popen(  # pylint: disable=consider-using-with
         [
@@ -128,6 +179,8 @@ def main():
         nonlocal stopping
         stopping = True
         process.terminate()
+        if runner is not None and runner.poll() is None:
+            runner.terminate()
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
@@ -176,8 +229,29 @@ def main():
             + host,
             flush=True,
         )
+        if autorun is None:
+            return process.wait()
+        notebook, exit_on_finish = autorun
+        # JupyterLab stays up to watch the run. With exit on finish the job ends with the
+        # notebook, and the stage then uploads the notebook directory with its results.
+        print("[blocksci-notebook] Autorun: " + notebook.name + " started", flush=True)
+        runner = subprocess.Popen(  # pylint: disable=consider-using-with
+            [sys.executable, sys.argv[0], "--run-file", str(notebook)]
+        )
+        while runner.poll() is None and process.poll() is None:
+            time.sleep(1)
+        if runner.poll() is None:
+            runner.terminate()
+            runner.wait()
+            return process.returncode or 1
+        if exit_on_finish:
+            return runner.returncode
+        print("[blocksci-notebook] Autorun ended; JupyterLab stays up until Stop run or the walltime", flush=True)
         return process.wait()
     finally:
+        if runner is not None and runner.poll() is None:
+            runner.terminate()
+            runner.wait()
         connection.unlink(missing_ok=True)
         if process.poll() is None:
             process.terminate()

@@ -187,13 +187,18 @@ def publish_output(stage: Stage, output: Path, settings: OutputSettings) -> None
     stage.log(f"notebooks are in {prefix}; removed {output}")
 
 
-def seed_notebook(stage: Stage, output: Path) -> None:
-    """Write the optional initial file the submitter staged in ``.notebook/initial.json`` into the notebook directory."""
+def seed_notebook(stage: Stage, output: Path) -> dict[str, object] | None:
+    """Write the optional initial file the submitter staged in ``.notebook/initial.json`` into the notebook directory.
+
+    Returns ``{"name", "exit"}`` when the submitter asked to run it at start (``"run": true``),
+    with ``exit`` from ``"exitOnFinish"`` (end the job once it ran), else None.
+    """
     uri = f"{stage.run_prefix}/.notebook/initial.json"
     if not stage.storage.exists(uri):
-        return
+        return None
     seed = stage.storage.cat_json(uri)
     name, text = seed.get("name"), seed.get("text")
+    run, exit_on_finish = seed.get("run", False), seed.get("exitOnFinish", False)
     if (
         not isinstance(name, str)
         or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _.-]{0,119}\.(py|ipynb)", name)
@@ -202,6 +207,9 @@ def seed_notebook(stage: Stage, output: Path) -> None:
         or "\0" in text
     ):
         raise StageFailure("Invalid initial notebook file in S3")
+    # Exit on finish only ends a notebook that runs at start.
+    if not isinstance(run, bool) or not isinstance(exit_on_finish, bool) or (exit_on_finish and not run):
+        raise StageFailure("Invalid initial notebook file in S3: bad run flags")
     if name.endswith(".ipynb"):
         document = json.loads(text)
         if (
@@ -214,6 +222,7 @@ def seed_notebook(stage: Stage, output: Path) -> None:
     descriptor = os.open(str(output / name), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
         stream.write(text)
+    return {"name": name, "exit": exit_on_finish} if run else None
 
 
 @contextmanager
@@ -331,11 +340,17 @@ def blocksci_analysis(stage: Stage) -> None:
         binds.append(f"{script}:/mnt/user-analysis.py:ro")
     control = None
     if settings["output"].get("notebook"):
-        seed_notebook(stage, output)
+        autorun = seed_notebook(stage, output)
         control = notebook_control(stage)
         control.mkdir(parents=True, exist_ok=True)
         control.chmod(0o700)
         (control / "connection.json").unlink(missing_ok=True)
+        # blocksci_notebook.py runs this notebook once JupyterLab is up, and may then end the job.
+        (control / "autorun.json").unlink(missing_ok=True)
+        if autorun:
+            (control / "autorun.json").write_text(json.dumps(autorun))
+            ending = "the job ends when it finishes" if autorun["exit"] else "JupyterLab stays up afterwards"
+            stage.log(f"[{mode}] {autorun['name']} runs at start; {ending}")
         notebook = Path(__file__).parent / "templates/blocksci_notebook.py"
         binds += [
             f"{output}:/mnt/notebooks:rw",

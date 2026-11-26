@@ -33,6 +33,21 @@ def test_seed_is_exclusive_and_rejects_paths(tmp_path):
         seed_notebook(job, tmp_path)
 
 
+def test_seed_names_the_notebook_only_when_asked_to_run_it(tmp_path):
+    job = stage()
+    job.storage.cat_json.return_value = {"name": "a.ipynb", "text": '{"nbformat": 4, "cells": []}'}
+    assert seed_notebook(job, tmp_path) is None
+    job.storage.cat_json.return_value = {"name": "b.ipynb", "text": '{"nbformat": 4, "cells": []}', "run": True}
+    assert seed_notebook(job, tmp_path) == {"name": "b.ipynb", "exit": False}
+    job.storage.cat_json.return_value = {"name": "c.py", "text": "x", "run": True, "exitOnFinish": True}
+    assert seed_notebook(job, tmp_path) == {"name": "c.py", "exit": True}
+    for flags in ({"run": "yes"}, {"exitOnFinish": True}, {"run": True, "exitOnFinish": 1}):
+        job.storage.cat_json.return_value = {"name": "d.py", "text": "x", **flags}
+        with pytest.raises(StageFailure, match="Invalid initial"):
+            seed_notebook(job, tmp_path)
+    assert not (tmp_path / "d.py").exists()
+
+
 def test_missing_seed_does_not_write_anything(tmp_path):
     job = stage()
     job.storage.exists.return_value = False

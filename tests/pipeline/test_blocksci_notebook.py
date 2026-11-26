@@ -60,6 +60,52 @@ def test_restart_preserves_user_notebook_and_settings(tmp_path, monkeypatch):
     assert overrides.read_text() == "user's settings"
 
 
+def test_autorun_target_reads_only_a_notebook_in_the_notebook_directory(tmp_path):
+    root, control = tmp_path / "notebooks", tmp_path / "control"
+    root.mkdir()
+    control.mkdir()
+    assert blocksci_notebook.autorun_target(root, control) is None
+    (root / "a.ipynb").write_text("{}")
+    (control / "autorun.json").write_text(json.dumps({"name": "a.ipynb"}))
+    assert blocksci_notebook.autorun_target(root, control) == (root / "a.ipynb", False)
+    (control / "autorun.json").write_text(json.dumps({"name": "a.ipynb", "exit": True}))
+    assert blocksci_notebook.autorun_target(root, control) == (root / "a.ipynb", True)
+    for name in ("missing.ipynb", "../a.ipynb", None):
+        (control / "autorun.json").write_text(json.dumps({"name": name}))
+        with pytest.raises(RuntimeError, match="missing"):
+            blocksci_notebook.autorun_target(root, control)
+
+
+def test_run_file_runs_a_script_in_its_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    folder = tmp_path / "notebooks"
+    folder.mkdir()
+    (folder / "ok.py").write_text("open('written', 'w').write('1')\n")
+    (folder / "bad.py").write_text("raise SystemExit(3)\n")
+    assert blocksci_notebook.run_file(folder / "ok.py") == 0
+    assert (folder / "written").read_text() == "1"
+    assert blocksci_notebook.run_file(folder / "bad.py") == 3
+
+
+def test_run_file_saves_every_cell_and_stops_at_the_first_error(tmp_path, monkeypatch):
+    pytest.importorskip("nbclient")
+    nbformat = pytest.importorskip("nbformat")
+    monkeypatch.chdir(tmp_path)
+    notebook = nbformat.v4.new_notebook()
+    notebook.cells = [
+        nbformat.v4.new_code_cell("open('first', 'w').write('1')"),
+        nbformat.v4.new_code_cell("raise ValueError('broken')"),
+        nbformat.v4.new_code_cell("open('third', 'w').write('1')"),
+    ]
+    path = tmp_path / "n.ipynb"
+    nbformat.write(notebook, str(path))
+    monkeypatch.setattr(blocksci_notebook, "KERNEL", "python3")
+    assert blocksci_notebook.run_file(path) == 1
+    assert (tmp_path / "first").exists() and not (tmp_path / "third").exists()
+    saved = nbformat.read(str(tmp_path / "n.autorun.ipynb"), as_version=4)
+    assert "ValueError" in json.dumps(saved.cells[1].outputs)
+
+
 class _Bucket:
     """What `s5cmd sync` and `ls` would do, kept in memory: key -> size."""
 
