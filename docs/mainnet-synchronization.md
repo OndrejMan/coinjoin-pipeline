@@ -47,7 +47,7 @@ When one fails, PBS cancels the ones that depend on it. The synchronization is c
 with the checkpoint's final `done.json` already; a failure of `mainnet-pack` or
 `mainnet-clear` does not change that and shows in the Lab only on that job.
 
-`mainnet-restore` (8 CPU / 8 GB) clears the state of the previous run and checks whether
+`mainnet-restore` (2 CPU, 2 GB) clears the state of the previous run and checks whether
 working data exists on the multijob (`bitcoin/`, `dumplings/`, `archive-state/`, or the
 index's `config.json`, `files.txt`, `manifest.json` or `parsed/`; locks, `sync/` and logs
 do not count).
@@ -180,7 +180,7 @@ pruning. The index manifest also holds the SHA-256 of that file's prefix up to t
 The next update checks the same bytes; new data can be appended after the cursor, but a
 different Core layout must not pass for the same source just because it has the same path.
 
-`mainnet-pack` (4 CPU, 4 GB, 24 h) compresses the block archive. It does not take the
+`mainnet-pack` (4 CPU, 3 GB, 24 h) compresses the block archive. It does not take the
 dataset lock, so it can run alongside the next synchronization. It lists S3 first and the
 disk second and takes only raw `blkNNNNN.dat` files that Core no longer has on disk:
 for files on disk, pruning checks the raw object. It refuses a run without this run's
