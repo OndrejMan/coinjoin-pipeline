@@ -154,8 +154,8 @@ class Stage:
 def with_job_log(stage: Stage, name: str) -> None:
     """Copy the job's output into a log the finalization uploads beside the run's other logs.
 
-    The output still reaches the PBS output file too, so a job submitted from a host
-    PBS cannot copy that file back to loses nothing that S3 does not keep.
+    It is the job's only output that is kept: the S3 job header sends PBS's own output
+    file to /dev/null.
     """
     log = stage.work / LOGS_DIR / name
     log.parent.mkdir(parents=True, exist_ok=True)

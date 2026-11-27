@@ -386,8 +386,10 @@ Apptainer, upload the outputs, then the finalizers (the job log, the release of
 an index lock) whatever the outcome, then the terminal marker, then an emptied
 scratch. A failure of any kind, `SIGTERM` at the walltime included, still
 publishes `failed`; a `done` marker that cannot be uploaded turns into a failure.
-The whole output also goes to `logs/<stage>.pbs.log` in the prefix, so no stage
-depends on PBS copying its output file back.
+The whole output goes to `logs/<stage>.pbs.log` in the prefix, and the job
+header sends PBS's own output file to `/dev/null`: the compute nodes cannot copy
+it back to the cj-frontend container, and every failed copy mails "Post job file
+processing error".
 
 BlockSci and report jobs take the exporters from `.pipeline/exporters/` of their
 own prefix, so every stage of a run uses the tree its first stage staged.

@@ -4,7 +4,8 @@
       "#PBS -N coinjoin_analysis_s3",
       "#PBS -l select=1:ncpus=4:mem=16gb:scratch_ssd=50gb",
       "#PBS -l walltime=04:00:00",
-      "#PBS -j oe"
+      "#PBS -j oe",
+      "#PBS -o /dev/null"
     ],
     "settings": {
       "command": "cd /work && python -m cj_process.parse_cj_logs --action analyze_only --target-path /work/input --env_vars DEBUG=False",

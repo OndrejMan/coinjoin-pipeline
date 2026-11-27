@@ -1,4 +1,3 @@
-#PBS -o {run_dir}/logs/{stage}.pbs.log
 set -euo pipefail
 cd "$PBS_O_WORKDIR"
 RUN_DIR="{run_dir}"

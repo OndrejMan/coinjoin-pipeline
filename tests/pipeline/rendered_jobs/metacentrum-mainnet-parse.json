@@ -4,7 +4,8 @@
       "#PBS -N blocksci_parse_s3",
       "#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=2tb",
       "#PBS -l walltime=48:00:00",
-      "#PBS -j oe"
+      "#PBS -j oe",
+      "#PBS -o /dev/null"
     ],
     "settings": {
       "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py parse --run-dir /runs/emulation/logs/mainnet-850000 --network bitcoin --disk /mnt/data --max-block 850001",

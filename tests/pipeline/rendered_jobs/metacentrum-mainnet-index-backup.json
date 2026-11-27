@@ -4,7 +4,8 @@
       "#PBS -N blocksci_backup_s3",
       "#PBS -l select=1:ncpus=8:mem=16gb:scratch_ssd=10gb:multijob=brno",
       "#PBS -l walltime=12:00:00",
-      "#PBS -j oe"
+      "#PBS -j oe",
+      "#PBS -o /dev/null"
     ],
     "settings": {
       "credentials": "/storage/brno2/home/<login>/.aws/credentials",

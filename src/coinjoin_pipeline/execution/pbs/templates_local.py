@@ -20,7 +20,9 @@ def _render(name: str, stage: str, run_dir: Path, resources: PBSResources, **val
     """Render one job whose markers and log live in the shared run directory."""
     require_safe_template_path(run_dir, "run directory")
     require_safe_pbs_token(stage, "PBS stage")
-    preamble = directives(stage.replace("-", "_"), resources) + "\n" + template("local_preamble.sh")
+    # The path submission_local.stage_log_path reads.
+    output = str(run_dir / "logs" / f"{stage}.pbs.log")
+    preamble = directives(stage.replace("-", "_"), resources, output=output) + "\n" + template("local_preamble.sh")
     return template(name).format(
         preamble=preamble.format(run_dir=run_dir, stage=stage),
         run_dir=run_dir,

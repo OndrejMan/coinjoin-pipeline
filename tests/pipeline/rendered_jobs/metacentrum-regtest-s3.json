@@ -4,7 +4,8 @@
       "#PBS -N blocksci_analyze_s3",
       "#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=2tb",
       "#PBS -l walltime=48:00:00",
-      "#PBS -j oe"
+      "#PBS -j oe",
+      "#PBS -o /dev/null"
     ],
     "settings": {
       "artifact_uri": "s3://your-bucket/runs",
@@ -65,7 +66,8 @@
       "#PBS -N blocksci_parse_s3",
       "#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=2tb",
       "#PBS -l walltime=48:00:00",
-      "#PBS -j oe"
+      "#PBS -j oe",
+      "#PBS -o /dev/null"
     ],
     "settings": {
       "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py parse --run-dir /runs/emulation/logs/example-run --network bitcoin_regtest --disk /mnt/data/regtest --max-block $((PBS_EXPORTED_MAX_BLOCK + 1))",
@@ -119,7 +121,8 @@
       "#PBS -N coinjoin_analysis_s3",
       "#PBS -l select=1:ncpus=4:mem=16gb:scratch_ssd=100gb",
       "#PBS -l walltime=08:00:00",
-      "#PBS -j oe"
+      "#PBS -j oe",
+      "#PBS -o /dev/null"
     ],
     "settings": {
       "command": "python -m cj_process.parse_cj_logs --action collect_docker --target-path /runs/emulation/selected",
@@ -162,7 +165,8 @@
       "#PBS -N coinjoin_mappings_s3",
       "#PBS -l select=1:ncpus=4:mem=16gb:scratch_ssd=100gb",
       "#PBS -l walltime=08:00:00",
-      "#PBS -j oe"
+      "#PBS -j oe",
+      "#PBS -o /dev/null"
     ],
     "settings": {
       "credentials": "/storage/brno2/home/<login>/.aws/credentials",
@@ -205,7 +209,8 @@
       "#PBS -N unified_report_s3",
       "#PBS -l select=1:ncpus=2:mem=8gb:scratch_ssd=10gb",
       "#PBS -l walltime=01:00:00",
-      "#PBS -j oe"
+      "#PBS -j oe",
+      "#PBS -o /dev/null"
     ],
     "settings": {
       "command": "python3 /mnt/exporters/worker.py report --run-dir /runs/emulation/logs/example-run --engine wasabi --coinjoin-type wasabi2 --min-input-count default --joinmarket-detector definite --joinmarket-min-base-fee 5000 --joinmarket-percentage-fee 4e-05 --joinmarket-max-depth 200000 --uploader-image ghcr.io/example/uploader:fixed --unified-report-image ghcr.io/example/unified-report:fixed",

@@ -4,7 +4,8 @@
       "#PBS -N coinjoin_analysis_s3",
       "#PBS -l select=1:ncpus=4:mem=64gb:scratch_ssd=100gb",
       "#PBS -l walltime=12:00:00",
-      "#PBS -j oe"
+      "#PBS -j oe",
+      "#PBS -o /dev/null"
     ],
     "settings": {
       "command": "python -m cj_process.parse_dumplings --cjtype jm --action process_dumplings --target-path /work/dumplings",

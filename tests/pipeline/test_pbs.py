@@ -336,6 +336,9 @@ class PBSTemplateTest(unittest.TestCase):
         )
         self.assertIn("#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=100gb", script)
         self.assertIn("#PBS -l walltime=24:00:00", script)
+        # Shared storage keeps PBS's output file in the run; only the S3 jobs discard it.
+        self.assertEqual(script.count("#PBS -o "), 1)
+        self.assertIn("#PBS -o /storage/run-a/logs/blocksci.pbs.log", script)
         self.assertIn("/storage/run-a", script)
         self.assertIn('BITCOIN_DATADIR="/storage/bitcoin-data"', script)
         self.assertIn('--bind "$BITCOIN_DATADIR:/mnt/data:ro"', script)

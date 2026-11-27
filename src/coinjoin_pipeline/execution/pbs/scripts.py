@@ -90,8 +90,15 @@ def launcher(module: str) -> str:
     return f"import sys\n\nfrom {module} import main\n\nraise SystemExit(main(sys.argv[1:]))\n"
 
 
-def directives(job_name: str, resources: PBSResources, multijob: str | None = None) -> str:
-    """The ``#PBS`` header: one chunk with the requested resources, output joined to the job log."""
+def directives(
+    job_name: str, resources: PBSResources, multijob: str | None = None, output: str = "/dev/null"
+) -> str:
+    """The ``#PBS`` header: one chunk with the requested resources, stdout and stderr joined into output.
+
+    The default discards it: an S3 job keeps its own log in S3, and PBS cannot copy the file back
+    to a submit host the compute nodes do not reach (the cj-frontend container), so it mails
+    "Post job file processing error" after every job.
+    """
     require_safe_pbs_resources(resources, multijob)
     select = (
         f"select=1:ncpus={resources.ncpus}:mem={resources.mem}:scratch_{resources.scratch_type}={resources.scratch}"
@@ -103,6 +110,7 @@ def directives(job_name: str, resources: PBSResources, multijob: str | None = No
             f"#PBS -l {select}{f':multijob={multijob}' if multijob else ''}",
             f"#PBS -l walltime={resources.walltime}",
             "#PBS -j oe",
+            f"#PBS -o {output}",
         )
     )
 
