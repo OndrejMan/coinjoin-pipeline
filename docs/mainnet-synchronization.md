@@ -207,8 +207,10 @@ the `sync/` directory stays. When `mainnet-pack` fails, `mainnet-clear` does not
 the data stays until the next synchronization. The next run restores it from S3. It runs
 only with `mainnet.clear_after_sync: true`; by default the data stays on the multijob.
 
-Because the multijob is empty between synchronizations, the jobs that read the index
-(`script`, `external`, `notebook`) do not read it from `blocksci.index_dir`. With
+The multijob can still be empty between synchronizations: after a run with
+`mainnet.clear_after_sync: true`, after a deletion in the Lab, or because multijob storage
+is temporary. The jobs that read the index (`script`, `external`, `notebook`) therefore do
+not depend on `blocksci.index_dir`. With
 `blocksci.index_in_scratch: true` they download the backup from
 `blocksci.index_backup_uri` into their own `$SCRATCHDIR`, where nobody else reads it, so
 they need no lock. With `blocksci.dumplings_uri` they add the Scanner, which the container
