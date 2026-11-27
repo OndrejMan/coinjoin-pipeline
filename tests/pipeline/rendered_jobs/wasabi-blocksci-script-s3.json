@@ -5,7 +5,7 @@
       "#PBS -l select=1:ncpus=2:mem=16gb:scratch_ssd=20gb",
       "#PBS -l walltime=01:00:00",
       "#PBS -j oe",
-      "#PBS -o /dev/null"
+      "#PBS -o localhost:/dev/null"
     ],
     "settings": {
       "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py parse --run-dir /runs/emulation/logs/liquidity-large-wallet-20261015-1653 --network bitcoin_regtest --disk /mnt/data/regtest --max-block $((PBS_EXPORTED_MAX_BLOCK + 1))",
@@ -60,7 +60,7 @@
       "#PBS -l select=1:ncpus=2:mem=16gb:scratch_ssd=20gb",
       "#PBS -l walltime=01:00:00",
       "#PBS -j oe",
-      "#PBS -o /dev/null"
+      "#PBS -o localhost:/dev/null"
     ],
     "settings": {
       "artifact_uri": "s3://your-bucket/runs",

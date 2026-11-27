@@ -5,7 +5,7 @@
       "#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=100gb:multijob=brno",
       "#PBS -l walltime=24:00:00",
       "#PBS -j oe",
-      "#PBS -o /dev/null"
+      "#PBS -o localhost:/dev/null"
     ],
     "settings": {
       "artifact_uri": "s3://bucket/runs",

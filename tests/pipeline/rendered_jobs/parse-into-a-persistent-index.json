@@ -5,7 +5,7 @@
       "#PBS -l select=1:ncpus=8:mem=64gb:scratch_ssd=100gb:multijob=brno",
       "#PBS -l walltime=24:00:00",
       "#PBS -j oe",
-      "#PBS -o /dev/null"
+      "#PBS -o localhost:/dev/null"
     ],
     "settings": {
       "command": "PYTHONPATH=/blocksci/.venv/lib/python3.8/site-packages:/mnt/blocksci/blockscipy /usr/bin/python3 /mnt/exporters/worker.py parse --run-dir /runs/emulation/logs/persistent-parse --network bitcoin_regtest --disk /mnt/data --max-block 201",

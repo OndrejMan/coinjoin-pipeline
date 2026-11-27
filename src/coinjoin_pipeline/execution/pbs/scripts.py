@@ -91,13 +91,14 @@ def launcher(module: str) -> str:
 
 
 def directives(
-    job_name: str, resources: PBSResources, multijob: str | None = None, output: str = "/dev/null"
+    job_name: str, resources: PBSResources, multijob: str | None = None, output: str = "localhost:/dev/null"
 ) -> str:
     """The ``#PBS`` header: one chunk with the requested resources, stdout and stderr joined into output.
 
-    The default discards it: an S3 job keeps its own log in S3, and PBS cannot copy the file back
-    to a submit host the compute nodes do not reach (the cj-frontend container), so it mails
-    "Post job file processing error" after every job.
+    The default discards it, as an S3 job keeps its own log in S3. The host must be ``localhost``:
+    qsub prefixes a bare ``/dev/null`` with the submit host, and the MoM skips the copy to
+    ``/dev/null`` only for a local destination, so it tries to reach a submit host the compute
+    nodes do not see (the cj-frontend container) and mails "Post job file processing error".
     """
     require_safe_pbs_resources(resources, multijob)
     select = (
