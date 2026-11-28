@@ -73,7 +73,7 @@ def validate_arguments(config: PipelineConfiguration, runs_root: Path) -> list[s
     """Check host-visible inputs after effective configuration is resolved."""
     errors: list[str] = []
     if config.action in {"emulate", "full-run"} and not config.resume_run and not config.scenario:
-        errors.append(f"{config.action} requires --scenario; there is no default scenario")
+        errors.append(f"{config.action} requires scenario; there is no default scenario")
     if config.scenario and scenario_file(config.scenario) is None:
         errors.append(
             f"scenario not found: {config.scenario}; pass a scenario JSON path or the name "

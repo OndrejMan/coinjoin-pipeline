@@ -173,9 +173,9 @@ class S3StageRunner:
             # An external chain is mounted as the coin directory itself, bounded by the requested height.
             command = blocksci_parse_pbs_command(
                 self.target.run_id,
-                coin_type=required(blocksci.network, "--blocksci-network"),
+                coin_type=required(blocksci.network, "blocksci.network"),
                 disk_path="/mnt/data",
-                max_block_expression=str(required(blocksci.max_block, "--blocksci-max-block") + 1),
+                max_block_expression=str(required(blocksci.max_block, "blocksci.max_block") + 1),
             )
         else:
             command = blocksci_parse_pbs_command(self.target.run_id)
@@ -247,7 +247,7 @@ def submit_s3_pbs_graph(args: PipelineConfiguration, resumed: ResumedGraph | Non
     the returned mapping includes the adopted jobs, and rollback cancels only new ones.
     """
     if not args.dry_run:
-        run_id = required(args.run_id, "--run-id")
+        run_id = required(args.run_id, "run_id")
         acquire_lock(pbs_submit_lock_path(args.runs_path, run_id))
         if resumed is None:
             # A resume adopts the live jobs this check refuses, after cancelling the rest itself.
@@ -286,7 +286,7 @@ def _submit_s3_pbs_stages(
             f"{run_prefix_uri(target.artifact_uri, target.run_id)}/{BASELINE_FILE}",
         ):
             raise ArtifactTransportError(
-                f"resuming without --analysis-pbs requires an existing {BASELINE_FILE} for run {target.run_id}"
+                f"resuming without stages.analysis requires an existing {BASELINE_FILE} for run {target.run_id}"
             )
     if not args.dry_run and (args.stage_exporters or pbs_stages_need_exporters(args)):
         ensure_staged_exporters(args)

@@ -13,7 +13,9 @@ exit 99
 FAKE
 chmod +x "$TMP_DIR/bin/docker"
 export PATH="$TMP_DIR/bin:$PATH"
-"$PROJECT_DIR/runIt.sh" full-run --engine wasabi --scenario scenarios/overactive-local.json --dry-run > "$TMP_DIR/output"
+python3 "$PROJECT_DIR/tests/support/experiment.py" "$TMP_DIR/wasabi.yaml" \
+  action=full-run engine=wasabi scenario=scenarios/overactive-local.json
+"$PROJECT_DIR/runIt.sh" run "$TMP_DIR/wasabi.yaml" --dry-run > "$TMP_DIR/output"
 grep -Fq '[dry-run] action: full-run' "$TMP_DIR/output"
 test ! -e "$EMULATION_LOGS_DIR"
 cat > "$TMP_DIR/run.yaml" <<YAML
@@ -24,9 +26,14 @@ YAML
 (cd "$TMP_DIR" && "$PROJECT_DIR/runIt.sh" run "$TMP_DIR/run.yaml" --dry-run) > "$TMP_DIR/output"
 grep -Fq '[dry-run] engine: joinmarket' "$TMP_DIR/output"
 test ! -e "$EMULATION_LOGS_DIR"
-if "$PROJECT_DIR/runIt.sh" analyze --dry-run > "$TMP_DIR/output" 2>&1; then
+if "$PROJECT_DIR/runIt.sh" run "$PROJECT_DIR/examples/stages/analyze.yaml" --dry-run > "$TMP_DIR/output" 2>&1; then
   echo 'FAIL: analyze accepted no run directory' >&2
   exit 1
 fi
-grep -Fq 'requires --run-dir' "$TMP_DIR/output"
+grep -Fq 'requires run_dir' "$TMP_DIR/output"
+if "$PROJECT_DIR/runIt.sh" full-run --engine wasabi --dry-run > "$TMP_DIR/output" 2>&1; then
+  echo 'FAIL: an experiment ran from command-line options' >&2
+  exit 1
+fi
+grep -Fq 'put `action: full-run` in a file' "$TMP_DIR/output"
 echo 'PASS: public CLI loads configuration without a wrapper process or runtime access.'

@@ -30,7 +30,7 @@ S3_JOB_DEADLINE_GRACE_SECONDS = 60
 # Every S3 emulation Job carries both labels; the emulator labels its own pods with the run ID.
 S3_EMULATION_APP_LABEL = "coinjoin-s3"
 RUN_ID_LABEL = "coinjoin.run-id"
-# Who launched the run (--owner); in a shared namespace it tells two people's runs apart.
+# Who launched the run (kubernetes.owner); in a shared namespace it tells two people's runs apart.
 OWNER_LABEL = "coinjoin.owner"
 S3_JOB_OWNED_RESOURCE_TYPES = (
     "serviceaccount",
@@ -132,7 +132,7 @@ def kubernetes_s3_auth_preflight(
     """
     if not reuse_namespace:
         raise RuntimeError(
-            "Kubernetes S3-compatible mode requires an existing namespace and Secret; pass --reuse-namespace"
+            "Kubernetes S3-compatible mode requires an existing namespace and Secret; pass kubernetes.reuse_namespace"
         )
     print(f"[kubernetes] S3-compatible auth preflight using kubeconfig: {kubeconfig_path}")
     _preflight(kubeconfig_path, "get", "--raw=/version")
@@ -199,7 +199,7 @@ def run_selector(run_id: str, owner: str | None = None) -> str:
     """A selector for exactly the objects ``run_labels`` marks: another owner's never match.
 
     Without an owner it requires the label to be absent, so a run launched without
-    ``--owner`` never selects an owner's objects that carry the same run ID.
+    ``kubernetes.owner`` never selects an owner's objects that carry the same run ID.
     """
     terms = [f"{key}={value}" for key, value in run_labels(run_id, owner).items()]
     return ",".join(terms if owner else [*terms, f"!{OWNER_LABEL}"])
@@ -221,7 +221,7 @@ def s3_emulation_job_name(run_id: str) -> str:
 # A pod that cannot start its containers keeps the Job "active" forever, so the
 # Job conditions alone never end the wait. The in-pod watchdog covers the
 # controller, but it cannot cover the image it runs in itself: an unpullable
-# uploader image would otherwise block the frontend until --emulation-timeout.
+# uploader image would otherwise block the frontend until emulation_timeout.
 UNSTARTABLE_WAITING_REASONS = frozenset(
     {
         "ErrImagePull",
@@ -653,7 +653,7 @@ def render_s3_emulation_resources(
             },
         },
     ]
-    # No Namespace: S3 mode requires --reuse-namespace; the namespace must already exist.
+    # No Namespace: S3 mode requires kubernetes.reuse_namespace; the namespace must already exist.
     return json.dumps({"apiVersion": "v1", "kind": "List", "items": resources}, indent=2)
 
 

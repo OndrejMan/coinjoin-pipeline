@@ -472,7 +472,7 @@ class UnifiedReportTest(unittest.TestCase):
     def test_run_manifest_records_reproduction_command(self):
         with mock.patch.dict(
             os.environ,
-            {"REPRODUCTION_COMMAND": "./runIt.sh full-run --engine joinmarket"},
+            {"REPRODUCTION_COMMAND": "./runIt.sh run examples/joinmarket.yaml"},
         ):
             manifest = build_run_manifest(
                 Path("/tmp/run"),
@@ -490,7 +490,7 @@ class UnifiedReportTest(unittest.TestCase):
             )
         self.assertEqual(
             manifest["execution"]["reproduction_command"],
-            "./runIt.sh full-run --engine joinmarket",
+            "./runIt.sh run examples/joinmarket.yaml",
         )
 
     def test_parse_args_rejects_removed_test_values(self):

@@ -39,7 +39,10 @@ def registry_digests(monkeypatch: pytest.MonkeyPatch) -> list[str]:
             "docker://ghcr.io/ondrejman/blocksci-complete:latest",
             ("ghcr.io/ondrejman/blocksci-complete", "ghcr.io", "ondrejman/blocksci-complete", "latest"),
         ),
-        ("ghcr.io/ondrejman/emulator-manager", ("ghcr.io/ondrejman/emulator-manager", "ghcr.io", "ondrejman/emulator-manager", "latest")),
+        (
+            "ghcr.io/ondrejman/emulator-manager",
+            ("ghcr.io/ondrejman/emulator-manager", "ghcr.io", "ondrejman/emulator-manager", "latest"),
+        ),
         ("python:3.12-slim-bookworm", ("python", "registry-1.docker.io", "library/python", "3.12-slim-bookworm")),
         ("pgsty/minio:v1", ("pgsty/minio", "registry-1.docker.io", "pgsty/minio", "v1")),
         ("localhost:5000/repo:t", ("localhost:5000/repo", "localhost:5000", "repo", "t")),
@@ -70,7 +73,9 @@ def test_registry_digest_answers_the_bearer_challenge(monkeypatch: pytest.Monkey
             return Response(b'{"token": "anonymous"}', {})
         if len(requests) == 1:
             headers = Message()
-            headers["WWW-Authenticate"] = 'Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:x/y:pull"'
+            headers["WWW-Authenticate"] = (
+                'Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:x/y:pull"'
+            )
             raise urllib.error.HTTPError(url, 401, "Unauthorized", headers, None)
         return Response(b"{}", {"Docker-Content-Digest": DIGEST})
 
@@ -101,7 +106,11 @@ def test_pbs_job_runs_the_digest_but_keeps_the_index_identity(registry_digests) 
         target=S3Target(
             artifact_uri="s3://bucket/runs",
             run_id="run-1",
-            access=S3Access(endpoint_url="https://s3.cl4.du.cesnet.cz", credentials_file="/storage/user/.aws/credentials", profile="coinjoin"),
+            access=S3Access(
+                endpoint_url="https://s3.cl4.du.cesnet.cz",
+                credentials_file="/storage/user/.aws/credentials",
+                profile="coinjoin",
+            ),
         ),
         image="docker://ghcr.io/x/blocksci:latest",
         command="parse",
@@ -116,12 +125,12 @@ def test_pbs_job_runs_the_digest_but_keeps_the_index_identity(registry_digests) 
 
 def test_analysis_records_the_pinned_images(registry_digests) -> None:
     config = pin_emulation_images(
-        PipelineConfiguration.from_flat(
+        PipelineConfiguration.from_paths(
             {
-                "pbs_blocksci_image": "ghcr.io/x/blocksci:latest",
-                "pbs_coinjoin_analysis_image": "ghcr.io/x/analysis:latest",
-                "emulator_image": "ghcr.io/x/emulator:latest",
-                "uploader_image": "ghcr.io/x/uploader:latest",
+                "pbs.blocksci_image": "ghcr.io/x/blocksci:latest",
+                "pbs.coinjoin_analysis_image": "ghcr.io/x/analysis:latest",
+                "images.emulator": "ghcr.io/x/emulator:latest",
+                "images.uploader": "ghcr.io/x/uploader:latest",
             }
         )
     )

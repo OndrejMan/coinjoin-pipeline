@@ -40,7 +40,7 @@ def _text(value: int | None) -> str | None:
 def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
     """Render and submit a Kubernetes job that uploads its artifacts to S3."""
     if not args.scenario:
-        raise RuntimeError("Kubernetes S3 emulation requires --scenario")
+        raise RuntimeError("Kubernetes S3 emulation requires scenario")
     scenario_path = scenario_source_path(args.scenario, scenarios_dir())
     if not scenario_path.is_file():
         raise RuntimeError(f"Scenario file not found: {scenario_path}")
@@ -48,7 +48,7 @@ def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
     kubeconfig_path = resolve_kubeconfig(kubernetes.kubeconfig)
     if not args.dry_run and not kubeconfig_path.is_file():
         raise RuntimeError(f"Kubeconfig not found: {kubeconfig_path}")
-    run_id = required(args.run_id, "--run-id")
+    run_id = required(args.run_id, "run_id")
     # Without a named Secret the run gets its own, made from the frontend's credentials file.
     temporary_secret = args.artifacts.secret_name is None
     manifest = render_s3_emulation_resources(
@@ -59,8 +59,8 @@ def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
         image_prefix=args.kubernetes.image_prefix,
         emulator_image=required(args.images.emulator, "images.emulator"),
         uploader_image=resolve_uploader_image(args),
-        artifact_uri=required(args.artifacts.uri, "--artifact-uri"),
-        endpoint_url=required(args.artifacts.endpoint_url, "--s3-endpoint-url"),
+        artifact_uri=required(args.artifacts.uri, "artifacts.uri"),
+        endpoint_url=required(args.artifacts.endpoint_url, "artifacts.endpoint_url"),
         secret_name=args.artifacts.secret_name or s3_emulation_job_name(run_id),
         emulation_timeout_seconds=args.emulation_timeout,
         distributor_startup_timeout=_text(kubernetes.distributor_startup_timeout),
@@ -70,8 +70,8 @@ def run_s3_kubernetes_emulation(args: PipelineConfiguration) -> None:
         owner=kubernetes.owner,
         planned_quota=kubernetes.planned_quota,
     )
-    credentials_file = required(args.artifacts.credentials_file, "--s3-credentials-file")
-    profile = required(args.artifacts.profile, "--s3-profile")
+    credentials_file = required(args.artifacts.credentials_file, "artifacts.credentials_file")
+    profile = required(args.artifacts.profile, "artifacts.profile")
     if args.dry_run:
         if temporary_secret:
             print(

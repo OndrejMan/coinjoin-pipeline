@@ -108,9 +108,9 @@ def inspect_run(runs_root: Path, run_id: str) -> None:
         print("Manifest:")
         print(json.dumps(manifest, indent=2, sort_keys=True))
     print("Resume:")
-    print(f"  ./runIt.sh export --run-dir {run_dir.name}")
+    print(f"  ./runIt.sh run examples/stages/export.yaml --run-dir {run_dir.name}")
     if mode_for_run(run_dir, manifest) == "external":
-        print(f"  ./runIt.sh external-analyze --run-id {run_dir.name} --resume")
+        print(f"  ./runIt.sh run examples/stages/external-resume.yaml --run-id {run_dir.name}")
 
 
 def runtime_check(runtime: str) -> None:
@@ -201,7 +201,7 @@ def external_inputs(args: argparse.Namespace, run_dir: Path) -> tuple[Path, Path
             raise ValueError(f"Cannot resume: baseline is missing at {baseline}")
         return require_datadir(Path(str(source_datadir))), baseline, []
     if run_dir.exists():
-        raise FileExistsError(f"Run already exists: {run_dir}; pass --resume to reuse it.")
+        raise FileExistsError(f"Run already exists: {run_dir}; set external.resume: true to reuse it.")
     assert args.bitcoin_datadir is not None and args.baseline is not None
     baseline = require_baseline(args.baseline)
     return require_datadir(args.bitcoin_datadir), baseline, resolve_false_cjtxs(baseline, args.false_cjtxs)
@@ -246,7 +246,7 @@ def external_analyze(args: argparse.Namespace) -> None:
             create_external_manifest(run_dir, datadir, baseline, args.network, args.coinjoin_type, false_cjtxs),
         )
 
-    reproduction_command = f"./runIt.sh external-analyze --run-id {shlex.quote(args.run_id)} --resume"
+    reproduction_command = f"./runIt.sh run examples/stages/external-resume.yaml --run-id {shlex.quote(args.run_id)}"
     command = [
         args.runtime,
         "run",

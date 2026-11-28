@@ -15,7 +15,6 @@ import pytest
 from exporters import coinjoin_research as research
 
 from coinjoin_pipeline.context import resolve_run_images
-from coinjoin_pipeline.arguments import load_configuration
 from coinjoin_pipeline.configuration import PipelineConfiguration, ConfigurationError
 from coinjoin_pipeline.execution.coinjoin_tools import command_argv
 from coinjoin_pipeline.execution.coinjoin_tools import run_local
@@ -35,24 +34,16 @@ def workspace(tmp_path):
 
 
 def test_research_cli_parses_typed_indices_and_retains_literal_values():
-    config = load_configuration(
-        [
-            "coinjoin-analysis",
-            "--run-dir",
-            "r1",
-            "--analysis-program",
-            "analyze_tx_size",
-            "--analysis-data-mode",
-            "mainnet",
-            "--analysis-tx-hex",
-            "abcd",
-            "--analysis-input-index",
-            "0",
-            "--analysis-input-index",
-            "2",
-            "--analysis-output-index",
-            "1",
-        ]
+    config = PipelineConfiguration.from_paths(
+        {
+            "action": "coinjoin-analysis",
+            "run_dir": "r1",
+            "coinjoin_analysis.program": "analyze_tx_size",
+            "coinjoin_analysis.data_mode": "mainnet",
+            "coinjoin_analysis.research.tx_hex": "abcd",
+            "coinjoin_analysis.research.input_indices": [0, 2],
+            "coinjoin_analysis.research.output_indices": [1],
+        }
     )
     config.validate()
     assert config.coinjoin_analysis.research.input_indices == (0, 2)
@@ -69,7 +60,7 @@ def test_research_cli_parses_typed_indices_and_retains_literal_values():
             {"program": "update_txids_with_wabisator", "data_mode": "emulation", "research": {"allow_network": True}},
             "mainnet",
         ),
-        ({"program": "update_txids_with_wabisator", "data_mode": "mainnet"}, "allow-network"),
+        ({"program": "update_txids_with_wabisator", "data_mode": "mainnet"}, "allow_network"),
         ({"program": "analyze_tx_size", "research": {"tx_hex": "ab", "input_indices": [-1]}}, "non-negative"),
         ({"program": "analyze_tx_size", "research": {"tx_hex": "ab", "input_indices": [0, 0]}}, "not repeat"),
         ({"program": "analyze_tx_size", "research": {"tx_hex": "abc", "input_indices": [0]}}, "hexadecimal"),
@@ -221,17 +212,19 @@ def test_llm_refuses_missing_ground_truth_before_loading_the_generator(workspace
 def test_local_refresh_stages_its_helper_even_when_the_image_omits_scripts(monkeypatch, tmp_path):
     run = tmp_path / "r1"
     run.mkdir()
-    config = resolve_run_images(PipelineConfiguration.from_mapping(
-        {
-            "action": "coinjoin-analysis",
-            "run_dir": "r1",
-            "coinjoin_analysis": {
-                "program": "update_txids_with_wabisator",
-                "data_mode": "mainnet",
-                "research": {"allow_network": True},
-            },
-        }
-    ))[0]
+    config = resolve_run_images(
+        PipelineConfiguration.from_mapping(
+            {
+                "action": "coinjoin-analysis",
+                "run_dir": "r1",
+                "coinjoin_analysis": {
+                    "program": "update_txids_with_wabisator",
+                    "data_mode": "mainnet",
+                    "research": {"allow_network": True},
+                },
+            }
+        )
+    )[0]
     config.validate()
 
     def execute(argv, **kwargs):

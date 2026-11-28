@@ -75,27 +75,27 @@ INVALID = {
     # Where a persistent index may live, and which jobs may use one.
     "an index outside shared storage": (
         job(MULTIJOB, task="backup", index_dir="/home/user/index", index_backup_uri=BACKUP),
-        "--blocksci-index-dir must be under /scratch/multijob-<location>/ or /storage/",
+        "blocksci.index_dir must be under /scratch/multijob-<location>/ or /storage/",
     ),
     "an index path that climbs out": (
         job(MULTIJOB, task="backup", index_dir=INDEX + "/../other", index_backup_uri=BACKUP),
-        "--blocksci-index-dir must not contain '..'",
+        "blocksci.index_dir must not contain '..'",
     ),
     "an index on a multijob the job does not request": (
         job(task="backup", index_dir=INDEX, index_backup_uri=BACKUP),
-        "--blocksci-index-dir on multijob-brno requires --pbs-blocksci-multijob brno",
+        "blocksci.index_dir on multijob-brno requires pbs.blocksci.multijob brno",
     ),
     "a multijob without an index on it": (
         job(MULTIJOB, task="backup", index_dir="/storage/home/user/index", index_backup_uri=BACKUP),
-        "--pbs-blocksci-multijob brno requires --blocksci-index-dir under /scratch/multijob-brno/",
+        "pbs.blocksci.multijob brno requires blocksci.index_dir under /scratch/multijob-brno/",
     ),
     "a multijob without any index": (
         job(MULTIJOB, task="script", script=SCRIPT, cache_source_run_id="run-1"),
-        "--pbs-blocksci-multijob requires --blocksci-index-dir on that multijob scratch",
+        "pbs.blocksci.multijob requires blocksci.index_dir on that multijob scratch",
     ),
     "a backup prefix without an index": (
         job(task="script", script=SCRIPT, cache_source_run_id="run-1", index_backup_uri=BACKUP),
-        "--blocksci-index-backup-uri requires --blocksci-index-dir",
+        "blocksci.index_backup_uri requires blocksci.index_dir",
     ),
     "a backup prefix that is not an S3 URI": (
         persistent("backup", index_backup_uri="/storage/home/user/copy"),
@@ -104,73 +104,73 @@ INVALID = {
     **{
         f"{option} without an index": (
             job(task="notebook", cache_source_run_id="run-1", **{option: value}),
-            f"{flag} requires --blocksci-index-dir",
+            f"blocksci.{option} requires blocksci.index_dir",
         )
-        for option, value, flag in (
-            ("index_in_scratch", True, "--blocksci-index-in-scratch"),
-            ("restore_index", True, "--blocksci-restore-index"),
-            ("dumplings_uri", "s3://bucket/dumplings", "--blocksci-dumplings-uri"),
-            ("dumplings_dir", "/storage/home/user/Scanner", "--blocksci-dumplings-dir"),
-            ("storage_report_uri", "s3://bucket/report.json", "--blocksci-storage-report-uri"),
+        for option, value in (
+            ("index_in_scratch", True),
+            ("restore_index", True),
+            ("dumplings_uri", "s3://bucket/dumplings"),
+            ("dumplings_dir", "/storage/home/user/Scanner"),
+            ("storage_report_uri", "s3://bucket/report.json"),
         )
     },
     "detection over a persistent index": (
         persistent("detect"),
-        "--blocksci-index-dir requires --blocksci-task parse, update, backup, script, external, or notebook",
+        "blocksci.index_dir requires blocksci.task parse, update, backup, script, external, or notebook",
     ),
     "a persistent index and another run's cache": (
         persistent("script", script=SCRIPT, cache_source_run_id="run-1"),
-        "choose one index source: --blocksci-index-dir or --blocksci-cache-source-run-id",
+        "choose one index source: blocksci.index_dir or blocksci.cache_source_run_id",
     ),
     "a persistent parse without a block source": (
         persistent("parse", workflow="reusable"),
-        "a persistent index is parsed from --blocksci-bitcoin-blocks-uri or --blocksci-external-bitcoin-datadir",
+        "a persistent index is parsed from blocksci.bitcoin_blocks_uri or blocksci.external_bitcoin_datadir",
     ),
     "a backup job without a backup prefix": (
         persistent("backup"),
-        "--blocksci-task backup requires --blocksci-index-backup-uri",
+        "blocksci.task backup requires blocksci.index_backup_uri",
     ),
     # How a reading job gets its copy of the index and of Dumplings.
     "an index in scratch without a backup": (
         persistent("notebook", index_in_scratch=True),
-        "--blocksci-index-in-scratch requires --blocksci-index-backup-uri and --blocksci-task",
+        "blocksci.index_in_scratch requires blocksci.index_backup_uri and blocksci.task",
     ),
     "a restored index for a script": (
         persistent("script", script=SCRIPT, index_backup_uri=BACKUP, restore_index=True),
-        "--blocksci-restore-index requires --blocksci-index-backup-uri and --blocksci-task notebook",
+        "blocksci.restore_index requires blocksci.index_backup_uri and blocksci.task notebook",
     ),
     "a storage report without a kept copy": (
         persistent("notebook", storage_report_uri="s3://bucket/report.json"),
-        "--blocksci-storage-report-uri requires --blocksci-restore-index",
+        "blocksci.storage_report_uri requires blocksci.restore_index",
     ),
     "a Dumplings copy for an index read in place": (
         persistent("notebook", dumplings_uri="s3://bucket/dumplings"),
-        "--blocksci-dumplings-uri requires --blocksci-index-in-scratch or --blocksci-restore-index",
+        "blocksci.dumplings_uri requires blocksci.index_in_scratch or blocksci.restore_index",
     ),
     "a Dumplings directory for an index in scratch": (
         persistent("notebook", index_backup_uri=BACKUP, index_in_scratch=True, dumplings_dir="/storage/Scanner"),
-        "--blocksci-dumplings-dir requires --blocksci-task notebook and --blocksci-index-dir",
+        "blocksci.dumplings_dir requires blocksci.task notebook and blocksci.index_dir",
     ),
     "a Dumplings directory outside shared storage": (
         persistent("notebook", dumplings_dir="/tmp/Scanner"),
-        "--blocksci-dumplings-dir must be under /scratch/multijob-<location>/ or /storage/, without '..'",
+        "blocksci.dumplings_dir must be under /scratch/multijob-<location>/ or /storage/, without '..'",
     ),
     "a Dumplings directory that climbs out": (
         persistent("notebook", dumplings_dir="/scratch/multijob-brno/user/../other/Scanner"),
-        "--blocksci-dumplings-dir must be under /scratch/multijob-<location>/ or /storage/, without '..'",
+        "blocksci.dumplings_dir must be under /scratch/multijob-<location>/ or /storage/, without '..'",
     ),
     "an index on an unknown multijob": (
         job(MULTIJOB, task="backup", index_dir="/scratch/multijob-ostrava/user/index", index_backup_uri=BACKUP),
-        "--blocksci-index-dir must be under /scratch/multijob-<location>/ or /storage/",
+        "blocksci.index_dir must be under /scratch/multijob-<location>/ or /storage/",
     ),
     # The block source of a parse or update.
     "a mainnet archive without its block hash": (
         persistent("parse", workflow="reusable", **{**ARCHIVE, "expected_block_hash": None}),
-        "Mainnet block archives require --blocksci-expected-block-hash at --blocksci-max-block",
+        "Mainnet block archives require blocksci.expected_block_hash at blocksci.max_block",
     ),
     "a malformed block hash": (
         persistent("parse", workflow="reusable", **{**ARCHIVE, "expected_block_hash": "not-a-hash"}),
-        "--blocksci-expected-block-hash must be 64 lowercase hexadecimal characters",
+        "blocksci.expected_block_hash must be 64 lowercase hexadecimal characters",
     ),
     "two block sources": (
         persistent("parse", workflow="reusable", external_bitcoin_datadir="/storage/bitcoin", **ARCHIVE),
@@ -178,37 +178,37 @@ INVALID = {
     ),
     "a block source without its chain": (
         persistent("parse", workflow="reusable", bitcoin_blocks_uri=BLOCKS),
-        "an external Bitcoin source requires --blocksci-network and --blocksci-max-block",
+        "an external Bitcoin source requires blocksci.network and blocksci.max_block",
     ),
     "an update without a block source": (
         job(task="update", cache_source_run_id="run-1"),
-        "--blocksci-task update requires --blocksci-external-bitcoin-datadir or --blocksci-bitcoin-blocks-uri",
+        "blocksci.task update requires blocksci.external_bitcoin_datadir or blocksci.bitcoin_blocks_uri",
     ),
     "an update without an index": (
         job(task="update", **REGTEST_ARCHIVE),
-        "--blocksci-task update requires --blocksci-cache-source-run-id or --blocksci-index-dir",
+        "blocksci.task update requires blocksci.cache_source_run_id or blocksci.index_dir",
     ),
     # Reading the cache of another run.
     "an update into its own source run": (
         job(task="update", cache_source_run_id="run-2", **REGTEST_ARCHIVE),
-        "--blocksci-cache-source-run-id must differ from target --run-id",
+        "blocksci.cache_source_run_id must differ from target run_id",
     ),
     "a script reading its own run as a source": (
         job(task="script", script=SCRIPT, cache_source_run_id="run-2"),
-        "--blocksci-cache-source-run-id must differ from target --run-id",
+        "blocksci.cache_source_run_id must differ from target run_id",
     ),
     "detection over another run's cache": (
         job(task="detect", cache_source_run_id="run-1"),
-        "--blocksci-cache-source-run-id requires --blocksci-task update, script, external, or notebook",
+        "blocksci.cache_source_run_id requires blocksci.task update, script, external, or notebook",
     ),
     "a malformed source run ID": (
         job(task="script", script=SCRIPT, cache_source_run_id="bad/run"),
-        "--blocksci-cache-source-run-id must be at most 63 characters",
+        "blocksci.cache_source_run_id must be at most 63 characters",
     ),
     # What each analysis task needs.
     "a script task without a script": (
         job(task="script", cache_source_run_id="run-1"),
-        "--blocksci-task script requires --blocksci-script",
+        "blocksci.task script requires blocksci.script",
     ),
     "a script that does not exist": (
         job(task="script", script="/storage/home/user/missing.py", cache_source_run_id="run-1"),
@@ -216,7 +216,7 @@ INVALID = {
     ),
     "an external report without a baseline": (
         job(task="external", cache_source_run_id="run-1"),
-        "--blocksci-task external requires --external-baseline-uri",
+        "blocksci.task external requires blocksci.external_baseline_uri",
     ),
     "a false-positive list for a script": (
         job(
@@ -225,11 +225,11 @@ INVALID = {
             cache_source_run_id="run-1",
             external_false_cjtxs_uri="s3://bucket/false_cjtxs.json",
         ),
-        "--external-false-cjtxs-uri requires --blocksci-task external",
+        "blocksci.external_false_cjtxs_uri requires blocksci.task external",
     ),
     "a privileged notebook port": (
         persistent("notebook", notebook_port=80),
-        "--blocksci-notebook-port must be between 1024 and 65535",
+        "blocksci.notebook_port must be between 1024 and 65535",
     ),
 }
 

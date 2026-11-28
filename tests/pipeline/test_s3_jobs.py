@@ -79,20 +79,20 @@ def backend(monkeypatch, tmp_path):
     monkeypatch.setattr(s3_markers, "qdel_pbs_job", lambda job: state.cancelled.append(job) or True)
     monkeypatch.setattr(locks, "pbs_job_probe", lambda job: lambda: "terminal")
 
-    def config(**overrides):
-        values = dict(
-            action="pbs-from-s3",
-            run_id="run-1",
-            runs_root=str(tmp_path),
-            artifact_uri="s3://bucket/runs",
-            s3_endpoint_url="https://s3.example",
-            s3_credentials_file="/tmp/credentials",
-            s3_profile="test",
-            analysis_pbs=True,
-            blocksci_pbs=True,
-        )
-        values.update(overrides)
-        return RunContext.prepare(PipelineConfiguration.from_flat(values), "test").config
+    def config(overrides=None):
+        values = {
+            "action": "pbs-from-s3",
+            "run_id": "run-1",
+            "runs_root": str(tmp_path),
+            "artifacts.uri": "s3://bucket/runs",
+            "artifacts.endpoint_url": "https://s3.example",
+            "artifacts.credentials_file": "/tmp/credentials",
+            "artifacts.profile": "test",
+            "stages.analysis": True,
+            "stages.blocksci": True,
+        }
+        values.update(overrides or {})
+        return RunContext.prepare(PipelineConfiguration.from_paths(values), "test").config
 
     state.config = config
     yield state
@@ -151,7 +151,7 @@ def test_overlap_is_rejected_before_new_submission(backend, monkeypatch):
 
 
 def test_dry_run_has_no_remote_writes_or_local_locks(backend):
-    config = backend.config(dry_run=True)
+    config = backend.config({"dry_run": True})
     s3_submission.submit_s3_pbs_graph(config)
     assert backend.jobs == []
     assert backend.staged == []
@@ -162,9 +162,7 @@ def test_dry_run_has_no_remote_writes_or_local_locks(backend):
 def test_mapping_fee_options_reach_the_s3_mappings_job(backend):
     s3_submission.submit_s3_pbs_graph(
         backend.config(
-            mappings_pbs=True,
-            mapping_coordination_fee_rate=0.01,
-            mapping_max_decomposition_fee=1234,
+            {"stages.mappings": True, "mappings.coordination_fee_rate": 0.01, "mappings.max_decomposition_fee": 1234}
         )
     )
     rendered = backend.rendered["render_mappings_s3_pbs"]
@@ -173,7 +171,7 @@ def test_mapping_fee_options_reach_the_s3_mappings_job(backend):
 
 
 def test_mappings_wait_for_baseline_and_gate_the_report(backend):
-    s3_submission.submit_s3_pbs_graph(backend.config(mappings_pbs=True))
+    s3_submission.submit_s3_pbs_graph(backend.config({"stages.mappings": True}))
     by_name = {job.stage: job for job in backend.jobs}
     ids = {job.stage: f"{index}.server" for index, job in enumerate(backend.jobs, 1)}
     assert by_name["coinjoin-mappings"].dependencies == (ids["coinjoin-analysis"],)
@@ -185,12 +183,12 @@ def test_mappings_wait_for_baseline_and_gate_the_report(backend):
 def test_resume_requires_existing_baseline(backend):
     backend.exists = False
     with pytest.raises(ArtifactTransportError, match="existing"):
-        s3_submission.submit_s3_pbs_graph(backend.config(analysis_pbs=False))
+        s3_submission.submit_s3_pbs_graph(backend.config({"stages.analysis": False}))
     assert backend.jobs == []
 
 
 def test_blocksci_resume_still_has_a_report_stage(backend):
-    s3_submission.submit_s3_pbs_graph(backend.config(analysis_pbs=False))
+    s3_submission.submit_s3_pbs_graph(backend.config({"stages.analysis": False}))
     assert [job.stage for job in backend.jobs] == ["blocksci", "unified-report"]
     assert backend.jobs[-1].dependencies == ("1.server",)
     assert backend.rendered["render_blocksci_s3_pbs"]["include_report"] is False
@@ -198,7 +196,7 @@ def test_blocksci_resume_still_has_a_report_stage(backend):
 
 
 def test_reusable_chain_uses_parser_analysis_and_report_dependencies(backend):
-    s3_submission.submit_s3_pbs_graph(backend.config(blocksci_workflow="reusable"))
+    s3_submission.submit_s3_pbs_graph(backend.config({"blocksci.workflow": "reusable"}))
     assert [job.stage for job in backend.jobs] == [
         "coinjoin-analysis",
         "blocksci-parse",
@@ -211,7 +209,7 @@ def test_reusable_chain_uses_parser_analysis_and_report_dependencies(backend):
 
 def test_parse_only_stages_the_worker_and_publishes_only_cache(backend):
     s3_submission.submit_s3_pbs_graph(
-        backend.config(analysis_pbs=False, blocksci_workflow="reusable", blocksci_task="parse")
+        backend.config({"stages.analysis": False, "blocksci.workflow": "reusable", "blocksci.task": "parse"})
     )
     assert [job.stage for job in backend.jobs] == ["blocksci-parse"]
     assert backend.staged == ["run-1"]
@@ -221,14 +219,16 @@ def test_parse_only_stages_the_worker_and_publishes_only_cache(backend):
 def test_archive_checkpoint_reaches_parse_and_update_renderer(backend, task, workflow):
     s3_submission.submit_s3_pbs_graph(
         backend.config(
-            analysis_pbs=False,
-            blocksci_workflow=workflow,
-            blocksci_task=task,
-            blocksci_bitcoin_blocks_uri="s3://bucket/mainnet",
-            blocksci_network="bitcoin",
-            blocksci_max_block=12,
-            blocksci_expected_block_hash="a" * 64,
-            blocksci_cache_source_run_id="previous" if task == "update" else None,
+            {
+                "stages.analysis": False,
+                "blocksci.workflow": workflow,
+                "blocksci.task": task,
+                "blocksci.bitcoin_blocks_uri": "s3://bucket/mainnet",
+                "blocksci.network": "bitcoin",
+                "blocksci.max_block": 12,
+                "blocksci.expected_block_hash": "a" * 64,
+                "blocksci.cache_source_run_id": "previous" if task == "update" else None,
+            }
         )
     )
     values = backend.rendered[f"render_blocksci_{task}_s3_pbs"]
@@ -238,7 +238,7 @@ def test_archive_checkpoint_reaches_parse_and_update_renderer(backend, task, wor
 
 def test_cached_notebook_has_no_report_or_worker_staging(backend):
     s3_submission.submit_s3_pbs_graph(
-        backend.config(analysis_pbs=False, blocksci_workflow="cached", blocksci_task="notebook")
+        backend.config({"stages.analysis": False, "blocksci.workflow": "cached", "blocksci.task": "notebook"})
     )
     assert [job.stage for job in backend.jobs] == ["blocksci-notebook"]
     assert backend.staged == []
@@ -253,10 +253,12 @@ def test_notebook_refuses_a_source_runs_loose_index_without_an_archive(backend, 
     with pytest.raises(ArtifactTransportError, match="source BlockSci cache manifest"):
         s3_submission.submit_s3_pbs_graph(
             backend.config(
-                analysis_pbs=False,
-                blocksci_workflow="cached",
-                blocksci_task="notebook",
-                blocksci_cache_source_run_id="source",
+                {
+                    "stages.analysis": False,
+                    "blocksci.workflow": "cached",
+                    "blocksci.task": "notebook",
+                    "blocksci.cache_source_run_id": "source",
+                }
             )
         )
     assert backend.jobs == []
@@ -265,10 +267,12 @@ def test_notebook_refuses_a_source_runs_loose_index_without_an_archive(backend, 
 def test_resource_and_image_overrides_reach_the_actual_job_renderers(backend):
     s3_submission.submit_s3_pbs_graph(
         backend.config(
-            pbs_ncpus=6,
-            pbs_blocksci_ncpus=12,
-            pbs_unified_report_ncpus=2,
-            pbs_blocksci_image="docker://blocksci:chosen",
+            {
+                "pbs.ncpus": 6,
+                "pbs.blocksci.ncpus": 12,
+                "pbs.unified_report.ncpus": 2,
+                "pbs.blocksci_image": "docker://blocksci:chosen",
+            }
         )
     )
     assert backend.rendered["render_coinjoin_analysis_s3_pbs"]["resources"].ncpus == 6
@@ -281,13 +285,15 @@ def test_resource_and_image_overrides_reach_the_actual_job_renderers(backend):
 def test_detector_overrides_reach_both_analysis_and_report_workers(backend, workflow):
     s3_submission.submit_s3_pbs_graph(
         backend.config(
-            engine="joinmarket",
-            blocksci_workflow=workflow,
-            min_input_count=7,
-            joinmarket_detector="possible",
-            joinmarket_min_base_fee=4321,
-            joinmarket_percentage_fee=0.00013,
-            joinmarket_max_depth=789,
+            {
+                "engine": "joinmarket",
+                "blocksci.workflow": workflow,
+                "min_input_count": 7,
+                "joinmarket.detector": "possible",
+                "joinmarket.min_base_fee": 4321,
+                "joinmarket.percentage_fee": 0.00013,
+                "joinmarket.max_depth": 789,
+            }
         )
     )
     analyzer = "render_blocksci_s3_pbs" if workflow == "combined" else "render_blocksci_analyze_s3_pbs"
@@ -324,7 +330,7 @@ def test_scheduler_receives_script_on_stdin_and_both_dependencies():
 
 
 def test_explicit_staging_prepares_workers_for_a_later_invocation(backend):
-    s3_submission.submit_s3_pbs_graph(backend.config(blocksci_pbs=False, stage_exporters=True))
+    s3_submission.submit_s3_pbs_graph(backend.config({"stages.blocksci": False, "stage_exporters": True}))
     assert backend.staged == ["run-1"]
     assert [job.stage for job in backend.jobs] == ["coinjoin-analysis"]
 
@@ -334,11 +340,13 @@ def test_read_only_analysis_passes_its_source_cache_to_the_renderer(backend, tmp
     script.write_text("print('scan')\n")
     s3_submission.submit_s3_pbs_graph(
         backend.config(
-            analysis_pbs=False,
-            blocksci_workflow="cached",
-            blocksci_task="script",
-            blocksci_script=str(script),
-            blocksci_cache_source_run_id="mainnet-index",
+            {
+                "stages.analysis": False,
+                "blocksci.workflow": "cached",
+                "blocksci.task": "script",
+                "blocksci.script": str(script),
+                "blocksci.cache_source_run_id": "mainnet-index",
+            }
         )
     )
     assert [job.stage for job in backend.jobs] == ["blocksci-script"]
@@ -352,11 +360,13 @@ def test_read_only_analysis_needs_a_published_source_cache(backend, tmp_path):
     with pytest.raises(ArtifactTransportError, match="mainnet-index"):
         s3_submission.submit_s3_pbs_graph(
             backend.config(
-                analysis_pbs=False,
-                blocksci_workflow="cached",
-                blocksci_task="script",
-                blocksci_script=str(script),
-                blocksci_cache_source_run_id="mainnet-index",
+                {
+                    "stages.analysis": False,
+                    "blocksci.workflow": "cached",
+                    "blocksci.task": "script",
+                    "blocksci.script": str(script),
+                    "blocksci.cache_source_run_id": "mainnet-index",
+                }
             )
         )
     assert backend.jobs == []
@@ -366,16 +376,18 @@ def test_persistent_update_needs_no_source_run_and_reaches_the_renderer(backend)
     backend.exists = False  # no S3 cache anywhere: the index lives on the multijob scratch
     s3_submission.submit_s3_pbs_graph(
         backend.config(
-            analysis_pbs=False,
-            blocksci_workflow="cached",
-            blocksci_task="update",
-            blocksci_index_dir="/scratch/multijob-brno/user/blocksci-mainnet",
-            blocksci_index_backup_uri="s3://bucket/blocksci-index",
-            pbs_blocksci_multijob="brno",
-            blocksci_bitcoin_blocks_uri="s3://bucket/mainnet",
-            blocksci_network="bitcoin",
-            blocksci_max_block=850100,
-            blocksci_expected_block_hash="a" * 64,
+            {
+                "stages.analysis": False,
+                "blocksci.workflow": "cached",
+                "blocksci.task": "update",
+                "blocksci.index_dir": "/scratch/multijob-brno/user/blocksci-mainnet",
+                "blocksci.index_backup_uri": "s3://bucket/blocksci-index",
+                "pbs.blocksci.multijob": "brno",
+                "blocksci.bitcoin_blocks_uri": "s3://bucket/mainnet",
+                "blocksci.network": "bitcoin",
+                "blocksci.max_block": 850100,
+                "blocksci.expected_block_hash": "a" * 64,
+            }
         )
     )
     values = backend.rendered["render_blocksci_update_s3_pbs"]
@@ -391,12 +403,14 @@ def test_persistent_update_needs_no_source_run_and_reaches_the_renderer(backend)
 def test_the_backup_task_submits_only_the_backup_job(backend):
     s3_submission.submit_s3_pbs_graph(
         backend.config(
-            analysis_pbs=False,
-            blocksci_workflow="cached",
-            blocksci_task="backup",
-            blocksci_index_dir="/scratch/multijob-brno/user/blocksci-mainnet",
-            blocksci_index_backup_uri="s3://bucket/blocksci-index",
-            pbs_blocksci_multijob="brno",
+            {
+                "stages.analysis": False,
+                "blocksci.workflow": "cached",
+                "blocksci.task": "backup",
+                "blocksci.index_dir": "/scratch/multijob-brno/user/blocksci-mainnet",
+                "blocksci.index_backup_uri": "s3://bucket/blocksci-index",
+                "pbs.blocksci.multijob": "brno",
+            }
         )
     )
     assert [job.stage for job in backend.jobs] == ["blocksci-backup"]
@@ -413,13 +427,15 @@ def test_index_jobs_at_a_fixed_state_prefix_clear_their_markers_there(backend, m
     )
     s3_submission.submit_s3_pbs_graph(
         backend.config(
-            analysis_pbs=False,
-            blocksci_workflow="cached",
-            blocksci_task="backup",
-            blocksci_index_dir="/scratch/multijob-brno/user/blocksci-mainnet",
-            blocksci_index_backup_uri="s3://bucket/blocksci-index",
-            blocksci_index_state_uri="s3://bucket/bitcoin-mainnet/index",
-            pbs_blocksci_multijob="brno",
+            {
+                "stages.analysis": False,
+                "blocksci.workflow": "cached",
+                "blocksci.task": "backup",
+                "blocksci.index_dir": "/scratch/multijob-brno/user/blocksci-mainnet",
+                "blocksci.index_backup_uri": "s3://bucket/blocksci-index",
+                "blocksci.index_state_uri": "s3://bucket/bitcoin-mainnet/index",
+                "pbs.blocksci.multijob": "brno",
+            }
         )
     )
     assert prefixes == [("s3://bucket/bitcoin-mainnet/index", "blocksci-backup")]
@@ -434,16 +450,18 @@ def test_a_fixed_state_prefix_always_refreshes_its_exporters(backend, monkeypatc
         s3_staging, "staged_exporters_state", lambda *_: pytest.fail("a fixed prefix never reuses staged exporters")
     )
     config = backend.config(
-        analysis_pbs=False,
-        blocksci_workflow="cached",
-        blocksci_task="update",
-        blocksci_index_dir="/scratch/multijob-brno/user/blocksci-mainnet",
-        blocksci_index_state_uri="s3://bucket/bitcoin-mainnet/index",
-        pbs_blocksci_multijob="brno",
-        blocksci_bitcoin_blocks_uri="s3://bucket/mainnet",
-        blocksci_network="bitcoin",
-        blocksci_max_block=850100,
-        blocksci_expected_block_hash="a" * 64,
+        {
+            "stages.analysis": False,
+            "blocksci.workflow": "cached",
+            "blocksci.task": "update",
+            "blocksci.index_dir": "/scratch/multijob-brno/user/blocksci-mainnet",
+            "blocksci.index_state_uri": "s3://bucket/bitcoin-mainnet/index",
+            "pbs.blocksci.multijob": "brno",
+            "blocksci.bitcoin_blocks_uri": "s3://bucket/mainnet",
+            "blocksci.network": "bitcoin",
+            "blocksci.max_block": 850100,
+            "blocksci.expected_block_hash": "a" * 64,
+        }
     )
     s3_staging.ensure_staged_exporters(config)
     s3_staging.ensure_staged_exporters(config)
@@ -463,7 +481,9 @@ def test_staging_drops_exporters_the_checkout_no_longer_has(monkeypatch, tmp_pat
 
 def test_a_dumplings_uri_turns_the_baseline_into_the_mainnet_one(backend):
     s3_submission.submit_s3_pbs_graph(
-        backend.config(blocksci_pbs=False, coinjoin_type="joinmarket", dumplings_uri="s3://bucket/dumplings")
+        backend.config(
+            {"stages.blocksci": False, "coinjoin_type": "joinmarket", "dumplings_uri": "s3://bucket/dumplings"}
+        )
     )
     assert [job.stage for job in backend.jobs] == ["coinjoin-analysis"]
     values = backend.rendered["render_coinjoin_analysis_dumplings_s3_pbs"]

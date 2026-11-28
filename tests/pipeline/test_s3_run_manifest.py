@@ -15,18 +15,20 @@ URI = "s3://bucket/runs/run-1/research_manifest.json"
 
 def _args(tmp_path):
     return configuration(
-        action="full-run",
-        artifact_backend="s3",
-        driver="kubernetes",
-        artifact_uri="s3://bucket/runs",
-        run_id="run-1",
-        runs_root=tmp_path,
-        s3_endpoint_url="https://s3.example",
-        s3_credentials_file="/credentials",
-        s3_profile="coinjoin",
-        s3_secret_name="coinjoin-s3",
-        namespace="coinjoin-ns",
-        reuse_namespace=True,
+        {
+            "action": "full-run",
+            "artifacts.backend": "s3",
+            "driver": "kubernetes",
+            "artifacts.uri": "s3://bucket/runs",
+            "run_id": "run-1",
+            "runs_root": tmp_path,
+            "artifacts.endpoint_url": "https://s3.example",
+            "artifacts.credentials_file": "/credentials",
+            "artifacts.profile": "coinjoin",
+            "artifacts.secret_name": "coinjoin-s3",
+            "kubernetes.namespace": "coinjoin-ns",
+            "kubernetes.reuse_namespace": True,
+        }
     )
 
 

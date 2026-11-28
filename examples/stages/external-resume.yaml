@@ -1,0 +1,4 @@
+# Continue an external analysis: cjp run examples/stages/external-resume.yaml --run-id <run-id>
+action: external-analyze
+external:
+  resume: true

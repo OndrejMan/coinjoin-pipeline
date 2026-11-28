@@ -14,6 +14,7 @@ from exporters.parameters import Detector
 
 from coinjoin_pipeline import cli
 from coinjoin_pipeline.arguments import load_configuration
+from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.context import RunContext, resolve_configuration
 from coinjoin_pipeline.execution import containers, research
 
@@ -65,16 +66,13 @@ def test_export_needs_only_analytic_artifacts_and_report_image(tmp_path):
     run = tmp_path / "run-a"
     report_inputs(run)
     context = RunContext.prepare(
-        load_configuration(
-            [
-                "export",
-                "--runs-root",
-                str(tmp_path),
-                "--run-dir",
-                "run-a",
-                "--unified-report-image",
-                "python:report-test",
-            ]
+        PipelineConfiguration.from_paths(
+            {
+                "action": "export",
+                "runs_root": str(tmp_path),
+                "run_dir": "run-a",
+                "images.unified_report": "python:report-test",
+            }
         ),
         "test",
     )
@@ -128,8 +126,12 @@ def test_utility_help_belongs_to_selected_command(capsys):
 
 
 def test_external_requires_run_identity_before_execution():
-    config = load_configuration(
-        ["external-analyze", "--bitcoin-datadir", "/tmp/btc", "--baseline", "/tmp/baseline.json"]
+    config = PipelineConfiguration.from_paths(
+        {
+            "action": "external-analyze",
+            "external.bitcoin_datadir": "/tmp/btc",
+            "external.baseline": "/tmp/baseline.json",
+        }
     )
     with pytest.raises(ValueError, match="run.id"):
         resolve_configuration(config)
@@ -138,14 +140,14 @@ def test_external_requires_run_identity_before_execution():
 @pytest.mark.parametrize(
     "argv",
     [
-        ["full-run", "--run-dir", "old-run"],
-        ["export", "--all-runs"],
-        ["analyze", "--parallel", "--run-dir", "run-a"],
+        {"action": "full-run", "run_dir": "old-run"},
+        {"action": "export", "all_runs": True},
+        {"action": "analyze", "parallel": True, "run_dir": "run-a"},
     ],
 )
 def test_unsupported_selectors_cannot_be_silently_ignored(argv):
     with pytest.raises(ValueError):
-        resolve_configuration(load_configuration(argv))
+        resolve_configuration(PipelineConfiguration.from_paths(argv))
 
 
 def test_worker_accepts_relative_run_path(tmp_path, monkeypatch):
@@ -164,9 +166,7 @@ def test_invalid_yaml_document_never_becomes_default_experiment(tmp_path, text):
         load_configuration(["run", str(path)])
 
 
-@pytest.mark.parametrize(
-    "entry", ["blocksci_export/analysis.py", "markdown_report.py", "worker.py"]
-)
+@pytest.mark.parametrize("entry", ["blocksci_export/analysis.py", "markdown_report.py", "worker.py"])
 def test_analysis_script_is_standalone_without_host_package(tmp_path, entry):
     import os
     import shutil
@@ -193,22 +193,17 @@ def test_shared_report_budget_matches_wait_budget_and_selected_image(tmp_path):
     from coinjoin_pipeline.execution.pbs_settings import stage_pbs_resources
 
     config = RunContext.prepare(
-        load_configuration(
-            [
-                "full-run",
-                "--blocksci-pbs",
-                "--pbs-bitcoin-datadir",
-                str(tmp_path / "btc"),
-                "--pbs-unified-report-walltime",
-                "03:00:00",
-                "--pbs-unified-report-ncpus",
-                "3",
-                "--unified-report-image",
-                "python:report-test",
-                "--runs-root",
-                str(tmp_path),
-                "--dry-run",
-            ]
+        PipelineConfiguration.from_paths(
+            {
+                "action": "full-run",
+                "stages.blocksci": True,
+                "pbs.bitcoin_datadir": str(tmp_path / "btc"),
+                "pbs.unified_report.walltime": "03:00:00",
+                "pbs.unified_report.ncpus": 3,
+                "images.unified_report": "python:report-test",
+                "runs_root": str(tmp_path),
+                "dry_run": True,
+            }
         ),
         "test",
     ).config
@@ -296,32 +291,22 @@ def test_report_never_fills_producer_digest_from_current_host(tmp_path, monkeypa
 
 @pytest.mark.parametrize("dry_run", [False, True])
 def test_external_detector_overrides_reach_worker(tmp_path, monkeypatch, dry_run):
-    argv = [
-        "external-analyze",
-        "--run-id",
-        "probe",
-        "--runs-root",
-        str(tmp_path),
-        "--bitcoin-datadir",
-        str(tmp_path / "bitcoin"),
-        "--baseline",
-        str(tmp_path / "baseline.json"),
-        "--coinjoin-type",
-        "joinmarket",
-        "--min-input-count",
-        "7",
-        "--joinmarket-detector",
-        "possible",
-        "--joinmarket-min-base-fee",
-        "123",
-        "--joinmarket-percentage-fee",
-        "0.001",
-        "--joinmarket-max-depth",
-        "42",
-    ]
+    argv = {
+        "action": "external-analyze",
+        "run_id": "probe",
+        "runs_root": str(tmp_path),
+        "external.bitcoin_datadir": str(tmp_path / "bitcoin"),
+        "external.baseline": str(tmp_path / "baseline.json"),
+        "coinjoin_type": "joinmarket",
+        "min_input_count": 7,
+        "joinmarket.detector": "possible",
+        "joinmarket.min_base_fee": 123,
+        "joinmarket.percentage_fee": 0.001,
+        "joinmarket.max_depth": 42,
+    }
     if dry_run:
-        argv.append("--dry-run")
-    config = RunContext.prepare(load_configuration(argv), "test").config
+        argv["dry_run"] = True
+    config = RunContext.prepare(PipelineConfiguration.from_paths(argv), "test").config
     with mock.patch.object(research, "external_analyze") as execute:
         research.run_external_configuration(config)
     command = research.external_command(execute.call_args.args[0])
@@ -338,8 +323,10 @@ def test_external_detector_overrides_reach_worker(tmp_path, monkeypatch, dry_run
     }
 
 
-def test_invalid_timezone_is_an_input_error_before_run_id_generation(capsys):
-    assert cli.main(["emulate", "--run-timezone", "missing/timezone", "--dry-run"]) == 2
+def test_invalid_timezone_is_an_input_error_before_run_id_generation(tmp_path, capsys):
+    experiment = tmp_path / "experiment.yaml"
+    experiment.write_text("action: emulate\nrun_timezone: missing/timezone\n", encoding="utf-8")
+    assert cli.main(["run", str(experiment), "--dry-run"]) == 2
     assert "invalid run timezone" in capsys.readouterr().err
 
 
@@ -349,31 +336,17 @@ def test_pbs_resume_failure_does_not_rewrite_original_launcher_manifest(tmp_path
     manifest = run / "research_manifest.json"
     original = '{"host_launcher": {"status": "completed", "evidence": "original"}}'
     manifest.write_text(original)
+    experiment = tmp_path / "experiment.yaml"
+    experiment.write_text(
+        "action: pbs-from-s3\nstages:\n  blocksci: true\nartifacts:\n  uri: s3://bucket/runs\n"
+        "  endpoint_url: https://s3.example\n  credentials_file: /tmp/credentials\n  profile: test\n",
+        encoding="utf-8",
+    )
     with (
         mock.patch.object(cli, "doctor_check", return_value=[]),
         mock.patch.object(cli, "execute", side_effect=RuntimeError("active job")),
     ):
-        assert (
-            cli.main(
-                [
-                    "pbs-from-s3",
-                    "--runs-root",
-                    str(tmp_path),
-                    "--run-id",
-                    "run-a",
-                    "--blocksci-pbs",
-                    "--artifact-uri",
-                    "s3://bucket/runs",
-                    "--s3-endpoint-url",
-                    "https://s3.example",
-                    "--s3-credentials-file",
-                    "/tmp/credentials",
-                    "--s3-profile",
-                    "test",
-                ]
-            )
-            == 5
-        )
+        assert cli.main(["run", str(experiment), "--runs-root", str(tmp_path), "--run-id", "run-a"]) == 5
     assert manifest.read_text() == original
 
 

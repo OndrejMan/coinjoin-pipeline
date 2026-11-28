@@ -9,6 +9,7 @@ LOGS_DIR="${EMULATION_LOGS_DIR:-${PROJECT_DIR}/emulation_logs}"
 BEFORE_FILE="$(mktemp)"
 AFTER_FILE="$(mktemp)"
 RUN_LOG="$(mktemp)"
+EXPERIMENT_FILE="$(mktemp --suffix=.yaml)"
 RUN_PID=""
 RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS:-3600}"
 REPO_ROOT="$(cd "${PROJECT_DIR}/.." && pwd)"
@@ -49,6 +50,7 @@ LOCAL_IMAGES_PREBUILT="${LOCAL_IMAGES_PREBUILT:-0}"
 COMPOSE_PROJECT="cjp-default-joinmarket-$$"
 
 cleanup() {
+  rm -f "${EXPERIMENT_FILE}"
   if [[ -n "${RUN_PID}" ]] && kill -0 "${RUN_PID}" >/dev/null 2>&1; then
     stop_blocksci
     wait "${RUN_PID}" >/dev/null 2>&1 || true
@@ -101,6 +103,8 @@ fi
 
 echo "Running real JoinMarket Docker workflow in ${IMAGE_MODE} image mode with logs in ${LOGS_DIR}..."
 echo "Using BlockSci image ${BLOCKSCI_IMAGE}, emulator image ${COINJOIN_EMULATOR_IMAGE}, and analyzer image ${COINJOIN_ANALYSIS_IMAGE}."
+python3 "${PROJECT_DIR}/tests/support/experiment.py" "${EXPERIMENT_FILE}" \
+  action=full-run engine=joinmarket scenario=scenarios/defaultJoinMarket.json
 (
   (
     cd "${PROJECT_DIR}"
@@ -117,7 +121,7 @@ echo "Using BlockSci image ${BLOCKSCI_IMAGE}, emulator image ${COINJOIN_EMULATOR
     COINJOIN_EMULATOR_IRC_SERVER_IMAGE="${COINJOIN_EMULATOR_IRC_SERVER_IMAGE:-}" \
     COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD:-}" \
     COINJOIN_COMPOSE_PROJECT="${COMPOSE_PROJECT}" \
-    bash runIt.sh full-run --engine joinmarket --scenario scenarios/defaultJoinMarket.json
+    bash runIt.sh run "${EXPERIMENT_FILE}"
   ) 2>&1 | tee "${RUN_LOG}"
 ) &
 RUN_PID=$!

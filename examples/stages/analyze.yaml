@@ -1,0 +1,2 @@
+# BlockSci analysis of an existing local run: cjp run examples/stages/analyze.yaml --run-dir <run-id>
+action: analyze

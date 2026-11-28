@@ -39,7 +39,7 @@ def credentials(tmp_path: Path) -> Path:
     return path
 
 
-def emulation_args(tmp_path: Path, **overrides):
+def emulation_args(tmp_path: Path, overrides=None):
     scenario = tmp_path / "scenario.json"
     scenario.write_text('{"name": "fin"}', encoding="utf-8")
     kubeconfig = tmp_path / "kubeconfig"
@@ -48,18 +48,18 @@ def emulation_args(tmp_path: Path, **overrides):
         "engine": "wasabi",
         "scenario": str(scenario),
         "run_timezone": "UTC",
-        "kubeconfig": str(kubeconfig),
-        "namespace": "shared-ns",
+        "kubernetes.kubeconfig": str(kubeconfig),
+        "kubernetes.namespace": "shared-ns",
         "run_id": "run-1",
-        "artifact_uri": "s3://bucket/runs",
-        "s3_endpoint_url": "https://s3.example.invalid",
-        "s3_credentials_file": str(credentials(tmp_path)),
-        "s3_profile": "coinjoin",
-        "reuse_namespace": True,
-        "uploader_image": "uploader:test",
-        **overrides,
+        "artifacts.uri": "s3://bucket/runs",
+        "artifacts.endpoint_url": "https://s3.example.invalid",
+        "artifacts.credentials_file": str(credentials(tmp_path)),
+        "artifacts.profile": "coinjoin",
+        "kubernetes.reuse_namespace": True,
+        "images.uploader": "uploader:test",
+        **(overrides or {}),
     }
-    return configuration(**values)
+    return configuration(values)
 
 
 def test_key_pair_reads_the_selected_profile(tmp_path: Path) -> None:
@@ -199,7 +199,7 @@ def test_emulation_without_a_secret_name_creates_one_for_the_run(tmp_path: Path)
 
 
 def test_emulation_with_a_secret_name_uses_the_existing_secret(tmp_path: Path) -> None:
-    args = emulation_args(tmp_path, s3_secret_name="coinjoin-s3-credentials")
+    args = emulation_args(tmp_path, {"artifacts.secret_name": "coinjoin-s3-credentials"})
     with (
         mock.patch.object(s3_emulation, "resolve_uploader_image", return_value="uploader:test"),
         mock.patch.object(s3_emulation, "create_temporary_s3_secret") as create,
@@ -214,7 +214,7 @@ def test_emulation_with_a_secret_name_uses_the_existing_secret(tmp_path: Path) -
 def test_dry_run_names_the_temporary_secret_without_reading_the_key(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    args = emulation_args(tmp_path, dry_run=True)
+    args = emulation_args(tmp_path, {"dry_run": True})
     with (
         mock.patch.object(s3_emulation, "resolve_uploader_image", return_value="uploader:test"),
         mock.patch.object(s3_emulation, "s3_key_pair") as key_pair,
@@ -245,7 +245,7 @@ def test_the_upload_marker_ends_the_temporary_secret(tmp_path: Path, fails: bool
 
 
 def test_a_named_secret_outlives_the_run(tmp_path: Path) -> None:
-    args = emulation_args(tmp_path, s3_secret_name="coinjoin-s3-credentials")
+    args = emulation_args(tmp_path, {"artifacts.secret_name": "coinjoin-s3-credentials"})
     access = S3Access("https://s3.example.invalid", "/credentials", "coinjoin")
     with (
         mock.patch.object(s3_workflow, "wait_for_s3_marker"),
@@ -336,13 +336,13 @@ def test_a_rollback_selects_the_owner_of_the_job(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("owner", ["xman", "a.b_c-1"])
 def test_an_owner_label_value_is_accepted(tmp_path: Path, owner: str) -> None:
-    assert emulation_args(tmp_path, owner=owner).kubernetes.owner == owner
+    assert emulation_args(tmp_path, {"kubernetes.owner": owner}).kubernetes.owner == owner
 
 
 @pytest.mark.parametrize("owner", ["xman@META", "-x", "a" * 64])
 def test_an_owner_that_is_no_label_value_is_refused(tmp_path: Path, owner: str) -> None:
-    with pytest.raises(ValueError, match="--owner must be a Kubernetes label value"):
-        resolve_configuration(emulation_args(tmp_path, owner=owner))
+    with pytest.raises(ValueError, match="kubernetes.owner must be a Kubernetes label value"):
+        resolve_configuration(emulation_args(tmp_path, {"kubernetes.owner": owner}))
 
 
 PLANNED = '{"requests.memory": "17179869184", "requests.cpu": "15.65", "pods": "33"}'
@@ -397,8 +397,8 @@ def test_without_a_plan_the_job_has_no_annotation(tmp_path: Path) -> None:
     ],
 )
 def test_a_malformed_planned_quota_is_refused(tmp_path: Path, planned: str, message: str) -> None:
-    with pytest.raises(ValueError, match=f"--planned-quota: .*{message}"):
-        resolve_configuration(emulation_args(tmp_path, planned_quota=planned))
+    with pytest.raises(ValueError, match=f"kubernetes.planned_quota: .*{message}"):
+        resolve_configuration(emulation_args(tmp_path, {"kubernetes.planned_quota": planned}))
 
 
 def test_an_interrupted_wait_leaves_the_secret_to_the_job(tmp_path: Path) -> None:

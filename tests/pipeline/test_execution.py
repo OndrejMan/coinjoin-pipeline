@@ -125,16 +125,13 @@ def test_blocksci_pbs_stage_submits_shared_staged_exporters(
     run_dir.mkdir(parents=True)
     bitcoin_datadir = tmp_path / "bitcoin"
     args = build_parser().parse_args(
-        [
-            "analyze",
-            "--engine",
-            "wasabi",
-            "--run-dir",
-            "run-a",
-            "--blocksci-pbs",
-            "--pbs-bitcoin-datadir",
-            str(bitcoin_datadir),
-        ]
+        {
+            "action": "analyze",
+            "engine": "wasabi",
+            "run_dir": "run-a",
+            "stages.blocksci": True,
+            "pbs.bitcoin_datadir": str(bitcoin_datadir),
+        }
     )
     staged = run_dir / ".pipeline" / "exporters"
 
@@ -167,7 +164,7 @@ def _kubectl_cmd(*parts: str) -> list[str]:
 
 
 def test_pbs_from_s3_uses_a_run_specific_submission_lock(tmp_path: Path) -> None:
-    args = Namespace(action="pbs-from-s3", run_id="run-1")
+    args = Namespace({"action": "pbs-from-s3", "run_id": "run-1"})
 
     assert command_lock_path(args, tmp_path) == (tmp_path / "run-1" / ".pbs-submit.lock")
 
@@ -175,7 +172,7 @@ def test_pbs_from_s3_uses_a_run_specific_submission_lock(tmp_path: Path) -> None
 @pytest.mark.parametrize("action", ["full-run", "emulate"])
 def test_s3_runs_lock_only_their_own_run(tmp_path: Path, action: str) -> None:
     def s3_args(run_id: str) -> Namespace:
-        return Namespace(action=action, run_id=run_id, artifact_backend="s3")
+        return Namespace({"action": action, "run_id": run_id, "artifacts.backend": "s3"})
 
     assert command_lock_path(s3_args("run-1"), tmp_path) == tmp_path / "run-1" / ".pipeline.lock"
     try:
@@ -186,7 +183,7 @@ def test_s3_runs_lock_only_their_own_run(tmp_path: Path, action: str) -> None:
 
 
 def test_local_runs_still_share_the_runs_root_lock(tmp_path: Path) -> None:
-    args = Namespace(action="full-run")
+    args = Namespace({"action": "full-run"})
 
     assert command_lock_path(args, tmp_path) == tmp_path / ".pipeline.lock"
 
@@ -206,26 +203,26 @@ def test_pbs_from_s3_refuses_a_recorded_active_graph(tmp_path: Path) -> None:
         ensure_no_active_s3_pbs_submission(tmp_path)
 
 
-def _full_run_s3_args(**overrides) -> Namespace:
-    values = dict(
-        artifact_uri="s3://bucket/runs",
-        run_id="run-1",
-        s3_endpoint_url="https://s3.cl4.du.cesnet.cz",
-        s3_credentials_file="/storage/user/.aws/credentials",
-        s3_profile="coinjoin",
-        s3_secret_name="coinjoin-s3",
-        kubeconfig=None,
-        namespace="coinjoin-ns",
-        reuse_namespace=True,
-        dry_run=False,
-        emulation_timeout=3600,
-        analysis_pbs=True,
-        blocksci_pbs=True,
-        mappings_pbs=False,
-        pbs_walltime=None,
-    )
-    values.update(overrides)
-    return Namespace(**values)
+def _full_run_s3_args(overrides=None) -> Namespace:
+    values = {
+        "artifacts.uri": "s3://bucket/runs",
+        "run_id": "run-1",
+        "artifacts.endpoint_url": "https://s3.cl4.du.cesnet.cz",
+        "artifacts.credentials_file": "/storage/user/.aws/credentials",
+        "artifacts.profile": "coinjoin",
+        "artifacts.secret_name": "coinjoin-s3",
+        "kubernetes.kubeconfig": None,
+        "kubernetes.namespace": "coinjoin-ns",
+        "kubernetes.reuse_namespace": True,
+        "dry_run": False,
+        "emulation_timeout": 3600,
+        "stages.analysis": True,
+        "stages.blocksci": True,
+        "stages.mappings": False,
+        "pbs.walltime": None,
+    }
+    values.update(overrides or {})
+    return Namespace(values)
 
 
 class FullRunS3OrchestrationTest(unittest.TestCase):
@@ -289,7 +286,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         calls: list[str] = []
         mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(f"wait:{stage}")
 
-        run_full_run_s3(_full_run_s3_args(analysis_pbs=False, blocksci_pbs=False))
+        run_full_run_s3(_full_run_s3_args({"stages.analysis": False, "stages.blocksci": False}))
 
         self.assertEqual(calls, ["wait:kubernetes-emulation"])
         mocks["require_qsub"].assert_not_called()
@@ -303,7 +300,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         calls: list[str] = []
         mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(f"wait:{stage}")
 
-        run_full_run_s3(_full_run_s3_args(analysis_pbs=False))
+        run_full_run_s3(_full_run_s3_args({"stages.analysis": False}))
 
         self.assertEqual(calls, ["wait:kubernetes-emulation", "wait:blocksci"])
 
@@ -315,7 +312,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         calls: list[str] = []
         mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(f"wait:{stage}")
 
-        run_full_run_s3(_full_run_s3_args(blocksci_pbs=False))
+        run_full_run_s3(_full_run_s3_args({"stages.blocksci": False}))
 
         self.assertEqual(calls, ["wait:kubernetes-emulation", "wait:coinjoin-analysis"])
 
@@ -346,7 +343,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         calls: list[str] = []
         mocks["wait_for_s3_marker"].side_effect = lambda stage, *a, **k: calls.append(stage)
 
-        run_full_run_s3(_full_run_s3_args(mappings_pbs=True))
+        run_full_run_s3(_full_run_s3_args({"stages.mappings": True}))
 
         self.assertEqual(
             calls,
@@ -398,7 +395,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         mocks["wait_for_s3_marker"].side_effect = wait
 
         with self.assertRaises(ArtifactTransportError):
-            run_full_run_s3(_full_run_s3_args(mappings_pbs=True))
+            run_full_run_s3(_full_run_s3_args({"stages.mappings": True}))
 
         self.assertEqual(
             mocks["qdel_pbs_job"].call_args_list,
@@ -447,7 +444,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         mocks["wait_for_s3_marker"].side_effect = wait
 
         with self.assertRaises(ArtifactTransportError):
-            run_full_run_s3(_full_run_s3_args(blocksci_workflow="reusable"))
+            run_full_run_s3(_full_run_s3_args({"blocksci.workflow": "reusable"}))
 
         self.assertEqual(
             mocks["qdel_pbs_job"].call_args_list,
@@ -472,7 +469,7 @@ class FullRunS3OrchestrationTest(unittest.TestCase):
         mocks["wait_for_s3_marker"].side_effect = wait
 
         with self.assertRaises(ArtifactTransportError):
-            run_full_run_s3(_full_run_s3_args(mappings_pbs=True))
+            run_full_run_s3(_full_run_s3_args({"stages.mappings": True}))
 
         mocks["qdel_pbs_job"].assert_called_once_with("report.job")
 
@@ -599,15 +596,17 @@ class WrapperExportTest(unittest.TestCase):
             run_dir = Path(tmpdir) / "run-a"
             run_dir.mkdir()
             args = Namespace(
-                blocksci_script=None,
-                engine="joinmarket",
-                coinjoin_type="joinmarket",
-                min_input_count=1,
-                scenario=None,
-                joinmarket_detector="definite",
-                joinmarket_min_base_fee=5000,
-                joinmarket_percentage_fee=0.00004,
-                joinmarket_max_depth=200000,
+                {
+                    "blocksci.script": None,
+                    "engine": "joinmarket",
+                    "coinjoin_type": "joinmarket",
+                    "min_input_count": 1,
+                    "scenario": None,
+                    "joinmarket.detector": "definite",
+                    "joinmarket.min_base_fee": 5000,
+                    "joinmarket.percentage_fee": 0.00004,
+                    "joinmarket.max_depth": 200000,
+                }
             )
             with mock.patch("coinjoin_pipeline.execution.containers.run_command") as run_mock:
                 run_blocksci_docker_stage(args, run_dir, include_report=False)
@@ -649,7 +648,7 @@ class WrapperExportTest(unittest.TestCase):
         self.assertLessEqual(int(env["BLOCKSCI_HOST_PORT"]), 29999)
 
     def test_compose_env_allows_run_timezone_override(self):
-        self.assertEqual(compose_env(Namespace(run_timezone="UTC"))["RUN_TIMEZONE"], "UTC")
+        self.assertEqual(compose_env(Namespace({"run_timezone": "UTC"}))["RUN_TIMEZONE"], "UTC")
 
     def test_compose_env_targets_active_run_for_coinjoin_analysis(self):
         env = compose_env(active_run_id="run-a")
@@ -767,7 +766,7 @@ class WrapperExportTest(unittest.TestCase):
         assert error is not None
         self.assertIn("blocksci-analysis_data/blocksci_analysis.json", error)
         self.assertNotIn("coinjoin_tx_info.json", error)
-        self.assertIn("cjp analyze --run-dir 2026-05-24_16-58_default", error)
+        self.assertIn("cjp run examples/stages/analyze.yaml --run-dir 2026-05-24_16-58_default", error)
 
     def test_export_preflight_blocksci_only(self):
         error = export_preflight_error(
@@ -780,7 +779,7 @@ class WrapperExportTest(unittest.TestCase):
         self.assertIn("coinjoin-analysis_data/coinjoin_tx_info.json", error)
         self.assertNotIn("blocksci_analysis.json", error)
         self.assertIn(
-            "cjp coinjoin-analysis --run-dir 2026-05-24_16-58_default",
+            "cjp run examples/stages/coinjoin-analysis.yaml --run-dir 2026-05-24_16-58_default",
             error,
         )
 
@@ -983,7 +982,7 @@ class WrapperExportTest(unittest.TestCase):
 
     def test_kubernetes_emulator_command_places_driver_before_subcommand(self):
         command = kubernetes_emulator_command(
-            Namespace(namespace="coinjoin-test", image_prefix="ghcr.io/test/"),
+            Namespace({"kubernetes.namespace": "coinjoin-test", "kubernetes.image_prefix": "ghcr.io/test/"}),
             "/app/scenarios/overactive-local.json",
             btc_data_path="/btc-data/custom",
         )
@@ -1020,12 +1019,12 @@ class WrapperExportTest(unittest.TestCase):
                 self.subTest(engine=engine),
                 mock.patch.dict(os.environ, {"KUBERNETES_SERVICE_HOST": "10.43.0.1"}),
             ):
-                command = kubernetes_emulator_command(Namespace(engine=engine), "/scenario.json")
+                command = kubernetes_emulator_command(Namespace({"engine": engine}), "/scenario.json")
             self.assertNotIn("--in-cluster", command)
 
     def test_kubernetes_emulator_command_can_copy_btc_data_to_host(self):
         command = kubernetes_emulator_command(
-            Namespace(copy_to_host=True),
+            Namespace({"kubernetes.copy_to_host": True}),
             "/app/scenarios/overactive-local.json",
             btc_data_path="/btc-data/custom",
         )
@@ -1039,7 +1038,7 @@ class WrapperExportTest(unittest.TestCase):
 
     def test_kubernetes_emulator_command_accepts_control_ip(self):
         command = kubernetes_emulator_command(
-            Namespace(engine="joinmarket"),
+            Namespace({"engine": "joinmarket"}),
             "/app/scenarios/overactive-local.json",
             control_ip="172.17.0.1",
         )
@@ -1051,18 +1050,20 @@ class WrapperExportTest(unittest.TestCase):
         self.assertNotIn("--joinmarket-descriptor-regtest-fallback", command)
 
     def test_kubernetes_emulator_command_omits_obsolete_fallback_for_wasabi(self):
-        command = kubernetes_emulator_command(Namespace(engine="wasabi"), "/app/scenarios/overactive-local.json")
+        command = kubernetes_emulator_command(Namespace({"engine": "wasabi"}), "/app/scenarios/overactive-local.json")
 
         self.assertNotIn("--joinmarket-descriptor-regtest-fallback", command)
 
     def test_kubernetes_emulator_command_can_reuse_namespace(self):
-        command = kubernetes_emulator_command(Namespace(reuse_namespace=True), "/app/scenarios/overactive-local.json")
+        command = kubernetes_emulator_command(
+            Namespace({"kubernetes.reuse_namespace": True}), "/app/scenarios/overactive-local.json"
+        )
 
         self.assertEqual(command[-1], "--reuse-namespace")
 
     def test_kubernetes_emulator_command_can_request_local_build(self):
         command = kubernetes_emulator_command(
-            Namespace(engine="joinmarket"),
+            Namespace({"engine": "joinmarket"}),
             "/app/scenarios/defaultJoinMarket.json",
             local_build=True,
         )
@@ -1258,10 +1259,12 @@ class WrapperExportTest(unittest.TestCase):
             ):
                 run_kubernetes_emulation(
                     Namespace(
-                        scenario="overactive-local.json",
-                        namespace="coinjoin-test",
-                        kubeconfig=str(kubeconfig),
-                        run_timezone="UTC",
+                        {
+                            "scenario": "overactive-local.json",
+                            "kubernetes.namespace": "coinjoin-test",
+                            "kubernetes.kubeconfig": str(kubeconfig),
+                            "run_timezone": "UTC",
+                        }
                     ),
                     btc_datadir=str(root / "btc-data/data"),
                 )
@@ -1314,7 +1317,13 @@ class WrapperExportTest(unittest.TestCase):
                 mock.patch("coinjoin_pipeline.execution.kubernetes_launch.kubernetes_auth_preflight"),
             ):
                 run_kubernetes_emulation(
-                    Namespace(scenario="overactive-local.json", namespace="coinjoin-test", kubeconfig=str(kubeconfig))
+                    Namespace(
+                        {
+                            "scenario": "overactive-local.json",
+                            "kubernetes.namespace": "coinjoin-test",
+                            "kubernetes.kubeconfig": str(kubeconfig),
+                        }
+                    )
                 )
 
             docker_cmd = run_mock.call_args.args[0]
@@ -1348,7 +1357,13 @@ class WrapperExportTest(unittest.TestCase):
                 mock.patch("coinjoin_pipeline.execution.kubernetes_launch.kubernetes_auth_preflight"),
             ):
                 run_kubernetes_emulation(
-                    Namespace(scenario="overactive-local.json", kubeconfig=str(kubeconfig), copy_to_host=True)
+                    Namespace(
+                        {
+                            "scenario": "overactive-local.json",
+                            "kubernetes.kubeconfig": str(kubeconfig),
+                            "kubernetes.copy_to_host": True,
+                        }
+                    )
                 )
 
             docker_cmd = run_mock.call_args.args[0]
@@ -1382,10 +1397,16 @@ class WrapperExportTest(unittest.TestCase):
             }
             with (
                 mock.patch.dict(os.environ, env, clear=True),
-                self.assertRaisesRegex(ValueError, "--copy-to-host requires KUBERNETES_COPY_TO_HOST_DIR"),
+                self.assertRaisesRegex(ValueError, "kubernetes.copy_to_host requires KUBERNETES_COPY_TO_HOST_DIR"),
             ):
                 run_kubernetes_emulation(
-                    Namespace(scenario="overactive-local.json", kubeconfig=str(kubeconfig), copy_to_host=True)
+                    Namespace(
+                        {
+                            "scenario": "overactive-local.json",
+                            "kubernetes.kubeconfig": str(kubeconfig),
+                            "kubernetes.copy_to_host": True,
+                        }
+                    )
                 )
 
     def test_container_run_pull_args_default_to_always_for_registry_images(self):
@@ -1453,7 +1474,7 @@ class ScenarioPathTests(unittest.TestCase):
             catalogue.mkdir()
             scenario = catalogue / "fin-cliff.json"
             scenario.write_text("{}", encoding="utf-8")
-            config = Namespace(scenario=str(scenario), dry_run=True)
+            config = Namespace({"scenario": str(scenario), "dry_run": True})
             with mock.patch.dict(os.environ, {}, clear=True):
                 env = compose_env(config)
                 self.assertEqual(env["SCENARIOS_DIR"], str(catalogue))

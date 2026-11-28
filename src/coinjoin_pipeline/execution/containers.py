@@ -473,7 +473,7 @@ def export_preflight_error(coinjoin_ready: bool, blocksci_ready: bool, run_dir: 
     return (
         f"cannot export unified report for run '{run_dir.name}'; missing analytical input: "
         + ", ".join(missing)
-        + f". Run: cjp {command} --run-dir {shlex.quote(run_dir.name)}"
+        + f". Run: cjp run examples/stages/{command}.yaml --run-dir {shlex.quote(run_dir.name)}"
     )
 
 

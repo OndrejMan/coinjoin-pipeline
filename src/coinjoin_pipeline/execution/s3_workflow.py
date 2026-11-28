@@ -126,7 +126,7 @@ def wait_for_emulation_upload(args: PipelineConfiguration, run_prefix: str, acce
     then needs to start, and the Job's deletion removes the Secret in any case.
     """
     kubeconfig_path = resolve_kubeconfig(args.kubernetes.kubeconfig)
-    run_id = required(args.run_id, "--run-id")
+    run_id = required(args.run_id, "run_id")
     temporary = args.artifacts.secret_name is None
     try:
         _wait_for_emulation_upload(args, run_prefix, access, kubeconfig_path, run_id)

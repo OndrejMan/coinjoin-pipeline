@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 
 from coinjoin_pipeline.arguments import load_configuration
+from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.cli import main
 from coinjoin_pipeline.context import resolve_configuration
 from coinjoin_pipeline.runs import run_id_for
@@ -20,9 +21,18 @@ def test_relative_external_scenario_survives_launcher_working_directory(tmp_path
     checkout.mkdir()
     monkeypatch.chdir(checkout)
     config = resolve_configuration(
-        load_configuration(["emulate", "--scenario", "../coinjoin-scenarios/fin-cliff.json"])
+        PipelineConfiguration.from_paths({"action": "emulate", "scenario": "../coinjoin-scenarios/fin-cliff.json"})
     )
     assert config.scenario == str(scenario)
+
+
+EMULATE = "action: emulate\nengine: wasabi\nscenario: scenarios/overactive-local.json\n"
+
+
+def experiment(tmp_path: Path) -> str:
+    path = tmp_path / "experiment.yaml"
+    path.write_text(EMULATE, encoding="utf-8")
+    return str(path)
 
 
 @pytest.mark.parametrize(
@@ -33,8 +43,8 @@ def test_relative_external_scenario_survives_launcher_working_directory(tmp_path
         ["--run-id=old-run", "--run-id", "new-run"],
     ],
 )
-def test_host_run_id_matches_argparse_last_value(arguments: list[str]) -> None:
-    config = load_configuration(arguments)
+def test_host_run_id_matches_argparse_last_value(arguments: list[str], tmp_path: Path) -> None:
+    config = load_configuration(["run", experiment(tmp_path), *arguments])
     assert config.run_id == "new-run"
     assert run_id_for(config) == "new-run"
 
@@ -47,46 +57,15 @@ def test_local_build_preserves_explicit_and_environment_image_overrides(
         mock.patch("coinjoin_pipeline.cli.doctor_check", return_value=[]),
         mock.patch("coinjoin_pipeline.cli.execute") as execute,
     ):
-        assert (
-            main(
-                [
-                    "--runs-root",
-                    str(tmp_path),
-                    "emulate",
-                    "--engine",
-                    "wasabi",
-                    "--scenario",
-                    "scenarios/overactive-local.json",
-                    "--run-id",
-                    "custom-images",
-                    "--local-build",
-                    "--emulator-image",
-                    "emulator:custom",
-                ]
-            )
-            == 0
-        )
+        argv = ["--runs-root", str(tmp_path), "run", experiment(tmp_path), "--run-id", "custom-images"]
+        assert main([*argv, "--local-build", "--emulator-image", "emulator:custom"]) == 0
         env = execute.call_args.args[0].environment
     assert env["COINJOIN_EMULATOR_IMAGE"] == "emulator:custom"
     assert env["BLOCKSCI_IMAGE"] == "blocksci:env"
     assert env["COINJOIN_ANALYSIS_IMAGE"] == "coinjoin-analysis:local"
 
 
-def test_local_build_rejects_invalid_image_overrides() -> None:
+def test_local_build_rejects_invalid_image_overrides(tmp_path: Path) -> None:
     with mock.patch("coinjoin_pipeline.cli.doctor_check", return_value=[]):
-        assert (
-            main(
-                [
-                    "emulate",
-                    "--engine",
-                    "wasabi",
-                    "--scenario",
-                    "scenarios/overactive-local.json",
-                    "--local-build",
-                    "--emulator-image",
-                    "not an image",
-                    "--dry-run",
-                ]
-            )
-            == 2
-        )
+        argv = ["run", experiment(tmp_path), "--local-build", "--emulator-image", "not an image", "--dry-run"]
+        assert main(argv) == 2

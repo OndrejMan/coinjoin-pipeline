@@ -379,16 +379,18 @@ class PBSTemplateTest(unittest.TestCase):
         run_dir = Path("/storage/run-a")
         command = blocksci_pbs_command(
             run_dir.name,
-            resolve_run_images(PipelineConfiguration.from_flat(
-                {
-                    "coinjoin_type": "joinmarket",
-                    "min_input_count": 1,
-                    "joinmarket_detector": "definite",
-                    "joinmarket_min_base_fee": 5000,
-                    "joinmarket_percentage_fee": 4e-05,
-                    "joinmarket_max_depth": 200000,
-                }
-            ))[0],
+            resolve_run_images(
+                PipelineConfiguration.from_paths(
+                    {
+                        "coinjoin_type": "joinmarket",
+                        "min_input_count": 1,
+                        "joinmarket.detector": "definite",
+                        "joinmarket.min_base_fee": 5000,
+                        "joinmarket.percentage_fee": 4e-05,
+                        "joinmarket.max_depth": 200000,
+                    }
+                )
+            )[0],
         )
         self.assertIn("worker.py run", command)
         self.assertIn("--report" if "worker.py run" in command else "worker.py report", command)
@@ -402,16 +404,18 @@ class PBSTemplateTest(unittest.TestCase):
     def test_blocksci_pbs_command_runs_custom_script_before_report(self):
         command = blocksci_pbs_command(
             "run-a",
-            resolve_run_images(PipelineConfiguration.from_flat(
-                {
-                    "coinjoin_type": "joinmarket",
-                    "min_input_count": 1,
-                    "joinmarket_detector": "definite",
-                    "joinmarket_min_base_fee": 5000,
-                    "joinmarket_percentage_fee": 4e-05,
-                    "joinmarket_max_depth": 200000,
-                }
-            ))[0],
+            resolve_run_images(
+                PipelineConfiguration.from_paths(
+                    {
+                        "coinjoin_type": "joinmarket",
+                        "min_input_count": 1,
+                        "joinmarket.detector": "definite",
+                        "joinmarket.min_base_fee": 5000,
+                        "joinmarket.percentage_fee": 4e-05,
+                        "joinmarket.max_depth": 200000,
+                    }
+                )
+            )[0],
             blocksci_script="/runs/emulation/logs/run-a/.pipeline/blocksci-script.py",
         )
 
@@ -421,16 +425,18 @@ class PBSTemplateTest(unittest.TestCase):
     def test_blocksci_pbs_command_can_defer_report(self):
         command = blocksci_pbs_command(
             "run-a",
-            resolve_run_images(PipelineConfiguration.from_flat(
-                {
-                    "coinjoin_type": "joinmarket",
-                    "min_input_count": 1,
-                    "joinmarket_detector": "definite",
-                    "joinmarket_min_base_fee": 5000,
-                    "joinmarket_percentage_fee": 4e-05,
-                    "joinmarket_max_depth": 200000,
-                }
-            ))[0],
+            resolve_run_images(
+                PipelineConfiguration.from_paths(
+                    {
+                        "coinjoin_type": "joinmarket",
+                        "min_input_count": 1,
+                        "joinmarket.detector": "definite",
+                        "joinmarket.min_base_fee": 5000,
+                        "joinmarket.percentage_fee": 4e-05,
+                        "joinmarket.max_depth": 200000,
+                    }
+                )
+            )[0],
             include_report=False,
         )
 
@@ -440,16 +446,18 @@ class PBSTemplateTest(unittest.TestCase):
     def test_blocksci_pbs_command_can_persist_analysis_for_lightweight_report(self):
         command = blocksci_pbs_command(
             "run-a",
-            resolve_run_images(PipelineConfiguration.from_flat(
-                {
-                    "coinjoin_type": "wasabi2",
-                    "min_input_count": None,
-                    "joinmarket_detector": "definite",
-                    "joinmarket_min_base_fee": 5000,
-                    "joinmarket_percentage_fee": 4e-05,
-                    "joinmarket_max_depth": 200000,
-                }
-            ))[0],
+            resolve_run_images(
+                PipelineConfiguration.from_paths(
+                    {
+                        "coinjoin_type": "wasabi2",
+                        "min_input_count": None,
+                        "joinmarket.detector": "definite",
+                        "joinmarket.min_base_fee": 5000,
+                        "joinmarket.percentage_fee": 4e-05,
+                        "joinmarket.max_depth": 200000,
+                    }
+                )
+            )[0],
             include_report=False,
         )
 
@@ -465,13 +473,15 @@ class PBSTemplateTest(unittest.TestCase):
         # --cleanenv drops the image variables, so provenance must travel as options.
         command = blocksci_pbs_command(
             "run-a",
-            resolve_run_images(PipelineConfiguration.from_flat(
-                {
-                    "pbs_blocksci_image": "ghcr.io/x/blocksci@sha256:" + "b" * 64,
-                    "emulator_image": "ghcr.io/x/emulator:v1",
-                    "uploader_image": "ghcr.io/x/uploader:v1",
-                }
-            ))[0],
+            resolve_run_images(
+                PipelineConfiguration.from_paths(
+                    {
+                        "pbs.blocksci_image": "ghcr.io/x/blocksci@sha256:" + "b" * 64,
+                        "images.emulator": "ghcr.io/x/emulator:v1",
+                        "images.uploader": "ghcr.io/x/uploader:v1",
+                    }
+                )
+            )[0],
             include_report=False,
         )
 
@@ -483,14 +493,14 @@ class PBSTemplateTest(unittest.TestCase):
     def test_blocksci_export_pbs_command_is_report_only(self):
         command = blocksci_export_pbs_command(
             "run-a",
-            PipelineConfiguration.from_flat(
+            PipelineConfiguration.from_paths(
                 {
                     "coinjoin_type": "joinmarket",
                     "min_input_count": 1,
-                    "joinmarket_detector": "definite",
-                    "joinmarket_min_base_fee": 5000,
-                    "joinmarket_percentage_fee": 4e-05,
-                    "joinmarket_max_depth": 200000,
+                    "joinmarket.detector": "definite",
+                    "joinmarket.min_base_fee": 5000,
+                    "joinmarket.percentage_fee": 4e-05,
+                    "joinmarket.max_depth": 200000,
                 }
             ),
         )
@@ -502,14 +512,14 @@ class PBSTemplateTest(unittest.TestCase):
     def test_blocksci_script_command_exports_typed_detector_settings(self):
         command = blocksci_script_pbs_command(
             "mainnet-850000",
-            PipelineConfiguration.from_flat(
+            PipelineConfiguration.from_paths(
                 {
                     "coinjoin_type": "joinmarket",
                     "min_input_count": None,
-                    "joinmarket_detector": "possible",
-                    "joinmarket_min_base_fee": 4000,
-                    "joinmarket_percentage_fee": 5e-05,
-                    "joinmarket_max_depth": 150000,
+                    "joinmarket.detector": "possible",
+                    "joinmarket.min_base_fee": 4000,
+                    "joinmarket.percentage_fee": 5e-05,
+                    "joinmarket.max_depth": 150000,
                 }
             ),
         )
@@ -527,13 +537,13 @@ class PBSTemplateTest(unittest.TestCase):
     def test_blocksci_script_command_exports_the_pin_and_scan_range(self):
         command = blocksci_script_pbs_command(
             "mainnet-scan",
-            PipelineConfiguration.from_flat(
+            PipelineConfiguration.from_paths(
                 {
                     "coinjoin_type": "wasabi2",
                     "min_input_count": 15,
-                    "blocksci_pin_height": 850000,
-                    "blocksci_scan_start_height": 741213,
-                    "blocksci_scan_end_height": 850001,
+                    "blocksci.pin_height": 850000,
+                    "blocksci.scan_start_height": 741213,
+                    "blocksci.scan_end_height": 850001,
                 }
             ),
         )
@@ -545,7 +555,7 @@ class PBSTemplateTest(unittest.TestCase):
         self.assertIn("MIN_INPUT_COUNT=15", command)
 
     def test_blocksci_script_command_leaves_the_whole_index_by_default(self):
-        command = blocksci_script_pbs_command("mainnet-scan", PipelineConfiguration.from_flat({}))
+        command = blocksci_script_pbs_command("mainnet-scan", PipelineConfiguration.from_paths({}))
 
         for name in ("BLOCKSCI_MAX_BLOCK", "SCAN_START_HEIGHT", "SCAN_END_HEIGHT"):
             self.assertNotIn(f"{name}=", command)

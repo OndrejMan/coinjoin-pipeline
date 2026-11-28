@@ -10,6 +10,7 @@ LOGS_DIR="${EMULATION_LOGS_DIR:-${PROJECT_DIR}/emulation_logs}"
 BEFORE_FILE="$(mktemp)"
 AFTER_FILE="$(mktemp)"
 RUN_LOG="$(mktemp)"
+EXPERIMENT_FILE="$(mktemp --suffix=.yaml)"
 RUN_PID=""
 RUN_TIMEOUT_SECONDS="${RUN_TIMEOUT_SECONDS:-14400}"
 IMAGE_MODE="${1:-upstream}"
@@ -40,7 +41,7 @@ E2E_PARALLEL="${E2E_PARALLEL:-0}"
 PARALLEL_ARGS=()
 WORKFLOW="Docker"
 if [[ "${E2E_PARALLEL}" == 1 ]]; then
-  PARALLEL_ARGS=(--parallel)
+  PARALLEL_ARGS=(parallel=true)
   WORKFLOW="Docker --parallel"
 fi
 # delete.sh reaps every cjp-*-<pid> project whose pid is gone, so the suffix
@@ -48,6 +49,7 @@ fi
 COMPOSE_PROJECT="cjp-${E2E_SCENARIO_NAME}-$$"
 
 cleanup() {
+  rm -f "${EXPERIMENT_FILE}"
   if [[ -n "${RUN_PID}" ]] && kill -0 "${RUN_PID}" >/dev/null 2>&1; then
     stop_blocksci
     wait "${RUN_PID}" >/dev/null 2>&1 || true
@@ -101,6 +103,8 @@ fi
 
 echo "Running real ${WORKFLOW} workflow in ${IMAGE_MODE} image mode with logs in ${LOGS_DIR}..."
 echo "Using BlockSci image ${BLOCKSCI_IMAGE}, emulator image ${COINJOIN_EMULATOR_IMAGE}, and analyzer image ${COINJOIN_ANALYSIS_IMAGE}."
+python3 "${PROJECT_DIR}/tests/support/experiment.py" "${EXPERIMENT_FILE}" action=full-run engine=wasabi \
+  "scenario=${E2E_SCENARIO_FILE}" min_input_count=15 "${PARALLEL_ARGS[@]}"
 (
   (
     cd "${PROJECT_DIR}"
@@ -114,8 +118,7 @@ echo "Using BlockSci image ${BLOCKSCI_IMAGE}, emulator image ${COINJOIN_EMULATOR
     COINJOIN_EMULATOR_IMAGE_PREFIX="${COINJOIN_EMULATOR_IMAGE_PREFIX}" \
     COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD}" \
     COINJOIN_COMPOSE_PROJECT="${COMPOSE_PROJECT}" \
-    bash runIt.sh --engine wasabi --scenario "${E2E_SCENARIO_FILE}" \
-      --min-input-count 15 "${PARALLEL_ARGS[@]}"
+    bash runIt.sh run "${EXPERIMENT_FILE}"
   ) 2>&1 | tee "${RUN_LOG}"
 ) &
 RUN_PID=$!

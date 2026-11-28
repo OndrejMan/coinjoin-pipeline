@@ -95,7 +95,7 @@ def decide_resume(
 def _emulation_job(args: PipelineConfiguration) -> dict | None:
     """The run's emulation Job, None when Kubernetes says it does not exist."""
     kubeconfig = resolve_kubeconfig(args.kubernetes.kubeconfig)
-    name = s3_emulation_job_name(required(args.run_id, "--run-id"))
+    name = s3_emulation_job_name(required(args.run_id, "run_id"))
     try:
         result = kubectl(kubeconfig, "get", "job", name, "-o", "json", namespace=args.kubernetes.namespace)
     except FileNotFoundError as error:

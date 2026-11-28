@@ -1,9 +1,9 @@
-"""Input adapters for the single typed configuration schema."""
+"""Command-line input: an experiment's YAML file and the few values one launch overrides."""
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import MISSING, Field
+from dataclasses import MISSING, Field, fields
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, get_args, get_origin, get_type_hints
@@ -12,10 +12,9 @@ import yaml
 
 from .configuration import (
     ConfigurationError,
+    ImageConfiguration,
     PipelineAction,
     PipelineConfiguration,
-    cli_flag,
-    option_routes,
     option_specs,
     set_mapping_path,
     without_none,
@@ -32,7 +31,6 @@ def field_type(path: str):
     return without_none(model)
 
 
-CONFIGURATION_FLAG = "--from-configuration"
 # Host commands that need no experiment; DELEGATING_UTILITIES parse their own arguments.
 UTILITIES = (
     "version",
@@ -62,50 +60,69 @@ UTILITY_SUMMARIES = {
 ACTION_SUMMARIES = {
     "full-run": "emulate a new run, then analyze it and export its report",
     "emulate": "emulate a new run only",
-    "analyze": "BlockSci analysis of --run-dir",
-    "export": "unified report of --run-dir",
-    "coinjoin-analysis": "baseline coinjoin-analysis of --run-dir or --all-runs",
-    "mappings": "Wasabi mappings and Sake of --run-dir on PBS",
+    "analyze": "BlockSci analysis of run_dir",
+    "export": "unified report of run_dir",
+    "coinjoin-analysis": "baseline coinjoin-analysis of run_dir or all_runs",
+    "mappings": "Wasabi mappings and Sake of run_dir on PBS",
     "pbs-from-s3": "submit PBS analysis jobs for a run already in S3",
     "mainnet-sync": "synchronize Bitcoin Core, Dumplings and the BlockSci index on PBS",
     "initialize": "pull the emulation and analysis images through Compose",
-    "clean": "remove the local pipeline containers and volumes (needs --yes)",
+    "clean": "remove the local pipeline containers and volumes (needs yes: true)",
     "external-analyze": "analyze an external Bitcoin datadir against a baseline",
 }
 
-# Argument groups by the first segment of the model path; top-level fields are "".
+# The command line sets only what belongs to one launch or to this host, never the experiment.
+# They override the YAML file; the utilities accept the host ones (runtime, runs root, images).
+OVERRIDES = {
+    "dry_run": "--dry-run",
+    "run_id": "--run-id",
+    "run_dir": "--run-dir",
+    "resume_run": "--resume-run",
+    "runs_root": "--runs-root",
+    "runtime": "--runtime",
+    "images.version": "--version",
+    "images.registry": "--image-registry",
+    "images.local_build": "--local-build",
+    **{
+        f"images.{item.name}": f"--{item.name.replace('_', '-')}-image"
+        for item in fields(ImageConfiguration)
+        if item.name not in {"version", "registry", "local_build"}
+    },
+}
+HOST_OVERRIDES = frozenset(path for path in OVERRIDES if path in {"runtime", "runs_root"} or path.startswith("images."))
+
+# Sections of the YAML reference by the first segment of the model path; top-level keys are "".
 SECTIONS = {
     "": ("run options", None),
-    "kubernetes": ("Kubernetes driver", "Used with --driver kubernetes."),
-    "artifacts": ("artifact backend", "S3 options are required by --artifact-backend s3 and pbs-from-s3."),
+    "kubernetes": ("Kubernetes driver", "Used with driver kubernetes."),
+    "artifacts": ("artifact backend", "Required by artifacts.backend s3 and by pbs-from-s3."),
     "images": (
         "component images",
-        "Each image is the explicit option, else its environment variable, else the --local-build tag, "
-        "else the release tag --version.",
+        "Each image is its key or override, else its environment variable, else the images.local_build tag, "
+        "else the release tag images.version.",
     ),
     "stages": ("PBS stages", "Run an analyzer as a PBS job instead of a local container."),
-    "blocksci": ("BlockSci", "Reusable tasks are submitted with pbs-from-s3 --blocksci-pbs."),
+    "blocksci": ("BlockSci", "Reusable tasks are submitted with pbs-from-s3 stages.blocksci."),
     "joinmarket": ("JoinMarket detector", None),
-    "mappings": ("Wasabi mappings and Sake", "Used with --mappings-pbs (Wasabi runs only)."),
+    "mappings": ("Wasabi mappings and Sake", "Used with stages.mappings (Wasabi runs only)."),
     "coinjoin_analysis": (
         "coinjoin-analysis programs",
         "Run one upstream program instead of the default baseline; see docs/coinjoin-analysis-operations.md.",
     ),
     "pbs": (
         "PBS resources and images",
-        "A stage-specific --pbs-<stage>-* value overrides the shared --pbs-* fallback, "
-        "which overrides the stage's default.",
+        "A stage's pbs.<stage>.* value overrides the shared pbs.* fallback, which overrides the stage's default.",
     ),
     "mainnet": ("mainnet-sync", "Only for action mainnet-sync; see docs/mainnet-synchronization.md."),
-    "external": ("external-analyze", "Only for `cjp external-analyze`."),
+    "external": ("external-analyze", "Only for action external-analyze."),
 }
 
-# Help text by model path. The YAML key and the default are appended automatically.
+# Help text by model path. The default is appended automatically.
 HELP = {
     "runtime": "container runtime for local stages",
     "runs_root": "directory holding the run directories (default: $EMULATION_LOGS_DIR, else ./coinjoin-runs)",
     "engine": "CoinJoin implementation to emulate and analyze",
-    "coinjoin_type": "protocol the analyzers look for (default: joinmarket for --engine joinmarket)",
+    "coinjoin_type": "protocol the analyzers look for (default: joinmarket for engine joinmarket)",
     "driver": "where the emulation runs",
     "scenario": "scenario JSON file, or the file name of a packaged scenario",
     "run_dir": "existing run, as a name inside the runs root or a path to it",
@@ -118,7 +135,7 @@ HELP = {
     "dry_run": "validate and print the plan without starting containers, jobs or uploads",
     "parallel": "run the local analysis stages of a full-run in parallel",
     "resume_run": (
-        "continue the S3 full-run of --run-id from its markers and recorded PBS jobs "
+        "continue the S3 full-run of run_id from its markers and recorded PBS jobs "
         "after the process that drove it died; give the original configuration"
     ),
     "all_runs": "run coinjoin-analysis over every run in the runs root",
@@ -126,9 +143,9 @@ HELP = {
     "analysis_action": "collect_docker collects the emulator logs first; analyze_only needs an existing baseline",
     "dumplings_uri": "S3 prefix holding the Dumplings Scanner/ copy and its manifest.json, used as the mainnet baseline",
     "explorer_uri": (
-        "with --dumplings-uri: parse every protocol and update the CoinJoin Explorer data under this fixed S3 prefix"
+        "with dumplings_uri: parse every protocol and update the CoinJoin Explorer data under this fixed S3 prefix"
     ),
-    "explorer_source": "CoinJoin Explorer's cj_browser directory; with --explorer-uri the job also renders its page",
+    "explorer_source": "CoinJoin Explorer's cj_browser directory; with explorer_uri the job also renders its page",
     "emulation_timeout": "seconds to wait for the emulation before giving up",
     "stage_exporters": "always upload the exporters into the S3 run prefix, even when no PBS stage needs them",
     "kubernetes.namespace": "namespace of the run's Kubernetes resources",
@@ -159,7 +176,7 @@ HELP = {
     "artifacts.endpoint_url": "S3-compatible HTTP(S) endpoint URL",
     "artifacts.secret_name": (
         "existing Kubernetes Secret with the S3 credentials of the emulation Job; without it the "
-        "frontend creates a temporary Secret per run from --s3-credentials-file and deletes it after the upload"
+        "frontend creates a temporary Secret per run from artifacts.credentials_file and deletes it after the upload"
     ),
     "artifacts.credentials_file": "absolute path of the s5cmd credentials file on the frontend",
     "artifacts.profile": "profile name inside the credentials file",
@@ -176,18 +193,18 @@ HELP = {
     "stages.mappings": "run the Wasabi mappings enumerator and Sake as PBS jobs",
     "blocksci.workflow": "combined parses and detects in one job; reusable keeps the index; cached reuses one",
     "blocksci.task": "what the BlockSci job does; detect is the regular analysis",
-    "blocksci.script": "Python script run over the parsed index (local analyze, or --blocksci-task script)",
+    "blocksci.script": "Python script run over the parsed index (local analyze, or blocksci.task script)",
     "blocksci.cache_source_run_id": "run whose BlockSci index cache this task reads",
-    "blocksci.notebook_port": "preferred Jupyter port of --blocksci-task notebook (1024-65535)",
-    "blocksci.notebooks_dir": "notebook directory of --blocksci-task notebook",
+    "blocksci.notebook_port": "preferred Jupyter port of blocksci.task notebook (1024-65535)",
+    "blocksci.notebooks_dir": "notebook directory of blocksci.task notebook",
     "blocksci.external_bitcoin_datadir": "Bitcoin datadir to parse (reusable parse or cached update)",
     "blocksci.bitcoin_blocks_uri": "S3 prefix of a bitcoin-block-archive to parse (reusable parse or cached update)",
     "blocksci.external_blocksci_dir": "existing BlockSci index directory for a reusable parse",
-    "blocksci.external_baseline_uri": "S3 URI of the baseline compared by --blocksci-task external",
+    "blocksci.external_baseline_uri": "S3 URI of the baseline compared by blocksci.task external",
     "blocksci.external_false_cjtxs_uri": "S3 URI of curated Dumplings false positives (false_cjtxs.json)",
     "blocksci.network": "chain of an external Bitcoin source",
     "blocksci.max_block": "last height to parse from an external Bitcoin source",
-    "blocksci.expected_block_hash": "expected block hash at --blocksci-max-block (required for mainnet archives)",
+    "blocksci.expected_block_hash": "expected block hash at blocksci.max_block (required for mainnet archives)",
     "blocksci.pin_height": "script or external task: the last height the analysis may see",
     "blocksci.scan_start_height": "script or external task: first scanned height (inclusive)",
     "blocksci.scan_end_height": "script or external task: end of the scanned range (exclusive)",
@@ -202,12 +219,12 @@ HELP = {
     "blocksci.index_in_scratch": "script, external or notebook task: restore the index backup into the job's scratch",
     "blocksci.restore_index": "notebook task: fill an incomplete index directory from the backup and keep it there",
     "blocksci.dumplings_uri": (
-        "with --blocksci-index-in-scratch or --blocksci-restore-index: S3 prefix of the Dumplings copy placed "
+        "with blocksci.index_in_scratch or blocksci.restore_index: S3 prefix of the Dumplings copy placed "
         "next to the index, seen at /mnt/dumplings"
     ),
     "blocksci.dumplings_dir": "notebook task over an index read in place: Scanner/ read in place, seen at /mnt/dumplings",
-    "blocksci.storage_report_uri": "with --blocksci-restore-index: S3 object receiving the kept copy's size",
-    "pbs.image": "Singularity image of every PBS stage without its own --pbs-*-image",
+    "blocksci.storage_report_uri": "with blocksci.restore_index: S3 object receiving the kept copy's size",
+    "pbs.image": "Singularity image of every PBS stage without its own pbs.*_image",
     "pbs.bitcoin_datadir": "Bitcoin datadir the PBS BlockSci stage reads",
     "coinjoin_analysis.actions": "program operation (repeatable)",
     "coinjoin_analysis.target_paths": "program target path (repeatable)",
@@ -219,7 +236,7 @@ HELP = {
     "external.baseline": "baseline to compare the detections against",
     "external.false_cjtxs": "false_cjtxs.json applied to the baseline (repeatable)",
     "external.min_free_gb": "free space the run directory needs, in GiB (default: 20)",
-    "external.resume": "resume the external analysis of --run-id",
+    "external.resume": "resume the external analysis of run_id",
     "external.network": "chain of the external Bitcoin datadir",
     "joinmarket.detector": "deprecated subset-matching JoinMarket scan of the report; definite matches more strictly",
     "joinmarket.min_base_fee": (
@@ -297,7 +314,7 @@ HELP = {
 
 
 def option_help(path: str, item: Field) -> str:
-    """Help text of one option: its description, YAML key and effective default."""
+    """Help text of one setting with its effective default."""
     parts = path.split(".")
     if parts[0] == "pbs" and len(parts) == 3:
         stage, name = parts[1], parts[2]
@@ -305,29 +322,24 @@ def option_help(path: str, item: Field) -> str:
         if name == "multijob":
             text += " scratch location"
         else:
-            text += f"; falls back to --pbs-{name.replace('_', '-')}"
+            text += f"; falls back to pbs.{name}"
     else:
         text = HELP.get(path, "")
-    details = [f"YAML: {path}"]
     default = item.default
     if default is not MISSING and default not in (None, False, ()):
-        details.append(f"default: {default}")
-    suffix = "[" + "; ".join(details) + "]"
-    return f"{text} {suffix}" if text else suffix
+        text += f" [default: {default}]"
+    return text
 
 
 def _metavar(path: str) -> str:
-    if path.endswith("_image") or (path.startswith("images.") and path != "images.version"):
+    if path.startswith("images.") and path != "images.version":
         return "IMAGE"
     return path.rsplit(".", 1)[-1].upper()
 
 
 def action_index(argv: list[str]) -> int | None:
-    """Return the position of the action word, skipping options and their values."""
-    takes_value = {CONFIGURATION_FLAG}
-    for path, destination, _ in option_specs():
-        if field_type(path) is not bool:
-            takes_value.add(cli_flag(destination))
+    """Return the position of the command word, skipping options and their values."""
+    takes_value = {flag for path, flag in OVERRIDES.items() if field_type(path) is not bool}
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -344,9 +356,20 @@ def action_word(argv: list[str]) -> str | None:
     return None if index is None else argv[index]
 
 
+def yaml_reference() -> list[str]:
+    """Every YAML key with its help text, grouped like the model."""
+    sections: dict[str, list[str]] = {section: [] for section in SECTIONS}
+    for path, item in option_specs():
+        sections[path.split(".", 1)[0] if "." in path else ""].append(f"    {path}  {option_help(path, item)}")
+    lines = []
+    for section, (title, text) in SECTIONS.items():
+        lines += ["", f"  {title}:" + (f" {text}" if text else ""), *sections[section]]
+    return lines
+
+
 def _epilog() -> str:
     width = max(map(len, (*ACTION_SUMMARIES, *UTILITY_SUMMARIES)))
-    lines = ["actions:"]
+    lines = ["actions (the YAML key action):"]
     lines += [f"  {name:<{width}}  {summary}" for name, summary in ACTION_SUMMARIES.items()]
     delegating = [name for name in UTILITIES if name in DELEGATING_UTILITIES]
     own_help = ", ".join(delegating[:-1]) + " and " + delegating[-1]
@@ -356,12 +379,11 @@ def _epilog() -> str:
         "",
         "examples:",
         "  cjp run examples/metacentrum-regtest-s3.yaml --dry-run",
-        "  cjp full-run --engine joinmarket --dry-run",
-        "  cjp analyze --run-dir <run-id>",
+        "  cjp run examples/stages/analyze.yaml --run-dir <run-id>",
         "  cjp watch --run-id <run-id> --pbs-only",
         "",
-        "Every option is also a YAML key (shown as YAML: ...); options after `run CONFIG.yaml` override it.",
-        "Use --dry-run to validate and render an execution without starting work.",
+        "YAML keys:",
+        *yaml_reference(),
         "",
         "exit codes:",
     ]
@@ -369,89 +391,68 @@ def _epilog() -> str:
     return "\n".join(lines)
 
 
-def build_parser(paths: set[str] | None = None, *, add_help: bool = True) -> argparse.ArgumentParser:
+def build_parser(paths: set[str] | frozenset[str] | None = None, *, add_help: bool = True) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cjp",
-        usage=("cjp ACTION [OPTIONS]\n       cjp run CONFIG.yaml [OPTIONS]\n       cjp UTILITY [UTILITY OPTIONS]"),
-        description="Run a CoinJoin experiment from YAML or explicit options.",
+        usage="cjp run CONFIG.yaml [OVERRIDES]\n       cjp UTILITY [UTILITY OPTIONS]",
+        description="Run a CoinJoin experiment described by a YAML file.",
         add_help=add_help,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_epilog(),
     )
-    parser.add_argument("action", nargs="?", default=argparse.SUPPRESS, help="execution action (listed below)")
-    parser.add_argument(
-        CONFIGURATION_FLAG,
-        type=Path,
-        metavar="CONFIG.yaml",
-        help="load an experiment from YAML (same as `cjp run CONFIG.yaml`)",
-    )
-    # Created in SECTIONS order, which is the order --help lists them in.
-    groups = {section: parser.add_argument_group(title, text) for section, (title, text) in SECTIONS.items()}
-    for path, destination, item in option_specs():
+    parser.add_argument("command", nargs="?", default=argparse.SUPPRESS, help="run, or a utility (listed below)")
+    group = parser.add_argument_group("overrides", "Replace the YAML file's value for this launch.")
+    for path, flag in OVERRIDES.items():
         if paths is not None and path not in paths:
             continue
-        section = path.split(".", 1)[0] if "." in path else ""
         annotation = field_type(path)
-        options: dict[str, object] = {
-            "dest": destination,
-            "default": argparse.SUPPRESS,
-            "help": option_help(path, item),
-        }
+        options: dict[str, object] = {"dest": path, "default": argparse.SUPPRESS, "help": HELP.get(path, "")}
         if annotation is bool:
             options["action"] = "store_true"
-        elif get_origin(annotation) is tuple:
-            options.update(action="append", type=get_args(annotation)[0])
         elif get_origin(annotation) is Literal:
             options.update(choices=get_args(annotation))
         else:
             options.update(type=annotation, metavar=_metavar(path))
-        groups[section].add_argument(cli_flag(destination), **options)  # type: ignore[arg-type]
+        group.add_argument(flag, **options)  # type: ignore[arg-type]
     return parser
 
 
-def _known_action(action: str) -> str:
-    """The action, once checked against the pipeline's actions."""
-    if action not in get_args(PipelineAction):
-        raise ConfigurationError(
-            f"unknown action {action!r}; choose one of: {', '.join(get_args(PipelineAction))}, "
-            f"or a utility: {', '.join(UTILITIES)}"
-        )
-    return action
+def _read_yaml(path: Path) -> dict[str, object]:
+    try:
+        data = yaml.safe_load(path.expanduser().read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise ConfigurationError(f"cannot read configuration {path}: {error}") from error
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise ConfigurationError("configuration must be a mapping")
+    if "action" not in data:
+        raise ConfigurationError(f"configuration {path} has no action; add one, e.g. `action: full-run`")
+    return data
 
 
 def load_configuration(argv: list[str]) -> PipelineConfiguration:
-    """Decode the YAML file, when given, and the explicit options into one configuration."""
+    """Decode `cjp run CONFIG.yaml [OVERRIDES]` into one configuration."""
     index = action_index(argv)
-    if index is not None:
-        head, action, tail = argv[:index], argv[index], argv[index + 1 :]
-        if action == "run":
-            if tail[:1] and tail[0] in {"-h", "--help"}:
-                argv = [*head, *tail]
-            elif not tail or tail[0].startswith("-"):
-                raise ConfigurationError("run requires a YAML configuration path: cjp run CONFIG.yaml")
-            else:
-                argv = [*head, CONFIGURATION_FLAG, tail[0], *tail[1:]]
-    parsed = vars(build_parser().parse_args(argv))
-    path = parsed.pop("from_configuration", None)
-    data = {}
-    if path is not None:
-        if "action" in parsed:
-            raise ConfigurationError("put the action in YAML when using --from-configuration")
-        try:
-            data = yaml.safe_load(path.expanduser().read_text(encoding="utf-8"))
-            if data is None:
-                data = {}
-        except (OSError, yaml.YAMLError) as error:
-            raise ConfigurationError(f"cannot read configuration {path}: {error}") from error
-        if not isinstance(data, dict):
-            raise ConfigurationError("configuration must be a mapping")
-        # A YAML file names its experiment; the command line's default full-run would start an
-        # emulation the file never asked for.
-        if "action" not in data:
-            raise ConfigurationError(f"configuration {path} has no action; add one, e.g. `action: full-run`")
-    routes = option_routes()
-    for key, value in parsed.items():
-        if key == "action":
-            value = _known_action(value)
-        set_mapping_path(data, routes[key], value)
+    word = None if index is None else argv[index]
+    if index is None or word != "run":
+        if word in get_args(PipelineAction):
+            raise ConfigurationError(
+                f"experiments run from YAML: put `action: {word}` in a file and start it with cjp run FILE.yaml"
+            )
+        raise ConfigurationError(
+            f"unknown command {word!r}; start an experiment with cjp run CONFIG.yaml, "
+            f"or a utility: {', '.join(UTILITIES)}"
+        )
+    head, tail = argv[:index], argv[index + 1 :]
+    if tail[:1] and tail[0] in {"-h", "--help"}:
+        build_parser().parse_args(["--help"])
+    if not tail or tail[0].startswith("-"):
+        raise ConfigurationError("run requires a YAML configuration path: cjp run CONFIG.yaml")
+    data = _read_yaml(Path(tail[0]))
+    parsed = vars(build_parser().parse_args([*head, *tail[1:]]))
+    if "command" in parsed:
+        raise ConfigurationError(f"unexpected argument {parsed['command']!r} after the configuration path")
+    for path, value in parsed.items():
+        set_mapping_path(data, path, value)
     return PipelineConfiguration.from_mapping(data)

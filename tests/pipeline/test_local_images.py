@@ -4,11 +4,14 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
+
+from coinjoin_pipeline.arguments import load_configuration
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -157,6 +160,51 @@ local_images_import test-cluster
     )
     assert result.returncode == 0, result.stderr
     assert bool(commands) == (mode == "local")
+
+
+def test_run_all_keeps_the_experiment_used_by_the_launch_command(tmp_path):
+    project = tmp_path / "pipeline checkout"
+    support = project / "tests/support"
+    support.mkdir(parents=True)
+    shutil.copyfile(PROJECT_ROOT / "run-all.sh", project / "run-all.sh")
+    shutil.copyfile(HELPER.with_name("experiment.py"), support / "experiment.py")
+    (project / "runIt.sh").write_text('printf "%s\\n" "$@" > "$LAUNCH_ARGUMENTS"\n')
+    docker = tmp_path / "docker"
+    docker.write_text("#!/bin/sh\nexit 0\n")
+    docker.chmod(0o755)
+    scenario = tmp_path / "scenario with spaces.json"
+    scenario.write_text(json.dumps({"name": "scenario", "default_version": "joinmarket"}))
+    launch_arguments = tmp_path / "launch-arguments"
+
+    result = subprocess.run(
+        ["bash", str(project / "run-all.sh"), "github", "--skip-pull", "--skip-tests", "--scenario", scenario.name],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "EMULATION_LOGS_DIR": "run results",
+            "LAUNCH_ARGUMENTS": str(launch_arguments),
+            "BLOCKSCI_IMAGE": "blocksci:test",
+            "COINJOIN_EMULATOR_IMAGE": "emulator:test",
+            "COINJOIN_ANALYSIS_IMAGE": "analysis:test",
+        },
+        text=True,
+        capture_output=True,
+        timeout=5,
+    )
+
+    assert result.returncode == 0, result.stderr
+    arguments = launch_arguments.read_text().splitlines()
+    runs_root = tmp_path / "run results"
+    assert Path(arguments[1]).parent == runs_root / ".run-all-experiments"
+    config = load_configuration(arguments)
+    assert (config.action, config.engine, config.scenario) == ("full-run", "joinmarket", str(scenario))
+    assert (config.runs_root, config.run_id) == (str(runs_root), None)
+    assert (config.images.blocksci, config.images.emulator, config.images.coinjoin_analysis) == (
+        "blocksci:test",
+        "emulator:test",
+        "analysis:test",
+    )
 
 
 @pytest.mark.parametrize(

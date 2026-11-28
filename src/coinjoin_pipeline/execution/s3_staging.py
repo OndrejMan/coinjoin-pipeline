@@ -136,7 +136,7 @@ def ensure_staged_exporters(args: PipelineConfiguration) -> None:
             f"run prefix {prefix} carries an exporter tree without {', '.join(missing)}; "
             "an older pipeline staged it or a previous upload died halfway. "
             "Re-staging it here would mix exporter versions across the run's stages, so "
-            "start a fresh --run-id (or delete the prefix and restage it deliberately)"
+            "start a fresh run_id (or delete the prefix and restage it deliberately)"
         )
     print(f"[stage] Run prefix has no exporters; uploading from {EXPORTERS_ROOT}")
     upload_exporters(target.access, target.run_prefix, EXPORTERS_ROOT)
@@ -145,7 +145,7 @@ def ensure_staged_exporters(args: PipelineConfiguration) -> None:
 def stage_kubernetes_s3_run(args: PipelineConfiguration) -> None:
     """Prepare the S3 run prefix before any Kubernetes Job is created.
 
-    Shared by ``full-run --artifact-backend s3`` and the standalone ``emulate``
+    Shared by ``full-run artifacts.backend s3`` and the standalone ``emulate``
     S3 branch. The preflights (S3 access, Kubernetes permissions, and a run ID that
     no Job, pod or temporary Secret in the namespace carries yet) run before the
     upload on purpose: a failed check must not leave staged exporters behind under

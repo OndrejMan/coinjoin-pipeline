@@ -2,6 +2,7 @@ import fcntl
 import json
 import os
 import re
+import shlex
 from pathlib import Path
 from unittest import mock
 
@@ -9,6 +10,7 @@ import pytest
 
 from coinjoin_pipeline import cli
 from coinjoin_pipeline.arguments import load_configuration
+from coinjoin_pipeline.configuration import PipelineConfiguration, set_mapping_path
 from coinjoin_pipeline.context import RunContext
 from coinjoin_pipeline.doctor import (
     Capability,
@@ -21,6 +23,16 @@ from coinjoin_pipeline.runs import adopt_recorded_launches, run_id_for, store_ho
 from coinjoin_pipeline.run_ids import validate_run_id
 
 
+def run_argv(tmp_path, values, *overrides):
+    """`cjp run FILE.yaml OVERRIDES` for an experiment given as YAML paths."""
+    data = {}
+    for path, value in values.items():
+        set_mapping_path(data, path, value)
+    target = tmp_path / "experiment.yaml"
+    target.write_text(json.dumps(data), encoding="utf-8")
+    return ["run", str(target), *overrides]
+
+
 def test_executes_typed_configuration_in_process_and_restores_environment(tmp_path):
     observed = []
 
@@ -30,27 +42,21 @@ def test_executes_typed_configuration_in_process_and_restores_environment(tmp_pa
         assert context.config.engine == "joinmarket"
         assert context.config.coinjoin_type == "joinmarket"
 
+    argv = run_argv(
+        tmp_path,
+        {"action": "full-run", "engine": "joinmarket", "scenario": "scenarios/defaultJoinMarket.json"},
+        "--runs-root",
+        str(tmp_path),
+        "--run-id",
+        "run-a",
+    )
     with (
-        mock.patch.dict(os.environ, {"PIPELINE_RUN_ID": "outside"}),
+        mock.patch.dict(os.environ, {"PIPELINE_RUN_ID": "outside", "BLOCKSCI_PULL_POLICY": "never"}),
+        mock.patch.object(cli.shutil, "which", return_value=None),
         mock.patch.object(cli, "doctor_check", return_value=[]),
         mock.patch.object(cli, "execute", side_effect=execute),
     ):
-        assert (
-            cli.main(
-                [
-                    "full-run",
-                    "--engine",
-                    "joinmarket",
-                    "--scenario",
-                    "scenarios/defaultJoinMarket.json",
-                    "--runs-root",
-                    str(tmp_path),
-                    "--run-id",
-                    "run-a",
-                ]
-            )
-            == 0
-        )
+        assert cli.main(argv) == 0
         assert os.environ["PIPELINE_RUN_ID"] == "outside"
     data = json.loads((tmp_path / "run-a/research_manifest.json").read_text())
     assert data["mode"] == "emulator"
@@ -58,6 +64,11 @@ def test_executes_typed_configuration_in_process_and_restores_environment(tmp_pa
     assert data["host_launcher"]["status"] == "completed"
     assert data["host_launcher"]["configuration"]["engine"] == "joinmarket"
     assert len(observed) == 1
+    replay = data["host_launcher"]["user_command"]
+    arguments = shlex.split(replay)
+    assert arguments[:2] == ["env", "BLOCKSCI_PULL_POLICY=never"]
+    assert arguments[-len(argv) - 1 :] == [str(cli.PROJECT_ROOT / "runIt.sh"), *argv]
+    assert replay == observed[0].environment["REPRODUCTION_COMMAND"]
 
 
 def test_failed_execution_finishes_manifest(tmp_path):
@@ -65,9 +76,8 @@ def test_failed_execution_finishes_manifest(tmp_path):
         mock.patch.object(cli, "doctor_check", return_value=[]),
         mock.patch.object(cli, "execute", side_effect=RuntimeError("failed stage")),
     ):
-        argv = ["emulate", "--scenario", "scenarios/overactive-local.json", "--runs-root", str(tmp_path)]
-        argv += ["--run-id", "failed-run"]
-        assert cli.main(argv) == 5
+        values = {"action": "emulate", "scenario": "scenarios/overactive-local.json"}
+        assert cli.main(run_argv(tmp_path, values, "--runs-root", str(tmp_path), "--run-id", "failed-run")) == 5
     manifest = json.loads((tmp_path / "failed-run/research_manifest.json").read_text())
     assert manifest["host_launcher"]["status"] == "failed"
     assert manifest["host_launcher"]["exit_code"] == 5
@@ -109,17 +119,16 @@ def test_manifest_records_effective_environment_without_secrets(tmp_path, fails)
         mock.patch.object(cli, "execute", side_effect=execute),
     ):
         code = cli.main(
-            [
-                "emulate",
-                "--scenario",
-                "scenarios/overactive-local.json",
+            run_argv(
+                tmp_path,
+                {"action": "emulate", "scenario": "scenarios/overactive-local.json"},
                 "--runs-root",
                 str(tmp_path),
                 "--run-id",
                 "run-a",
                 "--blocksci-image",
                 "blocksci:explicit",
-            ]
+            )
         )
         assert code == (5 if fails else 0)
         assert dict(os.environ) == inherited
@@ -144,16 +153,15 @@ def test_dry_run_does_not_overwrite_manifest_or_preflight_runtime(tmp_path):
     ):
         assert (
             cli.main(
-                [
-                    "full-run",
-                    "--scenario",
-                    "scenarios/overactive-local.json",
+                run_argv(
+                    tmp_path,
+                    {"action": "full-run", "scenario": "scenarios/overactive-local.json"},
                     "--runs-root",
                     str(tmp_path),
                     "--run-id",
                     "run-a",
                     "--dry-run",
-                ]
+                )
             )
             == 0
         )
@@ -163,30 +171,20 @@ def test_dry_run_does_not_overwrite_manifest_or_preflight_runtime(tmp_path):
     assert not (tmp_path / ".notebooks").exists()
 
 
-S3_FULL_RUN = [
-    "full-run",
-    "--scenario",
-    "scenarios/overactive-local.json",
-    "--engine",
-    "wasabi",
-    "--driver",
-    "kubernetes",
-    "--artifact-backend",
-    "s3",
-    "--s3-secret-name",
-    "coinjoin-s3",
-    "--reuse-namespace",
-    "--artifact-uri",
-    "s3://bucket/runs",
-    "--s3-endpoint-url",
-    "https://s3.example",
-    "--s3-credentials-file",
-    "/tmp/credentials",
-    "--s3-profile",
-    "test",
-    "--run-id",
-    "run-a",
-]
+S3_FULL_RUN = {
+    "action": "full-run",
+    "scenario": "scenarios/overactive-local.json",
+    "engine": "wasabi",
+    "driver": "kubernetes",
+    "artifacts.backend": "s3",
+    "artifacts.secret_name": "coinjoin-s3",
+    "kubernetes.reuse_namespace": True,
+    "artifacts.uri": "s3://bucket/runs",
+    "artifacts.endpoint_url": "https://s3.example",
+    "artifacts.credentials_file": "/tmp/credentials",
+    "artifacts.profile": "test",
+    "run_id": "run-a",
+}
 ORIGINAL_LAUNCH = {"host_launcher": {"status": "completed", "evidence": "original"}}
 
 
@@ -203,7 +201,7 @@ def test_resume_keeps_the_original_launch_record(tmp_path):
         mock.patch.object(cli, "doctor_check", return_value=[]),
         mock.patch.object(cli, "execute") as execute,
     ):
-        assert cli.main([*S3_FULL_RUN, "--runs-root", str(tmp_path), "--resume-run"]) == 0
+        assert cli.main(run_argv(tmp_path, S3_FULL_RUN, "--runs-root", str(tmp_path), "--resume-run")) == 0
     execute.assert_called_once()
     data = json.loads(manifest.read_text())
     assert data["earlier_host_launchers"] == [ORIGINAL_LAUNCH["host_launcher"]]
@@ -217,7 +215,7 @@ def test_new_run_refuses_a_run_id_that_records_a_launch(tmp_path, capsys):
         mock.patch.object(cli, "doctor_check", return_value=[]),
         mock.patch.object(cli, "execute") as execute,
     ):
-        assert cli.main([*S3_FULL_RUN, "--runs-root", str(tmp_path)]) == 2
+        assert cli.main(run_argv(tmp_path, S3_FULL_RUN, "--runs-root", str(tmp_path))) == 2
     execute.assert_not_called()
     assert json.loads(manifest.read_text()) == ORIGINAL_LAUNCH
     assert "--resume-run" in capsys.readouterr().err
@@ -232,7 +230,7 @@ def test_command_on_a_locked_run_leaves_its_record_alone(tmp_path):
     ):
         # The process that still drives the run holds its lock.
         fcntl.flock(running.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        assert cli.main([*S3_FULL_RUN, "--runs-root", str(tmp_path), "--resume-run"]) == 5
+        assert cli.main(run_argv(tmp_path, S3_FULL_RUN, "--runs-root", str(tmp_path), "--resume-run")) == 5
     execute.assert_not_called()
     assert json.loads(manifest.read_text()) == ORIGINAL_LAUNCH
 
@@ -252,7 +250,7 @@ def test_s3_run_uploads_its_record_when_staged_and_when_finished(tmp_path):
         ),
         mock.patch.object(s3_run_manifest, "upload_s3_file", side_effect=upload),
     ):
-        assert cli.main([*S3_FULL_RUN, "--runs-root", str(tmp_path)]) == 0
+        assert cli.main(run_argv(tmp_path, S3_FULL_RUN, "--runs-root", str(tmp_path))) == 0
     uri = "s3://bucket/runs/run-a/research_manifest.json"
     assert statuses == [(uri, "prepared"), (uri, "completed")]
 
@@ -299,38 +297,44 @@ def test_utility_routes_without_container_preflight(action, module, tmp_path):
 
 
 @pytest.mark.parametrize("action", ["analyze", "export", "coinjoin-analysis", "mappings"])
-def test_stage_requires_selected_run(action):
+def test_stage_requires_selected_run(action, tmp_path):
     with mock.patch.object(cli, "execute") as execute:
-        assert cli.main([action, "--dry-run"]) == 2
+        assert cli.main(run_argv(tmp_path, {"action": action}, "--dry-run")) == 2
     execute.assert_not_called()
 
 
 @pytest.mark.parametrize(
-    "args",
+    "values,overrides",
     [
-        ["clean"],
-        ["full-run", "--test-values"],
-        ["full-run", "--min-input-count", "0"],
-        ["builder"],
+        ({"action": "clean"}, ()),
+        ({"action": "full-run"}, ("--test-values", "--dry-run")),
+        ({"action": "full-run"}, ("--engine", "joinmarket", "--dry-run")),
+        ({"action": "full-run", "min_input_count": 0}, ("--dry-run",)),
+        ({"action": "full-run", "test_values": True}, ("--dry-run",)),
     ],
 )
-def test_invalid_input_never_executes(args):
+def test_invalid_input_never_executes(values, overrides, tmp_path):
     with mock.patch.object(cli, "execute") as execute:
-        assert cli.main([*args, "--dry-run"] if args[0] != "clean" else args) == 2
+        assert cli.main(run_argv(tmp_path, values, *overrides)) == 2
+    execute.assert_not_called()
+
+
+@pytest.mark.parametrize("argv", [["builder"], ["full-run", "--dry-run"]])
+def test_an_unknown_command_never_executes(argv):
+    with mock.patch.object(cli, "execute") as execute:
+        assert cli.main(argv) == 2
     execute.assert_not_called()
 
 
 def test_images_resolve_once_before_pbs_rendering():
-    config = load_configuration(
-        [
-            "full-run",
-            "--analysis-pbs",
-            "--blocksci-pbs",
-            "--version",
-            "stable",
-            "--blocksci-image",
-            "registry/blocksci:chosen",
-        ]
+    config = PipelineConfiguration.from_paths(
+        {
+            "action": "full-run",
+            "stages.analysis": True,
+            "stages.blocksci": True,
+            "images.version": "stable",
+            "images.blocksci": "registry/blocksci:chosen",
+        }
     )
     context = RunContext.prepare(config, "cjp")
     assert context.config.pbs.blocksci_image == "registry/blocksci:chosen"
@@ -340,13 +344,8 @@ def test_images_resolve_once_before_pbs_rendering():
 
 def test_explicit_pbs_image_override_wins():
     context = RunContext.prepare(
-        load_configuration(
-            [
-                "full-run",
-                "--blocksci-pbs",
-                "--pbs-blocksci-image",
-                "docker://registry/blocksci:pbs",
-            ]
+        PipelineConfiguration.from_paths(
+            {"action": "full-run", "stages.blocksci": True, "pbs.blocksci_image": "docker://registry/blocksci:pbs"}
         ),
         "cjp",
     )
@@ -354,7 +353,7 @@ def test_explicit_pbs_image_override_wins():
 
 
 def test_capabilities_follow_actual_delegation():
-    config = load_configuration(["full-run", "--analysis-pbs"])
+    config = PipelineConfiguration.from_paths({"action": "full-run", "stages.analysis": True})
     assert "emulator" in required_image_components(config)
     assert "coinjoin_analysis" not in required_image_components(config)
     assert {
@@ -397,22 +396,24 @@ def test_manifest_redacts_secrets():
 def test_run_id_is_safe_and_bounded(tmp_path):
     scenario = tmp_path / "scenario.json"
     scenario.write_text(json.dumps({"name": "Příliš žluťoučký " * 20}))
-    value = run_id_for(load_configuration(["emulate", "--scenario", str(scenario)]))
+    value = run_id_for(PipelineConfiguration.from_paths({"action": "emulate", "scenario": str(scenario)}))
     assert validate_run_id(value) == value
     assert len(value) <= 63
     # Seconds keep two launches within one minute apart.
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_.+", value)
 
 
-def test_stage_flags_have_only_the_kebab_case_spelling() -> None:
-    from coinjoin_pipeline.arguments import load_configuration
+def test_yaml_keys_have_one_spelling() -> None:
+    from coinjoin_pipeline.configuration import ConfigurationError
 
-    config = load_configuration(["pbs-from-s3", "--analysis-pbs", "--blocksci-pbs", "--mappings-pbs"])
+    config = PipelineConfiguration.from_paths(
+        {"action": "pbs-from-s3", "stages.analysis": True, "stages.blocksci": True, "stages.mappings": True}
+    )
 
     assert (config.stages.analysis, config.stages.blocksci, config.stages.mappings) == (True, True, True)
-    for removed in ("--analysisPbs", "--blocksciPbs", "--mappingsPbs", "--blocksciScript", "--fromConfiguration"):
-        with pytest.raises(SystemExit):
-            load_configuration(["pbs-from-s3", removed])
+    for removed in ({"stages": {"analysisPbs": True}}, {"analysis_pbs": True}, {"blocksci": {"blocksciScript": "x"}}):
+        with pytest.raises(ConfigurationError):
+            PipelineConfiguration.from_mapping(removed)
 
 
 def test_kubeconfig_defaults_to_the_first_file_of_the_environment(tmp_path, monkeypatch) -> None:
@@ -438,15 +439,13 @@ def test_a_failed_run_exits_with_the_failure_code_not_the_usage_code(capsys) -> 
 
 def test_image_registry_moves_every_default_image_but_not_explicit_ones(monkeypatch):
     monkeypatch.delenv("COINJOIN_IMAGE_REGISTRY", raising=False)
-    config = load_configuration(
-        [
-            "full-run",
-            "--analysis-pbs",
-            "--image-registry",
-            "ghcr.io/someone/",
-            "--blocksci-image",
-            "registry/blocksci:chosen",
-        ]
+    config = PipelineConfiguration.from_paths(
+        {
+            "action": "full-run",
+            "stages.analysis": True,
+            "images.registry": "ghcr.io/someone/",
+            "images.blocksci": "registry/blocksci:chosen",
+        }
     )
     context = RunContext.prepare(config, "cjp")
     assert context.config.images.emulator == "ghcr.io/someone/emulator-manager:latest"

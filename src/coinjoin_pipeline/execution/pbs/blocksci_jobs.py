@@ -130,7 +130,7 @@ class WrittenIndex:
         self._lock()
         if self.persistent is not None:
             if (self.store.path / "manifest.json").exists() or self.store.backup_available():
-                raise StageFailure(f"[index] an index already exists for {self.store.path}; use --blocksci-task update")
+                raise StageFailure(f"[index] an index already exists for {self.store.path}; use blocksci.task update")
             # What a failed parse left; a recorded index was refused above.
             self.store.discard()
         self._link()

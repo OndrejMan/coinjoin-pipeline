@@ -48,7 +48,7 @@ def resolve_configuration(config: PipelineConfiguration) -> PipelineConfiguratio
     if config.action in {"pbs-from-s3", "mainnet-sync"}:
         if "artifacts.backend" in provided and config.artifacts.backend != "s3":
             raise ConfigurationError(
-                f"{config.action} reads its artifacts from S3; drop --artifact-backend shared-storage"
+                f"{config.action} reads its artifacts from S3; drop artifacts.backend shared-storage"
             )
         config = replace_path(config, "artifacts.backend", "s3")
     if config.engine == "joinmarket" and "coinjoin_type" not in provided:
@@ -123,7 +123,7 @@ def resolve_run_images(config: PipelineConfiguration) -> tuple[PipelineConfigura
 
 
 def selected_run_dir(config: PipelineConfiguration) -> Path | None:
-    """--run-dir relative to the runs root, else the directory of the run ID."""
+    """run_dir relative to the runs root, else the directory of the run ID."""
     if config.run_dir:
         selected = Path(config.run_dir).expanduser()
         return (selected if selected.is_absolute() else config.runs_path / selected).resolve()

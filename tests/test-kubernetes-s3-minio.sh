@@ -259,17 +259,17 @@ docker tag "${UPLOADER_IMAGE}" "${K3D_UPLOADER_IMAGE}"
 docker tag "${COINJOIN_EMULATOR_SOURCE_IMAGE}" "${K3D_COINJOIN_EMULATOR_IMAGE}"
 
 if [[ -n "${PBS_BLOCKSCI_LOCAL_IMAGE}" ]]; then
-  export_pbs_docker_archive "${PBS_BLOCKSCI_LOCAL_IMAGE}" blocksci --pbs-blocksci-image
+  export_pbs_docker_archive "${PBS_BLOCKSCI_LOCAL_IMAGE}" blocksci pbs.blocksci_image
 fi
 if [[ -n "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" ]]; then
   export_pbs_docker_archive \
-    "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" coinjoin-analysis --pbs-coinjoin-analysis-image
+    "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" coinjoin-analysis pbs.coinjoin_analysis_image
 fi
 if [[ -n "${PBS_UNIFIED_REPORT_LOCAL_IMAGE}" ]]; then
   docker image inspect "${PBS_UNIFIED_REPORT_LOCAL_IMAGE}" >/dev/null 2>&1 \
     || docker pull "${PBS_UNIFIED_REPORT_LOCAL_IMAGE}"
   export_pbs_docker_archive \
-    "${PBS_UNIFIED_REPORT_LOCAL_IMAGE}" unified-report --unified-report-image
+    "${PBS_UNIFIED_REPORT_LOCAL_IMAGE}" unified-report images.unified_report
 fi
 
 echo "Extracting s5cmd from ${UPLOADER_IMAGE} for the host and the PBS container..."
@@ -331,7 +331,7 @@ k3d kubeconfig get "${CLUSTER_NAME}" >"${HOST_KUBECONFIG}"
 local_images_import "${CLUSTER_NAME}"
 kubectl --kubeconfig "${HOST_KUBECONFIG}" wait node --all --for=condition=Ready --timeout=240s
 
-# No Secret is provisioned: without --s3-secret-name the frontend creates the run's
+# No Secret is provisioned: without artifacts.secret_name the frontend creates the run's
 # own from the credentials file and deletes it after the upload, as on MetaCentrum.
 kubectl --kubeconfig "${HOST_KUBECONFIG}" create namespace "${NAMESPACE}"
 
@@ -348,12 +348,12 @@ export PBS_CLIENT_WORKDIR="${WORK_ROOT}"
 export EMULATION_LOGS_DIR="${LOGS_ROOT}"
 export COINJOIN_EMULATOR_IMAGE
 EMULATION_JOB_ARGS=(
-  --distributor-startup-timeout "${COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT}"
-  --btc-node-image "${COINJOIN_BTC_NODE_IMAGE}"
-  --kubernetes-image-pull-policy "${KUBERNETES_IMAGE_PULL_POLICY}"
+  "kubernetes.distributor_startup_timeout=${COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT}"
+  "kubernetes.btc_node_image=${COINJOIN_BTC_NODE_IMAGE}"
+  "kubernetes.image_pull_policy=${KUBERNETES_IMAGE_PULL_POLICY}"
 )
 if [[ -n "${COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT:-}" ]]; then
-  EMULATION_JOB_ARGS+=(--btc-node-initial-block-count "${COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT}")
+  EMULATION_JOB_ARGS+=("kubernetes.btc_node_initial_block_count=${COINJOIN_BTC_NODE_INITIAL_BLOCK_COUNT}")
 fi
 
 # Records the run's objects while it is on, each once it is complete: the Job, the temporary
@@ -399,38 +399,27 @@ observe_run_objects &
 OBSERVER_PID=$!
 
 echo "Running the S3-compatible full-run for run ${RUN_ID}..."
+# The S3 emulation settings both launches share; the second one emulates only.
+S3_EMULATION_SETTINGS=(
+  "engine=${ENGINE}" "scenario=${SCENARIO}" driver=kubernetes
+  "kubernetes.namespace=${NAMESPACE}" kubernetes.reuse_namespace=true
+  "kubernetes.kubeconfig=${HOST_KUBECONFIG}" "kubernetes.image_prefix=${IMAGE_PREFIX}"
+  artifacts.backend=s3 "artifacts.uri=${ARTIFACT_URI}" "artifacts.endpoint_url=${S3_ENDPOINT_URL}"
+  "artifacts.credentials_file=${CREDENTIALS_FILE}" "artifacts.profile=${S3_PROFILE}"
+  "images.uploader=${UPLOADER_IMAGE}" "kubernetes.owner=${E2E_OWNER}"
+)
+python3 "${PROJECT_DIR}/tests/support/experiment.py" "${WORK_ROOT}/full-run.yaml" \
+  action=full-run "${S3_EMULATION_SETTINGS[@]}" "kubernetes.planned_quota=${E2E_PLANNED_QUOTA}" \
+  "${EMULATION_JOB_ARGS[@]}" stages.analysis=true stages.blocksci=true min_input_count=15 \
+  "${PBS_IMAGE_ARGS[@]}" pbs.ncpus=2 pbs.mem=4gb pbs.scratch=2gb pbs.walltime=00:30:00 emulation_timeout=10800
+python3 "${PROJECT_DIR}/tests/support/experiment.py" "${WORK_ROOT}/emulate.yaml" \
+  action=emulate "${S3_EMULATION_SETTINGS[@]}"
 set +e
 (
   cd "${PROJECT_DIR}"
   PYTHONPATH="${PROJECT_DIR}/src:${PROJECT_DIR}/pipeline${PYTHONPATH:+:${PYTHONPATH}}" \
     timeout --foreground "${KUBERNETES_S3_TIMEOUT}" \
-    python3 -m coinjoin_pipeline.cli full-run \
-    --engine "${ENGINE}" \
-    --scenario "${SCENARIO}" \
-    --driver kubernetes \
-    --namespace "${NAMESPACE}" \
-    --reuse-namespace \
-    --kubeconfig "${HOST_KUBECONFIG}" \
-    --image-prefix "${IMAGE_PREFIX}" \
-    --artifact-backend s3 \
-    --artifact-uri "${ARTIFACT_URI}" \
-    --run-id "${RUN_ID}" \
-    --s3-endpoint-url "${S3_ENDPOINT_URL}" \
-    --s3-credentials-file "${CREDENTIALS_FILE}" \
-    --s3-profile "${S3_PROFILE}" \
-    --uploader-image "${UPLOADER_IMAGE}" \
-    --owner "${E2E_OWNER}" \
-    --planned-quota "${E2E_PLANNED_QUOTA}" \
-    "${EMULATION_JOB_ARGS[@]}" \
-    --analysis-pbs \
-    --blocksci-pbs \
-    --min-input-count 15 \
-    "${PBS_IMAGE_ARGS[@]}" \
-    --pbs-ncpus 2 \
-    --pbs-mem 4gb \
-    --pbs-scratch 2gb \
-    --pbs-walltime 00:30:00 \
-    --emulation-timeout 10800
+    python3 -m coinjoin_pipeline.cli run "${WORK_ROOT}/full-run.yaml" --run-id "${RUN_ID}"
 ) 2>&1 | tee "${PIPELINE_OUTPUT_FILE}"
 PIPELINE_STATUS=${PIPESTATUS[0]}
 set -e
@@ -514,22 +503,7 @@ set +e
   # so only the namespace can tell that the run ID is taken.
   EMULATION_LOGS_DIR="${WORK_ROOT}/second-frontend-runs" \
     PYTHONPATH="${PROJECT_DIR}/src:${PROJECT_DIR}/pipeline${PYTHONPATH:+:${PYTHONPATH}}" \
-    python3 -m coinjoin_pipeline.cli emulate \
-    --engine "${ENGINE}" \
-    --scenario "${SCENARIO}" \
-    --driver kubernetes \
-    --namespace "${NAMESPACE}" \
-    --reuse-namespace \
-    --kubeconfig "${HOST_KUBECONFIG}" \
-    --image-prefix "${IMAGE_PREFIX}" \
-    --artifact-backend s3 \
-    --artifact-uri "${ARTIFACT_URI}" \
-    --run-id "${RUN_ID}" \
-    --s3-endpoint-url "${S3_ENDPOINT_URL}" \
-    --s3-credentials-file "${CREDENTIALS_FILE}" \
-    --s3-profile "${S3_PROFILE}" \
-    --uploader-image "${UPLOADER_IMAGE}" \
-    --owner "${E2E_OWNER}"
+    python3 -m coinjoin_pipeline.cli run "${WORK_ROOT}/emulate.yaml" --run-id "${RUN_ID}"
 ) >"${WORK_ROOT}/second-launch.log" 2>&1
 SECOND_STATUS=$?
 set -e

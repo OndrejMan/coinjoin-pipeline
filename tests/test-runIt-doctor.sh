@@ -71,9 +71,21 @@ if grep -q 'coinjoin-pipeline:latest' "${FAKE_LOG}"; then
   exit 1
 fi
 
+experiment() {
+  local target="${TMP_DIR}/$1.yaml"
+  shift
+  python3 "${PROJECT_DIR}/tests/support/experiment.py" "${target}" "$@"
+  echo "${target}"
+}
+WASABI="$(experiment wasabi action=full-run engine=wasabi scenario=scenarios/overactive-local.json)"
+MISSING="$(experiment missing action=full-run engine=wasabi scenario=scenarios/missing.json)"
+ANALYZE="$(experiment analyze action=analyze engine=wasabi)"
+KUBERNETES="$(experiment kubernetes action=emulate engine=wasabi scenario=scenarios/overactive-local.json \
+  driver=kubernetes "kubernetes.kubeconfig=${TMP_DIR}/missing-kubeconfig")"
+
 # A dry run passes the configuration gates without contacting the runtime;
 # the runtime and image gates apply to live runs (exercised below).
-run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/overactive-local.json --dry-run
+run_it bash "${LAUNCHER}" run "${WASABI}" --dry-run
 launched
 if [[ -s "${FAKE_LOG}" ]]; then
   echo "FAIL: a dry run contacted the container runtime" >&2
@@ -83,7 +95,7 @@ fi
 # A runtime failure and a strict scenario failure both prevent launch. The
 # daemon gate runs only for live runs; it fails before anything is executed.
 set +e
-FAIL_INFO=1 run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/overactive-local.json >"${TMP_DIR}/daemon.out" 2>&1
+FAIL_INFO=1 run_it bash "${LAUNCHER}" run "${WASABI}" >"${TMP_DIR}/daemon.out" 2>&1
 daemon_exit=$?
 set -e
 [[ "${daemon_exit}" -ne 0 ]]
@@ -94,7 +106,7 @@ if launched; then
 fi
 
 set +e
-run_it bash "${LAUNCHER}" --engine wasabi --scenario scenarios/missing.json --dry-run >"${TMP_DIR}/scenario.out" 2>&1
+run_it bash "${LAUNCHER}" run "${MISSING}" --dry-run >"${TMP_DIR}/scenario.out" 2>&1
 scenario_exit=$?
 set -e
 [[ "${scenario_exit}" -ne 0 ]]
@@ -115,7 +127,7 @@ fi
 # the image gate fails before anything is executed.
 mkdir -p "${FAKE_LOGS}/existing-run"
 set +e
-FAIL_MANIFEST=1 run_it bash "${LAUNCHER}" analyze --engine wasabi --run-dir existing-run >"${TMP_DIR}/image.out" 2>&1
+FAIL_MANIFEST=1 run_it bash "${LAUNCHER}" run "${ANALYZE}" --run-dir existing-run >"${TMP_DIR}/image.out" 2>&1
 image_exit=$?
 set -e
 [[ "${image_exit}" -ne 0 ]]
@@ -129,7 +141,7 @@ fi
 set +e
 # Not a dry run: the kubeconfig gate only applies to live runs, and it fails
 # before anything is executed.
-run_it bash "${LAUNCHER}" emulate --engine wasabi --scenario scenarios/overactive-local.json --driver kubernetes --kubeconfig "${TMP_DIR}/missing-kubeconfig" >"${TMP_DIR}/kube.out" 2>&1
+run_it bash "${LAUNCHER}" run "${KUBERNETES}" >"${TMP_DIR}/kube.out" 2>&1
 kube_exit=$?
 set -e
 [[ "${kube_exit}" -ne 0 ]]

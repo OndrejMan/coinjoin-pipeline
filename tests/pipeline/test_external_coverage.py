@@ -45,15 +45,17 @@ def test_without_heights_the_report_says_so_instead_of_dropping_everything():
 def test_the_external_command_passes_the_window_and_threshold():
     command = blocksci_external_report_pbs_command(
         "mainnet-compare",
-        resolve_run_images(PipelineConfiguration.from_flat(
-            {
-                "coinjoin_type": "wasabi2",
-                "min_input_count": 15,
-                "blocksci_pin_height": 850000,
-                "blocksci_scan_start_height": 741213,
-                "blocksci_scan_end_height": 850001,
-            }
-        ))[0],
+        resolve_run_images(
+            PipelineConfiguration.from_paths(
+                {
+                    "coinjoin_type": "wasabi2",
+                    "min_input_count": 15,
+                    "blocksci.pin_height": 850000,
+                    "blocksci.scan_start_height": 741213,
+                    "blocksci.scan_end_height": 850001,
+                }
+            )
+        )[0],
     )
 
     assert "--min-input-count 15" in command

@@ -46,7 +46,7 @@ def analysis_mode_settings(mode: str, blocksci: BlockSciConfiguration) -> Analys
         ]
     elif mode == "blocksci-external":
         baseline_uri = validated_s3_uri(
-            required(blocksci.external_baseline_uri, "--external-baseline-uri"), "Dumplings baseline URI"
+            required(blocksci.external_baseline_uri, "blocksci.external_baseline_uri"), "Dumplings baseline URI"
         )
         settings["output_check"] = [REPORT_FILE, "External BlockSci report did not produce unified_report.json"]
         inputs += [{"run": STAGED_EXPORTERS_DIR}, {"uri": baseline_uri, "to": BASELINE_FILE}]
@@ -66,7 +66,7 @@ def analysis_mode_settings(mode: str, blocksci: BlockSciConfiguration) -> Analys
             )
     elif mode == "blocksci-script":
         # The configuration rules checked that the script exists; the node reads it from shared storage.
-        script_path = Path(required(blocksci.script, "--blocksci-script")).expanduser().resolve()
+        script_path = Path(required(blocksci.script, "blocksci.script")).expanduser().resolve()
         require_storage_path(script_path)
         settings["user_script"] = str(script_path)
     else:

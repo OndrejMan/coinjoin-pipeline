@@ -13,6 +13,7 @@ source "${SCRIPT_DIR}/support/local-runit.sh"
 REPO_ROOT="$(cd "${PROJECT_DIR}/.." && pwd)"
 LOGS_DIR="${EMULATION_LOGS_DIR:-${PROJECT_DIR}/emulation_logs}"
 TMP_DIR="$(mktemp -d)"
+EXPERIMENT_FILE="${TMP_DIR}/experiment.yaml"
 BEFORE_FILE="${TMP_DIR}/runs-before"
 AFTER_FILE="${TMP_DIR}/runs-after"
 RUN_LOG="${TMP_DIR}/pipeline.log"
@@ -107,6 +108,8 @@ else
 fi
 
 echo "Running complete Podman workflow with logs in ${LOGS_DIR}..."
+python3 "${PROJECT_DIR}/tests/support/experiment.py" "${EXPERIMENT_FILE}" \
+  action=full-run engine=wasabi scenario=scenarios/overactive-local.json min_input_count=15
 (
   (
     cd "${PROJECT_DIR}"
@@ -122,10 +125,7 @@ echo "Running complete Podman workflow with logs in ${LOGS_DIR}..."
     COINJOIN_EMULATOR_PULL_POLICY="${COINJOIN_EMULATOR_PULL_POLICY}" \
     COINJOIN_EMULATOR_IMAGE_PREFIX="${COINJOIN_EMULATOR_IMAGE_PREFIX}" \
     COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD="${COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD}" \
-    bash runIt.sh --runtime podman full-run \
-      --engine wasabi \
-      --scenario scenarios/overactive-local.json \
-      --min-input-count 15
+    bash runIt.sh --runtime podman run "${EXPERIMENT_FILE}"
   ) 2>&1 | tee "${RUN_LOG}"
 ) &
 RUN_PID=$!

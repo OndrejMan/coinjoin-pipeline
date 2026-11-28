@@ -2,7 +2,7 @@
 
 The emulator creates its wallet pods over minutes, so the namespace quota's ``used`` lags the
 run's real share. A launcher that knows the run's pod sizes (the Scenario Lab, from its
-src/domain/quota.ts) passes the run's peak as ``--planned-quota``; the Job carries it, so a
+src/domain/quota.ts) passes the run's peak as ``kubernetes.planned_quota``; the Job carries it, so a
 queue in any Lab reading the namespace can reserve that space before the pods exist. The
 pipeline does not model pod sizes and only checks the shape.
 """
@@ -18,7 +18,7 @@ _QUANTITY = re.compile(r"(?:\d+(?:\.\d*)?|\.\d+)(?:m|k|M|G|T|Ki|Mi|Gi|Ti)?")
 
 
 def planned_quota_annotation(text: str) -> str:
-    """The annotation value of ``--planned-quota``: compact JSON of known resources.
+    """The annotation value of ``kubernetes.planned_quota``: compact JSON of known resources.
 
     Raises ValueError when the text is not a JSON object of ResourceQuota resources and
     non-negative Kubernetes quantities.

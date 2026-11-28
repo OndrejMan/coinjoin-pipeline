@@ -70,7 +70,11 @@ def settings_of(script: str) -> dict:
 S3_TARGET = S3Target(
     artifact_uri="s3://bucket/runs",
     run_id="run-1",
-    access=S3Access(endpoint_url="https://s3.cl4.du.cesnet.cz", credentials_file="/storage/user/.aws/credentials", profile="coinjoin"),
+    access=S3Access(
+        endpoint_url="https://s3.cl4.du.cesnet.cz",
+        credentials_file="/storage/user/.aws/credentials",
+        profile="coinjoin",
+    ),
 )
 COMMON = dict(target=S3_TARGET)
 # An update of another run's cache from the block archive.
@@ -206,16 +210,18 @@ def test_reusable_blocksci_templates_archive_verify_and_avoid_reparse() -> None:
     )
     command = blocksci_analysis_pbs_command(
         "run-1",
-        resolve_run_images(PipelineConfiguration.from_flat(
-            {
-                "coinjoin_type": "wasabi2",
-                "min_input_count": 2,
-                "joinmarket_detector": "definite",
-                "joinmarket_min_base_fee": 5000,
-                "joinmarket_percentage_fee": 4e-05,
-                "joinmarket_max_depth": 200000,
-            }
-        ))[0],
+        resolve_run_images(
+            PipelineConfiguration.from_paths(
+                {
+                    "coinjoin_type": "wasabi2",
+                    "min_input_count": 2,
+                    "joinmarket.detector": "definite",
+                    "joinmarket.min_base_fee": 5000,
+                    "joinmarket.percentage_fee": 4e-05,
+                    "joinmarket.max_depth": 200000,
+                }
+            )
+        )[0],
     )
     analyze = settings_of(render_blocksci_analyze_s3_pbs(**COMMON, image="docker://blocksci", command=command))
 
@@ -244,7 +250,11 @@ def test_notebook_uses_image_python_and_keeps_control_files_outside_saved_notebo
     assert "/usr/bin/python3 /mnt/blocksci_notebook.py 8890" in command
     assert "uv run" not in command
     script = render_blocksci_analyze_s3_pbs(
-        **COMMON, image="docker://blocksci", command=command, mode="blocksci-notebook", blocksci=BlockSciConfiguration(notebook_port=8890)
+        **COMMON,
+        image="docker://blocksci",
+        command=command,
+        mode="blocksci-notebook",
+        blocksci=BlockSciConfiguration(notebook_port=8890),
     )
     settings = settings_of(script)
     assert settings["output"] == {"relative": "blocksci-notebooks_data", "notebook": True}
@@ -407,14 +417,21 @@ def test_s3_bitcoin_archive_parse_uploads_failure_log_before_marker(
     target = S3Target(
         artifact_uri="s3://bucket/runs",
         run_id="run-1",
-        access=S3Access(endpoint_url="https://example.com", credentials_file=str(tmp_path / "missing-credentials"), profile="coinjoin"),
+        access=S3Access(
+            endpoint_url="https://example.com",
+            credentials_file=str(tmp_path / "missing-credentials"),
+            profile="coinjoin",
+        ),
     )
     script = render_blocksci_parse_s3_pbs(
         target,
         image="docker://blocksci",
         command="true",
         blocksci=BlockSciConfiguration(
-            bitcoin_blocks_uri="s3://bucket/bitcoin-blocks", expected_block_hash="a" * 64, network="bitcoin", max_block=1
+            bitcoin_blocks_uri="s3://bucket/bitcoin-blocks",
+            expected_block_hash="a" * 64,
+            network="bitcoin",
+            max_block=1,
         ),
     )
     result = subprocess.run(
@@ -440,16 +457,18 @@ def test_s3_bitcoin_archive_parse_uploads_failure_log_before_marker(
 def test_cached_external_task_downloads_dumplings_baseline_and_uploads_report() -> None:
     command = blocksci_external_report_pbs_command(
         "run-1",
-        resolve_run_images(PipelineConfiguration.from_flat(
-            {
-                "coinjoin_type": "joinmarket",
-                "min_input_count": None,
-                "joinmarket_detector": "definite",
-                "joinmarket_min_base_fee": 5000,
-                "joinmarket_percentage_fee": 4e-05,
-                "joinmarket_max_depth": 200000,
-            }
-        ))[0],
+        resolve_run_images(
+            PipelineConfiguration.from_paths(
+                {
+                    "coinjoin_type": "joinmarket",
+                    "min_input_count": None,
+                    "joinmarket.detector": "definite",
+                    "joinmarket.min_base_fee": 5000,
+                    "joinmarket.percentage_fee": 4e-05,
+                    "joinmarket.max_depth": 200000,
+                }
+            )
+        )[0],
     )
     settings = settings_of(
         render_blocksci_analyze_s3_pbs(
@@ -510,7 +529,6 @@ def test_incremental_blocksci_update_from_the_block_archive_downloads_only_new_f
     source = settings_of(script)["source"]
     assert source["kind"] == "bitcoin-blocks-s3" and source["blocks_uri"] == "s3://bucket/bitcoin-blocks"
     assert embedded_file(script, "coinjoin_pipeline/execution/block_archive.py")
-
 
 
 def test_external_blocksci_import_repackages_index_without_parser() -> None:
@@ -632,11 +650,13 @@ def test_prefix_preflight_rejects_incomplete_staging() -> None:
 
 def exporter_staging_args() -> SimpleNamespace:
     return configuration(
-        artifact_uri="s3://bucket/runs",
-        run_id="run-9",
-        s3_endpoint_url="https://s3.cl4.du.cesnet.cz",
-        s3_credentials_file="/storage/user/.aws/credentials",
-        s3_profile="coinjoin",
+        {
+            "artifacts.uri": "s3://bucket/runs",
+            "run_id": "run-9",
+            "artifacts.endpoint_url": "https://s3.cl4.du.cesnet.cz",
+            "artifacts.credentials_file": "/storage/user/.aws/credentials",
+            "artifacts.profile": "coinjoin",
+        }
     )
 
 
@@ -644,42 +664,28 @@ def test_standalone_s3_emulation_can_supply_frontend_credentials() -> None:
     # stage_kubernetes_s3_run reads args.artifacts.credentials_file/s3_profile before
     # creating the Job. The emulate parser used to define neither, so a live
     # (non-dry) standalone S3 emulation died with AttributeError.
-    arguments = [
-        "emulate",
-        "--engine",
-        "wasabi",
-        "--driver",
-        "kubernetes",
-        "--artifact-backend",
-        "s3",
-        "--artifact-uri",
-        "s3://bucket/runs",
-        "--s3-endpoint-url",
-        "https://s3.example.invalid",
-        "--s3-secret-name",
-        "coinjoin-s3",
-        "--run-id",
-        "run-1",
-        "--reuse-namespace",
-        "--kubeconfig",
-        "/dev/null",
-    ]
+    arguments = {
+        "action": "emulate",
+        "engine": "wasabi",
+        "driver": "kubernetes",
+        "artifacts.backend": "s3",
+        "artifacts.uri": "s3://bucket/runs",
+        "artifacts.endpoint_url": "https://s3.example.invalid",
+        "artifacts.secret_name": "coinjoin-s3",
+        "run_id": "run-1",
+        "kubernetes.reuse_namespace": True,
+        "kubernetes.kubeconfig": "/dev/null",
+    }
     parser = build_parser()
     args = parser.parse_args(
-        arguments
-        + [
-            "--s3-credentials-file",
-            "/storage/user/.aws/credentials",
-            "--s3-profile",
-            "coinjoin",
-        ]
+        {**arguments, "artifacts.credentials_file": "/storage/user/.aws/credentials", "artifacts.profile": "coinjoin"}
     )
     assert args.artifacts.credentials_file == "/storage/user/.aws/credentials"
     assert args.artifacts.profile == "coinjoin"
 
     # And they are mandatory, not silently defaulted: the wrapper applies the
     # shared option rules to its argv before it acts on the parsed values.
-    with pytest.raises(ValueError, match="s3-credentials-file"):
+    with pytest.raises(ValueError, match="artifacts.credentials_file"):
         resolve_configuration(parser.parse_args(arguments))
 
 
@@ -689,22 +695,24 @@ def test_s3_emulation_forwards_timeout_to_uploader_manifest(
     scenario = tmp_path / "scenario.json"
     scenario.write_text('{"name": "private-experiment"}', encoding="utf-8")
     args = configuration(
-        engine="wasabi",
-        scenario=str(scenario),
-        run_timezone="UTC",
-        kubeconfig=None,
-        dry_run=True,
-        namespace="coinjoin",
-        run_id="run-1",
-        image_prefix="ghcr.io/ondrejman/",
-        artifact_uri="s3://bucket/runs",
-        s3_endpoint_url="https://s3.example.invalid",
-        s3_secret_name="coinjoin-s3",
-        s3_credentials_file="/storage/user/.aws/credentials",
-        s3_profile="coinjoin",
-        emulation_timeout=123,
-        reuse_namespace=True,
-        uploader_image="uploader:test",
+        {
+            "engine": "wasabi",
+            "scenario": str(scenario),
+            "run_timezone": "UTC",
+            "kubernetes.kubeconfig": None,
+            "dry_run": True,
+            "kubernetes.namespace": "coinjoin",
+            "run_id": "run-1",
+            "kubernetes.image_prefix": "ghcr.io/ondrejman/",
+            "artifacts.uri": "s3://bucket/runs",
+            "artifacts.endpoint_url": "https://s3.example.invalid",
+            "artifacts.secret_name": "coinjoin-s3",
+            "artifacts.credentials_file": "/storage/user/.aws/credentials",
+            "artifacts.profile": "coinjoin",
+            "emulation_timeout": 123,
+            "kubernetes.reuse_namespace": True,
+            "images.uploader": "uploader:test",
+        }
     )
     with (
         mock.patch(
@@ -741,7 +749,7 @@ def test_unified_report_image_keeps_existing_uri_schemes(reference: str, expecte
     from coinjoin_pipeline.images import resolve_unified_report_image
     from coinjoin_pipeline.execution.pbs_settings import with_singularity_scheme
 
-    args = configuration(unified_report_image=reference)
+    args = configuration({"images.unified_report": reference})
     assert with_singularity_scheme(resolve_unified_report_image(args)) == expected
 
 
@@ -1080,16 +1088,16 @@ def test_kubernetes_manifest_reuses_existing_namespace() -> None:
     assert all(item["metadata"].get("namespace") == "coinjoin" for item in manifest["items"])
 
 
-def exporter_need_args(**overrides) -> SimpleNamespace:
-    defaults = dict(
-        analysis_pbs=False,
-        blocksci_pbs=True,
-        mappings_pbs=False,
-        blocksci_workflow="reusable",
-        blocksci_task="detect",
-    )
-    defaults.update(overrides)
-    return configuration(**defaults)
+def exporter_need_args(overrides=None) -> SimpleNamespace:
+    defaults = {
+        "stages.analysis": False,
+        "stages.blocksci": True,
+        "stages.mappings": False,
+        "blocksci.workflow": "reusable",
+        "blocksci.task": "detect",
+    }
+    defaults.update(overrides or {})
+    return configuration(defaults)
 
 
 def test_only_stages_that_run_the_exporters_require_them() -> None:
@@ -1097,17 +1105,20 @@ def test_only_stages_that_run_the_exporters_require_them() -> None:
     # exporters directory at most; staging for them would let a local exporter
     # problem block a job that cannot use one.
     assert pbs_stages_need_exporters(exporter_need_args()) is True
-    assert pbs_stages_need_exporters(exporter_need_args(blocksci_workflow="combined")) is True
-    assert pbs_stages_need_exporters(exporter_need_args(blocksci_workflow="combined", blocksci_task="notebook")) is True
-    assert pbs_stages_need_exporters(exporter_need_args(blocksci_task="parse"))
-    assert pbs_stages_need_exporters(exporter_need_args(blocksci_workflow="cached", blocksci_task="update"))
+    assert pbs_stages_need_exporters(exporter_need_args({"blocksci.workflow": "combined"})) is True
+    assert (
+        pbs_stages_need_exporters(exporter_need_args({"blocksci.workflow": "combined", "blocksci.task": "notebook"}))
+        is True
+    )
+    assert pbs_stages_need_exporters(exporter_need_args({"blocksci.task": "parse"}))
+    assert pbs_stages_need_exporters(exporter_need_args({"blocksci.workflow": "cached", "blocksci.task": "update"}))
     for overrides in (
-        dict(blocksci_pbs=False, analysis_pbs=True),
-        dict(blocksci_pbs=False, mappings_pbs=True),
-        dict(blocksci_task="script"),
-        dict(blocksci_task="notebook"),
+        {"stages.blocksci": False, "stages.analysis": True},
+        {"stages.blocksci": False, "stages.mappings": True},
+        {"blocksci.task": "script"},
+        {"blocksci.task": "notebook"},
     ):
-        assert pbs_stages_need_exporters(exporter_need_args(**overrides)) is False, overrides
+        assert pbs_stages_need_exporters(exporter_need_args(overrides)) is False, overrides
 
 
 def test_s3_pbs_scratch_type_selects_the_scratch_resource() -> None:
@@ -1122,16 +1133,18 @@ def test_s3_pbs_scratch_type_selects_the_scratch_resource() -> None:
 def test_read_only_source_cache_feeds_an_analysis_of_another_run() -> None:
     command = blocksci_external_report_pbs_command(
         "run-1",
-        resolve_run_images(PipelineConfiguration.from_flat(
-            {
-                "coinjoin_type": "wasabi2",
-                "min_input_count": 15,
-                "joinmarket_detector": "definite",
-                "joinmarket_min_base_fee": 5000,
-                "joinmarket_percentage_fee": 4e-05,
-                "joinmarket_max_depth": 200000,
-            }
-        ))[0],
+        resolve_run_images(
+            PipelineConfiguration.from_paths(
+                {
+                    "coinjoin_type": "wasabi2",
+                    "min_input_count": 15,
+                    "joinmarket.detector": "definite",
+                    "joinmarket.min_base_fee": 5000,
+                    "joinmarket.percentage_fee": 4e-05,
+                    "joinmarket.max_depth": 200000,
+                }
+            )
+        )[0],
     )
     settings = settings_of(
         render_blocksci_analyze_s3_pbs(
@@ -1149,7 +1162,6 @@ def test_read_only_source_cache_feeds_an_analysis_of_another_run() -> None:
     assert (settings["source_run_id"], settings["artifact_uri"]) == ("mainnet-index", "s3://bucket/runs")
     assert settings["run_prefix"] == "s3://bucket/runs/run-1"
     assert settings["output"] == {"relative": "coinjoinPipeline_data"}
-
 
 
 INDEX = dict(index_dir="/scratch/multijob-brno/user/blocksci-mainnet", index_backup_uri="s3://bucket/blocksci-index")
@@ -1286,7 +1298,6 @@ def test_a_fixed_state_prefix_replaces_the_run_prefix_and_keeps_logs_per_run() -
     assert settings["run_id"] == "run-1"
 
 
-
 def test_external_report_downloads_the_curated_false_positives() -> None:
     settings = settings_of(
         render_blocksci_analyze_s3_pbs(
@@ -1303,7 +1314,6 @@ def test_external_report_downloads_the_curated_false_positives() -> None:
     assert {"uri": "s3://bucket/dumplings/false_cjtxs.json", "to": "coinjoin-analysis_data/false_cjtxs.json"} in (
         settings["inputs"]
     )
-
 
 
 def test_dumplings_baseline_reads_the_manifested_copy() -> None:

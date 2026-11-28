@@ -1,4 +1,4 @@
-"""full-run --resume-run: which stages a resume keeps, adopts, cancels and resubmits."""
+"""full-run resume_run: which stages a resume keeps, adopts, cancels and resubmits."""
 
 from unittest import mock
 
@@ -21,26 +21,26 @@ PLAN = s3_full_run_plan(
 )
 
 
-def _args(tmp_path, **overrides):
-    values = dict(
-        action="full-run",
-        resume_run=True,
-        artifact_backend="s3",
-        driver="kubernetes",
-        artifact_uri="s3://bucket/runs",
-        run_id="run-1",
-        runs_root=tmp_path,
-        s3_endpoint_url="https://s3.example",
-        s3_credentials_file="/credentials",
-        s3_profile="coinjoin",
-        s3_secret_name="coinjoin-s3",
-        namespace="coinjoin-ns",
-        reuse_namespace=True,
-        analysis_pbs=True,
-        blocksci_pbs=True,
-    )
-    values.update(overrides)
-    return configuration(**values)
+def _args(tmp_path, overrides=None):
+    values = {
+        "action": "full-run",
+        "resume_run": True,
+        "artifacts.backend": "s3",
+        "driver": "kubernetes",
+        "artifacts.uri": "s3://bucket/runs",
+        "run_id": "run-1",
+        "runs_root": tmp_path,
+        "artifacts.endpoint_url": "https://s3.example",
+        "artifacts.credentials_file": "/credentials",
+        "artifacts.profile": "coinjoin",
+        "artifacts.secret_name": "coinjoin-s3",
+        "kubernetes.namespace": "coinjoin-ns",
+        "kubernetes.reuse_namespace": True,
+        "stages.analysis": True,
+        "stages.blocksci": True,
+    }
+    values.update(overrides or {})
+    return configuration(values)
 
 
 def test_the_graph_under_test_is_baseline_and_detection_joined_by_the_report() -> None:
@@ -233,7 +233,7 @@ def test_resume_does_not_resubmit_over_a_job_it_could_not_cancel(tmp_path, remot
 def test_a_dry_run_resume_cancels_and_waits_for_nothing(tmp_path, remote) -> None:
     _, calls = remote
 
-    s3_resume.resume_s3_full_run(_args(tmp_path, dry_run=True))
+    s3_resume.resume_s3_full_run(_args(tmp_path, {"dry_run": True}))
 
     calls["qdel"].assert_not_called()
     calls["wait"].assert_not_called()

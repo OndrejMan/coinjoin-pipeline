@@ -244,9 +244,9 @@ if [[ -n "${PBS_BLOCKSCI_LOCAL_IMAGE}" ]]; then
   mkdir -p "${WORK_ROOT}/pbs-images"
   docker save "${PBS_BLOCKSCI_LOCAL_IMAGE}" -o "${WORK_ROOT}/pbs-images/blocksci.tar"
   chmod 0644 "${WORK_ROOT}/pbs-images/blocksci.tar"
-  PBS_IMAGE_ARGS=(--pbs-blocksci-image "docker-archive:${WORK_ROOT}/pbs-images/blocksci.tar")
+  PBS_IMAGE_ARGS=("pbs.blocksci_image=docker-archive:${WORK_ROOT}/pbs-images/blocksci.tar")
 else
-  PBS_IMAGE_ARGS=(--pbs-blocksci-image "${BLOCKSCI_IMAGE}")
+  PBS_IMAGE_ARGS=("pbs.blocksci_image=${BLOCKSCI_IMAGE}")
 fi
 
 export PBS_CLIENT_WORKDIR="${WORK_ROOT}" EMULATION_LOGS_DIR="${LOGS_ROOT}"
@@ -260,15 +260,18 @@ heights = json.load(open(sys.argv[1], encoding="utf-8"))
 print(next(digest for digest, height in heights.items() if height == int(sys.argv[2])))
 PY
 )"
+  # The remaining arguments are further experiment settings as PATH=VALUE.
+  python3 "${PROJECT_DIR}/tests/support/experiment.py" "${WORK_ROOT}/${run_id}.yaml" \
+    action=pbs-from-s3 engine=joinmarket "artifacts.uri=${ARTIFACT_URI}" \
+    "artifacts.endpoint_url=${S3_ENDPOINT_URL}" "artifacts.credentials_file=${CREDENTIALS_FILE}" \
+    "artifacts.profile=${S3_PROFILE}" stages.blocksci=true "$@" "blocksci.bitcoin_blocks_uri=${BLOCKS_URI}" \
+    blocksci.network=bitcoin "blocksci.expected_block_hash=${checkpoint_hash}" \
+    "${PBS_IMAGE_ARGS[@]}" pbs.ncpus=2 pbs.mem=4gb pbs.scratch=2gb pbs.walltime=00:20:00
   (
     cd "${PROJECT_DIR}"
     PYTHONPATH="${PROJECT_DIR}/src:${PROJECT_DIR}/pipeline${PYTHONPATH:+:${PYTHONPATH}}" \
-      timeout --foreground "${E2E_TIMEOUT}" python3 -m coinjoin_pipeline.cli pbs-from-s3 \
-      --engine joinmarket --artifact-uri "${ARTIFACT_URI}" --run-id "${run_id}" \
-      --s3-endpoint-url "${S3_ENDPOINT_URL}" --s3-credentials-file "${CREDENTIALS_FILE}" --s3-profile "${S3_PROFILE}" \
-      --blocksci-pbs "$@" --blocksci-bitcoin-blocks-uri "${BLOCKS_URI}" --blocksci-network bitcoin \
-      --blocksci-expected-block-hash "$checkpoint_hash" \
-      "${PBS_IMAGE_ARGS[@]}" --pbs-ncpus 2 --pbs-mem 4gb --pbs-scratch 2gb --pbs-walltime 00:20:00
+      timeout --foreground "${E2E_TIMEOUT}" python3 -m coinjoin_pipeline.cli \
+      run "${WORK_ROOT}/${run_id}.yaml" --run-id "${run_id}"
   ) 2>&1 | tee -a "${PIPELINE_OUTPUT_FILE}"
 }
 
@@ -294,7 +297,7 @@ fetch_cache() {
 }
 
 echo "Submitting BlockSci S3 parse for ${RUN_ID}..."
-submit_blocksci "${RUN_ID}" 1 --blocksci-workflow reusable --blocksci-task parse --blocksci-max-block 1
+submit_blocksci "${RUN_ID}" 1 blocksci.workflow=reusable blocksci.task=parse blocksci.max_block=1
 wait_for_stage "${RUN_ID}" blocksci-parse
 fetch_cache "${RUN_ID}" blocksci-parse
 
@@ -304,13 +307,13 @@ archive_blocks
 s5 cp "${BLOCKS_URI}/blk00001.dat.json" "${WORK_ROOT}/blk00001.dat.json" >/dev/null
 
 echo "Submitting incremental BlockSci update ${RUN_ID} -> ${UPDATE_RUN_ID}..."
-submit_blocksci "${UPDATE_RUN_ID}" 3 --blocksci-workflow cached --blocksci-task update \
-  --blocksci-cache-source-run-id "${RUN_ID}" --blocksci-max-block 3
+submit_blocksci "${UPDATE_RUN_ID}" 3 blocksci.workflow=cached blocksci.task=update \
+  "blocksci.cache_source_run_id=${RUN_ID}" blocksci.max_block=3
 wait_for_stage "${UPDATE_RUN_ID}" blocksci-update
 fetch_cache "${UPDATE_RUN_ID}" blocksci-update
 
 echo "Submitting reference full parse ${FULL_RUN_ID}..."
-submit_blocksci "${FULL_RUN_ID}" 3 --blocksci-workflow reusable --blocksci-task parse --blocksci-max-block 3
+submit_blocksci "${FULL_RUN_ID}" 3 blocksci.workflow=reusable blocksci.task=parse blocksci.max_block=3
 wait_for_stage "${FULL_RUN_ID}" blocksci-parse
 fetch_cache "${FULL_RUN_ID}" blocksci-full-parse
 

@@ -37,15 +37,16 @@ def test_null_is_accepted_only_where_the_field_is_optional():
         PipelineConfiguration().runs_path
 
 
-def test_cli_override_changes_values_without_rendering_arguments(tmp_path):
+def test_a_launch_override_changes_values_without_rendering_arguments(tmp_path):
     path = tmp_path / "experiment.yaml"
-    path.write_text("action: full-run\nengine: wasabi\nmin_input_count: 15\njoinmarket:\n  max_depth: 100\n")
-    config = load_configuration(["run", str(path), "--engine", "joinmarket", "--joinmarket-max-depth", "200"])
-    assert config.engine == "joinmarket"
-    assert config.min_input_count == 15
-    assert config.joinmarket.max_depth == 200
+    path.write_text("action: full-run\nengine: wasabi\nrun_id: old\njoinmarket:\n  max_depth: 100\n")
+    config = load_configuration(["run", str(path), "--run-id", "new", "--blocksci-image", "blocksci:test"])
+    assert (config.engine, config.run_id, config.images.blocksci) == ("wasabi", "new", "blocksci:test")
+    assert config.joinmarket.max_depth == 100
     with pytest.raises(FrozenInstanceError):
-        config.engine = "wasabi"
+        config.engine = "joinmarket"
+    with pytest.raises(SystemExit):
+        load_configuration(["run", str(path), "--joinmarket-max-depth", "200"])
 
 
 def test_shorthand_actions_may_follow_options(tmp_path):
@@ -58,10 +59,12 @@ def test_shorthand_actions_may_follow_options(tmp_path):
         "v1",
         True,
     )
-    external = load_configuration(["--runtime", "podman", "external-analyze", "--run-id", "ext-1", "--resume"])
+    external = PipelineConfiguration.from_paths(
+        {"runtime": "podman", "action": "external-analyze", "run_id": "ext-1", "external.resume": True}
+    )
     assert (external.action, external.runtime) == ("external-analyze", "podman")
     # A value that happens to spell an action is not the action word.
-    assert load_configuration(["--run-id", "run", "emulate"]).action == "emulate"
+    assert PipelineConfiguration.from_paths({"run_id": "run", "action": "emulate"}).action == "emulate"
 
 
 def test_resources_enable_the_selected_pbs_stage():
@@ -87,7 +90,7 @@ def test_s3_only_actions_reject_an_explicit_shared_storage_backend(action):
 def test_default_namespace_only_requires_kubernetes_when_explicit():
     resolve_configuration(PipelineConfiguration.from_mapping({"action": "emulate"}))
     config = PipelineConfiguration.from_mapping({"action": "emulate", "kubernetes": {"namespace": "coinjoin"}})
-    with pytest.raises(ConfigurationError, match="--namespace requires --driver kubernetes"):
+    with pytest.raises(ConfigurationError, match="kubernetes.namespace requires driver kubernetes"):
         resolve_configuration(config)
 
 
@@ -169,11 +172,13 @@ def test_a_yaml_configuration_must_name_its_action(tmp_path, text):
         load_configuration(["run", str(path)])
 
 
-def test_no_explicit_action_alongside_yaml(tmp_path):
+def test_an_action_word_is_no_way_around_the_yaml_file(tmp_path):
     path = tmp_path / "experiment.yaml"
-    path.write_text("engine: wasabi\n")
-    with pytest.raises(ConfigurationError, match="put the action in YAML"):
-        load_configuration(["full-run", "--from-configuration", str(path)])
+    path.write_text("action: full-run\nengine: wasabi\n")
+    with pytest.raises(ConfigurationError, match="put `action: full-run` in a file"):
+        load_configuration(["full-run", "--run-id", "x"])
+    with pytest.raises(ConfigurationError, match="unexpected argument 'extra'"):
+        load_configuration(["run", str(path), "extra"])
 
 
 def test_external_resume_rejects_new_inputs():
@@ -185,12 +190,6 @@ def test_external_resume_rejects_new_inputs():
     )
     with pytest.raises(ConfigurationError, match="cannot be combined"):
         resolve_configuration(config)
-
-
-def test_repeated_values_keep_cli_order():
-    config = load_configuration(["coinjoin-analysis", "--run-dir", "run-a", "--run-id=old", "--run-id", "new"])
-    assert config.action == "coinjoin-analysis"
-    assert config.run_id == "new"
 
 
 def _s3_full_run(**overrides):
@@ -226,7 +225,7 @@ def test_s3_full_run_accepts_any_analyzer_subset(stages):
 
 
 def test_s3_full_run_mappings_need_the_baseline_it_computes():
-    with pytest.raises(ConfigurationError, match="--mappings-pbs requires --analysis-pbs"):
+    with pytest.raises(ConfigurationError, match="stages.mappings requires stages.analysis"):
         resolve_configuration(_s3_full_run(stages={"analysis": False, "blocksci": True, "mappings": True}))
 
 
@@ -246,3 +245,18 @@ def test_every_example_resolves(monkeypatch):
     assert examples
     for example in examples:
         assert resolve_configuration(load_configuration(["run", str(example), "--dry-run"])).dry_run, example.name
+
+
+@pytest.mark.parametrize(
+    "name,override",
+    [
+        ("analyze", ["--run-dir", "run-a"]),
+        ("coinjoin-analysis", ["--run-dir", "run-a"]),
+        ("export", ["--run-dir", "run-a"]),
+        ("external-resume", ["--run-id", "run-a"]),
+    ],
+)
+def test_stage_examples_need_only_the_run(name, override):
+    path = Path(__file__).parents[2] / "examples" / "stages" / f"{name}.yaml"
+    config = resolve_configuration(load_configuration(["run", str(path), *override, "--dry-run"]))
+    assert config.action == ("external-analyze" if name == "external-resume" else name)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-test the ``--blocksci-task script`` PBS path on a regtest run.
+"""Smoke-test the ``blocksci.task: script`` PBS path on a regtest run.
 
 The job binds this file as /mnt/user-analysis.py inside the BlockSci image
 (Python 3.8) and runs it over the run's parsed index. It prints a short summary

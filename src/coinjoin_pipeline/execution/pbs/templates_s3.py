@@ -312,17 +312,17 @@ def _block_source(blocksci: BlockSciConfiguration) -> SourceSettings:
     if blocksci.external_bitcoin_datadir:
         return {
             "kind": "external-bitcoin",
-            "network": required(blocksci.network, "--blocksci-network"),
+            "network": required(blocksci.network, "blocksci.network"),
             "description": "external Bitcoin Core block directory",
             "datadir": _bitcoin_datadir(Path(blocksci.external_bitcoin_datadir)),
-            "max_block": required(blocksci.max_block, "--blocksci-max-block"),
+            "max_block": required(blocksci.max_block, "blocksci.max_block"),
         }
     if blocksci.bitcoin_blocks_uri:
         return {
             "kind": "bitcoin-blocks-s3",
-            "network": required(blocksci.network, "--blocksci-network"),
+            "network": required(blocksci.network, "blocksci.network"),
             "description": "verified Bitcoin block archive from S3",
-            "max_block": required(blocksci.max_block, "--blocksci-max-block"),
+            "max_block": required(blocksci.max_block, "blocksci.max_block"),
             "blocks_uri": validated_s3_uri(blocksci.bitcoin_blocks_uri, "Bitcoin block archive URI"),
             "expected_hash": blocksci.expected_block_hash,
         }

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Kubernetes runs the emulation; --analysis-pbs --blocksci-pbs schedule both
+# Kubernetes runs the emulation. stages.analysis and stages.blocksci schedule both
 # analyzers and the unified report on PBS over the shared storage.
-# With E2E_PARALLEL=1 (test-parallel-pbs-analysis.sh) the run adds --parallel:
+# With E2E_PARALLEL=1 (test-parallel-pbs-analysis.sh) the run sets parallel: true:
 # both analyzers must run concurrently under the wrapper's "Parallel analysis"
 # pipeline stage and the report must start only after both finished.
 
@@ -22,7 +22,7 @@ if [[ "${E2E_PARALLEL}" == 1 ]]; then
   VARIANT_SUFFIX="-parallel"
   CLUSTER_KIND="pbsp"
   RESULT_NAME="parallel-pbs-analysis"
-  PARALLEL_ARGS=(--parallel)
+  PARALLEL_ARGS=(parallel=true)
   PBS_DESCRIPTION="parallel PBS"
 else
   VARIANT_SUFFIX=""
@@ -101,7 +101,7 @@ if [[ "${ENGINE}" == "wasabi" ]]; then
   SCENARIO="${SCENARIO:-overactive-local.json}"
   EXPECTED_SCENARIO="overactive-local"
   EXPECTED_COINJOIN_TYPE="wasabi2"
-  MIN_INPUT_COUNT_ARGS=(--min-input-count 15)
+  MIN_INPUT_COUNT_ARGS=(min_input_count=15)
 else
   SCENARIO="${SCENARIO:-defaultJoinMarket.json}"
   EXPECTED_SCENARIO="default-joinmarket"
@@ -263,10 +263,10 @@ mkdir -p "${LOGS_ROOT}" "${BITCOIN_DATADIR}"
 chmod 0777 "${WORK_ROOT}" "${LOGS_ROOT}" "${BITCOIN_DATADIR}"
 
 if [[ -n "${PBS_BLOCKSCI_LOCAL_IMAGE}" ]]; then
-  export_pbs_docker_archive "${PBS_BLOCKSCI_LOCAL_IMAGE}" blocksci --pbs-blocksci-image
+  export_pbs_docker_archive "${PBS_BLOCKSCI_LOCAL_IMAGE}" blocksci pbs.blocksci_image
 fi
 if [[ -n "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" ]]; then
-  export_pbs_docker_archive "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" coinjoin-analysis --pbs-coinjoin-analysis-image
+  export_pbs_docker_archive "${PBS_COINJOIN_ANALYSIS_LOCAL_IMAGE}" coinjoin-analysis pbs.coinjoin_analysis_image
 fi
 
 echo "Creating k3d cluster ${CLUSTER_NAME} with direct shared storage ${WORK_ROOT}..."
@@ -340,27 +340,17 @@ if [[ "${INJECT_KUBERNETES_CLIENT_FAILURE}" == 1 ]]; then
   FAILURE_INJECTOR_PID=$!
 fi
 
+python3 "${PROJECT_DIR}/tests/support/experiment.py" "${WORK_ROOT}/experiment.yaml" \
+  action=full-run "engine=${ENGINE}" "scenario=${SCENARIO}" driver=kubernetes \
+  "kubernetes.namespace=${NAMESPACE}" "kubernetes.kubeconfig=${CONTAINER_KUBECONFIG}" \
+  "kubernetes.image_prefix=${IMAGE_PREFIX}" "kubernetes.btc_datadir=${BITCOIN_DATADIR}" \
+  stages.analysis=true stages.blocksci=true \
+  "${MIN_INPUT_COUNT_ARGS[@]}" "${PBS_IMAGE_ARGS[@]}" "${PARALLEL_ARGS[@]}" \
+  "pbs.bitcoin_datadir=${BITCOIN_DATADIR}" pbs.ncpus=2 pbs.mem=4gb pbs.scratch=2gb pbs.walltime=00:30:00
 set +e
 (
   cd "${PROJECT_DIR}"
-  timeout --foreground "${KUBERNETES_PBS_TIMEOUT}" ./runIt.sh full-run \
-    --engine "${ENGINE}" \
-    --scenario "${SCENARIO}" \
-    --driver kubernetes \
-    --namespace "${NAMESPACE}" \
-    --kubeconfig "${CONTAINER_KUBECONFIG}" \
-    --image-prefix "${IMAGE_PREFIX}" \
-    --kubernetes-btc-datadir "${BITCOIN_DATADIR}" \
-    --analysis-pbs \
-    --blocksci-pbs \
-    "${MIN_INPUT_COUNT_ARGS[@]}" \
-    "${PBS_IMAGE_ARGS[@]}" \
-    "${PARALLEL_ARGS[@]}" \
-    --pbs-bitcoin-datadir "${BITCOIN_DATADIR}" \
-    --pbs-ncpus 2 \
-    --pbs-mem 4gb \
-    --pbs-scratch 2gb \
-    --pbs-walltime 00:30:00
+  timeout --foreground "${KUBERNETES_PBS_TIMEOUT}" ./runIt.sh run "${WORK_ROOT}/experiment.yaml"
 ) 2>&1 | tee "${PIPELINE_OUTPUT_FILE}"
 PIPELINE_STATUS=${PIPESTATUS[0]}
 set -e

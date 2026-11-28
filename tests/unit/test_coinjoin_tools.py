@@ -10,7 +10,6 @@ from unittest.mock import Mock
 import pytest
 
 from coinjoin_pipeline.context import resolve_run_images
-from coinjoin_pipeline.arguments import load_configuration
 from coinjoin_pipeline.configuration import ConfigurationError, PipelineConfiguration
 from coinjoin_pipeline.execution import coinjoin_tools
 from job_scripts import embedded_file
@@ -23,22 +22,24 @@ def config(options, **overrides):
     options = {**options}
     if "data_mode" not in options and options.get("program") in coinjoin_tools.MAINNET_PROGRAMS:
         options["data_mode"] = "mainnet"
-    return resolve_run_images(PipelineConfiguration.from_mapping(
-        {
-            "action": "pbs-from-s3",
-            "run_id": "r1",
-            "stages": {"analysis": True},
-            "artifacts": {
-                "backend": "s3",
-                "uri": "s3://bucket/runs",
-                "endpoint_url": "https://s3.example",
-                "credentials_file": "/tmp/credentials",
-                "profile": "test",
-            },
-            "coinjoin_analysis": options,
-            **overrides,
-        }
-    ))[0]
+    return resolve_run_images(
+        PipelineConfiguration.from_mapping(
+            {
+                "action": "pbs-from-s3",
+                "run_id": "r1",
+                "stages": {"analysis": True},
+                "artifacts": {
+                    "backend": "s3",
+                    "uri": "s3://bucket/runs",
+                    "endpoint_url": "https://s3.example",
+                    "credentials_file": "/tmp/credentials",
+                    "profile": "test",
+                },
+                "coinjoin_analysis": options,
+                **overrides,
+            }
+        )
+    )[0]
 
 
 @pytest.mark.parametrize(
@@ -94,7 +95,10 @@ def test_catalog_covers_all_existing_commands_with_configurable_cli_inputs():
         )
         if parser or positional:
             commands.add(path.stem)
-    assert commands == set(coinjoin_tools.PROGRAM_ACTIONS) - coinjoin_tools.RESEARCH_PROGRAMS - coinjoin_tools.WORKFLOW_PROGRAMS
+    assert (
+        commands
+        == set(coinjoin_tools.PROGRAM_ACTIONS) - coinjoin_tools.RESEARCH_PROGRAMS - coinjoin_tools.WORKFLOW_PROGRAMS
+    )
 
 
 @pytest.mark.parametrize("program,actions", coinjoin_tools.PROGRAM_ACTIONS.items())
@@ -117,24 +121,16 @@ def test_every_public_operation_can_be_selected_without_report_dependencies(prog
 
 
 def test_cli_accepts_multiple_actions_targets_and_switches_as_values():
-    model = load_configuration(
-        [
-            "coinjoin-analysis",
-            "--run-dir",
-            "r1",
-            "--analysis-program",
-            "parse_cj_logs",
-            "--analysis-operation",
-            "analyze_only",
-            "--analysis-target-path",
-            "set one",
-            "--analysis-target-path",
-            "set two",
-            "--analysis-load-config",
-            "config.json",
-            "--analysis-env-vars",
-            "DEBUG=False;NAME='$(touch /tmp/never)'",
-        ]
+    model = PipelineConfiguration.from_paths(
+        {
+            "action": "coinjoin-analysis",
+            "run_dir": "r1",
+            "coinjoin_analysis.program": "parse_cj_logs",
+            "coinjoin_analysis.actions": ["analyze_only"],
+            "coinjoin_analysis.target_paths": ["set one", "set two"],
+            "coinjoin_analysis.load_config": "config.json",
+            "coinjoin_analysis.env_vars": "DEBUG=False;NAME='$(touch /tmp/never)'",
+        }
     )
     model.validate()
     argv = coinjoin_tools.command_argv(model.coinjoin_analysis, "r1")
@@ -157,7 +153,12 @@ def test_cli_accepts_multiple_actions_targets_and_switches_as_values():
         ({"program": "coinjoin_statistics", "actions": [], "input_uri": "s3://bucket/data"}, "at least one"),
         ({"program": "coinjoin_statistics", "actions": ["wasabi2"]}, "own input dataset"),
         (
-            {"program": "coinjoin_statistics", "actions": ["wasabi2"], "data_mode": "emulation", "input_uri": "s3://b/d"},
+            {
+                "program": "coinjoin_statistics",
+                "actions": ["wasabi2"],
+                "data_mode": "emulation",
+                "input_uri": "s3://b/d",
+            },
             "mainnet operation",
         ),
         (

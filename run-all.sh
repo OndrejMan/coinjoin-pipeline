@@ -275,16 +275,15 @@ run_with_selected_images_in_dir() {
 
 scenario_arg() {
   local scenario="$1"
-  if [[ -f "${scenario}" ]]; then
-    printf '%s\n' "${scenario}"
-  elif [[ -f "${SCRIPT_DIR}/${scenario}" ]]; then
-    printf '%s\n' "${scenario}"
-  elif [[ -f "${SCRIPT_DIR}/scenarios/${scenario}" ]]; then
-    printf '%s\n' "scenarios/${scenario}"
-  else
-    echo "ERROR: scenario not found: ${scenario}" >&2
-    exit 2
-  fi
+  local candidate
+  for candidate in "${scenario}" "${SCRIPT_DIR}/${scenario}" "${SCRIPT_DIR}/scenarios/${scenario}"; do
+    if [[ -f "${candidate}" ]]; then
+      realpath -- "${candidate}"
+      return
+    fi
+  done
+  echo "ERROR: scenario not found: ${scenario}" >&2
+  exit 2
 }
 
 engine_for_scenario() {
@@ -424,19 +423,23 @@ fi
 mkdir -p "${EMULATION_LOGS_DIR}"
 
 if [[ "${RUN_SCENARIOS}" == "1" ]]; then
+  EMULATION_LOGS_DIR="$(cd "${EMULATION_LOGS_DIR}" && pwd -P)"
+  experiment_dir="${EMULATION_LOGS_DIR}/.run-all-experiments"
+  mkdir -p "${experiment_dir}"
   for scenario in "${SCENARIOS[@]}"; do
-    resolved_scenario="$(scenario_arg "${scenario}")"
-    scenario_path="${resolved_scenario}"
-    if [[ "${resolved_scenario}" != /* ]]; then
-      scenario_path="${SCRIPT_DIR}/${resolved_scenario}"
-    fi
-
+    scenario_path="$(scenario_arg "${scenario}")"
     scenario_engine="$(engine_for_scenario "${scenario_path}")"
-    run_args=(full-run --scenario "${resolved_scenario}" --engine "${scenario_engine}")
+    # The manifest records this path. Keep the file beside the run directories,
+    # so replay can use the same YAML and let the pipeline assign a fresh run ID.
+    experiment_file="$(mktemp "${experiment_dir}/experiment.XXXXXX.yaml")"
+    python3 "${SCRIPT_DIR}/tests/support/experiment.py" "${experiment_file}" \
+      action=full-run "scenario=${scenario_path}" "engine=${scenario_engine}" \
+      "runs_root=${EMULATION_LOGS_DIR}" "images.blocksci=${BLOCKSCI_IMAGE}" \
+      "images.emulator=${COINJOIN_EMULATOR_IMAGE}" "images.coinjoin_analysis=${COINJOIN_ANALYSIS_IMAGE}"
 
-    echo "Running ${resolved_scenario} with ${IMAGE_MODE} images..."
-    CURRENT_STEP_LABEL="scenario workflow ${resolved_scenario}"
-    run_with_selected_images_in_dir "${SCRIPT_DIR}" bash runIt.sh "${run_args[@]}"
+    echo "Running ${scenario_path} with ${IMAGE_MODE} images from ${experiment_file}..."
+    CURRENT_STEP_LABEL="scenario workflow ${scenario_path}"
+    run_with_selected_images_in_dir "${SCRIPT_DIR}" bash runIt.sh run "${experiment_file}"
   done
 fi
 

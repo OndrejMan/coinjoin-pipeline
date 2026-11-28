@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from .configuration import PipelineConfiguration
 
 # Where the project's images are published; a fork publishing its own sets
-# images.registry (--image-registry, $COINJOIN_IMAGE_REGISTRY).
+# images.registry ($COINJOIN_IMAGE_REGISTRY).
 DEFAULT_REGISTRY = "ghcr.io/ondrejman"
 REGISTRY_ENVIRONMENT = "COINJOIN_IMAGE_REGISTRY"
 REPOSITORIES = {

@@ -9,23 +9,23 @@ from coinjoin_pipeline.execution import s3_submission
 from coinjoin_pipeline.storage.s3 import ArtifactTransportError
 
 
-def _args(**overrides):
-    values = dict(
-        artifact_uri="s3://bucket/runs",
-        run_id="run-1",
-        s3_endpoint_url="https://s3.example",
-        s3_credentials_file="/credentials",
-        s3_profile="coinjoin",
-        s3_secret_name="coinjoin-s3",
-        namespace="coinjoin-ns",
-        reuse_namespace=True,
-        dry_run=False,
-        analysis_pbs=False,
-        blocksci_pbs=True,
-        mappings_pbs=False,
-    )
-    values.update(overrides)
-    return Namespace(**values)
+def _args(overrides=None):
+    values = {
+        "artifacts.uri": "s3://bucket/runs",
+        "run_id": "run-1",
+        "artifacts.endpoint_url": "https://s3.example",
+        "artifacts.credentials_file": "/credentials",
+        "artifacts.profile": "coinjoin",
+        "artifacts.secret_name": "coinjoin-s3",
+        "kubernetes.namespace": "coinjoin-ns",
+        "kubernetes.reuse_namespace": True,
+        "dry_run": False,
+        "stages.analysis": False,
+        "stages.blocksci": True,
+        "stages.mappings": False,
+    }
+    values.update(overrides or {})
+    return Namespace(values)
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def submission():
 def test_resumed_detect_still_requires_the_stored_baseline(submission) -> None:
     exists, runner = submission
     with pytest.raises(ArtifactTransportError, match="requires an existing"):
-        s3_submission._submit_s3_pbs_stages(_args(action="pbs-from-s3"), [])
+        s3_submission._submit_s3_pbs_stages(_args({"action": "pbs-from-s3"}), [])
     exists.assert_called_once()
     runner.assert_not_called()
 

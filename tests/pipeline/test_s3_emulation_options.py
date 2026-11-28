@@ -8,32 +8,24 @@ import pytest
 
 from coinjoin_pipeline.context import resolve_run_images
 from coinjoin_pipeline.arguments import load_configuration
+from coinjoin_pipeline.configuration import PipelineConfiguration
 from coinjoin_pipeline.configuration import ConfigurationError
 from coinjoin_pipeline.context import resolve_configuration
 from coinjoin_pipeline.execution import s3_emulation
 
-S3_EMULATE = [
-    "emulate",
-    "--engine",
-    "wasabi",
-    "--driver",
-    "kubernetes",
-    "--artifact-backend",
-    "s3",
-    "--run-id",
-    "run-1",
-    "--s3-secret-name",
-    "coinjoin-s3",
-    "--reuse-namespace",
-    "--artifact-uri",
-    "s3://bucket/runs",
-    "--s3-endpoint-url",
-    "https://s3.example.invalid",
-    "--s3-credentials-file",
-    "/storage/user/.aws/credentials",
-    "--s3-profile",
-    "coinjoin",
-]
+S3_EMULATE = {
+    "action": "emulate",
+    "engine": "wasabi",
+    "driver": "kubernetes",
+    "artifacts.backend": "s3",
+    "run_id": "run-1",
+    "artifacts.secret_name": "coinjoin-s3",
+    "kubernetes.reuse_namespace": True,
+    "artifacts.uri": "s3://bucket/runs",
+    "artifacts.endpoint_url": "https://s3.example.invalid",
+    "artifacts.credentials_file": "/storage/user/.aws/credentials",
+    "artifacts.profile": "coinjoin",
+}
 ENVIRONMENT = {
     "COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT": "1800",
     "COINJOIN_BTC_NODE_IMAGE": "btc-node:env",
@@ -66,7 +58,7 @@ def test_the_environment_no_longer_sets_the_options(monkeypatch) -> None:
     for variable, value in ENVIRONMENT.items():
         monkeypatch.setenv(variable, value)
 
-    config = resolve_configuration(load_configuration(S3_EMULATE))
+    config = resolve_configuration(PipelineConfiguration.from_paths(S3_EMULATE))
 
     assert config.kubernetes.distributor_startup_timeout is None
     assert config.kubernetes.btc_node_image is None
@@ -88,21 +80,19 @@ def test_an_invalid_option_value_is_refused(option, value) -> None:
 
 
 def test_the_job_renders_the_configured_options_not_the_environment(monkeypatch, tmp_path) -> None:
-    config = resolve_run_images(resolve_configuration(
-        load_configuration(
-            [
-                *S3_EMULATE,
-                "--distributor-startup-timeout",
-                "1800",
-                "--btc-node-image",
-                "btc-node:cli",
-                "--btc-node-initial-block-count",
-                "201",
-                "--kubernetes-image-pull-policy",
-                "Never",
-            ]
+    config = resolve_run_images(
+        resolve_configuration(
+            PipelineConfiguration.from_paths(
+                {
+                    **S3_EMULATE,
+                    "kubernetes.distributor_startup_timeout": 1800,
+                    "kubernetes.btc_node_image": "btc-node:cli",
+                    "kubernetes.btc_node_initial_block_count": 201,
+                    "kubernetes.image_pull_policy": "Never",
+                }
+            )
         )
-    ))[0]
+    )[0]
     # Set only after resolution: the Job must not read the process environment.
     monkeypatch.setenv("COINJOIN_BTC_NODE_IMAGE", "btc-node:env")
 
@@ -115,7 +105,9 @@ def test_the_job_renders_the_configured_options_not_the_environment(monkeypatch,
 
 
 def test_unset_options_leave_the_emulator_defaults(tmp_path) -> None:
-    environment = _controller_environment(resolve_run_images(resolve_configuration(load_configuration(S3_EMULATE)))[0], tmp_path)
+    environment = _controller_environment(
+        resolve_run_images(resolve_configuration(PipelineConfiguration.from_paths(S3_EMULATE)))[0], tmp_path
+    )
 
     for variable in (
         "COINJOIN_DISTRIBUTOR_STARTUP_TIMEOUT",

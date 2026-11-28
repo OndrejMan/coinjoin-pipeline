@@ -78,7 +78,9 @@ def main() -> int:
             args.output.write_text(script, encoding="utf-8")
             return 0
         index = dict(index_dir=args.index_dir, index_backup_uri=args.backup_uri)
-        chain = dict(external_bitcoin_datadir=str(args.bitcoin_datadir), network="bitcoin_regtest", max_block=args.max_block)
+        chain = dict(
+            external_bitcoin_datadir=str(args.bitcoin_datadir), network="bitcoin_regtest", max_block=args.max_block
+        )
         short = replace(DEFAULT_RESOURCES["blocksci"], walltime="02:00:00")
         common = dict(image="docker://blocksci-local", resources=short)
         if args.kind == "parse":
@@ -105,12 +107,12 @@ def main() -> int:
                 target, blocksci=BlockSciConfiguration(**index), resources=short
             )
         elif args.kind == "compare":
-            config = PipelineConfiguration.from_flat(
+            config = PipelineConfiguration.from_paths(
                 {
                     "coinjoin_type": "wasabi2",
                     "min_input_count": 15,
-                    "blocksci_pin_height": args.pin_height,
-                    "pbs_image": common["image"],
+                    "blocksci.pin_height": args.pin_height,
+                    "pbs.image": common["image"],
                 }
             )
             script = templates_s3.render_blocksci_analyze_s3_pbs(
@@ -121,12 +123,12 @@ def main() -> int:
                 **common,
             )
         else:
-            config = PipelineConfiguration.from_flat(
+            config = PipelineConfiguration.from_paths(
                 {
                     "coinjoin_type": "wasabi2",
                     "min_input_count": 15,
-                    "blocksci_pin_height": args.pin_height,
-                    "pbs_image": common["image"],
+                    "blocksci.pin_height": args.pin_height,
+                    "pbs.image": common["image"],
                 }
             )
             script = templates_s3.render_blocksci_analyze_s3_pbs(

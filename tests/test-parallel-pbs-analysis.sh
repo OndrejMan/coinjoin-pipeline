@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Happy-path e2e: full-run --parallel with both analyzers scheduled on PBS.
-# Kubernetes runs the emulation; --analysis-pbs --blocksci-pbs --parallel must
+# Happy-path e2e: full-run with parallel: true and both analyzers scheduled on PBS.
+# Kubernetes runs the emulation. stages.analysis, stages.blocksci and parallel
 # submit the coinjoin-analysis and BlockSci PBS jobs concurrently under the
 # wrapper's "Parallel analysis" pipeline stage, join them, and then run the
 # unified report export PBS stage. Arguments and environment as in

@@ -88,25 +88,25 @@ def research_option_errors(config: PipelineConfiguration) -> list[str]:
     if options.env_vars or options.load_config or options.filename:
         errors.append("research adapters use coinjoin_analysis.research settings, not parser switches")
     if options.program != "generate_llm_inputs" and options.target_paths:
-        errors.append("this research adapter uses its named input file settings, not --analysis-target-path")
+        errors.append("this research adapter uses its named input file settings, not coinjoin_analysis.target_paths")
     if settings.allow_network and options.data_mode != "mainnet":
         errors.append("online sources are only available for mainnet data")
     if settings.txid is not None and re.fullmatch(r"[0-9a-fA-F]{64}", settings.txid) is None:
-        errors.append("--analysis-txid must contain 64 hexadecimal characters")
+        errors.append("coinjoin_analysis.research.txid must contain 64 hexadecimal characters")
     if options.program == "analyze_tx_size":
         if settings.tx_hex and settings.transaction_file:
             errors.append("choose raw tx_hex or transaction_file, not both")
         if not (settings.txid or settings.tx_hex or settings.transaction_file):
             errors.append("transaction size requires a TXID, raw tx_hex or transaction_file")
         if settings.tx_hex and (len(settings.tx_hex) % 2 or re.fullmatch(r"[0-9a-fA-F]+", settings.tx_hex) is None):
-            errors.append("--analysis-tx-hex must contain even-length hexadecimal data")
+            errors.append("coinjoin_analysis.research.tx_hex must contain even-length hexadecimal data")
         if not (settings.input_indices or settings.output_indices):
             errors.append("select at least one input or output index for the transaction size calculation")
         for indices in (settings.input_indices, settings.output_indices):
             if any(index < 0 for index in indices) or len(indices) != len(set(indices)):
                 errors.append("transaction indices must be non-negative and must not repeat")
     if options.program == "update_txids_with_wabisator" and not settings.allow_network:
-        errors.append("coordinator refresh needs --analysis-allow-network for Wabisator and mempool.space")
+        errors.append("coordinator refresh needs coinjoin_analysis.research.allow_network for Wabisator and mempool.space")
     for path in (settings.transaction_file, settings.coordinator_file):
         if path is not None and not relative_path(path):
             errors.append("research input files must be relative to the input dataset, without '..'")
@@ -130,7 +130,7 @@ def option_errors(config: PipelineConfiguration) -> list[str]:
     options = config.coinjoin_analysis
     if options.program is None:
         return (
-            ["coinjoin_analysis options require --analysis-program"]
+            ["coinjoin_analysis options require coinjoin_analysis.program"]
             if any(path.startswith("coinjoin_analysis.") for path in config.provided)
             else []
         )
@@ -147,7 +147,7 @@ def _data_mode_errors(options: CoinjoinAnalysisConfiguration) -> list[str]:
     """Mainnet operations read public-chain data; emulation operations need wallet labels."""
     errors = []
     if options.program in MAINNET_PROGRAMS and options.data_mode != "mainnet":
-        errors.append(f"{options.program} is a mainnet operation; set --analysis-data-mode mainnet")
+        errors.append(f"{options.program} is a mainnet operation; set coinjoin_analysis.data_mode mainnet")
     if options.program in EMULATION_PROGRAMS and options.data_mode != "emulation":
         errors.append(f"{options.program} requires emulation data with wallet labels")
     if options.program == "ww2_analyze_client":
@@ -162,9 +162,9 @@ def _placement_errors(config: PipelineConfiguration) -> list[str]:
     """Analyzer operations run alone, locally through coinjoin-analysis or on PBS through pbs-from-s3."""
     errors = []
     if config.action not in {"coinjoin-analysis", "pbs-from-s3"}:
-        errors.append("--analysis-program requires coinjoin-analysis or pbs-from-s3")
+        errors.append("coinjoin_analysis.program requires coinjoin-analysis or pbs-from-s3")
     if config.action == "pbs-from-s3" and not config.stages.analysis:
-        errors.append("--analysis-program on PBS requires --analysis-pbs")
+        errors.append("coinjoin_analysis.program on PBS requires stages.analysis")
     if config.stages.blocksci or config.stages.mappings or config.all_runs or config.dumplings_uri:
         errors.append("coinjoin-analysis operations run alone; disable BlockSci/mappings and select one run")
     if config.action == "coinjoin-analysis" and config.stages.analysis:
@@ -178,7 +178,7 @@ def _operation_errors(options: CoinjoinAnalysisConfiguration) -> list[str]:
     program = options.program or ""
     allowed = PROGRAM_ACTIONS[program]
     if allowed and not options.actions:
-        errors.append("choose at least one --analysis-operation")
+        errors.append("choose at least one coinjoin_analysis.actions")
     if any(action not in allowed for action in options.actions):
         errors.append(f"invalid operation for {program}; choose from {', '.join(allowed)}")
     if program == "parse_cj_logs" and len(options.actions) != 1:
@@ -186,9 +186,9 @@ def _operation_errors(options: CoinjoinAnalysisConfiguration) -> list[str]:
     if program == "scan_results_plot":
         filename = options.filename
         if not filename or not relative_path(filename) or "/" in filename or filename.endswith(".json"):
-            errors.append("scan_results_plot requires --analysis-filename (a filename without .json)")
+            errors.append("scan_results_plot requires coinjoin_analysis.filename (a filename without .json)")
     elif options.filename is not None:
-        errors.append("--analysis-filename is only supported by scan_results_plot")
+        errors.append("coinjoin_analysis.filename is only supported by scan_results_plot")
     if program in POSITIONAL_PROGRAMS and (options.env_vars or options.load_config):
         errors.append(f"{program} has no --env_vars or --load-config option")
     if program in WORKFLOW_PROGRAMS:
@@ -197,7 +197,7 @@ def _operation_errors(options: CoinjoinAnalysisConfiguration) -> list[str]:
         if len(set(options.actions)) != len(options.actions):
             errors.append(f"{program} lists each protocol once")
     if options.load_config and program not in {"parse_cj_logs", "parse_dumplings"}:
-        errors.append("--analysis-load-config is supported by parse_cj_logs and parse_dumplings")
+        errors.append("coinjoin_analysis.load_config is supported by parse_cj_logs and parse_dumplings")
     return errors
 
 
@@ -208,23 +208,23 @@ def _input_errors(config: PipelineConfiguration) -> list[str]:
     if options.program != "parse_cj_logs" and len(options.target_paths) > 1:
         errors.append(f"{options.program} accepts only one target path")
     if options.program == "perf_processing" and not options.target_paths:
-        errors.append("perf_processing requires --analysis-target-path pointing to a CSV file")
+        errors.append("perf_processing requires coinjoin_analysis.target_paths pointing to a CSV file")
     if any(
         not relative_path(path)
         for path in (*options.target_paths, *([options.load_config] if options.load_config else []))
     ):
         errors.append("analysis target/config paths must be relative to the input and must not contain '..'")
     if needs_external_input(options) and not (options.input_uri or options.input_dir):
-        errors.append("this operation needs its own input dataset (--analysis-input-uri or --analysis-input-dir)")
+        errors.append("this operation needs its own input dataset (coinjoin_analysis.input_uri or coinjoin_analysis.input_dir)")
     if options.input_uri:
         try:
             validate_artifact_uri(options.input_uri)
         except ValueError as error:
             errors.append(f"invalid analysis input URI: {error}")
         if config.action != "pbs-from-s3":
-            errors.append("--analysis-input-uri requires pbs-from-s3; use --analysis-input-dir locally")
+            errors.append("coinjoin_analysis.input_uri requires pbs-from-s3; use coinjoin_analysis.input_dir locally")
     if options.input_dir and config.action != "coinjoin-analysis":
-        errors.append("--analysis-input-dir is local; use --analysis-input-uri on PBS")
+        errors.append("coinjoin_analysis.input_dir is local; use coinjoin_analysis.input_uri on PBS")
     return errors
 
 

@@ -44,7 +44,7 @@ def run_kubernetes_emulation(
     """
     scenario, kubernetes = config.scenario, config.kubernetes
     if not scenario:
-        raise ValueError("Kubernetes emulation requires --scenario")
+        raise ValueError("Kubernetes emulation requires scenario")
     copy_to_host = kubernetes.copy_to_host
     env = containers.compose_env(config, create_directories=True)
     host_root_dir = containers.default_host_root_dir()
@@ -53,7 +53,7 @@ def run_kubernetes_emulation(
     copy_to_host_dir = os.environ.get("KUBERNETES_COPY_TO_HOST_DIR")
     if copy_to_host and (not copy_to_host_dir):
         raise ValueError(
-            "--copy-to-host requires KUBERNETES_COPY_TO_HOST_DIR; "
+            "kubernetes.copy_to_host requires KUBERNETES_COPY_TO_HOST_DIR; "
             "the launcher must mount an explicit host-owned output directory"
         )
     local_btc_data_dir = Path(copy_to_host_dir or host_root_dir / "btc-data").expanduser().resolve()
@@ -66,7 +66,7 @@ def run_kubernetes_emulation(
     container_scenario = scenarios.container_scenario_path(str(source), scenarios_dir)
     kubeconfig_path = resolve_kubeconfig(kubernetes.kubeconfig)
     if not kubeconfig_path.exists():
-        raise ValueError(f"kubeconfig not found at {kubeconfig_path}; pass --kubeconfig or create ~/.kube/config")
+        raise ValueError(f"kubeconfig not found at {kubeconfig_path}; pass kubernetes.kubeconfig or create ~/.kube/config")
     kubernetes_auth_preflight(kubeconfig_path, kubernetes.namespace, kubernetes.reuse_namespace)
     emulator_cmd = kubernetes_emulator_command(
         config,

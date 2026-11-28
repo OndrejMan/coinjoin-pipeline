@@ -350,18 +350,15 @@ export KUBERNETES_CONTROL_IP="${K3D_SERVER_IP}"
 echo "Emulator manager network: ${K3D_NETWORK}; Kubernetes NodePort host: ${K3D_SERVER_IP}"
 
 echo "Running Kubernetes emulation test action '${ACTION}' in namespace '${NAMESPACE}'..."
+# Extra arguments of this script are further experiment settings as PATH=VALUE.
+python3 "${PROJECT_DIR}/tests/support/experiment.py" "${TMP_DIR}/experiment.yaml" \
+  "action=${ACTION}" engine=wasabi "scenario=${SCENARIO}" driver=kubernetes \
+  "kubernetes.namespace=${NAMESPACE}" "kubernetes.kubeconfig=${CONTAINER_KUBECONFIG}" \
+  "kubernetes.image_prefix=${IMAGE_PREFIX}" kubernetes.copy_to_host=true "$@"
 (
   cd "${PROJECT_DIR}"
   timeout --foreground "${EMULATION_TIMEOUT}" \
-    ./runIt.sh "${ACTION}" --runtime "${CONTAINER_RUNTIME}" \
-    --engine wasabi \
-    --scenario "${SCENARIO}" \
-    --driver kubernetes \
-    --namespace "${NAMESPACE}" \
-    --kubeconfig "${CONTAINER_KUBECONFIG}" \
-    --image-prefix "${IMAGE_PREFIX}" \
-    --copy-to-host \
-    "$@"
+    ./runIt.sh --runtime "${CONTAINER_RUNTIME}" run "${TMP_DIR}/experiment.yaml"
 )
 
 echo "PASS: Kubernetes emulation path completed on k3d cluster '${CLUSTER_NAME}' with ${AGENTS} worker agent(s)."

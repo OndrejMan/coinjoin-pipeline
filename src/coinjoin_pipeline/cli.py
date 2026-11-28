@@ -5,33 +5,57 @@ from __future__ import annotations
 import importlib
 import os
 import shlex
+import shutil
 import subprocess
 import sys
-from dataclasses import asdict, fields
+from dataclasses import asdict
 from pathlib import Path
 
 from exporters.artifact_paths import RUN_MANIFEST
 
 from . import MANIFEST_SCHEMA_VERSION, __version__
 from .arguments import (
-    CONFIGURATION_FLAG,
     DELEGATING_UTILITIES,
+    HOST_OVERRIDES,
     UTILITIES,
     UTILITY_SUMMARIES,
     action_word,
     build_parser,
     load_configuration,
 )
-from .configuration import ImageConfiguration, PipelineConfiguration
+from .configuration import PipelineConfiguration
 from .console import EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, fail
 from .context import RunContext, runs_root
 from .doctor import check as doctor_check
 from .doctor import required_capabilities, required_image_components, validate_arguments
 from .images import DEFAULT_VERSION, Images, image_names
 from .manifest import environment_snapshot, initial_manifest, mark_finished
-from .paths import PIPELINE_ROOT
+from .paths import PIPELINE_ROOT, PROJECT_ROOT
 from .process import run
 from .runs import read_host_manifest, store_host_manifest
+
+
+# Host settings that run-all.sh passes to its Compose workflow.
+REPLAY_ENVIRONMENT = (
+    "BLOCKSCI_PULL_POLICY",
+    "COINJOIN_EMULATOR_PULL_POLICY",
+    "COINJOIN_ANALYSIS_PULL_POLICY",
+    "COINJOIN_EMULATOR_IMAGE_PREFIX",
+    "COINJOIN_EMULATOR_INFRASTRUCTURE_LOCAL_BUILD",
+    "BLOCKSCI_LAUNCH_JUPYTER",
+    "RUN_TIMEOUT_SECONDS",
+)
+
+
+def reproduction_command(argv: list[str]) -> str:
+    """A runnable experiment command with the launcher's Compose settings."""
+    launcher = "coinjoin-pipeline"
+    wrapper = PROJECT_ROOT / "runIt.sh"
+    if shutil.which(launcher) is None and wrapper.is_file():
+        launcher = str(wrapper)
+    environment = [f"{key}={os.environ[key]}" for key in REPLAY_ENVIRONMENT if key in os.environ]
+    command = [launcher, *argv]
+    return shlex.join(["env", *environment, *command] if environment else command)
 
 
 def print_version() -> None:
@@ -62,10 +86,6 @@ def use_line_buffered_output() -> None:
             reconfigure(line_buffering=True)
 
 
-# The host options every utility accepts before or after its name.
-UTILITY_OPTIONS = frozenset({"runtime", "runs_root", *("images." + item.name for item in fields(ImageConfiguration))})
-
-
 def utility_usage(action: str) -> str:
     return (
         f"usage: cjp {action} [--runtime {{docker,podman}}] [--runs-root DIR] "
@@ -75,10 +95,9 @@ def utility_usage(action: str) -> str:
 
 
 def _utility(argv: list[str]) -> int | None:
-    values, remaining = build_parser(set(UTILITY_OPTIONS), add_help=False).parse_known_args(argv)
+    values, remaining = build_parser(HOST_OVERRIDES, add_help=False).parse_known_args(argv)
     supplied = vars(values)
-    action = supplied.pop("action", None)
-    supplied.pop("from_configuration", None)
+    action = supplied.pop("command", None)
     if action not in UTILITIES:
         return None
     if action not in DELEGATING_UTILITIES and remaining[:1] in (["-h"], ["--help"]):
@@ -87,7 +106,7 @@ def _utility(argv: list[str]) -> int | None:
     if action == "version":
         print_version()
         return EXIT_OK
-    config = PipelineConfiguration.from_flat(supplied)
+    config = PipelineConfiguration.from_paths(supplied)
     reproduction = shlex.join(["cjp", *argv])
     # Only pull, doctor and runs validate need images; the others read the runs root alone.
     root = runs_root(config)
@@ -99,7 +118,7 @@ def _utility(argv: list[str]) -> int | None:
 
         if action == "runs" and remaining[:1] == ["validate"]:
             # An explicit image overrides the report's; otherwise it only replaces a missing one.
-            flag = "--blocksci-image" if "blocksci_image" in supplied else "--default-blocksci-image"
+            flag = "--blocksci-image" if "images.blocksci" in supplied else "--default-blocksci-image"
             remaining.extend([flag, RunContext.prepare(config, reproduction).images.blocksci])
         return research_main(["--runs-root", str(root), "--runtime", config.runtime, action, *remaining])
     context = RunContext.prepare(config, reproduction)
@@ -175,7 +194,7 @@ def start_host_manifest(
     if target and not config.run_dir and not config.resume_run and "host_launcher" in read_host_manifest(target):
         raise ValueError(
             f"run {config.run_id} already records a launch in {target}; start the new run "
-            "under a fresh --run-id, or continue an S3 full-run with --resume-run"
+            "under a fresh run_id, or continue an S3 full-run with --resume-run"
         )
     effective = asdict(config)
     effective.pop("_provided", None)
@@ -205,14 +224,11 @@ def main(argv: list[str] | None = None) -> int:
     manifest = None
     code = EXIT_FAILURE
     try:
-        if (
-            not any(value.split("=", 1)[0] == CONFIGURATION_FLAG for value in original)
-            and action_word(original) != "run"
-        ):
+        if action_word(original) != "run":
             result = _utility(original)
             if result is not None:
                 return result
-        reproduction = shlex.join(["coinjoin-pipeline", *original])
+        reproduction = reproduction_command(original)
         context = RunContext.prepare(load_configuration(original), reproduction)
         config = context.config
         errors = preflight_errors(context)

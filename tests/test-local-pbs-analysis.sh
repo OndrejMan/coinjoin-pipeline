@@ -125,13 +125,15 @@ export PBS_CLIENT_WORKDIR="${WORK_DIR}"
 export EMULATION_LOGS_DIR="${WORK_DIR}"
 
 echo "Running coinjoin-analysis through the documented runIt.sh PBS interface..."
-(cd "${PROJECT_DIR}" && ./runIt.sh coinjoin-analysis \
-  --run-dir "${RUN_DIR}" --analysis-pbs --pbs-ncpus 1 --pbs-mem 2gb --pbs-scratch 1gb --pbs-walltime 00:10:00)
+python3 "${PROJECT_DIR}/tests/support/experiment.py" "${WORK_DIR}/coinjoin-analysis.yaml" \
+  action=coinjoin-analysis stages.analysis=true pbs.ncpus=1 pbs.mem=2gb pbs.scratch=1gb pbs.walltime=00:10:00
+(cd "${PROJECT_DIR}" && ./runIt.sh run "${WORK_DIR}/coinjoin-analysis.yaml" --run-dir "${RUN_DIR}")
 
 echo "Running BlockSci through the documented runIt.sh PBS interface..."
-(cd "${PROJECT_DIR}" && ./runIt.sh analyze --engine wasabi \
-  --run-dir "${RUN_DIR}" --blocksci-pbs --pbs-bitcoin-datadir "${BITCOIN_DATADIR}" \
-  --pbs-ncpus 1 --pbs-mem 4gb --pbs-scratch 1gb --pbs-walltime 00:15:00)
+python3 "${PROJECT_DIR}/tests/support/experiment.py" "${WORK_DIR}/analyze.yaml" \
+  action=analyze engine=wasabi stages.blocksci=true "pbs.bitcoin_datadir=${BITCOIN_DATADIR}" \
+  pbs.ncpus=1 pbs.mem=4gb pbs.scratch=1gb pbs.walltime=00:15:00
+(cd "${PROJECT_DIR}" && ./runIt.sh run "${WORK_DIR}/analyze.yaml" --run-dir "${RUN_DIR}")
 
 python3 - "${RUN_DIR}" <<'PY'
 import json

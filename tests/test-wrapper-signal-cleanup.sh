@@ -70,8 +70,10 @@ from pathlib import Path
 import shlex
 
 destination, runs_root, run_id = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
-command = [sys.executable, "-m", "coinjoin_pipeline.cli", "emulate", "--engine", "wasabi",
-           "--scenario", "overactive-local.json", "--runs-root", str(runs_root), "--run-id", run_id]
+experiment = destination.with_suffix(".yaml")
+experiment.write_text("action: emulate\nengine: wasabi\nscenario: overactive-local.json\n", encoding="utf-8")
+command = [sys.executable, "-m", "coinjoin_pipeline.cli", "run", str(experiment),
+           "--runs-root", str(runs_root), "--run-id", run_id]
 destination.write_text("exec " + shlex.join(command) + "\n", encoding="utf-8")
 PY
 

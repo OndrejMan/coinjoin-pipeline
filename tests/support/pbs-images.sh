@@ -5,13 +5,13 @@
 # docker-archive reference.
 #
 #   source tests/support/pbs-images.sh
-#   export_pbs_docker_archive <image> <archive name> <cjp image flag>
+#   export_pbs_docker_archive <image> <archive name> <YAML key, e.g. pbs.blocksci_image>
 #
-# The caller sets WORK_ROOT and PBS_IMAGE_ARGS=(); each call appends the flag
-# and its docker-archive reference to PBS_IMAGE_ARGS.
+# The caller sets WORK_ROOT and PBS_IMAGE_ARGS=(); each call appends KEY=reference
+# for tests/support/experiment.py to PBS_IMAGE_ARGS.
 
 export_pbs_docker_archive() {
-  local image="$1" archive_name="$2" image_flag="$3"
+  local image="$1" archive_name="$2" image_key="$3"
   docker image inspect "${image}" >/dev/null 2>&1 || {
     echo "FAIL: local image for PBS docker-archive export not found: ${image}" >&2
     exit 2
@@ -20,5 +20,5 @@ export_pbs_docker_archive() {
   echo "Exporting ${image} as ${archive_name}.tar for offline PBS execution..."
   docker save "${image}" -o "${WORK_ROOT}/pbs-images/${archive_name}.tar"
   chmod 0644 "${WORK_ROOT}/pbs-images/${archive_name}.tar"
-  PBS_IMAGE_ARGS+=("${image_flag}" "docker-archive:${WORK_ROOT}/pbs-images/${archive_name}.tar")
+  PBS_IMAGE_ARGS+=("${image_key}=docker-archive:${WORK_ROOT}/pbs-images/${archive_name}.tar")
 }

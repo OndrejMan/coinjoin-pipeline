@@ -85,12 +85,12 @@ class S3Target:
     def from_args(cls, args: "PipelineConfiguration") -> "S3Target":
         """Build a target after the public CLI has validated its S3 options."""
         return cls(
-            artifact_uri=required(args.artifacts.uri, "--artifact-uri"),
-            run_id=required(args.run_id, "--run-id"),
+            artifact_uri=required(args.artifacts.uri, "artifacts.uri"),
+            run_id=required(args.run_id, "run_id"),
             access=S3Access(
-                endpoint_url=required(args.artifacts.endpoint_url, "--s3-endpoint-url"),
-                credentials_file=required(args.artifacts.credentials_file, "--s3-credentials-file"),
-                profile=required(args.artifacts.profile, "--s3-profile"),
+                endpoint_url=required(args.artifacts.endpoint_url, "artifacts.endpoint_url"),
+                credentials_file=required(args.artifacts.credentials_file, "artifacts.credentials_file"),
+                profile=required(args.artifacts.profile, "artifacts.profile"),
             ),
             state_prefix=args.blocksci.index_state_uri,
         )
