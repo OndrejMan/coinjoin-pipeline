@@ -29,17 +29,17 @@ jobs run the enumerator and Sake from `templates/mappings_run.sh`.
 
 | Stage name          | Submitted by                          | Template                          |
 |---------------------|---------------------------------------|-----------------------------------|
-| `blocksci`          | `--blocksci-pbs`                      | `local_blocksci.sh`               |
-| `coinjoin-analysis` | `--analysis-pbs`                      | `local_coinjoin_analysis.sh`      |
-| `coinjoin-mappings` | `--mappings-pbs`                      | `local_mappings.sh`               |
+| `blocksci`          | `stages.blocksci`                      | `local_blocksci.sh`               |
+| `coinjoin-analysis` | `stages.analysis`                      | `local_coinjoin_analysis.sh`      |
+| `coinjoin-mappings` | `stages.mappings`                      | `local_mappings.sh`               |
 | `unified-report`    | serial or parallel, after analyzers    | `local_blocksci.sh` (report-only command) |
-| S3 analyzer variants | `pbs-from-s3`, `full-run --artifact-backend s3` | `analyzer_jobs.py` (`coinjoin_analysis`), `blocksci_jobs.py` (`blocksci`) |
-| S3 mainnet baseline | `pbs-from-s3 --analysis-pbs --dumplings-uri` | `analyzer_jobs.py` (`dumplings_baseline`) |
-| S3 `coinjoin-mappings` | Wasabi `--mappings-pbs` | `analyzer_jobs.py` (`coinjoin_mappings`) running `mappings_run.sh` |
+| S3 analyzer variants | `pbs-from-s3`, `full-run` with `artifacts.backend: s3` | `analyzer_jobs.py` (`coinjoin_analysis`), `blocksci_jobs.py` (`blocksci`) |
+| S3 mainnet baseline | `pbs-from-s3`, `stages.analysis` and `dumplings_uri` | `analyzer_jobs.py` (`dumplings_baseline`) |
+| S3 `coinjoin-mappings` | Wasabi `stages.mappings` | `analyzer_jobs.py` (`coinjoin_mappings`) running `mappings_run.sh` |
 | S3 `blocksci-parse` | reusable BlockSci workflow | `blocksci_jobs.py` (`blocksci_parse`) |
 | S3 `blocksci-update` | versioned incremental cache update from a coin directory or the block archive | `blocksci_jobs.py` (`blocksci_update`) |
 | S3 cached work | `detect`, `script`, `external` or `notebook` over a reusable parse | `blocksci_analysis_jobs.py` (`blocksci_analysis`) |
-| S3 `blocksci-backup` | `--blocksci-task backup` of a persistent index | `blocksci_jobs.py` (`blocksci_backup`) |
+| S3 `blocksci-backup` | `blocksci.task backup` of a persistent index | `blocksci_jobs.py` (`blocksci_backup`) |
 | S3 `unified-report` | BlockSci detect selected, after selected analyzers; a `full-run` also needs coinjoin-analysis | `analyzer_jobs.py` (`unified_report`) |
 
 ## Marker files
@@ -64,7 +64,7 @@ compute jobs never remove remote markers, avoiding a queued old attempt
 deleting a newer attempt's marker. S3 jobs upload markers to
 `<artifact-uri>/<run-id>/.pbs/` instead of writing them locally.
 
-For `pbs-from-s3 --analysis-pbs --blocksci-pbs`, the analyzer jobs have no
+For `pbs-from-s3` with `stages.analysis` and `stages.blocksci`, the analyzer jobs have no
 dependency on each other. The report-only job uses
 `afterok:<coinjoin-analysis-job>:<blocksci-job>` and therefore runs only after
 both analyzers have uploaded their S3 outputs successfully. The BlockSci job
@@ -81,7 +81,7 @@ ends the job with 143, and any other failure keeps its own status. After the mar
 it empties `$SCRATCHDIR` with MetaCentrum's `clean_scratch`, or by deleting its
 contents where that tool is missing.
 
-For Wasabi 2 with `--mappings-pbs`, the S3 mappings job downloads
+For Wasabi 2 with `stages.mappings`, the S3 mappings job downloads
 `coinjoin-analysis_data/coinjoin_tx_info.json`, preserves the shared-storage
 enumerator/Sake partial-result semantics, and uploads
 `coinjoin-mappings_data/`. When coinjoin-analysis is submitted in the same
@@ -115,7 +115,7 @@ are verified. No analysis or notebook starts on failure.
 No emulation index is retained on multijob storage; persistent mainnet index
 locations, locking, update and backup lifecycle remain unchanged.
 
-`--blocksci-workflow cached --blocksci-task update` is the only S3 parser
+`blocksci.workflow: cached` with `blocksci.task: update` is the only S3 parser
 resume path. It requires a source cache run, a different fresh target run,
 and the source cache's block source: an external Bitcoin coin directory under
 `/storage` for an `external-bitcoin` cache, or the `bitcoin-block-archive` S3
@@ -136,7 +136,7 @@ height above the source maximum. The source run is never modified. A failed targ
 is not reusable as a target; choose another fresh `--run-id` after diagnosis.
 
 The `script`, `external`, and `notebook` tasks of the `cached` workflow may read
-another run's cache read-only with the same `--blocksci-cache-source-run-id`.
+another run's cache read-only with the same `blocksci.cache_source_run_id`.
 The frontend applies the same preflight (source manifest present, target
 prefix empty); the job streams the source archive, requires its
 manifest `run_id` to be the source run, and writes outputs, `.pbs` markers,
@@ -149,13 +149,13 @@ because it reads the emulator data of its own run. For the `script` task,
 `SCAN_START_HEIGHT`, and `SCAN_END_HEIGHT`.
 
 A persistent index replaces the S3 cache for mainnet: `blocksci.index_dir`
-(`--blocksci-index-dir`) names a working copy under `/scratch/multijob-<location>/`
+(`blocksci.index_dir`) names a working copy under `/scratch/multijob-<location>/`
 or `/storage/`, optionally with an S3 backup prefix `blocksci.index_backup_uri`
-(`--blocksci-index-backup-uri`). A working copy on multijob scratch requires
+(`blocksci.index_backup_uri`). A working copy on multijob scratch requires
 `pbs.blocksci.multijob: <location>`, which adds `:multijob=<location>` to the
 job's `select`. `parse` (from a block archive or an external Bitcoin datadir)
 parses straight into the directory and refuses one that already holds an index;
-`update` needs no `--blocksci-cache-source-run-id` and updates in place; `backup`,
+`update` needs no `blocksci.cache_source_run_id` and updates in place; `backup`,
 `script`, `external`, and `notebook` read it. Every job binds the directory at its own
 path, links `parsed/` into the run and keeps `config.json` run-local
 (`execution/pbs/index_store.py`, which the mainnet synchronization jobs use too).
@@ -202,7 +202,7 @@ in its run. Neither `parse` nor
 `blocksci-index-manifest.json`. `tests/test-persistent-index-local.sh` runs the
 rendered jobs on one host with Docker in place of Singularity.
 
-`blocksci.index_state_uri` (`--blocksci-index-state-uri`, only with `parse`,
+`blocksci.index_state_uri` (only with `parse`,
 `update` or `backup` of a persistent index) gives those jobs one fixed S3 prefix
 in place of `<artifact_uri>/<run_id>/`. The stage header then sets `RUN_PREFIX`
 to it and `LOG_PREFIX` to `<prefix>/logs/<run_id>`; every other job keeps
@@ -213,7 +213,7 @@ instead of reusing a staged tree, and the job replaces
 (the last backup). Only the logs of every run stay. The run ID still names the
 PBS job and the run directory under `runs_root`.
 
-For mainnet, `dumplings_uri` (`--dumplings-uri`, with `--analysis-pbs`) replaces
+For mainnet, `dumplings_uri` (with `stages.analysis`) replaces
 the emulator input of the `coinjoin-analysis` stage. The job reads
 `<dumplings_uri>/manifest.json` (written last by mainnet-sync, so a copy being
 replaced has none), downloads `<dumplings_uri>/Scanner/` into scratch, checks
@@ -223,7 +223,7 @@ runs `parse_dumplings --action process_dumplings` (`ww2` → `Scanner/wasabi2`,
 `jm` → `Scanner/joinmarket_all`) and uploads `coinjoin_tx_info.json`, the
 image's curated `false_cjtxs.json` and `dumplings-snapshot.json` to
 `coinjoin-analysis_data/`. The external report consumes them through
-`--external-baseline-uri` and `--external-false-cjtxs-uri`. With
+`blocksci.external_baseline_uri` and `blocksci.external_false_cjtxs_uri`. With
 `blocksci.pin_height` and the scan range, the external report scans only that
 window, looks up every baseline transaction's height in BlockSci (Dumplings
 records hold the position in the block, not the height) and compares only the
@@ -279,7 +279,7 @@ inclusive maximum. These ranges do not prove a connected or canonical chain.
 After parsing and before creating/uploading the cache tarball,
 `exporters/verify_chain.py` opens the actual index with no height limit and
 requires exactly `max_block + 1` blocks. It compares the target block hash to
-`--blocksci-expected-block-hash` (`blocksci.expected_block_hash` in YAML),
+`blocksci.expected_block_hash`,
 which is mandatory for mainnet archive sources and must come from a trusted
 source such as `bitcoin-cli getblockhash HEIGHT`. The PBS job makes no network
 request for the checkpoint. A short/overlong index or hash mismatch fails the
@@ -296,10 +296,10 @@ manifest records `source_kind` and `network`. Cached `script` and `notebook`
 jobs download only this cache, while `blocksci-analyze` also downloads the
 emulator and exporter inputs required by the standard detector contract.
 
-`--blocksci-task parse` submits only the cache producer. `script` and
+`blocksci.task parse` submits only the cache producer. `script` and
 `notebook` submit `blocksci-script` and `blocksci-notebook` work jobs and do
 not submit a unified report. `external` downloads a Dumplings
-`coinjoin_tx_info.json` from `--external-baseline-uri`, reuses a verified cache,
+`coinjoin_tx_info.json` from `blocksci.external_baseline_uri`, reuses a verified cache,
 and writes an external-mode unified report. It compares agreement with that
 baseline; it never claims emulator ground-truth precision/recall. A custom
 script is bound read-only from shared
@@ -328,7 +328,7 @@ the existing stage default. `scratch_type` picks the `#PBS -l` scratch resource:
 `ssd` (`scratch_ssd`, the default) or `local` (`scratch_local`, a spinning disk
 on most MetaCentrum nodes); `$SCRATCHDIR` points at whichever PBS granted. The S3 report-only job has independent defaults: 2 CPUs, 8 GB RAM,
 10 GB scratch, and a 1-hour walltime. Report-specific
-`--pbs-unified-report-*` options use the same precedence over the shared
+`pbs.unified_report.*` settings use the same precedence over the shared
 fallback.
 
 ## Frontend waiting (`wait_for_pbs_marker`)
@@ -360,7 +360,7 @@ Robustness rules:
 
 ## S3 marker wait contract (`wait_for_s3_marker`)
 
-`full-run --artifact-backend s3` is the only frontend-side consumer of the
+A `full-run` with `artifacts.backend: s3` is the only frontend-side consumer of the
 markers uploaded to the bucket. It polls these exact keys every 30 s with
 `s5cmd --json ls` (credentials file + profile + endpoint from the CLI, AWS_* env
 vars scrubbed first) and matches the listed key exactly, since `ls` of a key also
@@ -397,7 +397,7 @@ Semantics mirror `wait_for_pbs_marker`: `failed` raises and `done` returns.
 The probe distinguishes queued from executing work. A queued job may extend
 its start deadline, but after the job is observed running its execution
 deadline is absolute and is never extended (emulation:
-`--emulation-timeout`, default 21600 s; PBS stages: walltime + one hour).
+`emulation_timeout`, default 21600 s; PBS stages: walltime + one hour).
 The Kubernetes uploader has the same independent emulation timeout, so a
 deadlocked controller produces `upload.failed` instead of leaving the
 sidecar alive forever. A liveness *probe* replaces the local qstat fallback —
@@ -412,7 +412,7 @@ Extra rules for the S3 chain:
   contain any object. This prevents stale partial artifacts as well as stale
   markers from being merged into a reused `--run-id`.
 - Full S3 runs require both analyzer stages and an existing namespace selected
-  with `--reuse-namespace`; the S3 credentials Secret must predate the Job.
+  with `kubernetes.reuse_namespace`; the S3 credentials Secret must predate the Job.
 - S3 job scripts are submitted to `qsub` via **stdin**
   (`submit_pbs_text`). Job IDs live in orchestrator memory and are also
   persisted under the frontend's shared

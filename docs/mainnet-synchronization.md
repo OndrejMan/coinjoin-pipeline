@@ -13,8 +13,8 @@ the existing notebook form; that notebook does not parse the index and only read
 In the Lab, **Synchronization target height (optional)** is prefilled with `400000`.
 That is the recommended minimum target for a run in which Dumplings actually processes
 blocks, since on mainnet it starts at height 336861. The example
-`examples/mainnet-sync.yaml` uses the same target: `mainnet.target_height: 400000`
-(CLI `--mainnet-target-height 400000`). Core still synchronizes the history from genesis;
+`examples/mainnet-sync.yaml` uses the same target: `mainnet.target_height: 400000`.
+Core still synchronizes the history from genesis;
 400000 is the target height, not where the download starts.
 Smaller targets remain available for infrastructure tests and the empty checkpoint.
 An empty field or an omitted setting means the current chain tip.
@@ -273,7 +273,7 @@ index is not reconfigured automatically.
 Each prefix holds a single backup: an archive with a fixed name
 (`<backup-uri>/checkpoint.tar.zst`, `<index-backup-uri>/blocksci_index.tar.zst`),
 its `.sha256` and `manifest.json`. Only `S5Client.replace_backup` and `restore_backup`
-(`storage/s5client.py`) write and read the format, as for the `--blocksci-task backup`
+(`storage/s5client.py`) write and read the format, as for the `blocksci.task backup`
 job. A new backup deletes the manifest and the old archive first, so S3 never holds two
 copies and there is no valid backup until the upload ends.
 The archive is streamed to S3 with its SHA-256 computed on the way; after the upload only

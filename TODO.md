@@ -30,8 +30,8 @@ shared graph nodes, in-cluster scripts as `.sh` files). These were left on purpo
 
 ## 3. Incremental update from the S3 block archive
 
-Implemented: a `bitcoin-blocks-s3` cache updates with `--blocksci-task update
---blocksci-bitcoin-blocks-uri`, and both parse and update download only the
+Implemented: a `bitcoin-blocks-s3` cache updates with `blocksci.task: update` and
+`blocksci.bitcoin_blocks_uri`, and both parse and update download only the
 block files they need (`execution/block_archive.py`). Still unverified: the
 extended `tests/test-bitcoin-block-archive-s3-minio.sh` (parse → archive grows →
 update, compared with a full parse) has not run yet, and no update has run on

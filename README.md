@@ -25,12 +25,18 @@ uv run lint
 coinjoin-pipeline version
 cjp doctor
 coinjoin-pipeline pull
-coinjoin-pipeline full-run --engine joinmarket --scenario scenarios/defaultJoinMarket.json --dry-run
-coinjoin-pipeline full-run --engine joinmarket --scenario scenarios/defaultJoinMarket.json
+
+# An experiment is a YAML file; the command line only adds launch values.
+cat > joinmarket.yaml <<'YAML'
+action: full-run
+engine: joinmarket
+scenario: scenarios/defaultJoinMarket.json
+YAML
+cjp run joinmarket.yaml --dry-run
+cjp run joinmarket.yaml
 # Small regtest Wasabi rounds need an explicit input threshold.
-coinjoin-pipeline full-run --engine wasabi \
-  --scenario scenarios/overactive-local.json \
-  --min-input-count 15
+printf 'action: full-run\nengine: wasabi\nscenario: scenarios/overactive-local.json\nmin_input_count: 15\n' > wasabi.yaml
+cjp run wasabi.yaml
 
 # CI-style live output for a Kubernetes run.
 RUN_ID='<run-id>'
@@ -52,11 +58,14 @@ coinjoin-pipeline watch --run-id "$RUN_ID" --pbs-only \
 The private experiment catalogue is maintained in `OndrejMan/coinjoin-scenarios`.
 Clone it beside this checkout and pass its JSON files by path, for example:
 
-```bash
-cjp full-run --engine wasabi --scenario ../coinjoin-scenarios/fin-cliff.json --min-input-count 10
+```yaml
+action: full-run
+engine: wasabi
+scenario: ../coinjoin-scenarios/fin-cliff.json
+min_input_count: 10
 ```
 
-The YAML `scenario` field accepts the same path. Relative paths are resolved from
+Relative `scenario` paths are resolved from
 the directory where the CLI is invoked. Local Docker/Podman and Kubernetes
 launchers mount the selected file's directory read-only; Kubernetes → S3 embeds
 its contents in the Job's ConfigMap. No copy into the emulator checkout is needed.
@@ -89,8 +98,8 @@ If `git pull --ff-only` refuses to run because the checkout has local commits
 or modifications, resolve those changes before updating; do not force the
 pull.
 
-By default the pipeline leaves `--min-input-count` unset, so BlockSci applies
-its height-aware production threshold. Pass `--min-input-count N` for an
+By default the pipeline leaves `min_input_count` unset, so BlockSci applies
+its height-aware production threshold. Set `min_input_count: N` for an
 intentional positive override. Values below 1 are rejected. Small Wasabi
 regtest scenarios normally need a scenario-appropriate explicit value;
 otherwise a zero-detection report includes a prominent production-threshold
@@ -125,17 +134,17 @@ multi-chain workflow must first make these thresholds chain-specific in
 BlockSci.
 
 Outputs default to `./coinjoin-runs`; override this with `--runs-root`. Images
-default to the explicit `latest` tag. Use `--version TAG` to apply one coordinated
-tag to every default image, or `--local-build` for local development tags.
-Individual overrides (`--emulator-image`, `--coinjoin-analysis-image`,
-`--blocksci-image`, `--mappings-image`, and `--sake-image`) take precedence
-over the coordinated tag and over `--local-build` defaults. The corresponding
-environment overrides also apply in local mode; explicit CLI images win over
-the environment. The in-cluster uploader and the pinned Python image
-for the PBS report step are not part of that coordinated set: they carry their
-own immutable references in `container/uploader.image` and
-`container/unified-report.image`, overridable per run with `--uploader-image`
-and `--unified-report-image`.
+default to the explicit `latest` tag. Use `--version TAG` (YAML `images.version`)
+to apply one coordinated tag to every default image, or `--local-build` for local
+development tags. Individual images (`images.emulator`, `images.coinjoin_analysis`,
+`images.blocksci`, `images.mappings` and `images.sake`, or `--<component>-image`
+at launch) take precedence over the coordinated tag and over `--local-build`
+defaults. The corresponding environment overrides also apply in local mode;
+explicit images win over the environment. The in-cluster uploader and the pinned
+Python image for the PBS report step are not part of that coordinated set: they
+carry their own immutable references in `container/uploader.image` and
+`container/unified-report.image`, overridable per run with `images.uploader`
+and `images.unified_report`.
 
 The uploader image is published by the manual `Publish Uploader Image`
 workflow, not by the test pipeline, so **it has to exist in the registry before
@@ -143,18 +152,18 @@ the first S3 run**: the Kubernetes Job pulls it for both its preflight and its
 uploader container. Run the workflow, put the digest it prints into
 `container/uploader.image`, and only then start an S3 run — otherwise the Job
 sits in `ImagePullBackOff` (the frontend now aborts on that instead of waiting
-out `--emulation-timeout`, but the run is still lost).
+out `emulation_timeout`, but the run is still lost).
 
 When publishing component images separately, publish and verify the BlockSci
 and coinjoin-emulator images together. The pipeline requires BlockSci's raw
 CoinJoin binding and the emulator's in-cluster networking plus producer-label
-manifest contract. A coordinated `--version` tag avoids mixing incompatible
+manifest contract. A coordinated `images.version` tag avoids mixing incompatible
 generations.
 
 Developer compatibility entrypoints use the same CLI:
 
 ```bash
-./runIt.sh full-run --engine joinmarket --scenario scenarios/defaultJoinMarket.json --local-build --dry-run
+./runIt.sh run joinmarket.yaml --local-build --dry-run
 ./run-all.sh local --build-only
 ```
 
@@ -164,11 +173,18 @@ remain separate processes. `pipeline/compose.yaml`, the standalone exporters
 and scenarios are resolved relative to the checkout; a relocated wheel alone
 is not a complete execution installation.
 
-The recommended entry point is `cjp run experiment.yaml`. Both YAML and the
-existing command flags load the same typed configuration directly. Defaults,
-image selection and run identity are resolved before execution; YAML is never
-translated to a second command line. The interactive builder and generated
-command metadata have been removed. See [Current architecture](docs/architecture.md).
+The only entry point for an experiment is `cjp run experiment.yaml`. The file
+loads into one typed configuration; the command line adds only what belongs to
+one launch or one host: `--dry-run`, `--run-id`, `--run-dir`, `--resume-run`,
+`--runs-root`, `--runtime` and the image options. Defaults, image selection and
+run identity are resolved before execution. The stage-only actions have small
+files in `examples/stages/`, for example
+`cjp run examples/stages/analyze.yaml --run-dir <run-id>`.
+See [Current architecture](docs/architecture.md).
+
+The `--scenario` workflow of `run-all.sh` keeps the generated YAML in
+`$EMULATION_LOGS_DIR/.run-all-experiments/` beside the run directories. The
+manifest's launch command refers to that file and can start a fresh run from it.
 
 ## Commands and contracts
 
@@ -196,10 +212,10 @@ prefixed stream. Pipeline actions are `full-run`, `emulate`, `clean`, `analyze`,
 `export`, `coinjoin-analysis`, `pbs-from-s3`, `mappings`, `mainnet-sync`, and
 `initialize`, plus the `runs`, `scenarios`, and `external` command groups.
 
-`cjp --help` lists every option grouped by configuration section, each with
-its YAML key and default, so a flag and its YAML spelling can be looked up in
-one place; every utility answers `--help` too. Options given after
-`cjp run CONFIG.yaml` override the file. A `--dry-run` prints the resolved
+`cjp --help` lists every YAML key grouped by configuration section, each with
+its description and default, and the launch overrides; every utility answers
+`--help` too. Overrides given after `cjp run CONFIG.yaml` replace the file's
+value. A `--dry-run` prints the resolved
 run directory and component images before the execution plan. Exit codes:
 `0` success; `2` invalid configuration or arguments, a failed preflight check
 (each problem on its own `ERROR:` line), or an execution failure reported as
@@ -257,7 +273,7 @@ credential values through CLI arguments.
 
 The emulation Job reads the same key from a Kubernetes Secret. By default the
 frontend creates one per run: a Secret named like the run's Job, made from the
-`--s3-profile` of `--s3-credentials-file` and owned by the Job. It is deleted as soon
+`artifacts.profile` of `artifacts.credentials_file` and owned by the Job. It is deleted as soon
 as `full-run` sees the upload marker (or the upload fails), and with the Job in any
 case, so a namespace shared with other users holds the key only while a run needs it.
 The kubeconfig then needs `create`, `list`, `patch` and `delete` on `secrets`. A Secret
@@ -265,14 +281,14 @@ of that name that already exists is never replaced, and the deletion selects the
 labels, not the name alone. Before anything is created the frontend also refuses a run
 ID that already labels a Job, pod or temporary Secret in the namespace
 (`coinjoin.run-id=<id>`), the Kubernetes counterpart of the empty-run-prefix check.
-`--owner <login>` (YAML `kubernetes.owner`) adds a `coinjoin.owner` label to the Job, its
+`kubernetes.owner: <login>` adds a `coinjoin.owner` label to the Job, its
 support objects, the Secret and the emulator's pods, so a namespace shared by several
 people shows whose run each object belongs to; a rollback then selects that owner too. A standalone
 `emulate` does not wait for the upload, so its Secret lives until the finished Job
 expires an hour later.
 
-To use a Secret that is kept in the namespace instead, create it once and pass
-`--s3-secret-name`:
+To use a Secret that is kept in the namespace instead, create it once and set
+`artifacts.secret_name`:
 
 ```bash
 kubectl create secret generic coinjoin-s3-credentials \
@@ -282,45 +298,52 @@ kubectl create secret generic coinjoin-s3-credentials \
 
 ### Single-command full run
 
-`full-run --artifact-backend s3` orchestrates the whole chain from a
+A `full-run` with `artifacts.backend: s3` orchestrates the whole chain from a
 MetaCentrum frontend and waits for every stage: it submits the Kubernetes
 emulation Job, polls the bucket for `.k8s/upload.done`, submits both PBS
 analyzers in parallel followed by a report job dependent on both, and polls
 all three `.pbs/*.done` markers until the results land in the bucket.
-The analyzers are selectable: drop `--analysis-pbs`, `--blocksci-pbs` or both to run
+The analyzers are selectable: drop `stages.analysis`, `stages.blocksci` or both to run
 only part of the chain. Without coinjoin-analysis there is no baseline, so BlockSci
-publishes its results without the unified report and `--mappings-pbs` is refused;
+publishes its results without the unified report and `stages.mappings` is refused;
 without either analyzer the run ends at the emulation upload and never calls `qsub`.
 Requirements: kubeconfig + `qsub` + `s5cmd` on
-the frontend, and a pre-created namespace (`--reuse-namespace` is required). Run it inside `screen`/`tmux` —
+the frontend, and a pre-created namespace (`kubernetes.reuse_namespace: true` is required). Run it inside `screen`/`tmux` —
 the process blocks for the whole emulation and analysis.
 
-```bash
-coinjoin-pipeline full-run \
-  --engine wasabi \
-  --coinjoin-type wasabi2 \
-  --driver kubernetes \
-  --namespace <namespace> --reuse-namespace \
-  --artifact-backend s3 \
-  --artifact-uri s3://coinjoin-thesis/runs \
-  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
-  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
-  --s3-profile coinjoin \
-  --run-id '<id>' \
-  --min-input-count 15 \
-  --analysis-pbs \
-  --blocksci-pbs \
-  --mappings-pbs \
-  --emulation-timeout 21600
+```yaml
+action: full-run
+engine: wasabi
+coinjoin_type: wasabi2
+driver: kubernetes
+min_input_count: 15
+emulation_timeout: 21600
+kubernetes:
+  namespace: <namespace>
+  reuse_namespace: true
+artifacts:
+  backend: s3
+  uri: s3://coinjoin-thesis/runs
+  endpoint_url: https://s3.cl4.du.cesnet.cz
+  credentials_file: /storage/brno2/home/<login>/.aws/credentials
+  profile: coinjoin
+stages:
+  analysis: true
+  blocksci: true
+  mappings: true
 ```
 
-The orchestrator refuses a `--run-id` whose bucket prefix contains any object,
+```bash
+cjp run s3-full-run.yaml --run-id '<id>'
+```
+
+The orchestrator refuses a run ID whose bucket prefix contains any object,
 cancels dependent mappings/report jobs if a prerequisite fails, and prints `kubectl`
 diagnostics if the emulation fails. A still-running sibling analyzer job is
 deliberately left in place on failure — its results upload to the bucket
-independently and remain usable; cancel it with `qdel` if they are not needed. `--parallel`
-and full-run `--blocksci-script` are not supported in S3 mode. Optional
-`--mappings-pbs` is supported for Wasabi 2: it runs after coinjoin-analysis and
+independently and remain usable; cancel it with `qdel` if they are not needed. `parallel`
+and a full-run `blocksci.script` are not supported in S3 mode. Optional
+`stages.mappings` is supported for Wasabi 2: it runs after coinjoin-analysis and
 the unified-report job waits for and embeds its uploaded mapping results. The
 `.pipeline.lock` in the runs root is held for the whole duration — one S3
 full-run at a time per frontend. The end-to-end test for this path is
@@ -340,12 +363,9 @@ The automatic
 failure. See [the bounded mainnet E2E runbook](docs/mainnet-synchronization.md#bounded-mainnet-e2e-in-ci)
 for limits, retained evidence and the standalone command.
 
-The same run can be described in YAML and loaded with `cjp run CONFIG.yaml`
-(or `--from-configuration CONFIG.yaml`). YAML and
-CLI options decode into the same typed configuration (explicit CLI options
-override YAML values), so the same S3/PBS checks and research manifest apply. For an S3 `full-run`, a
-missing `run_id` is generated automatically; `pbs.analysis`, `pbs.blocksci`,
-and `pbs.mappings` enable their corresponding PBS stages.
+For an S3 `full-run`, a missing `run_id` is generated automatically;
+`stages.analysis`, `stages.blocksci` and `stages.mappings` enable their
+corresponding PBS stages.
 
 ```bash
 ./runIt.sh run examples/metacentrum-regtest-s3.yaml
@@ -362,8 +382,7 @@ profile. It requests 2 CPUs, 16 GB RAM, and 8 GB scratch for BlockSci, plus
 2 CPUs and 8 GB RAM for coinjoin-analysis:
 
 ```bash
-./runIt.sh \
-  --from-configuration examples/metacentrum-joinmarket-regtest-s3.yaml
+./runIt.sh run examples/metacentrum-joinmarket-regtest-s3.yaml
 ```
 
 The profile uses `scenarios/defaultJoinMarket.json`, enables regtest detector
@@ -371,12 +390,10 @@ thresholds, and leaves the larger global/mainnet PBS defaults unchanged.
 
 ```bash
 # Produces a checksummed reusable BlockSci cache from the external mainnet datadir.
-./runIt.sh \
-  --from-configuration examples/metacentrum-mainnet-parse.yaml
+./runIt.sh run examples/metacentrum-mainnet-parse.yaml
 
 # Reuses that run ID and cache to produce joinmarket-mainnet-summary.json.
-./runIt.sh \
-  --from-configuration examples/metacentrum-mainnet-analyze.yaml
+./runIt.sh run examples/metacentrum-mainnet-analyze.yaml
 ```
 
 When the Bitcoin Core node is pruned after archival by
@@ -390,7 +407,7 @@ height 0. Height ranges are only a preflight: they can include different forks.
 Before publishing the cache, the job opens the actual parsed BlockSci index,
 requires exactly `max_block + 1` blocks, and verifies the target block hash.
 Mainnet archive parses and updates require `blocksci.expected_block_hash`
-(`--blocksci-expected-block-hash`), pinned independently from a trusted Core
+pinned independently from a trusted Core
 with `bitcoin-cli getblockhash HEIGHT`. Change this hash whenever `max_block`
 changes. PBS does not fetch a checkpoint from an external service.
 The manifest records the observed `exported_max_block` and `exported_block_hash`,
@@ -400,8 +417,8 @@ of the scanned files, which an incremental update needs. The second job compares
 not ground-truth precision/recall.
 
 ```bash
-./runIt.sh --from-configuration examples/metacentrum-mainnet-s3-blocks-parse.yaml
-./runIt.sh --from-configuration examples/metacentrum-mainnet-dumplings-report.yaml
+./runIt.sh run examples/metacentrum-mainnet-s3-blocks-parse.yaml
+./runIt.sh run examples/metacentrum-mainnet-dumplings-report.yaml
 ```
 
 Before submission, set the same `run_id` and immutable `images.version` in
@@ -410,12 +427,11 @@ shared-storage paths. The analyze job writes the summary under
 `blocksci-custom-analysis_data/` in the same S3 run. It is detector output
 without emulator ground truth, not a precision/recall unified report.
 
-A YAML file must name its `action`: unlike the command line, it has no default,
-so a file without one never starts a full emulation by accident. An explicit
-CLI option after `cjp run FILE` overrides the same value from YAML. Programmatic consumers can load the schema through the
-immutable typed `PipelineConfiguration.from_yaml()` model exported by
-`coinjoin_pipeline` and call `to_arguments()` when they need the public CLI
-representation.
+A YAML file must name its `action`; there is no default, so a file without one
+never starts a full emulation by accident. A launch override after `cjp run FILE`
+replaces the same value from YAML. Programmatic consumers load the schema through
+the immutable typed `PipelineConfiguration.from_mapping()`, or
+`PipelineConfiguration.from_paths()` for YAML paths such as `artifacts.uri`.
 
 The typed schema also covers the advanced modes used by decomposed and mainnet
 workflows:
@@ -438,13 +454,13 @@ workflows:
 External mainnet analysis can therefore use the same typed configuration path:
 
 ```bash
-./runIt.sh --from-configuration examples/external-analysis.yaml
+./runIt.sh run examples/external-analysis.yaml
 ```
 
-For an existing external run, retain `run_id`, remove `bitcoin_datadir` and
-`baseline`, and set `external.resume: true`.
+For an existing external run, run `examples/stages/external-resume.yaml` with
+`--run-id` of that run.
 
-Cross-field restrictions remain identical to CLI validation. For example,
+Cross-field restrictions apply to every file. For example,
 external Bitcoin and external BlockSci sources are mutually exclusive, and
 external parsing is valid only for the appropriate `pbs-from-s3` reusable or
 cached task.
@@ -454,35 +470,48 @@ cached task.
 The same chain can run as two independent commands — emulation from any
 machine with a kubeconfig, analysis later from the frontend.
 
-Submit Kubernetes emulation and upload:
+Submit Kubernetes emulation and upload (`emulate.yaml`):
 
-```bash
-coinjoin-pipeline emulate \
-  --driver kubernetes \
-  --namespace <namespace> --reuse-namespace \
-  --artifact-backend s3 \
-  --artifact-uri s3://coinjoin-thesis/runs \
-  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
-  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
-  --s3-profile coinjoin \
-  --run-id '<id>' \
-  --engine wasabi
+```yaml
+action: emulate
+engine: wasabi
+driver: kubernetes
+kubernetes:
+  namespace: <namespace>
+  reuse_namespace: true
+artifacts:
+  backend: s3
+  uri: s3://coinjoin-thesis/runs
+  endpoint_url: https://s3.cl4.du.cesnet.cz
+  credentials_file: /storage/brno2/home/<login>/.aws/credentials
+  profile: coinjoin
 ```
 
-Submit PBS analysis for the existing run:
+Submit PBS analysis for the existing run (`analyze.yaml`):
+
+```yaml
+action: pbs-from-s3
+engine: wasabi
+min_input_count: 15
+artifacts:
+  backend: s3
+  uri: s3://coinjoin-thesis/runs
+  endpoint_url: https://s3.cl4.du.cesnet.cz
+  credentials_file: /storage/brno2/home/<login>/.aws/credentials
+  profile: coinjoin
+stages:
+  analysis: true
+  blocksci: true
+```
 
 ```bash
-coinjoin-pipeline pbs-from-s3 \
-  --run-id '<id>' \
-  --artifact-uri s3://coinjoin-thesis/runs \
-  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
-  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
-  --s3-profile coinjoin \
-  --engine wasabi \
-  --min-input-count 15 \
-  --analysis-pbs \
-  --blocksci-pbs
+cjp run emulate.yaml --run-id '<id>'
+cjp run analyze.yaml --run-id '<id>'
 ```
+
+The remaining `pbs-from-s3` examples show only what differs from `analyze.yaml`;
+each keeps its `action`, `engine` and `artifacts` settings and runs with
+`cjp run FILE.yaml --run-id '<id>'`.
 
 `s5cmd` must be available on PBS compute nodes and is included in the pipeline
 image used by the Kubernetes uploader; the single-command full run additionally
@@ -504,22 +533,16 @@ report job before returning. The decomposed `pbs-from-s3` command submits this
 three-job analysis graph without waiting; adding mappings expands it to four
 jobs.
 
-For Wasabi 2, add `--mappings-pbs` to either S3 analysis command. The mappings
+For Wasabi 2, add `stages.mappings: true` to either S3 analysis file. The mappings
 job uses `afterok` on coinjoin-analysis when both are submitted together,
 uploads `coinjoin-mappings_data/{enumerator.json,sake.json,coinjoin_mappings.json}`
 and becomes a third dependency of the report job. To run mappings later against
 an existing baseline without rerunning either analyzer:
 
-```bash
-./runIt.sh pbs-from-s3 \
-  --run-id '<id>' \
-  --artifact-uri s3://coinjoin-thesis/runs \
-  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
-  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
-  --s3-profile coinjoin \
-  --engine wasabi \
-  --coinjoin-type wasabi2 \
-  --mappings-pbs
+```yaml
+coinjoin_type: wasabi2
+stages:
+  mappings: true
 ```
 
 This mappings-only form expects
@@ -533,7 +556,7 @@ All S3 PBS parsing workflows publish the same
 a backup in the format of the persistent index's: the zstd archive holds the index's
 `config.json`, `files.txt`, `manifest.json` and `parsed/`, and the schema 1.1
 manifest records its run, image, source, exported maximum block, members and SHA-256.
-The default `--blocksci-workflow combined` parses and analyzes in one job.
+The default `blocksci.workflow: combined` parses and analyzes in one job.
 `reusable` splits parsing and analysis into dependent jobs; `cached` skips
 parsing and reads a saved index. The job arrangement does not change the S3 format.
 S3 never receives the loose working index.
@@ -548,28 +571,20 @@ mainnet index retains its existing location, direct reads, updates and backup li
 
 Use the split graph in a complete run:
 
-```bash
-./runIt.sh full-run \
-  ... \
-  --run-id '<id>' \
-  --artifact-backend s3 \
-  --analysis-pbs --blocksci-pbs \
-  --blocksci-workflow reusable
+```yaml
+# added to the S3 full-run file
+blocksci:
+  workflow: reusable
 ```
 
 Or publish only the parsed cache for an existing S3 run:
 
-```bash
-./runIt.sh pbs-from-s3 \
-  --run-id '<id>' \
-  --artifact-uri s3://coinjoin-thesis/runs \
-  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
-  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
-  --s3-profile coinjoin \
-  --engine wasabi \
-  --blocksci-pbs \
-  --blocksci-workflow reusable \
-  --blocksci-task parse
+```yaml
+stages:
+  blocksci: true
+blocksci:
+  workflow: reusable
+  task: parse
 ```
 
 The cache producer can also start from data already available to MetaCentrum
@@ -577,17 +592,15 @@ under `/storage`. To parse an external Bitcoin Core coin directory (the
 directory that directly contains `blocks/`), provide the network and an
 inclusive maximum block height:
 
-```bash
-./runIt.sh pbs-from-s3 \
-  ... \
-  --run-id '<id>' \
-  --engine wasabi \
-  --blocksci-pbs \
-  --blocksci-workflow reusable \
-  --blocksci-task parse \
-  --blocksci-external-bitcoin-datadir /storage/brno2/home/<login>/bitcoin \
-  --blocksci-network bitcoin \
-  --blocksci-max-block 850000
+```yaml
+stages:
+  blocksci: true
+blocksci:
+  workflow: reusable
+  task: parse
+  external_bitcoin_datadir: /storage/brno2/home/<login>/bitcoin
+  network: bitcoin
+  max_block: 850000
 ```
 
 To reuse an index parsed elsewhere, point at a BlockSci directory containing
@@ -595,39 +608,37 @@ To reuse an index parsed elsewhere, point at a BlockSci directory containing
 layout, rewrites the parsed-data path, verifies the expected files, and
 publishes the same checksummed cache:
 
-```bash
-./runIt.sh pbs-from-s3 \
-  ... \
-  --run-id '<id>' \
-  --engine wasabi \
-  --blocksci-pbs \
-  --blocksci-workflow reusable \
-  --blocksci-task parse \
-  --blocksci-external-blocksci-dir /storage/brno2/home/<login>/blocksci_data
+```yaml
+stages:
+  blocksci: true
+blocksci:
+  workflow: reusable
+  task: parse
+  external_blocksci_dir: /storage/brno2/home/<login>/blocksci_data
 ```
 
 To incrementally advance an external mainnet cache after Bitcoin Core has
 received newer blocks, use the existing cache run as the source and a fresh
 run ID as the target. Use the same block source as the source cache: a cache
 parsed from a coin directory updates from that directory, and a cache parsed
-from the block archive updates with `--blocksci-bitcoin-blocks-uri` instead of
-`--blocksci-external-bitcoin-datadir`:
+from the block archive updates with `blocksci.bitcoin_blocks_uri` instead of
+`blocksci.external_bitcoin_datadir`:
+
+```yaml
+engine: joinmarket
+stages:
+  blocksci: true
+blocksci:
+  workflow: cached
+  task: update
+  cache_source_run_id: mainnet-850000
+  external_bitcoin_datadir: /storage/brno2/home/<login>/bitcoin
+  network: bitcoin
+  max_block: 850100
+```
 
 ```bash
-./runIt.sh pbs-from-s3 \
-  --run-id 'mainnet-850100' \
-  --artifact-uri s3://coinjoin-thesis/runs \
-  --s3-endpoint-url https://s3.cl4.du.cesnet.cz \
-  --s3-credentials-file /storage/brno2/home/<login>/.aws/credentials \
-  --s3-profile coinjoin \
-  --engine joinmarket \
-  --blocksci-pbs \
-  --blocksci-workflow cached \
-  --blocksci-task update \
-  --blocksci-cache-source-run-id 'mainnet-850000' \
-  --blocksci-external-bitcoin-datadir /storage/brno2/home/<login>/bitcoin \
-  --blocksci-network bitcoin \
-  --blocksci-max-block 850100
+cjp run update.yaml --run-id mainnet-850100
 ```
 
 The target maximum is inclusive and must be greater than the maximum recorded
@@ -642,7 +653,7 @@ source cache indexed are unchanged. Archive updates also verify that the
 result preserves the source cache's block hash at its recorded height. Older
 archive caches without `exported_block_hash` must be parsed again; they are
 rejected before block downloads. A mainnet archive update needs a new
-`--blocksci-expected-block-hash` for its target `--blocksci-max-block`.
+`blocksci.expected_block_hash` for its target `blocksci.max_block`.
 Use the new target run ID for later
 `cached` script or notebook jobs.
 
@@ -653,20 +664,20 @@ metadata, so an otherwise empty external-data run is intended for notebook or
 custom-script analysis rather than the unified emulator comparison report.
 
 An analysis can read such a cache without touching it: give the script,
-external, or notebook task a fresh `--run-id`, `--blocksci-workflow cached`
-and `--blocksci-cache-source-run-id` of the cache run. The job checks the
+external, or notebook task a fresh run ID, `blocksci.workflow: cached`
+and `blocksci.cache_source_run_id` of the cache run. The job checks the
 source manifest, writes outputs and markers under its own run, and stores the
 source manifest next to the outputs as `blocksci-cache-manifest.json`. For the
-script task, `--blocksci-pin-height` and the half-open
-`--blocksci-scan-start-height`/`--blocksci-scan-end-height` reach the script as
+script task, `blocksci.pin_height` and the half-open
+`blocksci.scan_start_height`/`blocksci.scan_end_height` reach the script as
 `BLOCKSCI_MAX_BLOCK` (pin + 1), `SCAN_START_HEIGHT` and `SCAN_END_HEIGHT`;
 `examples/metacentrum-mainnet-analyze.yaml` uses all of them.
 
 For the mainnet index, keep the working copy out of S3:
-`--blocksci-index-dir` points the parse, update and analysis jobs at one
+`blocksci.index_dir` points the parse, update and analysis jobs at one
 persistent directory, usually on MetaCentrum multijob scratch
-(`--pbs-blocksci-multijob brno`). A manually started `--blocksci-task backup`
-job archives it into one S3 backup (`--blocksci-index-backup-uri`), deleting the
+(`pbs.blocksci.multijob: brno`). A manually started `blocksci.task: backup`
+job archives it into one S3 backup (`blocksci.index_backup_uri`), deleting the
 previous one first. Updates take a writer lock and analyses and the backup a shared
 one; an update restores a missing or incomplete working copy from the backup
 first. See `examples/metacentrum-mainnet-index-update.yaml`,
@@ -675,15 +686,13 @@ section of `docs/pbs-stage-contract.md`.
 
 Run the default detector later without invoking `blocksci_parser`:
 
-```bash
-./runIt.sh pbs-from-s3 \
-  ... \
-  --run-id '<id>' \
-  --engine wasabi \
-  --blocksci-pbs \
-  --blocksci-workflow cached \
-  --blocksci-task detect \
-  --min-input-count 15
+```yaml
+min_input_count: 15
+stages:
+  blocksci: true
+blocksci:
+  workflow: cached
+  task: detect
 ```
 
 Custom scripts must be on shared `/storage` so the PBS compute node can bind
@@ -691,37 +700,33 @@ them read-only. They receive `ACTIVE_RUN_ID`, `BLOCKSCI_CONFIG`,
 `BLOCKSCI_RUN_DIR`, and `BLOCKSCI_OUTPUT_DIR`; outputs under the latter are
 uploaded to `blocksci-custom-analysis_data/`:
 
-```bash
-./runIt.sh pbs-from-s3 \
-  ... \
-  --run-id '<id>' \
-  --engine wasabi \
-  --blocksci-pbs \
-  --blocksci-workflow cached \
-  --blocksci-task script \
-  --blocksci-script /storage/brno2/home/<login>/analysis.py
+```yaml
+stages:
+  blocksci: true
+blocksci:
+  workflow: cached
+  task: script
+  script: /storage/brno2/home/<login>/analysis.py
 ```
 
 Jupyter is a separate long-lived PBS task and never blocks `full-run` or the
 unified report. The current BlockSci image installs Jupyter at image-build
 time, so this task does not call `build.sh`, compile BlockSci, or parse again:
 
-```bash
-./runIt.sh pbs-from-s3 \
-  ... \
-  --run-id '<id>' \
-  --engine wasabi \
-  --blocksci-pbs \
-  --blocksci-workflow cached \
-  --blocksci-task notebook \
-  --blocksci-notebook-port 8888 \
-  --blocksci-notebooks-dir /storage/brno2/home/<login>/notebooks
+```yaml
+stages:
+  blocksci: true
+blocksci:
+  workflow: cached
+  task: notebook
+  notebook_port: 8888
+  notebooks_dir: /storage/brno2/home/<login>/notebooks
 ```
 
 The PBS output prints the assigned node, port, and Jupyter token. Stream that
 output with `./runIt.sh watch --run-id '<id>' --pbs-only --pbs` and create an
 SSH tunnel to the assigned compute node through the normal MetaCentrum access
-path. Stop the PBS job when finished. Without `--blocksci-notebooks-dir` Jupyter
+path. Stop the PBS job when finished. Without `blocksci.notebooks_dir` Jupyter
 saves to `~/coinjoin-notebooks/<run-id>` in the submitter's home; when the job
 ends it uploads that directory to `blocksci-notebooks_data/` and removes it from
 the home once S3 lists every file with its size and none changed during the
@@ -774,27 +779,24 @@ at the bucket root (`s3://<bucket>`) to wipe the whole bucket. The
 `--artifact-uri`, `--s3-*` options also read the `ARTIFACT_URI`, `S3_ENDPOINT_URL`,
 `S3_CREDENTIALS_FILE`, and `S3_PROFILE` environment variables.
 
-`--blocksci-pbs` by itself remains available only to `pbs-from-s3`; it retains
+`stages.blocksci` by itself remains available only to `pbs-from-s3`; it retains
 the combined BlockSci-plus-report behavior and requires the remote run to
 already contain `coinjoin-analysis_data/coinjoin_tx_info.json`. Both S3 report
 paths require and upload the canonical `coinjoinPipeline_data` output.
 
-The general `--pbs-{ncpus,mem,scratch,walltime}` values are backward-compatible
-fallbacks. Use `--pbs-blocksci-*`, `--pbs-analysis-*`, and `--pbs-mappings-*`
-to size those allocations independently. A stage-specific value takes
+The general `pbs.{ncpus,mem,scratch,walltime}` values are fallbacks. Use
+`pbs.blocksci.*`, `pbs.analysis.*` and `pbs.mappings.*` to size those
+allocations independently. A stage-specific value takes
 precedence over the general fallback and otherwise retains that stage's
 existing default.
 
-Every PBS job asks for `scratch_ssd` by default. `--pbs-scratch-type local`
-(YAML `pbs.scratch_type: local`, or per stage such as
-`pbs.blocksci.scratch_type`) requests `scratch_local` instead, which is a
+Every PBS job asks for `scratch_ssd` by default. `pbs.scratch_type: local`
+(or per stage, such as `pbs.blocksci.scratch_type`) requests `scratch_local` instead, which is a
 spinning disk on most MetaCentrum nodes but available on every node.
 
 The report-only job defaults to 2 CPUs, 8 GB RAM, 10 GB scratch, and a one-hour
-walltime. Use `--pbs-unified-report-ncpus`,
-`--pbs-unified-report-mem`, `--pbs-unified-report-scratch`, and
-`--pbs-unified-report-walltime` to override only that job; the shared
-`--pbs-*` resource options remain the fallback.
+walltime. Use `pbs.unified_report.{ncpus,mem,scratch,walltime}` to override
+only that job; the shared `pbs.*` resources remain the fallback.
 
 ## Rootless Podman test host
 

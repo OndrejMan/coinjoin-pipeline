@@ -39,21 +39,21 @@ recorded outside it, which is what `status`, `stop` and `--resume-run` read.
 
 ## Input and host layer
 
-`arguments.py` is an input adapter. It merges explicitly provided values into
-YAML before decoding, and owns the `--help` text (grouped by configuration
-section, each option with its YAML key). `configuration.py` owns field types,
-option spellings, action aliases and value bounds; `option_rules.py` owns every
+`arguments.py` is the input adapter. An experiment comes only from its YAML file
+(`cjp run CONFIG.yaml`); the command line adds the few launch values in
+`OVERRIDES` (`--dry-run`, `--run-id`, `--run-dir`, `--resume-run`, `--runs-root`,
+`--runtime` and the images), merged into the file's mapping before decoding.
+It also owns the `--help` text, which lists every YAML key by configuration
+section. `configuration.py` owns field types, YAML keys and value bounds; `option_rules.py` owns every
 cross-field rule (`PipelineConfiguration.validate` only calls it).
 `console.py` holds the exit codes and `ERROR:` output shared by `cli.py`, the
 utilities (`watch`, `status`, `stop`, `download-report`, `clean-s3`) and
-`pipeline_logging.exit_with_error`, which ends a failed run. The existing CLI
-flags remain available to scripts, but there is no YAML-to-argv conversion,
-metadata snapshot or second host Python process. `cjp run FILE.yaml` is the
-preferred entry point. An explicit `stages.<name>: false` is respected; assigning
-PBS resources to that disabled stage is an error.
-Cross-field rules read typed configuration attributes directly. The `provided`
-field set distinguishes explicit values from defaults; CLI option names are
-used only in validation messages.
+`pipeline_logging.exit_with_error`, which ends a failed run. There is no
+YAML-to-argv conversion, metadata snapshot or second host Python process.
+An explicit `stages.<name>: false` is respected; assigning PBS resources to that
+disabled stage is an error. Cross-field rules read typed configuration attributes
+directly. The `provided` field set distinguishes explicit values from defaults,
+and every validation message names a setting by its YAML path.
 
 `context.py` resolves run ID, output root and image selection, and restores
 environment, bytecode policy, signal handlers and locks after execution. For
@@ -205,13 +205,13 @@ submitted. Neither waits; only `full-run` does.
    One `kubectl apply` creates a ServiceAccount, a ConfigMap with the scenario, a
    Role, a RoleBinding and the Job; the Job is then made the owner of the other
    four, so deleting it removes them. The namespace must already exist
-   (`--reuse-namespace`). Without `--s3-secret-name` the frontend first creates the
+   (`kubernetes.reuse_namespace`). Without `artifacts.secret_name` the frontend first creates the
    run's own credentials Secret, named like the Job, from its credentials file
    (`kubectl create` on stdin, so no `last-applied` copy; an existing Secret of that
    name is an error, never replaced), makes the Job its owner too, and deletes it by
    its labels once `wait_for_emulation_upload` sees the upload marker, its failure or the
    timeout; an interrupted frontend leaves it to the Job's deletion, for a `--resume-run`.
-   With `--s3-secret-name` that Secret must exist and stays. `--owner` labels all of
+   With `artifacts.secret_name` that Secret must exist and stays. `kubernetes.owner` labels all of
    these objects and, through `COINJOIN_RUN_OWNER`, the emulator's pods with
    `coinjoin.owner`; a failed apply deletes by the run's labels, owner included. The Job's pod has three containers
    over one `emptyDir`:
@@ -434,7 +434,7 @@ The report always consumes `blocksci-analysis_data/blocksci_analysis.json`.
 It never performs an implicit detector scan. The reader accepts only artifact
 schema 1.3, which records the mode and preserves detector parameters, the
 deprecated JoinMarket subset-matching scan, diagnostics and clustering; older runs
-need `cjp analyze` again.
+need a new `analyze` run (`examples/stages/analyze.yaml`).
 
 `exporters/cli.assemble_report` joins three sources. The baseline
 (`coinjoin_tx_info.json`, less the false-positive sidecars) is normalized. In

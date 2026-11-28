@@ -118,7 +118,7 @@ optional `inputCount` argument is absent. For pre-height-850237 transactions,
 that internal minimum is 50; newer transactions use 20.
 
 The pipeline and exporter leave the option unset by default, so BlockSci uses
-the height-aware production threshold. An explicit `--min-input-count N`
+the height-aware production threshold. An explicit `min_input_count: N`
 overrides that threshold, and the run manifest records that override as `N`;
 no override is recorded as `null`. Overrides must be positive integers; zero,
 negative, and non-numeric values are command-line errors.
@@ -131,7 +131,7 @@ uses the protocol heuristic's set. This requires a BlockSci build with the new
 binding; older builds report clustering as unavailable with a rebuild hint.
 
 Small regtest Wasabi rounds generally need an explicit
-`--min-input-count`. When production thresholds are used on pre-850237
+`min_input_count`. When production thresholds are used on pre-850237
 emulator blocks and BlockSci detects zero transactions, the JSON and Markdown
 reports carry a `wasabi_production_threshold_zero_detections` warning.
 

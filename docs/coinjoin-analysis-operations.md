@@ -134,11 +134,8 @@ coinjoin_analysis:
 
 For a separate local dataset, add `input_dir: /absolute/path/to/dataset` to
 `coinjoin_analysis`. The directory layout and `target_paths` mean the same thing
-as on PBS. `input_uri` is for PBS; `input_dir` is for local execution. Each CLI
-field is also available as `--analysis-program`, repeated `--analysis-operation`,
-`--analysis-cjtype`, repeated `--analysis-target-path`, `--analysis-env-vars`,
-`--analysis-input-dir`/`--analysis-input-uri`, `--analysis-load-config`, and
-`--analysis-filename`.
+as on PBS. `input_uri` is for PBS; `input_dir` is for local execution. These
+settings exist only in the YAML file; the command line does not set them.
 
 ## Research adapters
 
@@ -217,9 +214,8 @@ in a later analysis, select its output prefix as the next dataset and provide th
 path expected by that existing analyzer operation; a refresh does not silently
 rewrite a previously published comparison baseline.
 
-All research settings have corresponding `--analysis-*` flags, for example
-`--analysis-txid`, repeated `--analysis-input-index`/`--analysis-output-index`,
-`--analysis-depth`, `--analysis-plot` and `--analysis-allow-network`.
+The research settings live under `coinjoin_analysis.research`, for example
+`txid`, the lists `input_indices`/`output_indices`, `depth`, `plot` and `allow_network`.
 
 `coinjoin_research.py` is copied with each invocation. The analyzer image excludes
 `scripts/`, so the existing Wabisator updater is packaged unchanged as
