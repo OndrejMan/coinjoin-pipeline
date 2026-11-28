@@ -208,13 +208,14 @@ refused_generation() {
     info=$(qstat -xf "$producer" 2>/dev/null || true)
     if [[ "$info" =~ Exit_status[[:space:]]*=[[:space:]]*(-?[0-9]+) ]]; then
       [[ "${BASH_REMATCH[1]}" != 0 ]] || { echo "$run: the producer accepted the dataset" >&2; return 1; }
-      # PBS delivers the joined job output to the submission directory after the exit.
+      # The job discards PBS's output file; the worker keeps the cause in its own log.
+      log="$work/runs/$run/logs/mainnet-producer/worker-producer.log"
       for _ in {1..60}; do
-        grep -qs "$3" "$work/mainnet_producer.o${producer%%.*}" && { echo "Refused $run: $3"; return; }
+        grep -qsF "$3" "$log" && { echo "Refused $run: $3"; return; }
         sleep 1
       done
       echo "$run: the producer failed for another reason" >&2
-      cat "$work/mainnet_producer.o${producer%%.*}" >&2 || true
+      cat "$log" >&2 || true
       return 1
     fi
     sleep 2
