@@ -43,6 +43,10 @@ recorded outside it, which is what `status`, `stop` and `--resume-run` read.
 (`cjp run CONFIG.yaml`); the command line adds the few launch values in
 `OVERRIDES` (`--dry-run`, `--run-id`, `--run-dir`, `--resume-run`, `--runs-root`,
 `--runtime` and the images), merged into the file's mapping before decoding.
+`--set KEY=VALUE` replaces any other YAML key for one launch: `parse_setting`
+checks the key against `option_specs()`, keeps the text for string keys and
+reads the rest as JSON, and the decoder then checks the type as for a file
+value. The `--set` values apply first, so a named override always wins.
 It also owns the `--help` text, which lists every YAML key by configuration
 section. `configuration.py` owns field types, YAML keys and value bounds; `option_rules.py` owns every
 cross-field rule (`PipelineConfiguration.validate` only calls it).

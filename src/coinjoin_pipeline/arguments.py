@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import MISSING, Field, fields
 from functools import lru_cache
 from pathlib import Path
@@ -90,6 +91,8 @@ OVERRIDES = {
     },
 }
 HOST_OVERRIDES = frozenset(path for path in OVERRIDES if path in {"runtime", "runs_root"} or path.startswith("images."))
+# Replaces one YAML key for this launch; the manifest records the command and the resolved configuration.
+SET_FLAG = "--set"
 
 # Sections of the YAML reference by the first segment of the model path; top-level keys are "".
 SECTIONS = {
@@ -339,7 +342,7 @@ def _metavar(path: str) -> str:
 
 def action_index(argv: list[str]) -> int | None:
     """Return the position of the command word, skipping options and their values."""
-    takes_value = {flag for path, flag in OVERRIDES.items() if field_type(path) is not bool}
+    takes_value = {SET_FLAG, *(flag for path, flag in OVERRIDES.items() if field_type(path) is not bool)}
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -380,6 +383,7 @@ def _epilog() -> str:
         "examples:",
         "  cjp run examples/metacentrum-regtest-s3.yaml --dry-run",
         "  cjp run examples/stages/analyze.yaml --run-dir <run-id>",
+        "  cjp run examples/metacentrum-regtest-s3.yaml --set pbs.ncpus=4 --set stages.mappings=false --dry-run",
         "  cjp watch --run-id <run-id> --pbs-only",
         "",
         "YAML keys:",
@@ -402,6 +406,18 @@ def build_parser(paths: set[str] | frozenset[str] | None = None, *, add_help: bo
     )
     parser.add_argument("command", nargs="?", default=argparse.SUPPRESS, help="run, or a utility (listed below)")
     group = parser.add_argument_group("overrides", "Replace the YAML file's value for this launch.")
+    if paths is None:
+        group.add_argument(
+            SET_FLAG,
+            dest=SET_FLAG,
+            action="append",
+            default=argparse.SUPPRESS,
+            metavar="KEY=VALUE",
+            help=(
+                "set one YAML key listed below (repeatable); a string key takes VALUE as written, "
+                "any other reads it as JSON (true, 4, 1.5, [\"a\", \"b\"], null)"
+            ),
+        )
     for path, flag in OVERRIDES.items():
         if paths is not None and path not in paths:
             continue
@@ -431,6 +447,28 @@ def _read_yaml(path: Path) -> dict[str, object]:
     return data
 
 
+def parse_setting(item: str) -> tuple[str, object]:
+    """The YAML key and value of one `--set KEY=VALUE`."""
+    path, separator, raw = item.partition("=")
+    if not separator or not path:
+        raise ConfigurationError(f"{SET_FLAG} expects KEY=VALUE, got {item!r}")
+    if path in OVERRIDES:
+        raise ConfigurationError(f"{SET_FLAG} {path}: use {OVERRIDES[path]} instead")
+    if path != "action" and path not in {known for known, _ in option_specs()}:
+        raise ConfigurationError(f"{SET_FLAG}: unknown YAML key {path!r}; cjp --help lists them")
+    annotation = field_type(path)
+    # A string is taken as written, so 00:30:00 or a JSON quota stays the text the key expects.
+    if annotation is str or get_origin(annotation) is Literal:
+        return path, raw
+    if get_origin(annotation) is tuple and get_args(annotation)[0] is str and not raw.startswith("["):
+        return path, raw
+    try:
+        return path, json.loads(raw)
+    except ValueError:
+        # The configuration rejects it and names the type the key expects.
+        return path, raw
+
+
 def load_configuration(argv: list[str]) -> PipelineConfiguration:
     """Decode `cjp run CONFIG.yaml [OVERRIDES]` into one configuration."""
     index = action_index(argv)
@@ -453,6 +491,9 @@ def load_configuration(argv: list[str]) -> PipelineConfiguration:
     parsed = vars(build_parser().parse_args([*head, *tail[1:]]))
     if "command" in parsed:
         raise ConfigurationError(f"unexpected argument {parsed['command']!r} after the configuration path")
+    # The named overrides come last, so --run-id and the others never lose to a key below them.
+    for item in parsed.pop(SET_FLAG, []):
+        set_mapping_path(data, *parse_setting(item))
     for path, value in parsed.items():
         set_mapping_path(data, path, value)
     return PipelineConfiguration.from_mapping(data)

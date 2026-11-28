@@ -176,7 +176,14 @@ is not a complete execution installation.
 The only entry point for an experiment is `cjp run experiment.yaml`. The file
 loads into one typed configuration; the command line adds only what belongs to
 one launch or one host: `--dry-run`, `--run-id`, `--run-dir`, `--resume-run`,
-`--runs-root`, `--runtime` and the image options. Defaults, image selection and
+`--runs-root`, `--runtime` and the image options. For a quick variation of an
+existing file, `--set KEY=VALUE` (repeatable) replaces one YAML key, for example
+`cjp run examples/metacentrum-regtest-s3.yaml --set pbs.ncpus=4 --dry-run`. A
+string key takes the value as written, any other key reads it as JSON (`true`,
+`4`, `["a", "b"]`); a key with its own option, such as `run_id`, is set only by
+that option. The run manifest records the command and the resolved
+configuration, so a launch with `--set` stays reproducible; for a variation you
+keep, write it into a file. Defaults, image selection and
 run identity are resolved before execution. The stage-only actions have small
 files in `examples/stages/`, for example
 `cjp run examples/stages/analyze.yaml --run-dir <run-id>`.
@@ -429,7 +436,8 @@ without emulator ground truth, not a precision/recall unified report.
 
 A YAML file must name its `action`; there is no default, so a file without one
 never starts a full emulation by accident. A launch override after `cjp run FILE`
-replaces the same value from YAML. Programmatic consumers load the schema through
+replaces the same value from YAML; `--set` values apply in order before the
+named overrides. Programmatic consumers load the schema through
 the immutable typed `PipelineConfiguration.from_mapping()`, or
 `PipelineConfiguration.from_paths()` for YAML paths such as `artifacts.uri`.
 

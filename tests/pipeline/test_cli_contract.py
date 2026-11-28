@@ -48,6 +48,64 @@ def test_an_override_replaces_the_file_value(tmp_path):
     assert resolve_configuration(config).coinjoin_type == "joinmarket"
 
 
+def test_set_replaces_yaml_keys_with_their_types(tmp_path):
+    path = experiment(tmp_path, "action: full-run\nengine: wasabi\npbs:\n  ncpus: 2\n")
+    config = load_configuration(
+        [
+            "run",
+            path,
+            "--set",
+            "pbs.ncpus=4",
+            "--set",
+            "pbs.walltime=00:30:00",
+            "--set",
+            "stages.blocksci=true",
+            "--set",
+            "coinjoin_analysis.actions=detect_coordinators",
+            "--set",
+            'coinjoin_analysis.research.input_indices=[0, 2]',
+            "--set",
+            'kubernetes.planned_quota={"cpu": 2}',
+        ]
+    )
+    assert config.pbs.ncpus == 4
+    assert config.pbs.walltime == "00:30:00"
+    assert config.stages.blocksci is True
+    assert config.coinjoin_analysis.actions == ("detect_coordinators",)
+    assert config.coinjoin_analysis.research.input_indices == (0, 2)
+    assert config.kubernetes.planned_quota == '{"cpu": 2}'
+
+
+def test_later_set_wins_and_named_overrides_win_over_set(tmp_path):
+    path = experiment(tmp_path, "action: emulate\nengine: wasabi\n")
+    config = load_configuration(["run", path, "--set", "engine=joinmarket", "--set", "engine=wasabi"])
+    assert config.engine == "wasabi"
+    with pytest.raises(ConfigurationError, match="use --run-id"):
+        load_configuration(["run", path, "--set", "run_id=x"])
+
+
+@pytest.mark.parametrize(
+    ("setting", "message"),
+    [
+        ("pbs.ncpus", "expects KEY=VALUE"),
+        ("=4", "expects KEY=VALUE"),
+        ("pbs.nope=1", "unknown YAML key 'pbs.nope'"),
+        ("pbs=1", "unknown YAML key 'pbs'"),
+        ("pbs.ncpus=four", "pbs.ncpus must be an integer"),
+        ("engine=bitcoin", "engine must be one of"),
+    ],
+)
+def test_set_rejects_malformed_and_unknown_keys(tmp_path, setting, message):
+    path = experiment(tmp_path, "action: emulate\nengine: wasabi\n")
+    with pytest.raises(ConfigurationError, match=message):
+        load_configuration(["run", path, "--set", setting])
+
+
+def test_utilities_do_not_take_set(capsys):
+    assert main(["doctor", "--set", "pbs.ncpus=4"]) != 0
+    assert "--set" in capsys.readouterr().err
+
+
 def test_help_documents_every_yaml_key(capsys):
     from typing import get_args
 
